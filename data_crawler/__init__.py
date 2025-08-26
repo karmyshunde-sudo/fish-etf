@@ -6,7 +6,7 @@ from utils.date_utils import get_last_trading_day, get_beijing_time
 from utils.file_utils import load_etf_metadata, update_etf_metadata, save_etf_daily_data
 from .akshare_crawler import crawl_etf_daily_akshare
 from .sina_crawler import crawl_etf_daily_sina
-from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes
+from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
 
 def crawl_etf_daily_incremental():
     """

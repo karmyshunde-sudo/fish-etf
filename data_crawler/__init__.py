@@ -7,7 +7,7 @@ from retrying import retry
 import akshare as ak
 from config import Config
 from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
-from utils.date_utils import get_beijing_time, is_trading_day
+from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
 
 # 初始化日志

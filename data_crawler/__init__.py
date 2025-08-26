@@ -134,19 +134,23 @@ def crawl_etf_daily_incremental():
 
 # 辅助函数：获取ETF名称（避免循环导入）
 def get_etf_name(etf_code):
-    """根据ETF代码获取名称，修复列名匹配问题"""
-    etf_list = load_all_etf_list()  # 复用加载ETF列表的函数
+    """根据ETF代码获取名称，修复列名匹配+函数未定义问题"""
+    try:
+        etf_list = load_all_etf_list()  # 现在函数已导入，可正常调用
+    except Exception as e:
+        print(f"⚠️ 加载ETF列表失败：{str(e)}")
+        return "未知名称（列表加载失败）"
+    
     if etf_list.empty:
         return "未知名称（无有效ETF列表）"
     
-    # 关键修复：使用数据中实际的列名 "ETF代码" 进行匹配
-    # 同时确保代码格式统一（去除首尾空格、补全6位）
+    # 统一代码格式，确保匹配准确性
     target_code = str(etf_code).strip().zfill(6)
     name_row = etf_list[
         etf_list["ETF代码"].astype(str).str.strip().str.zfill(6) == target_code
     ]
     
     if not name_row.empty:
-        return name_row.iloc[0]["ETF名称"]  # 返回对应名称
+        return name_row.iloc[0]["ETF名称"]
     else:
         return f"未知名称（代码：{etf_code} 未匹配到数据）"

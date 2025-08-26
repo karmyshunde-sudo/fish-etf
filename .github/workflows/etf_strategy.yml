@@ -92,30 +92,32 @@ jobs:
         run: |
           python main.py
       
+      - name: 显式创建数据目录（确保存在，避免提交失败）
+        run: |
+          # 确保data目录及子目录存在（即使代码未生成文件）
+          mkdir -p data/etf_daily data/flags
+      
       - name: 提交数据和标记文件
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          echo "检查 data 目录内容..."
-          ls -la data/ 2>/dev/null || echo "data/ 目录不存在"
-          find data/ -type f 2>/dev/null || echo "data/ 目录下没有文件"
+          echo "检查数据目录结构..."
+          tree data/ 2>/dev/null || echo "data目录结构：空"
 
-          echo "添加数据文件..."
-          git add data/
+          # 显式添加所有数据文件（包括自动创建的子目录内容）
+          git add data/etf_daily/ data/flags/ data/*.csv 2>/dev/null || echo "无数据文件可添加"
           
-          echo "检查暂存区内容..."
-          git status
+          echo "检查暂存区变更..."
+          git status --porcelain
 
-          # 仅当有变更时才提交
+          # 仅当有变更时提交
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "更新ETF数据/策略标记: $(date -u -d '+8 hours' '+%Y-%m-%d %H:%M')"
-            echo "成功提交数据变更"
-
-            echo "推送变更到仓库..."
-            git push origin main || echo "错误：无法推送到仓库"
+            git commit -m "自动更新数据: $(date -u -d '+8 hours' '+%Y-%m-%d %H:%M')"
+            echo "提交成功，准备推送..."
+            git push origin main || echo "推送失败（可能无权限或无变更）"
           else
-            echo "没有数据变更，跳过提交"
+            echo "无数据变更，跳过提交"
           fi
       
       - name: 任务完成

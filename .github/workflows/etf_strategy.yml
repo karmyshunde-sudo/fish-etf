@@ -84,6 +84,11 @@ jobs:
             # 手动触发时使用选择的任务
             echo "TASK=${{ github.event.inputs.task }}" >> $GITHUB_ENV
           fi
+
+      - name: 显式创建数据目录（确保存在，避免提交失败）
+        run: |
+          # 确保data目录及子目录存在（即使代码未生成文件）
+          mkdir -p data/etf_daily data/flags
       
       - name: 执行任务
         env:
@@ -91,12 +96,7 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}  # 微信Webhook从Secrets获取
         run: |
           python main.py
-      
-      - name: 显式创建数据目录（确保存在，避免提交失败）
-        run: |
-          # 确保data目录及子目录存在（即使代码未生成文件）
-          mkdir -p data/etf_daily data/flags
-      
+            
       - name: 提交数据和标记文件
         run: |
           git config user.name "GitHub Actions"

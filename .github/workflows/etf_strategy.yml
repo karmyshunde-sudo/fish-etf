@@ -110,16 +110,22 @@ jobs:
             echo "警告: 未检测到CSV文件"
           fi
       
-      - name: 拉取最新代码（处理冲突）
+      - name: 先提交变更再拉取最新代码（处理冲突）
         run: |
           set -euo pipefail
-          # 暂存数据文件（防止拉取失败）
-          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv 2>/dev/null || true
-          # 尝试拉取，失败则回退暂存
-          if ! git pull origin main --rebase; then
-            git reset HEAD .  # 取消暂存
-            git pull origin main --rebase
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 检查是否有未提交的更改
+          if [ -n "$(git status --porcelain data/)" ]; then
+            echo "检测到数据目录有未提交的更改，先提交这些更改"
+            git add data/
+            git commit -m "自动提交任务生成的临时变更: ${{ env.TASK }}"
           fi
+          
+          # 拉取远程最新代码
+          echo "拉取远程最新代码..."
+          git pull origin main --rebase
       
       - name: 提交数据
         if: steps.execute_task.outputs.file_count > 0

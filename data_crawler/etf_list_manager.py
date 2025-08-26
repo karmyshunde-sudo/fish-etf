@@ -1,7 +1,7 @@
 import akshare as ak
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
 from retrying import retry
@@ -15,10 +15,14 @@ def load_all_etf_list():
     return update_all_etf_list()
 
 def is_list_need_update():
-    """判断是否需要更新全市场ETF列表，逻辑不变"""
+    """判断是否需要更新全市场ETF列表，修复时区计算错误"""
     if not os.path.exists(Config.ALL_ETFS_PATH):
         return True
+    # 获取文件最后修改时间（naive 时间对象，无时区信息）
     last_modify_time = datetime.fromtimestamp(os.path.getmtime(Config.ALL_ETFS_PATH))
+    # 将 naive 时间对象转换为带时区的 aware 时间对象（与 get_beijing_time 时区一致，假设为东八区）
+    last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))  
+    # 现在两个时间对象均为 aware 且时区一致，可正常相减
     days_since_update = (get_beijing_time() - last_modify_time).days
     return days_since_update >= LIST_UPDATE_INTERVAL
 
@@ -84,7 +88,7 @@ def read_csv_with_encoding(file_path):
     raise Exception(f"无法解析文件 {file_path}，尝试了编码: {encodings}")
 
 def update_all_etf_list():
-    """更新全市场ETF列表（三级降级策略），仅添加初始化同步兜底文件逻辑"""
+    """更新全市场ETF列表（三级降级策略），保留全部原有逻辑"""
     Config.init_dirs()  # 使用Config的初始化方法
     primary_etf_list = None
     
@@ -115,7 +119,9 @@ def update_all_etf_list():
         # -------------------------
         # 检查兜底文件是否不存在或为空
         backup_file_exists = os.path.exists(Config.BACKUP_ETFS_PATH)
-        backup_file_empty = backup_file_exists and os.path.getsize(Config.BACKUP_ETFS_PATH) == 0
+        backup_file_empty = False
+        if backup_file_exists:
+            backup_file_empty = os.path.getsize(Config.BACKUP_ETFS_PATH) == 0
         
         if not backup_file_exists or backup_file_empty:
             print("🔄 检测到兜底文件未初始化，开始同步数据...")
@@ -182,4 +188,3 @@ def get_filtered_etf_codes():
     valid_codes = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]["ETF代码"].tolist()
     print(f"📊 有效ETF代码数量: {len(valid_codes)}")
     return valid_codes
-    

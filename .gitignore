@@ -1,0 +1,21 @@
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 日志文件
+*.log
+
+# 本地环境配置
+.env
+.local
+
+# 临时文件
+tmp/
+temp/
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo

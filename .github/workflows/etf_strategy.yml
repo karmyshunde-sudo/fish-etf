@@ -148,16 +148,23 @@ jobs:
           echo "检查数据目录结构变更..."
           tree data/ 2>/dev/null || echo "data目录结构：空"
 
-          # 显式添加所有数据文件和日志
-          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv 2>/dev/null
+          # 【新增】强制拉取最新代码（解决潜在冲突）
+          git pull origin main --rebase || true  # 冲突时继续，后续手动处理
           
-          echo "检查暂存区变更..."
-          git status --porcelain
+          # 显式添加所有数据文件和日志
+          # git add data/etf_daily/ data/flags/ data/logs/ data/*.csv 2>/dev/null
+          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force  # --force 覆盖.gitignore
 
+          # 【新增】调试：显示暂存区内容
+          echo "=== 暂存区文件 ==="
+          git status --porcelain
+          echo "=================="
+    
           # 提交变更
           git commit -m "自动更新数据[${{ env.TASK }}]: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M')"
           echo "提交成功，准备推送..."
-          git push origin main
+          # git push origin main
+          git push origin main || (echo "推送失败，尝试强制推送..." && git push origin main --force-with-lease)
       
       - name: 处理提交失败情况
         if: steps.execute_task.outputs.file_count > 0 && failure()

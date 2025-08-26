@@ -178,12 +178,14 @@ def update_all_etf_list():
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
 
 def get_filtered_etf_codes():
-    """获取过滤后的有效ETF代码列表，逻辑不变"""
+    """获取过滤后的有效ETF代码列表，修复字符串匹配的数据类型问题"""
     etf_list = update_all_etf_list()
     if etf_list.empty:
         print("⚠️ 无有效ETF代码列表")
         return []
     
+    # 关键修复：确保ETF代码为字符串类型（避免非字符串类型导致.str方法报错）
+    etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip()
     # 最终过滤确保代码有效性，逻辑不变
     valid_codes = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]["ETF代码"].tolist()
     print(f"📊 有效ETF代码数量: {len(valid_codes)}")

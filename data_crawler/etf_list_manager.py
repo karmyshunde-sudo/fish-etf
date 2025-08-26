@@ -5,6 +5,7 @@ from datetime import datetime
 from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
 from retrying import retry
+from config import Config
 
 # 列表更新频率（天）
 LIST_UPDATE_INTERVAL = 7

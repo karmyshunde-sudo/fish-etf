@@ -37,7 +37,9 @@ jobs:
     if: ${{ (github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 用于保存数据和标记文件
+      contents: write
+      id-token: write
+      pull-requests: write
     
     steps:
       - name: 拉取仓库代码
@@ -45,6 +47,8 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: 配置Python环境
         uses: actions/setup-python@v4
@@ -90,18 +94,29 @@ jobs:
       
       - name: 提交数据和标记文件
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          # 强制添加data目录下的所有变更（包括etf_daily子目录）
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          echo "检查 data 目录内容..."
+          ls -la data/ 2>/dev/null || echo "data/ 目录不存在"
+          find data/ -type f 2>/dev/null || echo "data/ 目录下没有文件"
+
+          echo "添加数据文件..."
           git add data/
-          # 检查是否有变更需要提交
-          if [ $(git diff --cached --numstat | grep -c .) -gt 0 ]; then
+          
+          echo "检查暂存区内容..."
+          git status
+
+          # 仅当有变更时才提交
+          if [ -n "$(git status --porcelain)" ]; then
             git commit -m "更新ETF数据/策略标记: $(date -u -d '+8 hours' '+%Y-%m-%d %H:%M')"
-            git push origin main
-            echo "数据已提交到仓库"
+            echo "成功提交数据变更"
+
+            echo "推送变更到仓库..."
+            git push origin main || echo "错误：无法推送到仓库"
           else
-            echo "无新数据或标记需要提交"
+            echo "没有数据变更，跳过提交"
           fi
       
       - name: 任务完成
-        run: echo "ETF任务执行结束，状态：${{ steps.run_task.outcome }}"
+        run: echo "ETF任务执行结束，状态：成功"

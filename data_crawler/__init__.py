@@ -74,7 +74,7 @@ def get_etf_name(etf_code):
         return f"未知名称({etf_code})"
 
 def crawl_etf_daily_incremental():
-    """增量爬取ETF日线数据"""
+    """增量爬取ETF日线数据（单只保存+断点续爬逻辑）"""
     logger.info("===== 开始执行任务：crawl_etf_daily =====")
     current_time = get_beijing_time()
     logger.info(f"当前时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）")
@@ -83,18 +83,22 @@ def crawl_etf_daily_incremental():
         logger.info(f"今日{current_time.date()}非交易日，无需爬取日线数据")
         return
     
-    init_dirs()
-    # 修复：使用Config中实际定义的DATA_DIR属性（日线数据存储目录）
-    os.makedirs(Config.DATA_DIR, exist_ok=True)
-    # 修复：定义已完成列表路径（基于Config的DATA_DIR）
-    completed_file = os.path.join(Config.DATA_DIR, "etf_daily_completed.txt")
+    # 显式拼接目录，确保基于已知存在的路径创建
+    etf_daily_dir = os.path.join(os.path.dirname(Config.ALL_ETFS_PATH), "etf_daily")
+    os.makedirs(etf_daily_dir, exist_ok=True)
+    logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
     
+    # 已完成列表路径
+    completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
+    
+    # 加载已完成列表（断点续爬基础）
     completed_codes = set()
     if os.path.exists(completed_file):
         with open(completed_file, "r", encoding="utf-8") as f:
             completed_codes = set(line.strip() for line in f if line.strip())
         logger.info(f"已完成爬取的ETF数量：{len(completed_codes)}")
     
+    # 获取待爬取ETF列表（排除已完成的）
     all_codes = get_filtered_etf_codes()
     to_crawl_codes = [code for code in all_codes if code not in completed_codes]
     total = len(to_crawl_codes)
@@ -105,10 +109,12 @@ def crawl_etf_daily_incremental():
     
     logger.info(f"待爬取ETF总数：{total}只")
     
+    # 分批爬取（每批50只）
     batch_size = 50
     batches = [to_crawl_codes[i:i+batch_size] for i in range(0, total, batch_size)]
     logger.info(f"共分为 {len(batches)} 个批次，每批 {batch_size} 只ETF")
     
+    # 逐批、逐只爬取
     for batch_idx, batch in enumerate(batches, 1):
         batch_num = len(batch)
         logger.info(f"==============================")
@@ -118,10 +124,12 @@ def crawl_etf_daily_incremental():
         
         for idx, etf_code in enumerate(batch, 1):
             try:
+                # 打印当前进度
                 logger.info(f"--- 批次{batch_idx} - 第{idx}只 / 共{batch_num}只 ---")
                 etf_name = get_etf_name(etf_code)
                 logger.info(f"ETF代码：{etf_code} | 名称：{etf_name}")
                 
+                # 爬取日线数据（使用带重试的封装）
                 df = akshare_retry(
                     ak.fund_etf_hist_em,
                     symbol=etf_code,
@@ -129,10 +137,12 @@ def crawl_etf_daily_incremental():
                     adjust="qfq"
                 )
                 
+                # 数据校验
                 if df.empty:
                     logger.warning(f"⚠️ 爬取结果为空，跳过保存")
                     continue
                 
+                # 统一列名（确保兼容性）
                 df = df.rename(columns={
                     "日期": "date",
                     "开盘价": "open",
@@ -144,28 +154,34 @@ def crawl_etf_daily_incremental():
                     "涨跌幅": "pct_change"
                 })
                 
+                # 补充ETF基本信息
                 df["etf_code"] = etf_code
                 df["etf_name"] = etf_name
                 df["crawl_time"] = current_time.strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 修复：使用Config中实际的DATA_DIR作为保存目录
-                save_path = os.path.join(Config.DATA_DIR, f"{etf_code}.csv")
+                # 单只保存路径（基于确保存在的目录）
+                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+                # 打印绝对路径用于调试
+                logger.info(f"📁 实际保存路径: {os.path.abspath(save_path)}")
                 df.to_csv(save_path, index=False, encoding="utf-8")
                 logger.info(f"✅ 保存成功：{save_path}（{len(df)}条数据）")
                 
+                # 记录已完成（立即更新状态）
                 with open(completed_file, "a", encoding="utf-8") as f:
                     f.write(f"{etf_code}\n")
                 
+                # 单只爬取后短休眠
                 time.sleep(1)
                 
             except Exception as e:
+                # 单只失败不中断，记录日志后继续
                 logger.error(f"❌ 爬取失败：{str(e)}", exc_info=True)
-                time.sleep(3)
+                time.sleep(3)  # 失败后延长休眠
                 continue
         
+        # 批次间长休眠（减轻服务器压力）
         if batch_idx < len(batches):
             logger.info(f"批次{batch_idx}处理完成，休眠10秒后继续...")
             time.sleep(10)
     
-    logger.info("===== 所有待爬取ETF处理完毕 =====")
-    
+    logger.info("===== 所有待爬取ETF处理完毕 =====")    

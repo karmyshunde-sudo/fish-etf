@@ -92,10 +92,10 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          # 检查是否有数据变更
-          if git status | grep -q "data/"; then
+          # 检查data目录下是否有变更（包含etf_daily子目录）
+          if git status --porcelain | grep -q "^[AM] data/"; then
             git add data/
-            git commit -m "更新ETF数据/策略标记: $(date +'%Y-%m-%d %H:%M')"
+            git commit -m "更新ETF数据/策略标记: $(date -u -d '+8 hours' '+%Y-%m-%d %H:%M')"
             git push origin main
             echo "数据已提交到仓库"
           else

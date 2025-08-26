@@ -31,6 +31,7 @@ on:
           - 'calculate_arbitrage'   # 计算套利机会
           - 'calculate_position'    # 计算仓位策略
           - 'update_etf_list'       # 更新ETF列表
+          - 'test_save_file'        # 测试保存文件功能（新增）
 
 jobs:
   run_etf_task:

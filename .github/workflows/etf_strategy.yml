@@ -1,0 +1,109 @@
+name: ETF数据爬取与策略推送
+
+on:
+  schedule:
+    # 任务1：下午4点（北京时间）增量爬取ETF日线数据（UTC 8点）
+    - cron: '0 8 * * 1-5'  # 周一至周五 UTC 8:00 = 北京时间16:00
+    
+    # 任务2：套利机会计算（多个时间点，北京时间），单日仅推一次
+    - cron: '40 1 * * 1-5'  # 9:40（UTC 1:40）
+    - cron: '40 2 * * 1-5'  # 10:40（UTC 2:40）
+    - cron: '40 3 * * 1-5'  # 11:40（UTC 3:40）
+    - cron: '40 4 * * 1-5'  # 12:40（UTC 4:40）
+    - cron: '40 5 * * 1-5'  # 13:40（UTC 5:40）
+    - cron: '40 6 * * 1-5'  # 14:40（UTC 6:40）
+    
+    # 任务3：下午2点（北京时间）计算仓位策略（UTC 6点）
+    - cron: '0 6 * * 1-5'   # 周一至周五 UTC 6:00 = 北京时间14:00
+    
+    # 任务4：每周日20:00更新全市场ETF列表（UTC 12:00）
+    - cron: '0 12 * * 0'    # 每周日 UTC 12:00 = 北京时间20:00
+
+  # 手动触发（测试用）
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '选择任务类型'
+        required: true
+        type: choice
+        options:
+          - 'crawl_etf_daily'       # 爬取ETF日线数据
+          - 'calculate_arbitrage'   # 计算套利机会
+          - 'calculate_position'    # 计算仓位策略
+          - 'update_etf_list'       # 更新ETF列表
+
+jobs:
+  run_etf_task:
+    if: ${{ 
+      (github.event_name == 'schedule') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '') 
+    }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 用于保存数据和标记文件
+    
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'  # 缓存依赖，加速安装
+      
+      - name: 安装依赖包
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 输出调试信息
+        run: |
+          echo "当前北京时间: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')"
+          echo "事件类型: ${{ github.event_name }}"
+          echo "定时表达式: ${{ github.event.schedule || '无' }}"
+          echo "手动任务: ${{ github.event.inputs.task || '无' }}"
+      
+      - name: 确定任务类型（定时任务自动匹配）
+        id: set_task
+        run: |
+          # 根据定时表达式匹配任务类型
+          if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
+            echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
+          elif [[ "${{ github.event.schedule }}" == "0 6 * * 1-5" ]]; then
+            echo "TASK=calculate_position" >> $GITHUB_ENV
+          elif [[ "${{ github.event.schedule }}" == "0 12 * * 0" ]]; then
+            echo "TASK=update_etf_list" >> $GITHUB_ENV
+          elif [[ "${{ github.event.schedule }}" =~ "40 [1-6] * * 1-5" ]]; then
+            echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
+          else
+            # 手动触发时使用选择的任务
+            echo "TASK=${{ github.event.inputs.task }}" >> $GITHUB_ENV
+          fi
+      
+      - name: 执行任务
+        env:
+          TASK: ${{ env.TASK }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}  # 微信Webhook从Secrets获取
+        run: |
+          python main.py
+      
+      - name: 提交数据和标记文件
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          # 检查是否有数据变更
+          if git status | grep -q "data/"; then
+            git add data/
+            git commit -m "更新ETF数据/策略标记: $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+            echo "数据已提交到仓库"
+          else
+            echo "无新数据或标记需要提交"
+          fi
+      
+      - name: 任务完成
+        run: echo "ETF任务执行结束，状态：${{ steps.run_task.outcome }}"

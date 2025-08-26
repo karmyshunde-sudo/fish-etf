@@ -34,10 +34,7 @@ on:
 
 jobs:
   run_etf_task:
-    if: ${{ 
-      (github.event_name == 'schedule') || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '') 
-    }}
+    if: ${{ (github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write  # 用于保存数据和标记文件

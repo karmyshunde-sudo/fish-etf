@@ -115,7 +115,9 @@ jobs:
           set -euo pipefail
           # 执行主程序并记录详细日志
           echo "开始执行任务: $TASK"
-          python main.py > data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log 2>&1
+          # python main.py > data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log 2>&1
+          python main.py 2>&1 | tee "data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log"
+
           
           # 验证文件是否生成
           echo "任务执行后的数据目录内容:"

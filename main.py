@@ -75,51 +75,9 @@ def main():
             "message": f"全市场ETF列表更新完成，共{len(etf_list)}只"
         }
     
-    # 5. 手动测试任务：保存测试文件
-    elif task == "test_save_file":
-        try:
-            # 生成测试数据
-            test_data = {
-                "task": "test_save_file",
-                "timestamp": now.strftime('%Y-%m-%d %H:%M:%S'),
-                "message": "这是一个测试保存的文件",
-                "environment": {
-                    "config_log_level": Config.LOG_LEVEL,
-                    "python_version": sys.version.split()[0]
-                }
-            }
-            
-            # 确保测试目录存在
-            test_dir = os.path.join(os.path.dirname(__file__), "test_output")
-            os.makedirs(test_dir, exist_ok=True)
-            
-            # 保存文件路径
-            file_name = f"test_{now.strftime('%Y%m%d_%H%M%S')}.txt"
-            file_path = os.path.join(test_dir, file_name)
-            
-            # 写入测试数据
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(test_data, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"测试文件已保存至: {file_path}")
-            response = {
-                "status": "success", 
-                "task": task, 
-                "message": f"测试文件保存成功: {file_path}",
-                "file_path": file_path
-            }
-        except Exception as e:
-            error_msg = f"测试文件保存失败: {str(e)}"
-            logger.error(error_msg)
-            response = {
-                "status": "failed", 
-                "task": task, 
-                "message": error_msg
-            }
-    
     # 未知任务
     else:
-        error_msg = f"未知任务类型：{task}（支持的任务：crawl_etf_daily, calculate_arbitrage, calculate_position, update_etf_list, test_save_file）"
+        error_msg = f"未知任务类型：{task}（支持的任务：crawl_etf_daily, calculate_arbitrage, calculate_position, update_etf_list）"
         logger.error(error_msg)
         send_wechat_message(f"【系统错误】{error_msg}")
         response = {"status": "error", "task": task, "message": error_msg}

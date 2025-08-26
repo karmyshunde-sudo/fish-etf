@@ -2,9 +2,11 @@ import os
 import time
 import pandas as pd
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, date
 from retrying import retry
 import akshare as ak
+from pandas.tseries.offsets import CustomBusinessDay
+from pandas.tseries.holiday import AbstractHolidayCalendar, Holiday, MO, TU, WE, TH, FR
 from config import Config
 from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
 from utils.date_utils import get_beijing_time
@@ -16,6 +18,19 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# 定义中国股市节假日日历（基础版，需根据实际情况维护）
+class ChinaStockHolidayCalendar(AbstractHolidayCalendar):
+    rules = [
+        # 2025年节假日示例（需按当年实际调休更新）
+        Holiday("2025元旦", month=1, day=1),
+        Holiday("2025春节", month=1, day=29, observance=lambda d: d + pd.DateOffset(days=+5)),
+        Holiday("2025清明节", month=4, day=4),
+        Holiday("2025劳动节", month=5, day=1),
+        Holiday("2025端午节", month=6, day=2),
+        Holiday("2025中秋节", month=9, day=8),
+        Holiday("2025国庆节", month=10, day=1, observance=lambda d: d + pd.DateOffset(days=+6)),
+    ]
 
 # 重试装饰器配置
 def retry_if_exception(exception):
@@ -30,6 +45,21 @@ def retry_if_exception(exception):
 def akshare_retry(func, *args, **kwargs):
     """带重试机制的akshare函数调用封装"""
     return func(*args, **kwargs)
+
+def is_trading_day(check_date: date) -> bool:
+    """判断是否为A股交易日（核心修复：补充完整实现）"""
+    # 1. 先判断是否为周末
+    if check_date.weekday() >= 5:  # 5=周六, 6=周日
+        return False
+    
+    # 2. 再判断是否为节假日
+    china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
+    try:
+        # 通过偏移0个工作日判断是否为交易日
+        return pd.Timestamp(check_date) == (pd.Timestamp(check_date) + 0 * china_bd)
+    except Exception as e:
+        logger.error(f"交易日判断失败: {str(e)}", exc_info=True)
+        return False
 
 def get_etf_name(etf_code):
     """根据ETF代码获取名称"""
@@ -54,7 +84,7 @@ def crawl_etf_daily_incremental():
     current_time = get_beijing_time()
     logger.info(f"当前时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）")
     
-    # 检查是否为交易日（非交易日不执行爬取）
+    # 核心修复：补充交易日判断
     if not is_trading_day(current_time.date()):
         logger.info(f"今日{current_time.date()}非交易日，无需爬取日线数据")
         return
@@ -156,9 +186,3 @@ def crawl_etf_daily_incremental():
             time.sleep(10)
     
     logger.info("===== 所有待爬取ETF处理完毕 =====")
-
-# 保留原有其他函数（未修改部分）
-def other_existing_functions():
-    # 原有其他函数逻辑保持不变
-    pass
-    

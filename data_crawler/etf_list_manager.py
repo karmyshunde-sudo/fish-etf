@@ -5,7 +5,7 @@ from datetime import datetime
 from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
 from retrying import retry
-from config import Config
+from config import Config  # 确保导入Config
 
 # 列表更新频率（天）
 LIST_UPDATE_INTERVAL = 7
@@ -20,29 +20,33 @@ def is_list_need_update():
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def fetch_all_etfs():
-    """从AkShare获取全市场ETF列表（主逻辑）"""
+    """从AkShare 1.17.41获取全市场ETF列表（适配旧版本接口）"""
     try:
-        sh_etf = ak.stock_etf_category_sina(symbol="上海")
-        sz_etf = ak.stock_etf_category_sina(symbol="深圳")
+        # akshare 1.17.41可用的ETF列表接口：分上海和深圳市场获取
+        sh_etf = ak.stock_etf_category_sina(symbol="上海ETF")  # 1.17.41版本的正确参数
+        sz_etf = ak.stock_etf_category_sina(symbol="深圳ETF")  # 1.17.41版本的正确参数
+        
+        # 合并沪深市场ETF
         etf_list = pd.concat([sh_etf, sz_etf], ignore_index=True)
         
-        # 处理不同版本的列名
-        if "代码" in etf_list.columns:
+        # 处理1.17.41版本的列名（固定为"代码"和"名称"）
+        if "代码" in etf_list.columns and "名称" in etf_list.columns:
             etf_list = etf_list.rename(columns={"代码": "etf_code", "名称": "etf_name"})
-        elif "基金代码" in etf_list.columns:
-            etf_list = etf_list.rename(columns={"基金代码": "etf_code", "基金名称": "etf_name"})
         else:
-            # 尝试模糊匹配
+            # 兼容可能的列名变化
             code_col = next(col for col in etf_list.columns if "代码" in col)
             name_col = next(col for col in etf_list.columns if "名称" in col)
             etf_list = etf_list.rename(columns={code_col: "etf_code", name_col: "etf_name"})
         
+        # 数据清洗：确保代码为6位数字，去重
+        etf_list["etf_code"] = etf_list["etf_code"].astype(str).str.strip()
+        etf_list = etf_list[etf_list["etf_code"].str.match(r'^\d{6}$')]  # 过滤非6位代码
         etf_list = etf_list.drop_duplicates(subset=["etf_code"], keep="last")
-        etf_list = etf_list[etf_list["etf_code"].str.match(r'^\d{6}$')]
+        
         return etf_list[["etf_code", "etf_name"]]
     except Exception as e:
-        print(f"⚠️ AkShare拉取全市场ETF列表失败：{str(e)}")
-        raise  # 触发重试，重试失败后走兜底逻辑
+        print(f"⚠️ AkShare 1.17.41拉取全市场ETF列表失败：{str(e)}")
+        raise  # 触发重试
 
 def update_all_etf_list():
     """更新全市场ETF列表，失败则使用兜底文件"""
@@ -58,28 +62,36 @@ def update_all_etf_list():
             print(f"❌ 全市场ETF列表更新失败，启用兜底文件...")
             # 读取兜底文件的ETF代码，自动补充名称
             if os.path.exists(Config.BACKUP_ETFS_PATH):
-                backup_df = pd.read_csv(Config.BACKUP_ETFS_PATH, encoding="utf-8")
-                # 校验兜底文件列名（必须含"etf_code"列或"ETF代码"列）
-                if "etf_code" not in backup_df.columns:
-                    if "ETF代码" in backup_df.columns:
-                        backup_df = backup_df.rename(columns={"ETF代码": "etf_code"})
-                    else:
-                        print(f"❌ 兜底文件列名错误，需包含'ETF代码'列")
+                try:
+                    backup_df = pd.read_csv(Config.BACKUP_ETFS_PATH, encoding="utf-8")
+                    
+                    # 严格校验兜底文件列名
+                    if "ETF代码" not in backup_df.columns:
+                        print(f"❌ 兜底文件必须包含'ETF代码'列，请检查文件格式")
                         return pd.DataFrame()
-                
-                # 去重并筛选6位数字代码
-                backup_df = backup_df[backup_df["etf_code"].astype(str).str.match(r'^\d{6}$')].drop_duplicates(subset=["etf_code"])
-                
-                # 补充名称列
-                if "etf_name" not in backup_df.columns:
-                    backup_df["etf_name"] = backup_df["etf_code"].apply(lambda x: f"ETF-{x}")
-                elif "ETF名称" in backup_df.columns:
-                    backup_df = backup_df.rename(columns={"ETF名称": "etf_name"})
-                
-                # 只保留必要列
-                backup_df = backup_df[["etf_code", "etf_name"]]
-                print(f"✅ 兜底文件加载完成（{len(backup_df)}只ETF）")
-                return backup_df
+                    
+                    # 列名转换为内部使用的etf_code
+                    backup_df = backup_df.rename(columns={"ETF代码": "etf_code"})
+                    
+                    # 数据清洗：确保代码为6位数字，去重
+                    backup_df["etf_code"] = backup_df["etf_code"].astype(str).str.strip()
+                    backup_df = backup_df[backup_df["etf_code"].str.match(r'^\d{6}$')]
+                    backup_df = backup_df.drop_duplicates(subset=["etf_code"])
+                    
+                    # 补充名称列（若不存在）
+                    if "etf_name" not in backup_df.columns:
+                        if "ETF名称" in backup_df.columns:
+                            backup_df = backup_df.rename(columns={"ETF名称": "etf_name"})
+                        else:
+                            backup_df["etf_name"] = backup_df["etf_code"].apply(lambda x: f"ETF-{x}")
+                    
+                    # 只保留必要列
+                    backup_df = backup_df[["etf_code", "etf_name"]]
+                    print(f"✅ 兜底文件加载完成（{len(backup_df)}只ETF）")
+                    return backup_df
+                except Exception as e:
+                    print(f"❌ 兜底文件解析失败：{str(e)}")
+                    return pd.DataFrame()
             else:
                 print(f"❌ 兜底文件 {Config.BACKUP_ETFS_PATH} 不存在")
                 return pd.DataFrame()
@@ -93,7 +105,9 @@ def load_all_etf_list():
         try:
             df = pd.read_csv(Config.ALL_ETFS_PATH, encoding="utf-8")
             if not df.empty and "etf_code" in df.columns:
-                return df
+                # 确保代码格式正确
+                df["etf_code"] = df["etf_code"].astype(str).str.strip()
+                return df[df["etf_code"].str.match(r'^\d{6}$')]
         except Exception as e:
             print(f"⚠️  加载本地ETF列表失败：{str(e)}")
     
@@ -106,12 +120,14 @@ def load_all_etf_list():
                 backup_df = backup_df.rename(columns={"ETF代码": "etf_code"})
             
             if "etf_code" in backup_df.columns:
-                backup_df = backup_df[backup_df["etf_code"].astype(str).str.match(r'^\d{6}$')].drop_duplicates()
+                backup_df["etf_code"] = backup_df["etf_code"].astype(str).str.strip()
+                backup_df = backup_df[backup_df["etf_code"].str.match(r'^\d{6}$')].drop_duplicates()
                 
                 if "etf_name" not in backup_df.columns:
-                    backup_df["etf_name"] = backup_df["etf_code"].apply(lambda x: f"ETF-{x}")
-                elif "ETF名称" in backup_df.columns:
-                    backup_df = backup_df.rename(columns={"ETF名称": "etf_name"})
+                    if "ETF名称" in backup_df.columns:
+                        backup_df = backup_df.rename(columns={"ETF名称": "etf_name"})
+                    else:
+                        backup_df["etf_name"] = backup_df["etf_code"].apply(lambda x: f"ETF-{x}")
                 
                 return backup_df[["etf_code", "etf_name"]]
         except Exception as e:
@@ -127,4 +143,4 @@ def get_filtered_etf_codes():
         print("⚠️  无有效ETF列表，返回空")
         return []
     # 返回所有6位代码（后续爬取时会逐一获取详细数据）
-    return etf_list["etf_code"].astype(str).tolist()
+    return etf_list["etf_code"].tolist()

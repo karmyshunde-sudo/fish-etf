@@ -2,41 +2,29 @@ name: ETF数据爬取与策略推送
 
 on:
   schedule:
-    # 任务1：下午4点（北京时间）增量爬取ETF日线数据（UTC 8点）
-    - cron: '0 8 * * 1-5'  # 周一至周五 UTC 8:00 = 北京时间16:00
-    
-    # 任务2：套利机会计算（多个时间点，北京时间），单日仅推一次
-    - cron: '40 1 * * 1-5'  # 9:40（UTC 1:40）
-    - cron: '40 2 * * 1-5'  # 10:40（UTC 2:40）
-    - cron: '40 3 * * 1-5'  # 11:40（UTC 3:40）
-    - cron: '40 4 * * 1-5'  # 12:40（UTC 4:40）
-    - cron: '40 5 * * 1-5'  # 13:40（UTC 5:40）
-    - cron: '40 6 * * 1-5'  # 14:40（UTC 6:40）
-    
-    # 任务3：下午2点（北京时间）计算仓位策略（UTC 6点）
-    - cron: '0 6 * * 1-5'   # 周一至周五 UTC 6:00 = 北京时间14:00
-    
-    # 任务4：每周日20:00更新全市场ETF列表（UTC 12:00）
-    - cron: '0 12 * * 0'    # 每周日 UTC 12:00 = 北京时间20:00
-
-  # 手动触发（测试用）
+    - cron: '0 8 * * 1-5'   # 日线爬取（16:00 北京时间）
+    - cron: '40 1-6 * * 1-5' # 套利计算（多时间点，9:40~14:40 北京时间）
+    - cron: '0 6 * * 1-5'   # 仓位策略（14:00 北京时间）
+    - cron: '0 12 * * 0'    # ETF列表更新（20:00 北京时间，周日）
   workflow_dispatch:
     inputs:
       task:
-        description: '选择任务类型'
+        description: '任务类型'
         required: true
         type: choice
         options:
-          - 'crawl_etf_daily'       # 爬取ETF日线数据
-          - 'calculate_arbitrage'   # 计算套利机会
-          - 'calculate_position'    # 计算仓位策略
-          - 'update_etf_list'       # 更新ETF列表
+          - 'crawl_etf_daily'
+          - 'calculate_arbitrage'
+          - 'calculate_position'
+          - 'update_etf_list'
 
 jobs:
   run_etf_task:
-    if: ${{ (github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '') }}
+    if: >-
+      (github.event_name == 'schedule') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '')
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # 防止任务无限运行
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -55,11 +43,11 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip'  # 缓存依赖，加速安装
+          cache: 'pip'
       
       - name: 安装依赖包
         run: |
-          set -euo pipefail  # 脚本出错立即终止
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
@@ -73,11 +61,10 @@ jobs:
           echo "当前工作目录: $(pwd)"
           echo "仓库目录内容: $(ls -la)"
       
-      - name: 确定任务类型（定时任务自动匹配）
+      - name: 确定任务类型
         id: set_task
         run: |
           set -euo pipefail
-          # 根据定时表达式匹配任务类型
           if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
             echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
           elif [[ "${{ github.event.schedule }}" == "0 6 * * 1-5" ]]; then
@@ -87,107 +74,97 @@ jobs:
           elif [[ "${{ github.event.schedule }}" =~ "40 [1-6] * * 1-5" ]]; then
             echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
           else
-            # 手动触发时使用选择的任务
             echo "TASK=${{ github.event.inputs.task }}" >> $GITHUB_ENV
           fi
           echo "最终执行任务: ${{ env.TASK }}"
       
-      - name: 显式创建数据目录（确保存在，设置权限）
+      - name: 创建数据目录
         run: |
           set -euo pipefail
-          # 确保data目录及子目录存在
           mkdir -p data/etf_daily data/flags data/logs
-          # 设置宽松权限，避免写入问题
           chmod -R 777 data/
-          # 验证目录创建和权限
           echo "数据目录权限:"
           ls -ld data/
           ls -ld data/etf_daily/
           echo "数据目录内容（初始）:"
           ls -la data/etf_daily/
       
-      - name: 执行任务并记录日志
+      - name: 执行任务
         id: execute_task
         env:
           TASK: ${{ env.TASK }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           set -euo pipefail
-          # 执行主程序并记录详细日志
           echo "开始执行任务: $TASK"
-          # python main.py > data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log 2>&1
           python main.py 2>&1 | tee "data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log"
-
           
-          # 验证文件是否生成
           echo "任务执行后的数据目录内容:"
           ls -la data/etf_daily/
           
-          # 统计生成的文件数量
           file_count=$(find data/etf_daily/ -type f -name "*.csv" 2>/dev/null | wc -l)
           echo "生成的CSV文件数量: $file_count"
           echo "file_count=$file_count" >> $GITHUB_OUTPUT
           
-          # 检查是否有文件生成
           if [ $file_count -eq 0 ]; then
-            echo "警告: 未检测到生成的CSV文件"
+            echo "警告: 未检测到CSV文件"
           fi
       
-      - name: 提交前拉取最新代码（避免冲突）
+      - name: 拉取最新代码（处理冲突）
         run: |
           set -euo pipefail
-          git pull origin main --rebase
+          # 暂存数据文件（防止拉取失败）
+          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv 2>/dev/null || true
+          # 尝试拉取，失败则回退暂存
+          if ! git pull origin main --rebase; then
+            git reset HEAD .  # 取消暂存
+            git pull origin main --rebase
+          fi
       
-      - name: 提交数据和标记文件
+      - name: 提交数据
         if: steps.execute_task.outputs.file_count > 0
         run: |
           set -euo pipefail
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-
-          echo "检查数据目录结构变更..."
-          tree data/ 2>/dev/null || echo "data目录结构：空"
-
-          # 【新增】强制拉取最新代码（解决潜在冲突）
-          git pull origin main --rebase || true  # 冲突时继续，后续手动处理
           
-          # 显式添加所有数据文件和日志
-          # git add data/etf_daily/ data/flags/ data/logs/ data/*.csv 2>/dev/null
-          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force  # --force 覆盖.gitignore
-
-          # 【新增】调试：显示暂存区内容
+          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force
+          
           echo "=== 暂存区文件 ==="
           git status --porcelain
           echo "=================="
-    
-          # 提交变更
+          
           git commit -m "自动更新数据[${{ env.TASK }}]: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M')"
-          echo "提交成功，准备推送..."
-          # git push origin main
-          git push origin main || (echo "推送失败，尝试强制推送..." && git push origin main --force-with-lease)
+          git push origin main || (echo "推送失败，强制重试..." && git push origin main --force-with-lease)
       
-      - name: 处理提交失败情况
-        if: steps.execute_task.outputs.file_count > 0 && failure()
+      - name: 处理提交失败
+        if: >-
+          steps.execute_task.outputs.file_count > 0 && 
+          failure()
         run: |
           set -euo pipefail
-          echo "提交失败，尝试强制推送..."
+          echo "提交失败，强制推送..."
           git push origin main --force-with-lease
       
       - name: 任务完成通知
         run: |
           if [ ${{ steps.execute_task.outputs.file_count }} -gt 0 ]; then
-            echo "ETF任务[${{ env.TASK }}]执行成功，生成了${{ steps.execute_task.outputs.file_count }}个文件并已提交到仓库"
+            echo "ETF任务[${{ env.TASK }}]执行成功，生成${{ steps.execute_task.outputs.file_count }}个文件"
           else
-            echo "ETF任务[${{ env.TASK }}]执行完成，但未生成新文件"
+            echo "ETF任务[${{ env.TASK }}]未生成新文件"
           fi
       
-      - name: 任务失败紧急通知
+      - name: 失败通知（企业微信）
         if: failure()
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          TASK: ${{ env.TASK }}
         run: |
+          set -euo pipefail
           if [ -n "$WECOM_WEBHOOK" ]; then
-            curl "$WECOM_WEBHOOK" \
-              -H 'Content-Type: application/json' \
-              -d '{"msgtype": "text", "text": {"content": "⚠️ ETF任务[${{ env.TASK }}]执行失败\n时间: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')\n查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"}}'
+            beijing_time=$(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ ETF任务[${TASK}]执行失败\\n时间: ${beijing_time}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
+            curl -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload"
           fi

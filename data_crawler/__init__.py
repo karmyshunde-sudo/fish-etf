@@ -84,10 +84,10 @@ def crawl_etf_daily_incremental():
         return
     
     init_dirs()
-    # 修复：使用Config中实际存在的日线数据目录属性（假设为ETF_DAILY_PATH）
-    os.makedirs(Config.ETF_DAILY_PATH, exist_ok=True)
-    # 修复：使用Config中实际存在的已完成列表路径属性（假设为ETF_DAILY_COMPLETED_FILE）
-    completed_file = Config.ETF_DAILY_COMPLETED_FILE
+    # 修复：使用Config中实际定义的DATA_DIR属性（日线数据存储目录）
+    os.makedirs(Config.DATA_DIR, exist_ok=True)
+    # 修复：定义已完成列表路径（基于Config的DATA_DIR）
+    completed_file = os.path.join(Config.DATA_DIR, "etf_daily_completed.txt")
     
     completed_codes = set()
     if os.path.exists(completed_file):
@@ -148,8 +148,8 @@ def crawl_etf_daily_incremental():
                 df["etf_name"] = etf_name
                 df["crawl_time"] = current_time.strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 同步修改保存路径为实际的Config属性
-                save_path = os.path.join(Config.ETF_DAILY_PATH, f"{etf_code}.csv")
+                # 修复：使用Config中实际的DATA_DIR作为保存目录
+                save_path = os.path.join(Config.DATA_DIR, f"{etf_code}.csv")
                 df.to_csv(save_path, index=False, encoding="utf-8")
                 logger.info(f"✅ 保存成功：{save_path}（{len(df)}条数据）")
                 

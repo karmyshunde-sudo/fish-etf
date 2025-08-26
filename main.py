@@ -94,7 +94,7 @@ def main():
             os.makedirs(test_dir, exist_ok=True)
             
             # 保存文件路径
-            file_name = f"test_{now.strftime('%Y%m%d_%H%M%S')}.json"
+            file_name = f"test_{now.strftime('%Y%m%d_%H%M%S')}.txt"
             file_path = os.path.join(test_dir, file_name)
             
             # 写入测试数据

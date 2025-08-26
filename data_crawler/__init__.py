@@ -83,8 +83,9 @@ def crawl_etf_daily_incremental():
         logger.info(f"今日{current_time.date()}非交易日，无需爬取日线数据")
         return
     
-    # 显式拼接目录，确保基于已知存在的路径创建
-    etf_daily_dir = os.path.join(os.path.dirname(Config.ALL_ETFS_PATH), "etf_daily")
+    # 基于仓库根目录拼接路径（关键修复）
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 获取仓库根目录（fish-etf/）
+    etf_daily_dir = os.path.join(root_dir, "data", "etf_daily")
     os.makedirs(etf_daily_dir, exist_ok=True)
     logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
     
@@ -159,10 +160,10 @@ def crawl_etf_daily_incremental():
                 df["etf_name"] = etf_name
                 df["crawl_time"] = current_time.strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 单只保存路径（基于确保存在的目录）
+                # 单只保存路径（基于仓库根目录）
                 save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
-                # 打印绝对路径用于调试
-                logger.info(f"📁 实际保存路径: {os.path.abspath(save_path)}")
+                # 打印仓库内相对路径用于调试
+                logger.info(f"📁 实际保存路径（仓库内相对路径）: {os.path.relpath(save_path, root_dir)}")
                 df.to_csv(save_path, index=False, encoding="utf-8")
                 logger.info(f"✅ 保存成功：{save_path}（{len(df)}条数据）")
                 
@@ -184,4 +185,4 @@ def crawl_etf_daily_incremental():
             logger.info(f"批次{batch_idx}处理完成，休眠10秒后继续...")
             time.sleep(10)
     
-    logger.info("===== 所有待爬取ETF处理完毕 =====")    
+    logger.info("===== 所有待爬取ETF处理完毕 =====")

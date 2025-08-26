@@ -1,35 +1,29 @@
 import akshare as ak
 import pandas as pd
 import os
+import requests  # 新增：替换 akshare.session
 from datetime import datetime
 from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
 from retrying import retry
 from config import Config
 
-# 列表更新频率（天）
 LIST_UPDATE_INTERVAL = 7
 
-# -------------------------
-# 保留原有函数名，确保其他模块能正常导入
-# -------------------------
 def load_all_etf_list():
-    """兼容旧代码：加载全市场ETF列表（实际调用update_all_etf_list）"""
     return update_all_etf_list()
 
 def is_list_need_update():
-    """判断是否需要更新全市场ETF列表"""
     if not os.path.exists(Config.ALL_ETFS_PATH):
         return True
     last_modify_time = datetime.fromtimestamp(os.path.getmtime(Config.ALL_ETFS_PATH))
-    days_since_update = (get_beijing_time() - last_modify_time).days
-    return days_since_update >= LIST_UPDATE_INTERVAL
+    return (get_beijing_time() - last_modify_time).days >= LIST_UPDATE_INTERVAL
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def fetch_all_etfs_akshare():
-    """从AkShare获取ETF列表（适配1.17.41版本）"""
     try:
-        etf_info = ak.etf_fund_info_em()
+        # 修复：akshare 1.17.41 正确接口名是 etf_basic_info_em
+        etf_info = ak.etf_basic_info_em()  
         etf_list = etf_info[etf_info["交易场所"] != "场外"]
         etf_list = etf_list.rename(columns={
             "基金代码": "ETF代码",
@@ -43,11 +37,11 @@ def fetch_all_etfs_akshare():
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def fetch_all_etfs_sina():
-    """新浪接口兜底（AkShare失败时使用）"""
     try:
         url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList"
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
-        response = ak.session.get(url, params=params, timeout=10)
+        # 修复：替换 akshare.session 为 requests
+        response = requests.get(url, params=params, timeout=10)  
         response.raise_for_status()
         etf_data = response.json() if response.text.startswith("[") else eval(response.text)
         etf_list = pd.DataFrame(etf_data)[["symbol", "name"]]
@@ -61,7 +55,6 @@ def fetch_all_etfs_sina():
         raise Exception(f"新浪接口错误: {str(e)}")
 
 def read_csv_with_encoding(file_path):
-    """读取CSV文件，自动兼容UTF-8和GBK编码"""
     encodings = ["utf-8", "gbk", "latin-1"]
     for encoding in encodings:
         try:
@@ -71,7 +64,6 @@ def read_csv_with_encoding(file_path):
     raise Exception(f"无法解析文件 {file_path}，尝试了编码: {encodings}")
 
 def update_all_etf_list():
-    """更新全市场ETF列表（三级降级策略）"""
     init_dirs()
     if is_list_need_update():
         print("🔍 尝试更新全市场ETF列表...")
@@ -118,7 +110,6 @@ def update_all_etf_list():
             return pd.DataFrame()
 
 def get_filtered_etf_codes():
-    """获取过滤后的有效ETF代码列表"""
     etf_list = update_all_etf_list()
     if etf_list.empty:
         print("⚠️ 无有效ETF代码列表")

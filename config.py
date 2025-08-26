@@ -1,3 +1,5 @@
+import os
+
 class Config:
     """全局配置：数据源、策略参数、文件路径"""
     # -------------------------
@@ -44,22 +46,27 @@ class Config:
     STOP_LOSS_THRESHOLD = -0.05    # 止损阈值（跌幅超5%）
 
     # -------------------------
-    # 3. 文件路径配置
+    # 3. 文件路径配置 - 基于仓库根目录的路径
     # -------------------------
+    # 获取仓库根目录（优先使用GITHUB_WORKSPACE环境变量）
+    GITHUB_WORKSPACE = os.environ.get('GITHUB_WORKSPACE', 
+                                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    BASE_DIR = os.path.abspath(GITHUB_WORKSPACE)
+    
     # 数据存储路径
-    DATA_DIR = "data/etf_daily"
+    DATA_DIR = os.path.join(BASE_DIR, "data/etf_daily")
     # ETF元数据（记录最后爬取日期）
-    METADATA_PATH = "data/etf_metadata.csv"
+    METADATA_PATH = os.path.join(BASE_DIR, "data/etf_metadata.csv")
     # 策略结果标记（避免单日重复推送）
-    FLAG_DIR = "data/flags"
+    FLAG_DIR = os.path.join(BASE_DIR, "data/flags")
     # 套利结果标记文件
-    ARBITRAGE_FLAG_FILE = f"{FLAG_DIR}/arbitrage_pushed_{{date}}.txt"
+    ARBITRAGE_FLAG_FILE = os.path.join(FLAG_DIR, "arbitrage_pushed_{date}.txt")
     # 仓位策略结果标记文件
-    POSITION_FLAG_FILE = f"{FLAG_DIR}/position_pushed_{{date}}.txt"
+    POSITION_FLAG_FILE = os.path.join(FLAG_DIR, "position_pushed_{date}.txt")
     # 全市场ETF列表存储路径
-    ALL_ETFS_PATH = "data/all_etfs.csv"
+    ALL_ETFS_PATH = os.path.join(BASE_DIR, "data/all_etfs.csv")
     # 兜底ETF列表路径
-    BACKUP_ETFS_PATH = "data/karmy_etf.csv"
+    BACKUP_ETFS_PATH = os.path.join(BASE_DIR, "data/karmy_etf.csv")
 
     # -------------------------
     # 4. 微信推送配置
@@ -92,4 +99,3 @@ class Config:
         root_data_dir = os.path.dirname(cls.ALL_ETFS_PATH)
         if not os.path.exists(root_data_dir):
             os.makedirs(root_data_dir, exist_ok=True)
-    

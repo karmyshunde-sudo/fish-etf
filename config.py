@@ -10,13 +10,19 @@ class Config:
     # 中文列名映射（固化，所有数据源统一）
     STANDARD_COLUMNS = {
         "日期": "date",
-        "开盘价": "open",
-        "收盘价": "close",
-        "最高价": "high",
-        "最低价": "low",
+        "开盘": "open",
+        "收盘": "close",
+        "最高": "high",
+        "最低": "low",
         "成交量": "volume",
         "成交额": "amount",
-        "涨跌幅": "pct_change"
+        "振幅": "amplitude",
+        "涨跌幅": "pct_change",
+        "涨跌额": "price_change",
+        "换手率": "turnover",
+        "ETF代码": "etf_code",
+        "ETF名称": "etf_name",
+        "爬取时间": "crawl_time"
     }
     # ETF列表标准列（确保all_etfs.csv和karmy_etf.csv结构一致）
     ETF_STANDARD_COLUMNS = ["ETF代码", "ETF名称"]

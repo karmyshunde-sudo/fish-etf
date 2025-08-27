@@ -49,7 +49,22 @@ class Config:
     MA_SHORT_PERIOD = 5    # 短期均线（5日）
     MA_LONG_PERIOD = 20    # 长期均线（20日）
     ADD_POSITION_THRESHOLD = 0.03  # 加仓阈值（涨幅超3%）
-    STOP_LOSS_THRESHOLD = -0.05    # 止损阈值（跌幅超5%）
+    STOP_LOSS_THRESHOLD = -0.05    # 止损阈值（跌幅超5%")
+    
+    # 评分维度权重
+    SCORE_WEIGHTS = {
+        'liquidity': 0.20,  # 流动性评分权重
+        'risk': 0.25,       # 风险控制评分权重
+        'return': 0.25,     # 收益能力评分权重
+        'premium': 0.15,    # 溢价率评分权重
+        'sentiment': 0.15   # 情绪指标评分权重
+    }
+    
+    # 买入信号条件
+    BUY_SIGNAL_DAYS = 2  # 连续几天信号持续才买入
+    
+    # 换股条件
+    SWITCH_THRESHOLD = 0.3  # 新ETF比原ETF综合评分高出30%则换股
 
     # -------------------------
     # 3. 文件路径配置 - 基于仓库根目录的路径
@@ -69,6 +84,8 @@ class Config:
     ARBITRAGE_FLAG_FILE = os.path.join(FLAG_DIR, "arbitrage_pushed_{date}.txt")
     # 仓位策略结果标记文件
     POSITION_FLAG_FILE = os.path.join(FLAG_DIR, "position_pushed_{date}.txt")
+    # 交易记录文件
+    TRADE_RECORD_FILE = os.path.join(BASE_DIR, "data/trade_records.csv")
     # 全市场ETF列表存储路径
     ALL_ETFS_PATH = os.path.join(BASE_DIR, "data/all_etfs.csv")
     # 兜底ETF列表路径
@@ -105,3 +122,7 @@ class Config:
         root_data_dir = os.path.dirname(cls.ALL_ETFS_PATH)
         if not os.path.exists(root_data_dir):
             os.makedirs(root_data_dir, exist_ok=True)
+        # 确保交易记录目录存在
+        trade_record_dir = os.path.dirname(cls.TRADE_RECORD_FILE)
+        if not os.path.exists(trade_record_dir):
+            os.makedirs(trade_record_dir, exist_ok=True)

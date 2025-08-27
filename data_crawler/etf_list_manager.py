@@ -2,6 +2,7 @@ import akshare as ak
 import pandas as pd
 import os
 import logging
+import requests
 from datetime import datetime, timezone, timedelta
 from utils.date_utils import get_beijing_time
 from utils.file_utils import init_dirs
@@ -39,8 +40,13 @@ def fetch_all_etfs_akshare():
         # 标准化列名
         etf_list = etf_info.rename(columns={
             "代码": "ETF代码",
-            "名称": "ETF名称"
-        })[Config.ETF_STANDARD_COLUMNS]
+            "名称": "ETF名称",
+            "上市日期": "上市日期"  # 添加上市日期列
+        })
+        
+        # 确保包含所有标准列和上市日期列
+        all_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+        etf_list = etf_list[all_columns]
         
         # 数据清洗：确保代码为6位数字
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
@@ -67,7 +73,11 @@ def fetch_all_etfs_sina():
         etf_list = etf_list.rename(columns={
             "symbol": "ETF代码",
             "name": "ETF名称"
-        })[Config.ETF_STANDARD_COLUMNS]
+        })
+        
+        # 添加空白的上市日期列（新浪接口不提供此信息）
+        etf_list["上市日期"] = ""
+        etf_list = etf_list[Config.ETF_STANDARD_COLUMNS + ["上市日期"]]
         
         etf_list["ETF代码"] = etf_list["ETF代码"].str[-6:].str.strip()
         
@@ -83,7 +93,12 @@ def read_csv_with_encoding(file_path):
     for encoding in encodings:
         try:
             df = pd.read_csv(file_path, encoding=encoding)
-            return df[Config.ETF_STANDARD_COLUMNS].copy()
+            # 确保包含所有需要的列
+            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            for col in required_columns:
+                if col not in df.columns:
+                    df[col] = ""
+            return df[required_columns].copy()
         except (UnicodeDecodeError, LookupError, KeyError) as e:
             continue
     raise Exception(f"无法解析文件 {file_path}，尝试了编码: {encodings}")
@@ -99,6 +114,13 @@ def update_all_etf_list():
         # 1. 尝试AkShare接口
         try:
             etf_list = fetch_all_etfs_akshare()
+            # 确保包含所有需要的列
+            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            for col in required_columns:
+                if col not in etf_list.columns:
+                    etf_list[col] = ""
+            etf_list = etf_list[required_columns]
+            
             etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
             logger.info(f"✅ AkShare更新成功（{len(etf_list)}只ETF）")
             primary_etf_list = etf_list
@@ -109,6 +131,13 @@ def update_all_etf_list():
         if primary_etf_list is None:
             try:
                 etf_list = fetch_all_etfs_sina()
+                # 确保包含所有需要的列
+                required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+                for col in required_columns:
+                    if col not in etf_list.columns:
+                        etf_list[col] = ""
+                etf_list = etf_list[required_columns]
+                
                 etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                 logger.info(f"✅ 新浪接口更新成功（{len(etf_list)}只ETF）")
                 primary_etf_list = etf_list
@@ -125,7 +154,7 @@ def update_all_etf_list():
             logger.info("🔄 检测到兜底文件未初始化，开始同步数据...")
             
             if primary_etf_list is not None and not primary_etf_list.empty:
-                backup_df = primary_etf_list[Config.ETF_STANDARD_COLUMNS].copy()
+                backup_df = primary_etf_list.copy()
                 backup_df.to_csv(Config.BACKUP_ETFS_PATH, index=False, encoding="utf-8")
                 logger.info(f"✅ 已从新获取数据同步兜底文件（{len(backup_df)}条记录）")
             
@@ -144,33 +173,46 @@ def update_all_etf_list():
                     backup_df = read_csv_with_encoding(Config.BACKUP_ETFS_PATH)
                     
                     # 验证必要列
-                    if not set(Config.ETF_STANDARD_COLUMNS).issubset(backup_df.columns):
-                        missing_cols = set(Config.ETF_STANDARD_COLUMNS) - set(backup_df.columns)
-                        raise Exception(f"兜底文件缺少必要列: {missing_cols}")
+                    required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+                    for col in required_columns:
+                        if col not in backup_df.columns:
+                            backup_df[col] = ""
                     
                     # 数据清洗
                     backup_df["ETF代码"] = backup_df["ETF代码"].astype(str).str.strip().str.zfill(6)
                     backup_df = backup_df[backup_df["ETF代码"].str.match(r'^\d{6}$')]
-                    backup_df = backup_df[Config.ETF_STANDARD_COLUMNS].drop_duplicates()
+                    backup_df = backup_df[required_columns].drop_duplicates()
                     
                     logger.info(f"✅ 兜底文件加载成功（{len(backup_df)}只ETF）")
                     return backup_df
                 except Exception as e:
                     logger.error(f"❌ 兜底文件处理失败: {str(e)}")
-                    return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+                    # 返回空DataFrame但包含所有列
+                    empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+                    return empty_df
             else:
                 logger.error(f"❌ 兜底文件不存在: {Config.BACKUP_ETFS_PATH}")
-                return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+                # 返回空DataFrame但包含所有列
+                empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+                return empty_df
         
         return primary_etf_list
     
     else:
         logger.info("ℹ️ 无需更新，加载本地ETF列表")
         try:
-            return read_csv_with_encoding(Config.ALL_ETFS_PATH)
+            etf_list = read_csv_with_encoding(Config.ALL_ETFS_PATH)
+            # 确保包含所有需要的列
+            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            for col in required_columns:
+                if col not in etf_list.columns:
+                    etf_list[col] = ""
+            return etf_list[required_columns]
         except Exception as e:
             logger.error(f"❌ 本地文件加载失败: {str(e)}")
-            return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+            # 返回空DataFrame但包含所有列
+            empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+            return empty_df
 
 def get_filtered_etf_codes():
     """获取过滤后的有效ETF代码列表"""

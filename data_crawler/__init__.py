@@ -179,23 +179,30 @@ def crawl_etf_daily_incremental():
                     logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
                     continue
                 
-                # 统一列名（转为英文列名）
-                col_map = {
-                    "日期": "date",
-                    "开盘价": "open",
-                    "最高价": "high",
-                    "最低价": "low",
-                    "收盘价": "close",
-                    "成交量": "volume",
-                    "成交额": "amount",
-                    "涨跌幅": "pct_change"
-                }
+                # 统一列名（转为英文列名，使用config.py中的标准定义）
+                col_map = Config.STANDARD_COLUMNS
                 df = df.rename(columns=col_map)
                 
                 # 补充ETF基本信息
                 df["etf_code"] = etf_code
                 df["etf_name"] = etf_name
                 df["crawl_time"] = current_time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 确保所有标准列都存在
+                for col in Config.STANDARD_COLUMNS.values():
+                    if col not in df.columns:
+                        # 填充缺失的列（除了etf_code, etf_name, crawl_time已经在上面添加）
+                        if col == "amplitude" and "振幅" in df.columns:
+                            df[col] = df["振幅"]
+                        elif col == "price_change" and "涨跌额" in df.columns:
+                            df[col] = df["涨跌额"]
+                        elif col == "turnover" and "换手率" in df.columns:
+                            df[col] = df["换手率"]
+                        else:
+                            df[col] = None  # 填充空值
+                
+                # 只保留标准列
+                df = df[list(Config.STANDARD_COLUMNS.values())]
                 
                 # 处理已有数据的追加逻辑
                 save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")

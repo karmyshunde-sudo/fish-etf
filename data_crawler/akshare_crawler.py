@@ -28,31 +28,32 @@ def crawl_etf_daily_akshare(etf_code, start_date, end_date):
             logger.warning(f"AkShare未获取到{etf_code}数据（{start_date}至{end_date}）")
             return pd.DataFrame()
         
-        # 列名映射为中文（确保与 config.py 中的 STANDARD_COLUMNS 完全一致）
-        col_map = {
-            "日期": "日期",
-            "开盘": "开盘",
-            "收盘": "收盘",
-            "最高": "最高",
-            "最低": "最低",
-            "成交量": "成交量",
-            "成交额": "成交额",
-            "涨跌幅": "涨跌幅",
-            "振幅": "振幅",
-            "涨跌额": "涨跌额",
-            "换手率": "换手率"
-        }
+        # 记录返回的列名，用于调试
+        logger.info(f"AkShare返回列名: {list(df.columns)}")
+        
+        # 使用Config中的标准列名映射
+        col_map = {}
+        for source_col, target_col in Config.STANDARD_COLUMNS.items():
+            # 尝试找到对应的源列
+            if source_col in df.columns:
+                col_map[source_col] = target_col
+            else:
+                # 尝试模糊匹配
+                for actual_col in df.columns:
+                    if source_col in actual_col:
+                        col_map[actual_col] = target_col
+                        break
         
         # 重命名列
         df = df.rename(columns=col_map)
         
-        # 确保所有标准列都存在
-        standard_cols = list(Config.STANDARD_COLUMNS.keys())
+        # 确保所有必需列都存在
+        required_cols = list(Config.STANDARD_COLUMNS.keys())
         # 排除不需要从akshare获取的列（这些列会在后续处理中添加）
         exclude_cols = ["ETF代码", "ETF名称", "爬取时间"]
-        required_cols = [col for col in standard_cols if col not in exclude_cols]
+        required_data_cols = [col for col in required_cols if col not in exclude_cols]
         
-        for col in required_cols:
+        for col in required_data_cols:
             if col not in df.columns:
                 if col == "涨跌额":
                     # 计算涨跌额
@@ -62,12 +63,18 @@ def crawl_etf_daily_akshare(etf_code, start_date, end_date):
                     # 计算振幅
                     df[col] = ((df["最高"] - df["最低"]) / df["收盘"].shift(1) * 100).round(4)
                     df.loc[0, col] = 0.0
+                elif col == "换手率":
+                    # 计算换手率（近似计算）
+                    if "成交量" in df.columns and "成交额" in df.columns:
+                        df[col] = (df["成交量"] / (df["成交额"] / df["收盘"]) * 100).round(4)
+                    else:
+                        df[col] = 0.0
                 else:
                     logger.warning(f"AkShare数据缺少必要列：{col}")
                     return pd.DataFrame()
         
         # 只保留标准列（排除不需要从akshare获取的列）
-        df = df[required_cols]
+        df = df[required_data_cols]
         
         # 数据清洗：去重、格式转换
         df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")

@@ -33,24 +33,37 @@ def is_list_need_update():
     days_since_update = (get_beijing_time() - last_modify_time).days
     return days_since_update >= LIST_UPDATE_INTERVAL
 
-@retry(stop_max_attempt_number=2, wait_fixed=1000)  # 减少重试次数和等待时间
+@retry(stop_max_attempt_number=2, wait_fixed=1000)
 def fetch_all_etfs_akshare():
     """使用AkShare接口获取ETF列表（带超时控制）"""
     try:
         logger.info("尝试从AkShare获取ETF列表...")
-        # 调用fund_etf_spot_em接口，设置超时
+        # 调用fund_etf_spot_em接口
         etf_info = ak.fund_etf_spot_em()
         
-        # 标准化列名
-        etf_list = etf_info.rename(columns={
-            "代码": "ETF代码",
-            "名称": "ETF名称",
-            "上市日期": "上市日期"
-        })
+        # 记录返回的列名，用于调试
+        logger.info(f"AkShare返回列名: {list(etf_info.columns)}")
         
-        # 确保包含所有标准列和上市日期列
-        all_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
-        etf_list = etf_list[all_columns]
+        # 标准化列名 - 只使用确定存在的列
+        column_mapping = {
+            "代码": "ETF代码",
+            "名称": "ETF名称"
+        }
+        
+        # 检查是否有"上市日期"列，如果有则添加映射
+        if "上市日期" in etf_info.columns:
+            column_mapping["上市日期"] = "上市日期"
+        
+        etf_list = etf_info.rename(columns=column_mapping)
+        
+        # 确保包含所有标准列
+        required_columns = Config.ETF_STANDARD_COLUMNS.copy()
+        if "上市日期" in etf_info.columns:
+            required_columns.append("上市日期")
+        
+        # 只保留存在的列
+        available_columns = [col for col in required_columns if col in etf_list.columns]
+        etf_list = etf_list[available_columns]
         
         # 数据清洗：确保代码为6位数字
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
@@ -63,7 +76,7 @@ def fetch_all_etfs_akshare():
         logger.warning(f"⚠️ {error_msg}")
         raise Exception(error_msg)
 
-@retry(stop_max_attempt_number=2, wait_fixed=1000)  # 减少重试次数和等待时间
+@retry(stop_max_attempt_number=2, wait_fixed=1000)
 def fetch_all_etfs_sina():
     """新浪接口兜底获取ETF列表（带超时控制）"""
     try:
@@ -73,22 +86,43 @@ def fetch_all_etfs_sina():
         response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         
-        etf_data = response.json() if response.text.startswith("[") else eval(response.text)
-        etf_list = pd.DataFrame(etf_data)[["symbol", "name"]]
+        # 处理新浪接口返回的数据
+        try:
+            etf_data = response.json()
+        except:
+            # 如果JSON解析失败，尝试eval
+            etf_data = eval(response.text)
         
-        etf_list = etf_list.rename(columns={
-            "symbol": "ETF代码",
-            "name": "ETF名称"
-        })
+        # 确保数据是列表格式
+        if not isinstance(etf_data, list):
+            logger.warning("新浪接口返回的数据不是列表格式")
+            etf_data = []
         
-        # 添加空白的上市日期列（新浪接口不提供此信息）
-        etf_list["上市日期"] = ""
-        etf_list = etf_list[Config.ETF_STANDARD_COLUMNS + ["上市日期"]]
-        
-        etf_list["ETF代码"] = etf_list["ETF代码"].str[-6:].str.strip()
-        
-        logger.info(f"新浪获取到{len(etf_list)}只ETF")
-        return etf_list.drop_duplicates(subset="ETF代码")
+        # 创建DataFrame
+        if etf_data:
+            etf_list = pd.DataFrame(etf_data)
+            # 检查必要的列是否存在
+            if "symbol" in etf_list.columns and "name" in etf_list.columns:
+                etf_list = etf_list.rename(columns={
+                    "symbol": "ETF代码",
+                    "name": "ETF名称"
+                })
+                
+                # 添加空白的上市日期列（新浪接口不提供此信息）
+                etf_list["上市日期"] = ""
+                etf_list = etf_list[Config.ETF_STANDARD_COLUMNS + ["上市日期"]]
+                
+                etf_list["ETF代码"] = etf_list["ETF代码"].str[-6:].str.strip()
+                
+                logger.info(f"新浪获取到{len(etf_list)}只ETF")
+                return etf_list.drop_duplicates(subset="ETF代码")
+            else:
+                logger.warning("新浪接口返回的数据缺少必要列")
+                return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+        else:
+            logger.warning("新浪接口返回空数据")
+            return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+            
     except Exception as e:
         error_msg = f"新浪接口错误: {str(e)}"
         logger.warning(f"⚠️ {error_msg}")

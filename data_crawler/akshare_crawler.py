@@ -17,54 +17,57 @@ def crawl_etf_daily_akshare(etf_code, start_date, end_date):
     :return: 标准化中文列名的DataFrame
     """
     try:
-        # 爬取ETF日线数据（AkShare接口）
-        df = ak.etf_spot_em(symbol=etf_code, start_date=start_date, end_date=end_date)
+        # 使用 fund_etf_hist_em 接口爬取ETF日线数据
+        df = ak.fund_etf_hist_em(symbol=etf_code, 
+                                period="daily", 
+                                start_date=start_date, 
+                                end_date=end_date, 
+                                adjust="qfq")
         
         if df.empty:
             logger.warning(f"AkShare未获取到{etf_code}数据（{start_date}至{end_date}）")
             return pd.DataFrame()
         
-        # 列名映射为中文（固化）
+        # 列名映射为中文（确保与 config.py 中的 STANDARD_COLUMNS 完全一致）
         col_map = {
-            "trade_date": "日期",
-            "open_price": "开盘价",
-            "close_price": "收盘价",
-            "high_price": "最高价",
-            "low_price": "最低价",
-            "volume": "成交量",
-            "amount": "成交额",
-            "pct_change": "涨跌幅"
+            "日期": "日期",
+            "开盘": "开盘",
+            "收盘": "收盘",
+            "最高": "最高",
+            "最低": "最低",
+            "成交量": "成交量",
+            "成交额": "成交额",
+            "涨跌幅": "涨跌幅",
+            "振幅": "振幅",
+            "涨跌额": "涨跌额",
+            "换手率": "换手率"
         }
         
-        # 处理可能的列名变化
-        available_cols = {}
-        for target_col, source_col in col_map.items():
-            # 尝试精确匹配
-            if source_col in df.columns:
-                available_cols[source_col] = target_col
-            else:
-                # 尝试模糊匹配
-                for col in df.columns:
-                    if source_col in col:
-                        available_cols[col] = target_col
-                        break
-        
-        # 只保留需要的列，并重命名
-        df = df.rename(columns=available_cols)
+        # 重命名列
+        df = df.rename(columns=col_map)
         
         # 确保所有标准列都存在
-        for col in Config.STANDARD_COLUMNS.keys():
+        standard_cols = list(Config.STANDARD_COLUMNS.keys())
+        # 排除不需要从akshare获取的列（这些列会在后续处理中添加）
+        exclude_cols = ["ETF代码", "ETF名称", "爬取时间"]
+        required_cols = [col for col in standard_cols if col not in exclude_cols]
+        
+        for col in required_cols:
             if col not in df.columns:
-                if col == "涨跌幅":
-                    # 计算涨跌幅
-                    df[col] = df["收盘价"].pct_change().round(4)
+                if col == "涨跌额":
+                    # 计算涨跌额
+                    df[col] = (df["收盘"] - df["收盘"].shift(1)).round(4)
+                    df.loc[0, col] = 0.0
+                elif col == "振幅":
+                    # 计算振幅
+                    df[col] = ((df["最高"] - df["最低"]) / df["收盘"].shift(1) * 100).round(4)
                     df.loc[0, col] = 0.0
                 else:
-                    # 缺失其他列则返回空
                     logger.warning(f"AkShare数据缺少必要列：{col}")
                     return pd.DataFrame()
         
-        df = df[list(Config.STANDARD_COLUMNS.keys())]
+        # 只保留标准列（排除不需要从akshare获取的列）
+        df = df[required_cols]
         
         # 数据清洗：去重、格式转换
         df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")

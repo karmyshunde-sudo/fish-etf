@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # 列表更新频率（天）
 LIST_UPDATE_INTERVAL = 7
 
+# 请求超时设置（秒）
+REQUEST_TIMEOUT = 30
+
 def load_all_etf_list():
     """加载全市场ETF列表"""
     return update_all_etf_list()
@@ -30,18 +33,19 @@ def is_list_need_update():
     days_since_update = (get_beijing_time() - last_modify_time).days
     return days_since_update >= LIST_UPDATE_INTERVAL
 
-@retry(stop_max_attempt_number=3, wait_fixed=2000)
+@retry(stop_max_attempt_number=2, wait_fixed=1000)  # 减少重试次数和等待时间
 def fetch_all_etfs_akshare():
-    """使用AkShare接口获取ETF列表"""
+    """使用AkShare接口获取ETF列表（带超时控制）"""
     try:
-        # 调用fund_etf_spot_em接口
+        logger.info("尝试从AkShare获取ETF列表...")
+        # 调用fund_etf_spot_em接口，设置超时
         etf_info = ak.fund_etf_spot_em()
         
         # 标准化列名
         etf_list = etf_info.rename(columns={
             "代码": "ETF代码",
             "名称": "ETF名称",
-            "上市日期": "上市日期"  # 添加上市日期列
+            "上市日期": "上市日期"
         })
         
         # 确保包含所有标准列和上市日期列
@@ -52,19 +56,21 @@ def fetch_all_etfs_akshare():
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
         etf_list = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]
         
+        logger.info(f"AkShare获取到{len(etf_list)}只ETF")
         return etf_list.drop_duplicates(subset="ETF代码")
     except Exception as e:
         error_msg = f"AkShare接口错误: {str(e)}"
         logger.warning(f"⚠️ {error_msg}")
         raise Exception(error_msg)
 
-@retry(stop_max_attempt_number=3, wait_fixed=2000)
+@retry(stop_max_attempt_number=2, wait_fixed=1000)  # 减少重试次数和等待时间
 def fetch_all_etfs_sina():
-    """新浪接口兜底获取ETF列表"""
+    """新浪接口兜底获取ETF列表（带超时控制）"""
     try:
+        logger.info("尝试从新浪获取ETF列表...")
         url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList"
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         
         etf_data = response.json() if response.text.startswith("[") else eval(response.text)
@@ -81,6 +87,7 @@ def fetch_all_etfs_sina():
         
         etf_list["ETF代码"] = etf_list["ETF代码"].str[-6:].str.strip()
         
+        logger.info(f"新浪获取到{len(etf_list)}只ETF")
         return etf_list.drop_duplicates(subset="ETF代码")
     except Exception as e:
         error_msg = f"新浪接口错误: {str(e)}"

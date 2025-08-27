@@ -79,20 +79,29 @@ def get_last_crawl_date(etf_code, etf_daily_dir):
     """获取最后一次爬取的日期"""
     file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
     if not os.path.exists(file_path):
-        return "2000-01-01"  # 初始日期
+        # 没有存量数据，返回最近一年的日期
+        current_date = get_beijing_time().date()
+        start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        return start_date
     
     try:
         df = pd.read_csv(file_path, encoding="utf-8")
         if df.empty or "date" not in df.columns:
-            return "2000-01-01"
+            # 文件为空或没有date列，返回最近一年的日期
+            current_date = get_beijing_time().date()
+            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+            return start_date
+        
         last_date = df["date"].max()
         # 计算下一个交易日作为开始日期
         china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
         next_date = (pd.to_datetime(last_date) + china_bd).strftime("%Y-%m-%d")
         return next_date
     except Exception as e:
-        logger.warning(f"获取{etf_code}最后爬取日期失败: {str(e)}，将从头爬取")
-        return "2000-01-01"
+        logger.warning(f"获取{etf_code}最后爬取日期失败: {str(e)}，将使用最近一年日期")
+        current_date = get_beijing_time().date()
+        start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        return start_date
 
 def crawl_etf_daily_incremental():
     """增量爬取ETF日线数据（单只保存+断点续爬逻辑）"""

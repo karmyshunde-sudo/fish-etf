@@ -655,7 +655,8 @@ def backup_incremental_data(data_dir: Union[str, Path],
         backup_dir = Path(backup_dir)
         
         if not data_dir.exists() or not data_dir.is_dir():
-            logger.warning(f"数据目录不存在: {data_dir")
+            logger.warning(f"数据目录不存在: {data_dir}")
+            # logger.warning(f"数据目录不存在: {data_dir")
             return 0
         
         # 确保备份目录存在

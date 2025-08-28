@@ -222,7 +222,7 @@ def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5)
         last_exception = None
         for attempt in range(max_retries):
             try:
-                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})"
+                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})")
                 return strategy_func(*args, **kwargs)
             except Exception as e:
                 last_exception = e

@@ -9,6 +9,10 @@ from config import Config
 # 初始化日志
 logger = logging.getLogger(__name__)
 
+# 直接导出策略函数，以便 main.py 可以导入
+from .arbitrage import calculate_arbitrage_opportunity, format_arbitrage_message
+from .position import calculate_position_strategy
+
 def run_all_strategies() -> Dict[str, Any]:
     """
     运行所有策略并返回结果
@@ -30,7 +34,6 @@ def run_all_strategies() -> Dict[str, Any]:
         logger.info("运行套利策略")
         logger.info("="*50)
         try:
-            from .arbitrage import calculate_arbitrage_opportunity, format_arbitrage_message
             arbitrage_df = calculate_arbitrage_opportunity()
             arbitrage_msg = format_arbitrage_message(arbitrage_df)
             results["arbitrage"] = arbitrage_msg
@@ -47,7 +50,6 @@ def run_all_strategies() -> Dict[str, Any]:
         logger.info("运行仓位策略")
         logger.info("="*50)
         try:
-            from .position import calculate_position_strategy
             position_msg = calculate_position_strategy()
             results["position"] = position_msg
             logger.info("仓位策略执行完成")
@@ -151,7 +153,7 @@ def check_arbitrage_exit_signals() -> bool:
     :return: 是否成功检查退出信号
     """
     try:
-        from position import init_trade_record
+        from .position import init_trade_record
         from wechat_push import send_wechat_message
         
         logger.info("开始检查套利退出信号")
@@ -220,7 +222,7 @@ def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5)
         last_exception = None
         for attempt in range(max_retries):
             try:
-                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})")
+                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})"
                 return strategy_func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
@@ -249,5 +251,3 @@ except Exception as e:
     import logging
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
     logging.error(f"策略模块初始化失败: {str(e)}")
-
-# 0828-1256【strategy/__init__.py代码】一共175行代码

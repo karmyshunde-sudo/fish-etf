@@ -1,7 +1,21 @@
-# config.py
 import os
 import logging
 from typing import Dict, Any, Optional
+
+# 先定义获取基础目录的函数，避免类定义时的循环引用问题
+def _get_base_dir() -> str:
+    """获取项目根目录路径"""
+    try:
+        base_dir = os.environ.get('GITHUB_WORKSPACE')
+        if not base_dir:
+            # 默认基于当前文件位置计算项目根目录
+            current_file_path = os.path.abspath(__file__)
+            base_dir = os.path.dirname(os.path.dirname(current_file_path))
+        return os.path.abspath(base_dir)
+    except Exception as e:
+        print(f"获取项目根目录失败: {str(e)}")
+        # 退回到当前工作目录
+        return os.path.abspath(os.getcwd())
 
 class Config:
     """
@@ -85,22 +99,13 @@ class Config:
     # 3. 文件路径配置 - 基于仓库根目录的路径
     # -------------------------
     # 获取仓库根目录（优先使用GITHUB_WORKSPACE环境变量）
-    @classmethod
-    def get_base_dir(cls) -> str:
+    @staticmethod
+    def get_base_dir() -> str:
         """获取项目根目录路径"""
-        try:
-            base_dir = os.environ.get('GITHUB_WORKSPACE')
-            if not base_dir:
-                # 默认基于当前文件位置计算项目根目录
-                current_file_path = os.path.abspath(__file__)
-                base_dir = os.path.dirname(os.path.dirname(current_file_path))
-            return os.path.abspath(base_dir)
-        except Exception as e:
-            logging.error(f"获取项目根目录失败: {str(e)}")
-            # 退回到当前工作目录
-            return os.path.abspath(os.getcwd())
+        return _get_base_dir()
     
-    BASE_DIR: str = get_base_dir.__func__()
+    # 修复：使用静态方法调用而不是类方法调用
+    BASE_DIR: str = _get_base_dir()
     
     # 数据存储路径
     DATA_DIR: str = os.path.join(BASE_DIR, "data", "etf_daily")
@@ -112,20 +117,20 @@ class Config:
     FLAG_DIR: str = os.path.join(BASE_DIR, "data", "flags")
     
     # 套利结果标记文件
-    @classmethod
-    def get_arbitrage_flag_file(cls, date_str: Optional[str] = None) -> str:
+    @staticmethod
+    def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
         from datetime import datetime
         date = date_str or datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(cls.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
+        return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
     
     # 仓位策略结果标记文件
-    @classmethod
-    def get_position_flag_file(cls, date_str: Optional[str] = None) -> str:
+    @staticmethod
+    def get_position_flag_file(date_str: Optional[str] = None) -> str:
         """获取仓位标记文件路径"""
         from datetime import datetime
         date = date_str or datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(cls.FLAG_DIR, f"position_pushed_{date}.txt")
+        return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
     
     # 交易记录文件
     TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
@@ -139,8 +144,8 @@ class Config:
     # -------------------------
     # 4. 微信推送配置
     # -------------------------
-    @classmethod
-    def get_wecom_webhook(cls) -> str:
+    @staticmethod
+    def get_wecom_webhook() -> str:
         """获取企业微信机器人Webhook（从环境变量或配置获取）"""
         try:
             # 优先从环境变量获取
@@ -149,18 +154,18 @@ class Config:
                 return webhook
                 
             # 其次从类属性获取
-            if hasattr(cls, '_WECOM_WEBHOOK') and cls._WECOM_WEBHOOK:
-                return cls._WECOM_WEBHOOK
+            if hasattr(Config, '_WECOM_WEBHOOK') and Config._WECOM_WEBHOOK:
+                return Config._WECOM_WEBHOOK
                 
             # 最后尝试从配置文件读取（如果有）
-            config_file = os.path.join(cls.BASE_DIR, "config.ini")
+            config_file = os.path.join(Config.BASE_DIR, "config.ini")
             if os.path.exists(config_file):
                 import configparser
                 parser = configparser.ConfigParser()
                 parser.read(config_file)
                 if 'wechat' in parser and 'webhook' in parser['wechat']:
                     webhook = parser['wechat']['webhook']
-                    cls._WECOM_WEBHOOK = webhook
+                    Config._WECOM_WEBHOOK = webhook
                     return webhook
                     
             logging.warning("企业微信Webhook未配置")
@@ -175,17 +180,16 @@ class Config:
     # -------------------------
     # 5. 日志配置
     # -------------------------
-    @classmethod
-    def setup_logging(cls, 
-                     log_level: Optional[str] = None,
+    @staticmethod
+    def setup_logging(log_level: Optional[str] = None,
                      log_file: Optional[str] = None) -> None:
         """
         配置日志系统
         :param log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         :param log_file: 日志文件路径，如果为None则只输出到控制台
         """
-        level = log_level or cls.LOG_LEVEL
-        log_format = cls.LOG_FORMAT
+        level = log_level or Config.LOG_LEVEL
+        log_format = Config.LOG_FORMAT
         
         # 创建根日志记录器
         root_logger = logging.getLogger()
@@ -229,13 +233,13 @@ class Config:
     # -------------------------
     # ETF筛选参数
     MIN_FUND_SIZE: float = 5.0  # 最小基金规模（亿元）
-    MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股）
+    MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股")
 
     # -------------------------
     # 7. 配置验证方法
     # -------------------------
-    @classmethod
-    def validate_config(cls) -> Dict[str, Any]:
+    @staticmethod
+    def validate_config() -> Dict[str, Any]:
         """
         验证配置是否有效，返回验证结果
         :return: 包含验证结果的字典
@@ -243,7 +247,7 @@ class Config:
         results = {}
         
         # 检查必要的目录是否存在或可创建
-        required_dirs = [cls.DATA_DIR, cls.FLAG_DIR, os.path.dirname(cls.LOG_FILE)]
+        required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, os.path.dirname(Config.LOG_FILE)]
         for dir_path in required_dirs:
             try:
                 if not os.path.exists(dir_path):
@@ -261,7 +265,7 @@ class Config:
                 }
         
         # 检查权重配置是否合理
-        total_weight = sum(cls.SCORE_WEIGHTS.values())
+        total_weight = sum(Config.SCORE_WEIGHTS.values())
         results["weights"] = {
             "status": "OK" if abs(total_weight - 1.0) < 0.001 else "WARNING",
             "total": total_weight,
@@ -269,7 +273,7 @@ class Config:
         }
         
         # 检查微信配置
-        webhook = cls.get_wecom_webhook()
+        webhook = Config.get_wecom_webhook()
         results["wechat"] = {
             "status": "OK" if webhook else "WARNING",
             "webhook_configured": bool(webhook)
@@ -280,8 +284,8 @@ class Config:
     # -------------------------
     # 路径初始化方法
     # -------------------------
-    @classmethod
-    def init_dirs(cls) -> bool:
+    @staticmethod
+    def init_dirs() -> bool:
         """
         初始化所有必要目录
         :return: 是否成功初始化所有目录
@@ -289,12 +293,12 @@ class Config:
         try:
             # 确保数据目录存在
             dirs_to_create = [
-                cls.DATA_DIR,
-                cls.FLAG_DIR,
-                os.path.dirname(cls.TRADE_RECORD_FILE),
-                os.path.dirname(cls.ALL_ETFS_PATH),
-                os.path.dirname(cls.BACKUP_ETFS_PATH),
-                os.path.dirname(cls.LOG_FILE)
+                Config.DATA_DIR,
+                Config.FLAG_DIR,
+                os.path.dirname(Config.TRADE_RECORD_FILE),
+                os.path.dirname(Config.ALL_ETFS_PATH),
+                os.path.dirname(Config.BACKUP_ETFS_PATH),
+                os.path.dirname(Config.LOG_FILE)
             ]
             
             for dir_path in dirs_to_create:
@@ -303,10 +307,10 @@ class Config:
                     logging.info(f"创建目录: {dir_path}")
             
             # 初始化日志
-            cls.setup_logging(log_file=cls.LOG_FILE)
+            Config.setup_logging(log_file=Config.LOG_FILE)
             
             # 验证配置
-            validation = cls.validate_config()
+            validation = Config.validate_config()
             has_errors = any(result["status"] == "ERROR" for result in validation.values())
             
             if has_errors:
@@ -323,6 +327,10 @@ class Config:
 
 # 初始化配置
 try:
+    # 先设置基础日志配置
+    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
+    
+    # 初始化目录
     Config.init_dirs()
     logging.info("配置初始化完成")
 except Exception as e:
@@ -330,4 +338,3 @@ except Exception as e:
     # 退回到基础日志配置
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
     logging.error(f"配置初始化失败: {str(e)}")
-# 0828-1256【config.py代码】一共265行代码

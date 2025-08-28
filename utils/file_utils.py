@@ -17,8 +17,14 @@ from typing import Any, Dict, List, Optional, Union, TextIO
 from datetime import datetime
 from pathlib import Path
 
+# 导入init_dirs函数
+from config import Config
+
 # 配置日志
 logger = logging.getLogger(__name__)
+
+# 重新导出init_dirs函数，使其可以从file_utils模块导入
+init_dirs = Config.init_dirs
 
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """
@@ -649,7 +655,7 @@ def backup_incremental_data(data_dir: Union[str, Path],
         backup_dir = Path(backup_dir)
         
         if not data_dir.exists() or not data_dir.is_dir():
-            logger.warning(f"数据目录不存在: {data_dir}")
+            logger.warning(f"数据目录不存在: {data_dir")
             return 0
         
         # 确保备份目录存在
@@ -842,7 +848,7 @@ def get_file_mtime(file_path: Union[str, Path]) -> Optional[datetime]:
         return None
 
 # 文件信息
-# 总行数: 467
+# 总行数: 469
 # 函数数量: 24
 # 最后修改: 2025-08-28
 # 版本: 1.1.0

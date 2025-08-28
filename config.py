@@ -25,7 +25,7 @@ class Config:
         "爬取时间": "crawl_time"
     }
     # ETF列表标准列（确保all_etfs.csv和karmy_etf.csv结构一致）
-    ETF_STANDARD_COLUMNS = ["ETF代码", "ETF名称"]
+    ETF_STANDARD_COLUMNS = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     # 新浪数据源备用接口
     SINA_ETF_HIST_URL = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
     # 批量爬取批次大小
@@ -104,6 +104,13 @@ class Config:
     # -------------------------
     LOG_LEVEL = "INFO"
     LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    # -------------------------
+    # 6. ETF筛选配置
+    # -------------------------
+    # ETF筛选参数
+    MIN_FUND_SIZE = 5.0  # 最小基金规模（亿元）
+    MIN_AVG_VOLUME = 1000  # 最小日均成交量（万股）
 
     # -------------------------
     # 路径初始化方法

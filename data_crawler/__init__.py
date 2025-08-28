@@ -103,6 +103,17 @@ def get_last_crawl_date(etf_code, etf_daily_dir):
         start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
         return start_date
 
+def record_failed_etf(etf_daily_dir, etf_code, etf_name, error_message=None):
+    """记录失败的ETF信息"""
+    failed_file = os.path.join(etf_daily_dir, "failed_etfs.txt")
+    timestamp = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+    
+    with open(failed_file, "a", encoding="utf-8") as f:
+        if error_message:
+            f.write(f"{etf_code}|{etf_name}|{timestamp}|{error_message}\n")
+        else:
+            f.write(f"{etf_code}|{etf_name}|{timestamp}\n")
+
 def crawl_etf_daily_incremental():
     """增量爬取ETF日线数据（单只保存+断点续爬逻辑）"""
     logger.info("===== 开始执行任务：crawl_etf_daily =====")
@@ -186,6 +197,8 @@ def crawl_etf_daily_incremental():
                 # 数据校验
                 if df.empty:
                     logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
+                    # 记录失败日志，但不标记为已完成，以便下次重试
+                    record_failed_etf(etf_daily_dir, etf_code, etf_name)
                     continue
                 
                 # 统一列名（转为英文列名，使用config.py中的标准定义）
@@ -239,6 +252,8 @@ def crawl_etf_daily_incremental():
             except Exception as e:
                 # 单只失败不中断，记录日志后继续
                 logger.error(f"❌ 爬取失败：{str(e)}", exc_info=True)
+                # 记录失败日志
+                record_failed_etf(etf_daily_dir, etf_code, etf_name, str(e))
                 time.sleep(3)  # 失败后延长休眠
                 continue
         

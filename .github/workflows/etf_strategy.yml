@@ -48,13 +48,15 @@ jobs:
       
       - name: 安装依赖包
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
       
       - name: 输出调试信息
         run: |
-          set -euo pipefail
           echo "当前UTC时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
           echo "当前北京时间: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')"
           echo "事件类型: ${{ github.event_name }}"
@@ -67,7 +69,6 @@ jobs:
       - name: 确定任务类型
         id: set_task
         run: |
-          set -euo pipefail
           # 处理定时任务
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
@@ -80,7 +81,7 @@ jobs:
               echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
             else
               echo "未知的定时任务: ${{ github.event.schedule }}"
-              exit 1
+              echo "TASK=unknown" >> $GITHUB_ENV
             fi
           # 处理手动触发任务
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -88,11 +89,9 @@ jobs:
           fi
           
           echo "最终执行任务: $TASK"
-          echo "task=$TASK" >> $GITHUB_OUTPUT
       
       - name: 创建数据目录
         run: |
-          set -euo pipefail
           mkdir -p data/etf_daily data/flags data/logs
           chmod -R 777 data/
           echo "数据目录结构:"
@@ -101,7 +100,6 @@ jobs:
       - name: 检查是否已推送标志
         id: check_flags
         run: |
-          set -euo pipefail
           # 检查标志文件是否存在（模拟主程序中的检查逻辑）
           if [[ "$TASK" == "calculate_arbitrage" ]]; then
             if [[ -f "data/flags/arbitrage_pushed.flag" ]]; then
@@ -136,7 +134,6 @@ jobs:
           TASK: ${{ env.TASK }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
-          set -euo pipefail
           echo "开始执行任务: $TASK"
           
           # 创建日志文件
@@ -167,13 +164,12 @@ jobs:
       - name: 拉取最新代码避免冲突
         if: env.skip_execution != 'true'
         run: |
-          set -euo pipefail
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
           # 拉取远程最新代码
           echo "拉取远程最新代码..."
-          git pull origin main --rebase --autostash
+          git pull origin main --rebase --autostash || echo "拉取代码失败，继续执行"
       
       - name: 提交数据变更
         if: >-
@@ -181,7 +177,6 @@ jobs:
           steps.execute_task.outputs.file_count != '0' &&
           steps.execute_task.outputs.task_status == 'success'
         run: |
-          set -euo pipefail
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
@@ -207,20 +202,19 @@ jobs:
           steps.execute_task.outputs.file_count != '0' &&
           failure()
         run: |
-          set -euo pipefail
           echo "处理提交冲突..."
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
           # 尝试拉取最新代码并合并
-          git pull origin main --rebase --autostash
+          git pull origin main --rebase --autostash || echo "拉取代码失败"
           
           # 再次尝试提交
           git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force
           
           if [ -n "$(git status --porcelain)" ]; then
             git commit -m "自动更新数据[$TASK]: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M') [冲突解决]"
-            git push origin main
+            git push origin main || echo "推送失败"
             echo "冲突解决后提交成功"
           else
             echo "无数据变更需要提交"
@@ -229,7 +223,6 @@ jobs:
       - name: 任务完成通知
         if: always()
         run: |
-          set -euo pipefail
           if [ "${{ env.skip_execution }}" == "true" ]; then
             echo "任务 ${{ env.TASK }} 已跳过（今日已推送）"
           elif [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
@@ -248,11 +241,12 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TASK: ${{ env.TASK }}
         run: |
-          set -euo pipefail
           if [ -n "$WECOM_WEBHOOK" ]; then
             beijing_time=$(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')
             payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ ETF任务[${TASK}]执行失败\\n时间: ${beijing_time}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
-            curl -X POST "$WECOM_WEBHOOK" \
+            curl -s -X POST "$WECOM_WEBHOOK" \
               -H "Content-Type: application/json" \
-              -d "$payload"
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
           fi

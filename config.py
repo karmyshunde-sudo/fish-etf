@@ -170,7 +170,7 @@ class Config:
             return ""
     
     # 消息末尾固定内容
-    WECOM_MESFOOTER: str = "【消息由fish-etf策略系统发送】"
+    WECOM_MESFOOTER: str = "【消息由GIT-fish-etf发送】"
 
     # -------------------------
     # 5. 日志配置

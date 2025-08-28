@@ -35,7 +35,7 @@ def is_list_need_update():
 
 @retry(stop_max_attempt_number=2, wait_fixed=1000)
 def fetch_all_etfs_akshare():
-    """使用AkShare接口获取ETF列表（带超时控制）"""
+    """使用AkShare接口获取ETF列表（带规模和成交额筛选）"""
     try:
         logger.info("尝试从AkShare获取ETF列表...")
         # 调用fund_etf_spot_em接口
@@ -44,37 +44,89 @@ def fetch_all_etfs_akshare():
         # 记录返回的列名，用于调试
         logger.info(f"AkShare返回列名: {list(etf_info.columns)}")
         
-        # 标准化列名 - 只使用确定存在的列
-        column_mapping = {
+        # 标准化列名
+        etf_list = etf_info.rename(columns={
             "代码": "ETF代码",
-            "名称": "ETF名称"
-        }
+            "名称": "ETF名称",
+            "基金规模": "基金规模",
+            "成交额": "日均成交额"
+        })
         
-        # 检查是否有"上市日期"列，如果有则添加映射
-        if "上市日期" in etf_info.columns:
-            column_mapping["上市日期"] = "上市日期"
-        
-        etf_list = etf_info.rename(columns=column_mapping)
+        # 添加完整代码列（带市场前缀）
+        etf_list["完整代码"] = etf_list["ETF代码"].apply(get_full_etf_code)
         
         # 确保包含所有标准列
-        required_columns = Config.ETF_STANDARD_COLUMNS.copy()
-        if "上市日期" in etf_info.columns:
-            required_columns.append("上市日期")
-        
-        # 只保留存在的列
-        available_columns = [col for col in required_columns if col in etf_list.columns]
-        etf_list = etf_list[available_columns]
+        required_columns = Config.ETF_STANDARD_COLUMNS + ["日均成交额"]
+        etf_list = etf_list[required_columns]
         
         # 数据清洗：确保代码为6位数字
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
         etf_list = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]
         
-        logger.info(f"AkShare获取到{len(etf_list)}只ETF")
-        return etf_list.drop_duplicates(subset="ETF代码")
+        # 筛选条件：基金规模和日均成交额
+        # 将基金规模转换为数值（单位：亿元）
+        etf_list["基金规模"] = etf_list["基金规模"].apply(convert_fund_size)
+        # 将成交额转换为数值（单位：万元）
+        etf_list["日均成交额"] = etf_list["日均成交额"].apply(convert_volume)
+        
+        # 应用筛选条件
+        filtered_etfs = etf_list[
+            (etf_list["基金规模"] >= Config.MIN_FUND_SIZE) &
+            (etf_list["日均成交额"] >= Config.MIN_AVG_VOLUME)
+        ]
+        
+        # 按基金规模降序排序
+        filtered_etfs = filtered_etfs.sort_values("基金规模", ascending=False)
+        
+        # 移除日均成交额列（不保存在文件中）
+        filtered_etfs = filtered_etfs[Config.ETF_STANDARD_COLUMNS]
+        
+        logger.info(f"AkShare获取到{len(etf_list)}只ETF，筛选后剩余{len(filtered_etfs)}只")
+        return filtered_etfs.drop_duplicates(subset="ETF代码")
     except Exception as e:
         error_msg = f"AkShare接口错误: {str(e)}"
         logger.warning(f"⚠️ {error_msg}")
         raise Exception(error_msg)
+
+def get_full_etf_code(etf_code):
+    """根据ETF代码获取完整代码（带市场前缀）"""
+    etf_code = str(etf_code).strip().zfill(6)
+    if etf_code.startswith(('5', '6', '9')):
+        return f"sh.{etf_code}"
+    else:
+        return f"sz.{etf_code}"
+
+def convert_fund_size(size_str):
+    """将基金规模字符串转换为数值（单位：亿元）"""
+    try:
+        if isinstance(size_str, (int, float)):
+            return float(size_str)
+        
+        size_str = str(size_str).strip()
+        if "亿" in size_str:
+            return float(size_str.replace("亿", "").strip())
+        elif "万" in size_str:
+            return float(size_str.replace("万", "").strip()) / 10000
+        else:
+            return float(size_str) if size_str else 0.0
+    except:
+        return 0.0
+
+def convert_volume(volume_str):
+    """将成交额字符串转换为数值（单位：万元）"""
+    try:
+        if isinstance(volume_str, (int, float)):
+            return float(volume_str)
+        
+        volume_str = str(volume_str).strip()
+        if "亿" in volume_str:
+            return float(volume_str.replace("亿", "").strip()) * 10000
+        elif "万" in volume_str:
+            return float(volume_str.replace("万", "").strip())
+        else:
+            return float(volume_str) if volume_str else 0.0
+    except:
+        return 0.0
 
 @retry(stop_max_attempt_number=2, wait_fixed=1000)
 def fetch_all_etfs_sina():
@@ -104,24 +156,29 @@ def fetch_all_etfs_sina():
             # 检查必要的列是否存在
             if "symbol" in etf_list.columns and "name" in etf_list.columns:
                 etf_list = etf_list.rename(columns={
-                    "symbol": "ETF代码",
+                    "symbol": "完整代码",
                     "name": "ETF名称"
                 })
                 
-                # 添加空白的上市日期列（新浪接口不提供此信息）
-                etf_list["上市日期"] = ""
-                etf_list = etf_list[Config.ETF_STANDARD_COLUMNS + ["上市日期"]]
+                # 提取纯数字代码
+                etf_list["ETF代码"] = etf_list["完整代码"].str[-6:].str.strip()
                 
-                etf_list["ETF代码"] = etf_list["ETF代码"].str[-6:].str.strip()
+                # 添加空白的基金规模列
+                etf_list["基金规模"] = 0.0
+                
+                etf_list = etf_list[Config.ETF_STANDARD_COLUMNS]
+                
+                # 按基金规模降序排序
+                etf_list = etf_list.sort_values("基金规模", ascending=False)
                 
                 logger.info(f"新浪获取到{len(etf_list)}只ETF")
                 return etf_list.drop_duplicates(subset="ETF代码")
             else:
                 logger.warning("新浪接口返回的数据缺少必要列")
-                return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+                return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
         else:
             logger.warning("新浪接口返回空数据")
-            return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+            return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
             
     except Exception as e:
         error_msg = f"新浪接口错误: {str(e)}"
@@ -135,7 +192,7 @@ def read_csv_with_encoding(file_path):
         try:
             df = pd.read_csv(file_path, encoding=encoding)
             # 确保包含所有需要的列
-            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            required_columns = Config.ETF_STANDARD_COLUMNS
             for col in required_columns:
                 if col not in df.columns:
                     df[col] = ""
@@ -156,11 +213,14 @@ def update_all_etf_list():
         try:
             etf_list = fetch_all_etfs_akshare()
             # 确保包含所有需要的列
-            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            required_columns = Config.ETF_STANDARD_COLUMNS
             for col in required_columns:
                 if col not in etf_list.columns:
                     etf_list[col] = ""
             etf_list = etf_list[required_columns]
+            
+            # 按基金规模降序排序
+            etf_list = etf_list.sort_values("基金规模", ascending=False)
             
             etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
             logger.info(f"✅ AkShare更新成功（{len(etf_list)}只ETF）")
@@ -173,7 +233,7 @@ def update_all_etf_list():
             try:
                 etf_list = fetch_all_etfs_sina()
                 # 确保包含所有需要的列
-                required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+                required_columns = Config.ETF_STANDARD_COLUMNS
                 for col in required_columns:
                     if col not in etf_list.columns:
                         etf_list[col] = ""
@@ -214,7 +274,7 @@ def update_all_etf_list():
                     backup_df = read_csv_with_encoding(Config.BACKUP_ETFS_PATH)
                     
                     # 验证必要列
-                    required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+                    required_columns = Config.ETF_STANDARD_COLUMNS
                     for col in required_columns:
                         if col not in backup_df.columns:
                             backup_df[col] = ""
@@ -224,17 +284,20 @@ def update_all_etf_list():
                     backup_df = backup_df[backup_df["ETF代码"].str.match(r'^\d{6}$')]
                     backup_df = backup_df[required_columns].drop_duplicates()
                     
+                    # 按基金规模降序排序
+                    backup_df = backup_df.sort_values("基金规模", ascending=False)
+                    
                     logger.info(f"✅ 兜底文件加载成功（{len(backup_df)}只ETF）")
                     return backup_df
                 except Exception as e:
                     logger.error(f"❌ 兜底文件处理失败: {str(e)}")
                     # 返回空DataFrame但包含所有列
-                    empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+                    empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
                     return empty_df
             else:
                 logger.error(f"❌ 兜底文件不存在: {Config.BACKUP_ETFS_PATH}")
                 # 返回空DataFrame但包含所有列
-                empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+                empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
                 return empty_df
         
         return primary_etf_list
@@ -244,15 +307,19 @@ def update_all_etf_list():
         try:
             etf_list = read_csv_with_encoding(Config.ALL_ETFS_PATH)
             # 确保包含所有需要的列
-            required_columns = Config.ETF_STANDARD_COLUMNS + ["上市日期"]
+            required_columns = Config.ETF_STANDARD_COLUMNS
             for col in required_columns:
                 if col not in etf_list.columns:
                     etf_list[col] = ""
-            return etf_list[required_columns]
+            
+            # 按基金规模降序排序
+            etf_list = etf_list.sort_values("基金规模", ascending=False)
+            
+            return etf_list
         except Exception as e:
             logger.error(f"❌ 本地文件加载失败: {str(e)}")
             # 返回空DataFrame但包含所有列
-            empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS + ["上市日期"])
+            empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
             return empty_df
 
 def get_filtered_etf_codes():

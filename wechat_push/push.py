@@ -12,12 +12,12 @@ def send_wechat_message(message):
     
     try:
         # 添加固定末尾
-        message_with_footer = f"{message}\n\n{Config.WECOM_MESFOOTER}"
+        full_message = f"{message}\n\n{Config.WECOM_MESFOOTER}"
         # 企业微信文本消息格式
         payload = {
             "msgtype": "text",
             "text": {
-                "content": message_with_footer
+                "content": full_message
             }
         }
         

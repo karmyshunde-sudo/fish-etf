@@ -236,7 +236,8 @@ def get_top_rated_etfs(top_n=None, min_score=60):
                     })
                     logger.debug(f"ETF {etf_code} 评分: {score}")
             except Exception as e:
-                logger.error(f处理ETF {etf_code} 时发生错误: {str(e)}")
+                logger.error(f"处理ETF {etf_code} 时发生错误：{str(e)}")
+                # logger.error(f处理ETF {etf_code} 时发生错误: {str(e)}")
                 continue
 
         if not score_list:

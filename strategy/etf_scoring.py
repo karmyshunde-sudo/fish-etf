@@ -160,7 +160,8 @@ def get_etf_name(etf_code):
     if etf_list.empty:
         return f"ETF-{etf_code}"
     
-    name_row = etf_list[etf_list["etf_code"].astype(str) == str(etf_code)]
+    # 注意：现在ETF列表的列名是中文的
+    name_row = etf_list[etf_list["ETF代码"].astype(str) == str(etf_code)]
     if not name_row.empty:
-        return name_row.iloc[0]["etf_name"]
+        return name_row.iloc[0]["ETF名称"]
     return f"ETF-{etf_code}"  # 未找到时用代码代替

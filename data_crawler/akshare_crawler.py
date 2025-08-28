@@ -1,13 +1,18 @@
 import akshare as ak
 import pandas as pd
 import logging
+import time
 from config import Config
 from retrying import retry
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-@retry(stop_max_attempt_number=3, wait_fixed=2000)
+def empty_result_check(result):
+    """检查结果是否为空"""
+    return result.empty
+
+@retry(stop_max_attempt_number=3, wait_fixed=2000, retry_on_result=empty_result_check)
 def crawl_etf_daily_akshare(etf_code, start_date, end_date):
     """
     用AkShare爬取ETF日线数据
@@ -17,12 +22,10 @@ def crawl_etf_daily_akshare(etf_code, start_date, end_date):
     :return: 标准化中文列名的DataFrame
     """
     try:
-        # 使用 fund_etf_hist_em 接口爬取ETF日线数据
-        df = ak.fund_etf_hist_em(symbol=etf_code, 
-                                period="daily", 
-                                start_date=start_date, 
-                                end_date=end_date, 
-                                adjust="qfq")
+        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
+        
+        # 尝试多种AkShare接口
+        df = try_multiple_akshare_interfaces(etf_code, start_date, end_date)
         
         if df.empty:
             logger.warning(f"AkShare未获取到{etf_code}数据（{start_date}至{end_date}）")
@@ -85,4 +88,66 @@ def crawl_etf_daily_akshare(etf_code, start_date, end_date):
     
     except Exception as e:
         logger.error(f"AkShare爬取{etf_code}失败：{str(e)}")
+        # 等待一段时间后重试
+        time.sleep(2)
         raise  # 触发重试
+
+def try_multiple_akshare_interfaces(etf_code, start_date, end_date):
+    """尝试多种AkShare接口获取ETF数据"""
+    interfaces = [
+        lambda: try_fund_etf_hist_em(etf_code, start_date, end_date),
+        lambda: try_fund_etf_hist_sina(etf_code, start_date, end_date),
+        lambda: try_etf_hist_em(etf_code, start_date, end_date)
+    ]
+    
+    for interface in interfaces:
+        try:
+            df = interface()
+            if not df.empty:
+                return df
+        except Exception as e:
+            logger.warning(f"接口调用失败: {str(e)}")
+            continue
+    
+    return pd.DataFrame()
+
+def try_fund_etf_hist_em(etf_code, start_date, end_date):
+    """尝试使用 fund_etf_hist_em 接口"""
+    return ak.fund_etf_hist_em(
+        symbol=etf_code, 
+        period="daily", 
+        start_date=start_date, 
+        end_date=end_date, 
+        adjust="qfq"
+    )
+
+def try_fund_etf_hist_sina(etf_code, start_date, end_date):
+    """尝试使用 fund_etf_hist_sina 接口"""
+    # 添加市场前缀（上海或深圳）
+    if etf_code.startswith('5') or etf_code.startswith('6'):
+        symbol = f"sh{etf_code}"
+    else:
+        symbol = f"sz{etf_code}"
+    
+    return ak.fund_etf_hist_sina(
+        symbol=symbol,
+        period="daily",
+        start_date=start_date,
+        end_date=end_date
+    )
+
+def try_etf_hist_em(etf_code, start_date, end_date):
+    """尝试使用 etf_hist_em 接口（备用）"""
+    # 添加市场前缀
+    if etf_code.startswith('5') or etf_code.startswith('6'):
+        symbol = f"sh{etf_code}"
+    else:
+        symbol = f"sz{etf_code}"
+    
+    return ak.etf_hist_em(
+        symbol=symbol,
+        period="daily",
+        start_date=start_date,
+        end_date=end_date,
+        adjust="qfq"
+    )

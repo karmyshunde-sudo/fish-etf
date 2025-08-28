@@ -12,12 +12,52 @@ import csv
 import logging
 import shutil
 import tempfile
+import pandas as pd
 from typing import Any, Dict, List, Optional, Union, TextIO
 from datetime import datetime
 from pathlib import Path
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
+    """
+    加载ETF日线数据
+    
+    Args:
+        etf_code: ETF代码
+        data_dir: 数据目录，如果为None则使用Config.DATA_DIR
+        
+    Returns:
+        pd.DataFrame: ETF日线数据DataFrame
+    """
+    try:
+        # 导入Config类来获取默认数据目录
+        from config import Config
+        
+        if data_dir is None:
+            data_dir = Config.DATA_DIR
+        
+        data_dir = Path(data_dir)
+        file_path = data_dir / f"{etf_code}.csv"
+        
+        if not file_path.exists():
+            logger.warning(f"ETF日线数据文件不存在: {file_path}")
+            return pd.DataFrame()
+        
+        # 读取CSV文件
+        df = pd.read_csv(file_path, encoding='utf-8')
+        
+        # 确保日期列存在并转换为datetime
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+        
+        logger.debug(f"加载ETF日线数据成功: {etf_code}, 共{len(df)}行")
+        return df
+        
+    except Exception as e:
+        logger.error(f"加载ETF日线数据失败 {etf_code}: {str(e)}")
+        return pd.DataFrame()
 
 def ensure_dir_exists(dir_path: Union[str, Path]) -> bool:
     """
@@ -656,7 +696,7 @@ def list_files(dir_path: Union[str, Path], pattern: str = "*") -> List[Path]:
         
         if not dir_path.exists() or not dir_path.is_dir():
             logger.warning(f"目录不存在或不是目录: {dir_path}")
-            return []
+        return []
         
         files = list(dir_path.glob(pattern))
         logger.debug(f"列出文件: {dir_path}/{pattern} -> 找到{len(files)}个文件")

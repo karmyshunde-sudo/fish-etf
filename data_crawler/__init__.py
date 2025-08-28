@@ -14,7 +14,8 @@ from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_
 from .akshare_crawler import crawl_etf_daily_akshare
 from .sina_crawler import crawl_etf_daily_sina
 from utils.date_utils import get_beijing_time
-from utils.file_utils import init_dirs
+# 删除以下导入，改用 Config.init_dirs()
+# from utils.file_utils import init_dirs
 
 # 初始化日志
 logging.basicConfig(
@@ -166,10 +167,10 @@ def crawl_etf_daily_incremental() -> None:
             logger.info(f"今日{current_date}非交易日且未到补爬时间，无需爬取日线数据")
             return
         
-        # 初始化目录
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        etf_daily_dir = os.path.join(root_dir, "data", "etf_daily")
-        os.makedirs(etf_daily_dir, exist_ok=True)
+        # 初始化目录 - 使用 Config.init_dirs() 而不是 utils.file_utils.init_dirs
+        Config.init_dirs()
+        root_dir = Config.BASE_DIR
+        etf_daily_dir = Config.DATA_DIR
         logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
         
         # 已完成列表路径
@@ -339,8 +340,8 @@ def get_crawl_status() -> Dict[str, Any]:
     :return: 包含爬取状态信息的字典
     """
     try:
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        etf_daily_dir = os.path.join(root_dir, "data", "etf_daily")
+        root_dir = Config.BASE_DIR
+        etf_daily_dir = Config.DATA_DIR
         
         # 获取已完成列表
         completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
@@ -391,5 +392,3 @@ except Exception as e:
     import logging
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
     logging.error(f"数据爬取模块初始化失败: {str(e)}")
-
-# 0828-1256【crawler_init.py代码】一共305行代码

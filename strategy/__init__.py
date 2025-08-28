@@ -2,7 +2,8 @@ from .arbitrage import calculate_arbitrage_opportunity, format_arbitrage_message
 from .position import calculate_position_strategy
 from .etf_scoring import get_top_rated_etfs
 import os
-from datetime import datetime
+import pandas as pd
+from datetime import datetime, timedelta
 from config import Config
 
 def run_all_strategies():

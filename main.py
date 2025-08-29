@@ -80,6 +80,22 @@ def send_task_completion_notification(task: str, result: Dict[str, Any]):
                 except:
                     pass
             summary_msg += f"📊 ETF数量: {count}只\n"
+            
+            # 添加数据来源信息
+            source = result.get('source', '未知')
+            summary_msg += f"来源: {source}\n"
+            
+            # 添加列表有效期信息
+            try:
+                file_path = Config.ALL_ETFS_PATH
+                if os.path.exists(file_path):
+                    last_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
+                    expiration = last_modified + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)
+                    summary_msg += f"📅 生成时间: {last_modified.strftime('%Y-%m-%d %H:%M')}\n"
+                    summary_msg += f"⏳ 过期时间: {expiration.strftime('%Y-%m-%d %H:%M')}\n"
+            except Exception as e:
+                logger.error(f"获取ETF列表文件信息失败: {str(e)}")
+                summary_msg += "📅 列表有效期信息: 获取失败\n"
         
         elif task == "crawl_etf_daily" and result["status"] == "success":
             summary_msg += "📈 数据爬取: 完成\n"

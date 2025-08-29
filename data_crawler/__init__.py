@@ -93,17 +93,16 @@ def get_etf_name(etf_code: str) -> str:
         logger.error(f"获取ETF名称失败: {str(e)}")
         return f"ETF-{etf_code}"
 
-def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
-    """
-    获取最后一次爬取的日期
+def get_last_crawl_date(etf_code: str, data_dir: str) -> str:
+    """获取ETF最后爬取日期
     :param etf_code: ETF代码
-    :param etf_daily_dir: ETF日线数据目录
-    :return: 开始爬取的日期
+    :param data_dir: 数据目录
+    :return: 最后爬取日期（格式：YYYY-MM-DD）
     """
     try:
-        file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+        file_path = os.path.join(data_dir, f"{etf_code}.csv")
         if not os.path.exists(file_path):
-            # 没有存量数据，返回最近一年的日期
+            # 文件不存在，返回初始爬取日期
             current_date = get_beijing_time().date()
             start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 无历史数据，使用初始日期: {start_date}")
@@ -111,7 +110,7 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         
         df = pd.read_csv(file_path, encoding="utf-8")
         if df.empty or "date" not in df.columns:
-            # 文件为空或没有date列，返回最近一年的日期
+            # 文件为空或没有date列，返回初始爬取日期
             current_date = get_beijing_time().date()
             start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
@@ -120,13 +119,14 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         last_date = df["date"].max()
         # 计算下一个交易日作为开始日期
         china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
-        next_date = (pd.to_datetime(last_date) + china_bd).strftime("%Y-%m-%d")
-        logger.debug(f"ETF {etf_code} 最后爬取日期: {last_date}, 下次开始日期: {next_date}")
-        return next_date
+        next_trading_day = pd.Timestamp(last_date) + china_bd
+        return next_trading_day.strftime("%Y-%m-%d")
     except Exception as e:
-        logger.warning(f"获取ETF {etf_code} 最后爬取日期失败: {str(e)}，将使用最近一年日期")
+        logger.error(f"获取{etf_code}最后爬取日期失败: {str(e)}")
+        # 出错时返回初始爬取日期
         current_date = get_beijing_time().date()
         start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        logger.debug(f"ETF {etf_code} 获取最后爬取日期失败，使用初始日期: {start_date}")
         return start_date
 
 def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str, error_message: Optional[str] = None) -> None:

@@ -334,25 +334,37 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
-    """数据清洗：去重、格式转换"""
+    """数据清洗和格式化
+    :param df: 原始DataFrame
+    :return: 清洗后的DataFrame"""
     if df.empty:
         return df
     
-    # 去重
-    df = df.drop_duplicates()
-    
-    # 格式转换 - 使用loc避免SettingWithCopyWarning
-    numeric_cols = ["开盘", "收盘", "最高", "最低", "成交量", "成交额", "涨跌幅", "涨跌额"]
-    for col in numeric_cols:
-        if col in df.columns:
-            # 使用loc确保修改原始DataFrame
-            df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    
-    # 日期格式化
-    if "日期" in df.columns:
-        df.loc[:, "日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
-    
-    return df
+    try:
+        # 日期格式转换
+        if "日期" in df.columns:
+            df.loc[:, "日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+        
+        # 去重
+        if "日期" in df.columns:
+            df = df.drop_duplicates(subset=["日期"], keep="last")
+        
+        # 数值列处理 - 使用loc避免SettingWithCopyWarning
+        numeric_columns = ["开盘", "收盘", "最高", "最低", "成交量", "成交额", 
+                          "振幅", "涨跌幅", "涨跌额", "换手率"]
+        for col in numeric_columns:
+            if col in df.columns:
+                # 使用loc确保修改原始DataFrame
+                df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        
+        # 排序
+        if "日期" in df.columns:
+            df = df.sort_values("日期")
+        
+        return df
+    except Exception as e:
+        logger.error(f"数据清洗和格式化时发生错误: {str(e)}")
+        return df
 
 def validate_date_range(start_date: str, end_date: str) -> bool:
     """

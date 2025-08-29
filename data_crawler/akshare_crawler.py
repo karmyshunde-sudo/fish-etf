@@ -93,7 +93,7 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
     """
     interfaces = [
         lambda: try_fund_etf_hist_em(etf_code, start_date, end_date),
-        lambda: try_fund_etf_hist_sina(etf_code, start_date, end_date)
+        lambda: try_fund_etf_hist_sina(etf_code)  # 移除了start_date和end_date参数
     ]
     
     for i, interface in enumerate(interfaces):
@@ -101,8 +101,14 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
             logger.debug(f"尝试第{i+1}种接口获取ETF {etf_code} 数据")
             df = interface()
             if not df.empty:
-                logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据")
-                return df
+                # 对返回的数据进行日期过滤
+                df['date'] = pd.to_datetime(df['date'])
+                mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
+                df = df.loc[mask]
+                
+                if not df.empty:
+                    logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据")
+                    return df
         except Exception as e:
             logger.warning(f"第{i+1}种接口调用失败: {str(e)}")
             continue
@@ -132,12 +138,10 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
         logger.warning(f"fund_etf_hist_em 接口调用失败: {str(e)}")
         return pd.DataFrame()
 
-def try_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:  # 移除了start_date和end_date参数
     """
     尝试使用 fund_etf_hist_sina 接口
     :param etf_code: ETF代码
-    :param start_date: 开始日期
-    :param end_date: 结束日期
     :return: 获取到的DataFrame
     """
     try:
@@ -145,12 +149,8 @@ def try_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str) -> pd.
         symbol = get_symbol_with_market_prefix(etf_code)
         logger.debug(f"尝试使用 fund_etf_hist_sina 接口获取ETF {symbol} 数据")
         
-        df = ak.fund_etf_hist_sina(
-            symbol=symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date
-        )
+        # 移除了period、start_date和end_date参数
+        df = ak.fund_etf_hist_sina(symbol=symbol)
         return df
     except Exception as e:
         logger.warning(f"fund_etf_hist_sina 接口调用失败: {str(e)}")

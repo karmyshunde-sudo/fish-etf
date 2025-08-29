@@ -232,9 +232,22 @@ class Config:
     # -------------------------
     # 7. ETF筛选配置
     # -------------------------
-    # ETF筛选参数
-    MIN_FUND_SIZE: float = 5.0  # 最小基金规模（亿元）
-    MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股）
+    # ETF筛选参数 - 全局默认值
+    GLOBAL_MIN_FUND_SIZE: float = 10.0  # 默认基金规模≥10亿元
+    GLOBAL_MIN_AVG_VOLUME: float = 5000.0  # 默认日均成交额≥5000万元
+
+    # 仓位类型特定参数
+    STRATEGY_PARAMETERS = {
+        "稳健仓": {
+            "min_fund_size": GLOBAL_MIN_FUND_SIZE,
+            "min_avg_volume": GLOBAL_MIN_AVG_VOLUME
+        },
+        "激进仓": {
+            "min_fund_size": 2.0,  # 放宽至2亿元
+            "min_avg_volume": 1000.0  # 放宽至1000万元
+        }
+    }
+
 
     # -------------------------
     # 8. 配置验证方法

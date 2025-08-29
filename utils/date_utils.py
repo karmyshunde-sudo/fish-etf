@@ -459,3 +459,33 @@ def validate_date_range(start_date: datetime, end_date: datetime) -> bool:
     except Exception as e:
         logger.error(f"日期范围验证失败 {start_date} 到 {end_date}: {str(e)}")
         return False
+
+def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
+    """
+    判断文件是否过期
+    :param file_path: 文件路径
+    :param max_age_days: 最大年龄（天）
+    :return: 如果文件过期返回True，否则返回False
+    """
+    if not os.path.exists(file_path):
+        return True
+    
+    try:
+        # 获取文件最后修改时间（转换为东八区时区）
+        last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        
+        # 计算距离上次更新的天数
+        days_since_update = (get_beijing_time() - last_modify_time).days
+        need_update = days_since_update >= max_age_days
+        
+        if need_update:
+            print(f"ETF列表已过期({days_since_update}天)，需要更新")
+        else:
+            print(f"ETF列表未过期({days_since_update}天)，无需更新")
+            
+        return need_update
+    except Exception as e:
+        print(f"检查ETF列表更新状态失败: {str(e)}")
+        # 出错时保守策略是要求更新
+        return True

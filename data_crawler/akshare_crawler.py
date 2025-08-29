@@ -118,8 +118,7 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
     return pd.DataFrame()
 
 def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    尝试使用 fund_etf_hist_em 接口
+    """尝试使用 fund_etf_hist_em 接口
     :param etf_code: ETF代码
     :param start_date: 开始日期
     :param end_date: 结束日期
@@ -128,10 +127,10 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
     try:
         logger.debug(f"尝试使用 fund_etf_hist_em 接口获取ETF {etf_code} 数据")
         df = ak.fund_etf_hist_em(
-            symbol=etf_code, 
-            period="daily", 
-            start_date=start_date, 
-            end_date=end_date, 
+            symbol=etf_code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
             adjust="qfq"
         )
         return df
@@ -140,8 +139,7 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
         return pd.DataFrame()
 
 def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
-    """
-    尝试使用 fund_etf_hist_sina 接口
+    """尝试使用 fund_etf_hist_sina 接口
     :param etf_code: ETF代码
     :return: 获取到的DataFrame
     """
@@ -149,10 +147,9 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
         # 添加市场前缀（上海或深圳）
         symbol = get_symbol_with_market_prefix(etf_code)
         logger.debug(f"尝试使用 fund_etf_hist_sina 接口获取ETF {symbol} 数据")
-        
         # 调用新浪接口
+
         df = ak.fund_etf_hist_sina(symbol=symbol)
-        
         # 新浪接口返回的数据可能需要特殊处理
         if not df.empty:
             # 新浪接口返回的列名可能是英文，需要转换为中文
@@ -165,14 +162,11 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
                 'volume': '成交量',
                 'amount': '成交额'
             }
-            
             # 重命名列
             df = df.rename(columns=column_mapping)
-            
             # 确保日期列存在
             if '日期' not in df.columns and 'date' in df.columns:
                 df = df.rename(columns={'date': '日期'})
-                
         return df
     except Exception as e:
         logger.warning(f"fund_etf_hist_sina 接口调用失败: {str(e)}")
@@ -189,126 +183,176 @@ def get_symbol_with_market_prefix(etf_code: str) -> str:
     else:
         return f"sz{etf_code}"
 
-def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    标准化列名（中文映射）
+def standardize_column_names(df: pd.DataFrame, source: str = "akshare") -> pd.DataFrame:
+    """标准化列名（中文映射）
     :param df: 原始DataFrame
+    :param source: 数据源名称（"akshare"、"sina"等）
     :return: 标准化列名的DataFrame
     """
     if df.empty:
         return df
-        
-    # 使用Config中的标准列名映射
+    
+    # 【新增】关键日志：输出原始列名，帮助诊断问题
+    logger.info(f"📊 {source}数据源返回的原始列名: {list(df.columns)}")
+    
+    # 针对不同数据源的特殊处理
+    if source == "sina":
+        # 【新增】新浪接口的特定列名映射规则
+        sina_col_map = {
+            "date": "日期",
+            "open": "开盘",
+            "close": "收盘",
+            "high": "最高",
+            "low": "最低",
+            "volume": "成交量",
+            "amount": "成交额",
+            "pre_close": "前收盘"
+        }
+        for src, tgt in sina_col_map.items():
+            if src in df.columns:
+                df = df.rename(columns={src: tgt})
+                logger.debug(f"🔄 新浪列名映射: {src} -> {tgt}")
+    
+    elif source == "akshare":
+        # 【新增】AkShare接口的特定列名映射规则
+        akshare_col_map = {
+            "日期": "日期",
+            "date": "日期",
+            "datetime": "日期",
+            "open": "开盘",
+            "op": "开盘",
+            "close": "收盘",
+            "cl": "收盘",
+            "high": "最高",
+            "hi": "最高",
+            "low": "最低",
+            "lo": "最低",
+            "volume": "成交量",
+            "vol": "成交量",
+            "amount": "成交额",
+            "amt": "成交额",
+            "change": "涨跌额",
+            "pct_chg": "涨跌幅",
+            "pre_close": "前收盘"
+        }
+        for src, tgt in akshare_col_map.items():
+            if src in df.columns:
+                df = df.rename(columns={src: tgt})
+                logger.debug(f"🔄 AkShare列名映射: {src} -> {tgt}")
+    
+    # 【改进】更精确的模糊匹配逻辑
     col_map = {}
-    for source_col, target_col in Config.STANDARD_COLUMNS.items():
-        # 尝试找到对应的源列
-        if source_col in df.columns:
-            col_map[source_col] = target_col
-        else:
-            # 尝试模糊匹配
-            for actual_col in df.columns:
-                if source_col in actual_col:
-                    col_map[actual_col] = target_col
-                    break
+    for target_col in Config.STANDARD_COLUMNS.keys():
+        # 排除不需要处理的列
+        if target_col in ["ETF代码", "ETF名称", "爬取时间"]:
+            continue
+            
+        # 精确匹配
+        if target_col in df.columns:
+            continue
+            
+        # 检查是否有相似列名
+        similar_cols = []
+        for actual_col in df.columns:
+            # 更精确的匹配逻辑：检查是否包含关键标识
+            if (target_col == "日期" and ("date" in actual_col.lower() or "time" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "开盘" and ("open" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "收盘" and ("close" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "最高" and ("high" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "最低" and ("low" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "成交量" and ("vol" in actual_col.lower())):
+                similar_cols.append(actual_col)
+            elif (target_col == "成交额" and ("amount" in actual_col.lower() or "amt" in actual_col.lower())):
+                similar_cols.append(actual_col)
+        
+        if similar_cols:
+            # 选择最可能的列（通常是最短的列名）
+            best_match = min(similar_cols, key=len)
+            col_map[best_match] = target_col
+            logger.info(f"🔍 自动匹配列名: {best_match} -> {target_col}")
     
     # 重命名列
     if col_map:
         df = df.rename(columns=col_map)
-        logger.debug(f"列名映射完成: {col_map}")
+    
+    # 【新增】关键日志：显示映射后的列名
+    logger.info(f"✅ 标准化后的列名: {list(df.columns)}")
+    
+    # 检查哪些必需列仍然缺失
+    missing_cols = []
+    for col in Config.STANDARD_COLUMNS.keys():
+        if col not in df.columns and col not in ["ETF代码", "ETF名称", "爬取时间"]:
+            missing_cols.append(col)
+    
+    if missing_cols:
+        logger.warning(f"⚠️ 数据源仍缺少必要列：{', '.join(missing_cols)}")
     
     return df
-
 def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    确保所有必需列都存在，缺失的列进行计算或填充
+    """确保所有必需列都存在，缺失的列进行计算或填充
     :param df: 原始DataFrame
     :return: 包含所有必需列的DataFrame
     """
     if df.empty:
         return df
-        
-    # 确保所有必需列都存在
-    required_cols = list(Config.STANDARD_COLUMNS.keys())
-    # 排除不需要从akshare获取的列（这些列会在后续处理中添加）
-    exclude_cols = ["ETF代码", "ETF名称", "爬取时间"]
-    required_data_cols = [col for col in required_cols if col not in exclude_cols]
     
-    for col in required_data_cols:
+    # 确定关键列（缺少这些列的数据不可用）
+    critical_cols = ["日期", "开盘", "收盘", "最高", "最低", "成交量"]
+    
+    # 检查关键列是否存在
+    missing_critical = [col for col in critical_cols if col not in df.columns]
+    if missing_critical:
+        logger.error(f"❌ 关键列缺失: {', '.join(missing_critical)} - 无法进行有效分析")
+        return pd.DataFrame()  # 返回空DataFrame，避免后续处理
+    
+    # 常规列处理
+    for col in Config.STANDARD_COLUMNS.keys():
+        if col in ["ETF代码", "ETF名称", "爬取时间"]:
+            continue
+            
         if col not in df.columns:
             try:
-                if col == "涨跌额" and "收盘" in df.columns:
-                    # 计算涨跌额
-                    df[col] = (df["收盘"] - df["收盘"].shift(1)).round(4)
-                    df.loc[df.index[0], col] = 0.0
-                    logger.debug(f"计算涨跌额列完成")
-                    
-                elif col == "振幅" and "最高" in df.columns and "最低" in df.columns and "收盘" in df.columns:
-                    # 计算振幅
-                    df[col] = ((df["最高"] - df["最低"]) / df["收盘"].shift(1) * 100).round(4)
-                    df.loc[df.index[0], col] = 0.0
-                    logger.debug(f"计算振幅列完成")
-                    
-                elif col == "涨跌幅" and "收盘" in df.columns:
-                    # 计算涨跌幅
-                    df[col] = (df["收盘"].pct_change() * 100).round(4)
-                    df.loc[df.index[0], col] = 0.0
-                    logger.debug(f"计算涨跌幅列完成")
-                    
-                elif col == "换手率" and "成交量" in df.columns and "成交额" in df.columns and "收盘" in df.columns:
-                    # 计算换手率（近似计算）
-                    df[col] = (df["成交量"] / (df["成交额"] / df["收盘"]) * 100).round(4)
-                    logger.debug(f"计算换手率列完成")
-                    
+                if col == "涨跌额" and "收盘" in df.columns and "前收盘" in df.columns:
+                    df.loc[:, col] = (df["收盘"] - df["前收盘"]).round(4)
+                elif col == "涨跌幅" and "收盘" in df.columns and "前收盘" in df.columns:
+                    df.loc[:, col] = ((df["收盘"] - df["前收盘"]) / df["前收盘"] * 100).round(2)
+                elif col == "振幅" and "最高" in df.columns and "最低" in df.columns and "前收盘" in df.columns:
+                    df.loc[:, col] = ((df["最高"] - df["最低"]) / df["前收盘"] * 100).round(2)
                 else:
-                    logger.warning(f"AkShare数据缺少必要列：{col}，使用默认值填充")
-                    df[col] = 0.0
+                    # 非关键列可以安全填充
+                    df.loc[:, col] = 0.0
+                    logger.debug(f"ℹ️ 填充非关键列 {col} 为默认值 0.0")
             except Exception as e:
-                logger.error(f"计算列 {col} 时发生错误: {str(e)}")
-                df[col] = 0.0
-    
-    # 只保留标准列（排除不需要从akshare获取的列）
-    try:
-        df = df[required_data_cols]
-    except KeyError as e:
-        logger.error(f"筛选标准列时发生错误: {str(e)}")
-        # 尝试保留所有可用列
-        available_cols = [col for col in required_data_cols if col in df.columns]
-        df = df[available_cols]
+                logger.error(f"❌ 计算列 {col} 时出错: {str(e)}")
+                df.loc[:, col] = 0.0
     
     return df
 
 def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    数据清洗和格式化
-    :param df: 原始DataFrame
-    :return: 清洗后的DataFrame
-    """
+    """数据清洗：去重、格式转换"""
     if df.empty:
         return df
-        
-    try:
-        # 日期格式转换
-        if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
-        
-        # 去重
-        if "日期" in df.columns:
-            df = df.drop_duplicates(subset=["日期"], keep="last")
-        
-        # 数值列处理
-        numeric_columns = ["开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-        
-        # 排序
-        if "日期" in df.columns:
-            df = df.sort_values("日期")
-        
-        return df
-    except Exception as e:
-        logger.error(f"数据清洗和格式化时发生错误: {str(e)}")
-        return df
+    
+    # 去重
+    df = df.drop_duplicates()
+    
+    # 格式转换 - 使用loc避免SettingWithCopyWarning
+    numeric_cols = ["开盘", "收盘", "最高", "最低", "成交量", "成交额", "涨跌幅", "涨跌额"]
+    for col in numeric_cols:
+        if col in df.columns:
+            # 使用loc确保修改原始DataFrame
+            df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    
+    # 日期格式化
+    if "日期" in df.columns:
+        df.loc[:, "日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+    
+    return df
 
 def validate_date_range(start_date: str, end_date: str) -> bool:
     """

@@ -6,6 +6,7 @@
 特别优化了与ETF数据爬取和策略计算相关的日期处理
 """
 
+import os
 import time
 import logging
 from datetime import datetime, timedelta, timezone

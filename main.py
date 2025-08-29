@@ -10,7 +10,7 @@ import sys
 import json
 import logging
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 # 添加项目根目录到Python路径
@@ -262,7 +262,7 @@ def handle_update_etf_list() -> Dict[str, Any]:
         # 获取文件修改时间并转换为北京时间
         file_path = Config.ALL_ETFS_PATH
         last_modified_utc = datetime.fromtimestamp(os.path.getmtime(file_path))
-        # 使用date_utils中的时区转换功能
+        # 正确使用timezone进行时区转换
         last_modified_beijing = last_modified_utc.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))
         
         # 计算过期时间（7天后）

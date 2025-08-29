@@ -136,52 +136,13 @@ class Config:
     TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
     
     # 全市场ETF列表存储路径
-    ALL_ETFS_PATH:极客时间
     ALL_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "all_etfs.csv")
     
     # 兜底ETF列表路径
     BACKUP_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "karmy_etf.csv")
 
     # -------------------------
-    # 4. 微信推送配置
-    # -------------------------
-    @staticmethod
-    def get_wecom_webhook() -> str:
-        """获取企业微信机器人Webhook(从环境变量或配置获取)"""  # 修复第159行：将全角括号改为半角括号
-        try:
-            # 优先从环境变量获取
-            webhook = os.environ.get("WECOM_WEBHOOK")
-            if webhook:
-                return webhook
-                
-            # 其次从类属性获取
-            if hasattr(Config, '_WECOM_WEBHOOK') and Config._极客时间
-            if hasattr(Config, '_WECOM_WEBHOOK') and Config._WECOM_WEBHOOK:
-                return Config._WECOM_WEBHOOK
-                
-            # 最后尝试从配置文件读取（如果有）
-            config极客时间
-            config_file = os.path.join(Config.BASE_DIR, "config.ini")
-            if os.path.exists(config_file):
-                import configparser
-                parser = configparser.ConfigParser()
-                parser.read(config_file)
-                if 'wechat' in parser and 'webhook' in parser['wechat']:
-                    webhook = parser['wechat']['webhook']
-                    Config._WECOM_WEBHOOK = webhook
-                    return webhook
-                    
-            logging.warning("企业微信Webhook未配置")
-            return ""
-        except Exception as e:
-            logging.error(f"获取企业微信Webhook配置失败: {str(e)}")
-            return ""
-    
-    # 消息末尾固定内容
-    WECOM_MESFOOTER: str = "【消息由fish-etf策略系统发送】"
-
-    # -------------------------
-    # 5. 日志配置
+    # 4. 日志配置
     # -------------------------
     @staticmethod
     def setup_logging(log_level: Optional[str] = None,
@@ -207,7 +168,6 @@ class Config:
         
         # 创建控制台处理器
         console_handler = logging.StreamHandler()
-        console_handler.set极客时间
         console_handler.setLevel(level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
@@ -229,7 +189,6 @@ class Config:
                 logging.error(f"配置日志文件失败: {str(e)}")
     
     LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "%(asctime)s - %(name极客时间
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE: str = os.path.join(BASE_DIR, "logs", "etf_strategy.log")
     LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 新增日志目录配置
@@ -265,7 +224,6 @@ class Config:
                     "writable": os.access(dir_path, os.W_OK)
                 }
             except Exception as e:
-                results[f"dir_{极客时间
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "ERROR", 
                     "path": dir_path,
@@ -306,7 +264,6 @@ class Config:
                 Config.LOG_DIR,
                 os.path.dirname(Config.TRADE_RECORD_FILE),
                 os.path.dirname(Config.ALL_ETFS_PATH),
-                os.path.dir极客时间
                 os.path.dirname(Config.BACKUP_ETFS_PATH)
             ]
             

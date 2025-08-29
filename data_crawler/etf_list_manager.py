@@ -60,6 +60,8 @@ def update_all_etf_list() -> pd.DataFrame:
                 primary_etf_list = primary_etf_list.sort_values("基金规模", ascending=False)
                 primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                 logger.info(f"✅ AkShare更新成功（{len(primary_etf_list)}只ETF）")
+                # 标记数据来源
+                primary_etf_list.source = "AkShare"
             else:
                 logger.warning("AkShare返回空的ETF列表")
             
@@ -77,6 +79,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     primary_etf_list = primary_etf_list[required_columns]
                     primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                     logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
+                    # 标记数据来源
+                    primary_etf_list.source = "新浪"
                 else:
                     logger.warning("新浪接口返回空的ETF列表")
             
@@ -98,6 +102,8 @@ def update_all_etf_list() -> pd.DataFrame:
                         # 按基金规模降序排序
                         backup_df = backup_df.sort_values("基金规模", ascending=False)
                         logger.info(f"✅ 兜底文件加载成功（{len(backup_df)}只ETF）")
+                        # 标记数据来源
+                        backup_df.source = "兜底文件"
                         
                         # 保存兜底文件为当前ETF列表
                         backup_df.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
@@ -108,6 +114,8 @@ def update_all_etf_list() -> pd.DataFrame:
                 # 如果兜底文件也不存在或处理失败，返回空DataFrame但包含所有列
                 logger.error("❌ 无法获取ETF列表，所有数据源均失败")
                 empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+                # 标记数据来源
+                empty_df.source = "无数据源"
                 return empty_df
             
             return primary_etf_list
@@ -127,12 +135,17 @@ def update_all_etf_list() -> pd.DataFrame:
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 使用兜底文件作为最后手段")
+                    # 标记数据来源
+                    backup_df.source = "兜底文件(异常)"
                     return backup_df
                 except Exception as e:
                     logger.error(f"❌ 兜底文件加载也失败: {str(e)}")
             
             # 返回空DataFrame但包含所有列
-            return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+            empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+            # 标记数据来源
+            empty_df.source = "无数据源(异常)"
+            return empty_df
     
     else:
         logger.info("ℹ️ 无需更新，加载本地ETF列表")
@@ -145,6 +158,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     etf_list[col] = ""
             # 按基金规模降序排序
             etf_list = etf_list.sort_values("基金规模", ascending=False)
+            # 标记数据来源
+            etf_list.source = "本地缓存"
             return etf_list
         except Exception as e:
             logger.error(f"❌ 本地文件加载失败: {str(e)}")
@@ -161,12 +176,16 @@ def update_all_etf_list() -> pd.DataFrame:
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 本地文件加载失败，使用兜底文件")
+                    # 标记数据来源
+                    backup_df.source = "兜底文件(本地加载失败)"
                     return backup_df
                 except Exception as e:
                     logger.error(f"❌ 兜底文件加载也失败: {str(e)}")
             
             # 返回空DataFrame但包含所有列
             empty_df = pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+            # 标记数据来源
+            empty_df.source = "无数据源(本地加载失败)"
             return empty_df
 
 def retry_if_network_error(exception: Exception) -> bool:

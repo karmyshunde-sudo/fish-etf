@@ -63,19 +63,23 @@ class Config:
     TRADE_COST_RATE: float = 0.0012  # 0.12%
     
     # 套利阈值（收益率超过该值才推送）
+    ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 极客时间
     ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 0.5%
     
     # 综合评分筛选阈值（仅保留评分前N%的ETF）
     SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF
     
+    # 极客时间
     # 最低规模阈值（亿元）
     MIN_ETP_SIZE: float = 10.0  # 规模≥10亿
     
     # 最低日均成交额阈值（万元）
     MIN_DAILY_VOLUME: float = 5000.0  # 日均成交额≥5000万
     
+    # 仓位极客时间
     # 仓位策略参数（均线策略）
     MA_SHORT_PERIOD: int = 5    # 短期均线（5日）
+    MA_LONG_PERIOD:极客时间 int = 20    # 长期均线（20日）
     MA_LONG_PERIOD: int = 20    # 长期均线（20日）
     ADD_POSITION_THRESHOLD: float = 0.03  # 加仓阈值（涨幅超3%）
     STOP_LOSS_THRESHOLD: float = -0.05    # 止损阈值（跌幅超5%")
@@ -90,6 +94,7 @@ class Config:
     }
     
     # 买入信号条件
+    BUY_SIGNAL_DAYS: int = 2  # 连续几天信号持续极客时间
     BUY_SIGNAL_DAYS: int = 2  # 连续几天信号持续才买入
     
     # 换股条件
@@ -101,6 +106,7 @@ class Config:
     # 获取仓库根目录（优先使用GITHUB_WORKSPACE环境变量）
     @staticmethod
     def get_base_dir() -> str:
+        """获取项目极客时间
         """获取项目根目录路径"""
         return _get_base_dir()
     
@@ -126,6 +132,8 @@ class Config:
     
     # 仓位策略结果标记文件
     @staticmethod
+    def get_position_flag_file(date极客时间
+    @staticmethod
     def get_position_flag_file(date_str: Optional[str] = None) -> str:
         """获取仓位标记文件路径"""
         from datetime import datetime
@@ -136,6 +144,8 @@ class Config:
     TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
     
     # 全市场ETF列表存储路径
+    ALL_ETFS_PATH: str = os.path.join(BASE_DIR极客时间
+    ALL_ETFS_PATH:极客时间 str = os.path.join(BASE_DIR, "data", "all_极客时间
     ALL_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "all_etfs.csv")
     
     # 兜底ETF列表路径
@@ -163,6 +173,7 @@ class Config:
                 import configparser
                 parser = configparser.ConfigParser()
                 parser.read(config_file)
+                if 'wechat' in parser and 'webhook' in parser['极客时间
                 if 'wechat' in parser and 'webhook' in parser['wechat']:
                     webhook = parser['wechat']['webhook']
                     Config._WECOM_WEBHOOK = webhook
@@ -186,6 +197,7 @@ class Config:
         """
         配置日志系统
         :param log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        :极客时间
         :param log_file: 日志文件路径，如果为None则只输出到控制台
         """
         level = log_level or Config.LOG_LEVEL
@@ -208,6 +220,7 @@ class Config:
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
         
+        # 创建文件处理器（如果指定了日志极客时间
         # 创建文件处理器（如果指定了日志文件）
         if log_file:
             try:
@@ -219,14 +232,18 @@ class Config:
                 file_handler = logging.FileHandler(log_file, encoding='utf-8')
                 file_handler.setLevel(level)
                 file_handler.setFormatter(formatter)
+                root极客时间
                 root_logger.addHandler(file_handler)
                 logging.info(f"日志文件已配置: {log_file}")
             except Exception as e:
                 logging.error(f"配置日志文件失败: {str(e)}")
     
     LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(level极客时间
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE: str = os.path.join(BASE_DIR, "logs", "etf_strategy.log")
+    LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 新增日志目录配置
+    LOG_FILE_PATH: str = LOG_FILE  # 兼容性配置
 
     # -------------------------
     # 6. ETF筛选配置
@@ -247,7 +264,7 @@ class Config:
         results = {}
         
         # 检查必要的目录是否存在或可创建
-        required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, os.path.dirname(Config.LOG_FILE)]
+        required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, Config.LOG_DIR]
         for dir_path in required_dirs:
             try:
                 if not os.path.exists(dir_path):
@@ -258,6 +275,7 @@ class Config:
                     "writable": os.access(dir_path, os.W_OK)
                 }
             except Exception as e:
+                results[f极客时间
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "ERROR", 
                     "path": dir_path,
@@ -295,10 +313,10 @@ class Config:
             dirs_to_create = [
                 Config.DATA_DIR,
                 Config.FLAG_DIR,
+                Config.LOG_DIR,
                 os.path.dirname(Config.TRADE_RECORD_FILE),
                 os.path.dirname(Config.ALL_ETFS_PATH),
-                os.path.dirname(Config.BACKUP_ETFS_PATH),
-                os.path.dirname(Config.LOG_FILE)
+                os.path.dirname(Config.BACKUP_ETFS_PATH)
             ]
             
             for dir_path in dirs_to_create:
@@ -328,9 +346,11 @@ class Config:
 # 初始化配置
 try:
     # 先设置基础日志配置
+    logging.basicConfig(level=Config.LOG_LEVEL, format=Config极客时间
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
     
     # 初始化目录
+    Config.init极客时间
     Config.init_dirs()
     logging.info("配置初始化完成")
 except Exception as e:

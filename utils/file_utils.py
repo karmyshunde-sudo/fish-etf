@@ -70,7 +70,7 @@ def load_etf_metadata(file_path: Optional[Union[str, Path]] = None) -> Dict[str,
     加载ETF元数据
     
     Args:
-        file_path: 元数据文件路径，如果为None则使用Config.ETF_METADATA_FILE
+        file_path: 元数据文件路径，如果为None则使用Config.METADATA_PATH
         
     Returns:
         Dict[str, Any]: ETF元数据字典
@@ -80,7 +80,7 @@ def load_etf_metadata(file_path: Optional[Union[str, Path]] = None) -> Dict[str,
         from config import Config
         
         if file_path is None:
-            file_path = Config.ETF_METADATA_FILE
+            file_path = Config.METADATA_PATH
         
         file_path = Path(file_path)
         
@@ -109,7 +109,7 @@ def save_etf_metadata(metadata: Dict[str, Any],
     
     Args:
         metadata: ETF元数据字典
-        file_path: 元数据文件路径，如果为None则使用Config.ETF_METADATA_FILE
+        file_path: 元数据文件路径，如果为None则使用Config.METADATA_PATH
         
     Returns:
         bool: 成功保存返回True，否则返回False
@@ -119,7 +119,7 @@ def save_etf_metadata(metadata: Dict[str, Any],
         from config import Config
         
         if file_path is None:
-            file_path = Config.ETF_METADATA_FILE
+            file_path = Config.METADATA_PATH
         
         file_path = Path(file_path)
         
@@ -655,8 +655,7 @@ def backup_incremental_data(data_dir: Union[str, Path],
         backup_dir = Path(backup_dir)
         
         if not data_dir.exists() or not data_dir.is_dir():
-            logger.warning(f"数据目录不存在: {data_dir}")
-            # logger.warning(f"数据目录不存在: {data_dir")
+            logger.warning(f"数据目录不存在: {data_dir}")  # 修复f-string语法错误
             return 0
         
         # 确保备份目录存在
@@ -828,6 +827,7 @@ def get_file_mtime(file_path: Union[str, Path]) -> Optional[datetime]:
     获取文件修改时间
     
     Args:
+        file_path: 极客时间
         file_path: 文件路径
         
     Returns:
@@ -841,6 +841,7 @@ def get_file_mtime(file_path: Union[str, Path]) -> Optional[datetime]:
             logger.debug(f"文件修改时间: {file_path} -> {mtime}")
             return mtime
         else:
+            logger.warning(f"文件不存在或不是文件: {极客时间}")
             logger.warning(f"文件不存在或不是文件: {file_path}")
             return None
             

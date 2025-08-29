@@ -200,14 +200,20 @@ def calculate_etf_score(etf_code, df):
         logger.error(f"计算ETF {etf_code} 综合评分时发生未预期错误: {str(e)}")
         return 0.0
 
-def get_top_rated_etfs(top_n=None, min_score=60):
+def get_top_rated_etfs(top_n=None, min_score=60, position_type="稳健仓"):
     """
     从全市场ETF中筛选高分ETF
     :param top_n: 返回前N名，为None则返回所有高于min_score的ETF
     :param min_score: 最低评分阈值
+    :param position_type: 仓位类型（"稳健仓"或"激进仓"）
     :return: 包含ETF代码、名称、评分等信息的DataFrame
     """
     try:
+        # 获取仓位类型对应的筛选参数
+        params = Config.STRATEGY_PARAMETERS.get(position_type, Config.STRATEGY_PARAMETERS["稳健仓"])
+        min_fund_size = params["min_fund_size"]
+        min_avg_volume = params["min_avg_volume"]
+        
         metadata_df = load_etf_metadata()
         if metadata_df is None or metadata_df.empty:
             logger.warning("元数据为空，无法获取ETF列表")
@@ -224,23 +230,39 @@ def get_top_rated_etfs(top_n=None, min_score=60):
             try:
                 df = load_etf_daily_data(etf_code)
                 score = calculate_etf_score(etf_code, df)
-                if score >= min_score:
+                
+                # 计算日均成交额（单位：万元）
+                avg_volume = 0.0
+                if not df.empty and "成交额" in df.columns:
+                    recent_30d = df.tail(30)
+                    if len(recent_30d) > 0:
+                        avg_volume = recent_30d["成交额"].mean() / 10000  # 转换为万元
+                
+                try:
                     size, listing_date = get_etf_basic_info(etf_code)
-                    etf_name = get_etf_name(etf_code)
+                except Exception as e:
+                    logger.warning(f"获取ETF {etf_code} 基本信息失败: {str(e)}")
+                    size, listing_date = 0.0, ""
+                
+                etf_name = get_etf_name(etf_code)
+                
+                # 应用动态筛选参数
+                if score >= min_score and size >= min_fund_size and avg_volume >= min_avg_volume:
                     score_list.append({
                         "etf_code": etf_code,
                         "etf_name": etf_name,
                         "score": score,
                         "size": size,
-                        "listing_date": listing_date
+                        "listing_date": listing_date,
+                        "avg_volume": avg_volume  # 添加日均成交额到记录中
                     })
-                    logger.debug(f"ETF {etf_code} 评分: {score}")
+                    logger.debug(f"ETF {etf_code} 评分: {score}, 规模: {size}亿元, 日均成交额: {avg_volume}万元")
             except Exception as e:
                 logger.error(f"处理ETF {etf_code} 时发生错误: {str(e)}")  # 修复字符串格式化错误
                 continue
 
         if not score_list:
-            logger.info(f"没有ETF达到最低评分阈值 {min_score}")
+            logger.info(f"没有ETF达到最低评分阈值 {min_score}，或未满足规模({min_fund_size}亿元)和日均成交额({min_avg_volume}万元)要求")
             return pd.DataFrame()
 
         score_df = pd.DataFrame(score_list).sort_values("score", ascending=False)
@@ -250,6 +272,7 @@ def get_top_rated_etfs(top_n=None, min_score=60):
         top_df = score_df.head(top_count)
 
         logger.info(f"评分完成。共{total_etfs}只ETF评分≥{min_score}，取前{top_percent}%({top_count}只)")
+        logger.info(f"应用筛选参数: 规模≥{min_fund_size}亿元, 日均成交额≥{min_avg_volume}万元")
 
         if top_n is not None and top_n > 0:
             return top_df.head(top_n)

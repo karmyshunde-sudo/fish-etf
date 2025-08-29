@@ -201,6 +201,19 @@ class Config:
     MIN_FUND_SIZE: float = 5.0  # 最小基金规模（亿元）
     MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股")
 
+
+    # -------------------------
+    # 8. 企业微信机器人配置
+    # -------------------------
+    @staticmethod
+    def get_wecom_webhook() -> Optional[str]:
+        """
+        安全地从环境变量获取企业微信机器人的Webhook URL。
+        如果环境变量未设置，则返回None。
+        :return: Webhook URL字符串或None
+        """
+        return os.environ.get('WECOM_WEBHOOK_URL')
+    
     # -------------------------
     # 7. 配置验证方法
     # -------------------------
@@ -237,9 +250,9 @@ class Config:
             "total": total_weight,
             "expected": 1.0
         }
-        
-        # 检查微信配置
-        webhook = Config.get_wecom_webhook()
+
+        # 检查微信配置 (现在这个调用不会报错了)
+        webhook = Config.get_wecom_webhook() # 现在这个方法已定义
         results["wechat"] = {
             "status": "OK" if webhook else "WARNING",
             "webhook_configured": bool(webhook)

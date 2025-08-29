@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from retrying import retry
 from config import Config
-from utils.date_utils import is_file_outdated  # 新增导入
+from utils.date_utils import is_file_outdated, get_beijing_time  # 确保导入get_beijing_time
 
 # 初始化日志
 logger = logging.getLogger(__name__)

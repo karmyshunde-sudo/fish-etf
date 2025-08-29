@@ -17,6 +17,11 @@ MAX_RETRY_ATTEMPTS = 3
 RETRY_WAIT_FIXED = 2000  # 毫秒
 RETRY_WAIT_EXPONENTIAL_MAX = 10000  # 毫秒
 
+print(f"AkShare版本: {ak.__version__}")
+
+# 查看可用接口
+print([func for func in dir(ak) if 'etf' in func or 'fund' in func])
+
 def empty_result_check(result: pd.DataFrame) -> bool:
     """
     检查AkShare返回结果是否为空
@@ -88,8 +93,7 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
     """
     interfaces = [
         lambda: try_fund_etf_hist_em(etf_code, start_date, end_date),
-        lambda: try_fund_etf_hist_sina(etf_code, start_date, end_date),
-        lambda: try_etf_hist_em(etf_code, start_date, end_date)
+        lambda: try_fund_etf_hist_sina(etf_code, start_date, end_date)
     ]
     
     for i, interface in enumerate(interfaces):
@@ -150,31 +154,6 @@ def try_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str) -> pd.
         return df
     except Exception as e:
         logger.warning(f"fund_etf_hist_sina 接口调用失败: {str(e)}")
-        return pd.DataFrame()
-
-def try_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    尝试使用 etf_hist_em 接口（备用）
-    :param etf_code: ETF代码
-    :param start_date: 开始日期
-    :param end_date: 结束日期
-    :return: 获取到的DataFrame
-    """
-    try:
-        # 添加市场前缀
-        symbol = get_symbol_with_market_prefix(etf_code)
-        logger.debug(f"尝试使用 etf_hist_em 接口获取ETF {symbol} 数据")
-        
-        df = ak.etf_hist_em(
-            symbol=symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq"
-        )
-        return df
-    except Exception as e:
-        logger.warning(f"etf_hist_em 接口调用失败: {str(e)}")
         return pd.DataFrame()
 
 def get_symbol_with_market_prefix(etf_code: str) -> str:

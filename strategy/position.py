@@ -261,76 +261,23 @@ def calculate_position_strategy() -> str:
         position_df = init_position_record()
         init_trade_record()
         
-        # 获取评分前5的ETF（用于选仓）
-        top_etfs = get_top_rated_etfs(top_n=5)
-        if top_etfs.empty:
-            logger.warning("无有效ETF评分数据，无法计算仓位策略")
-            return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
-        
-        # 2. 分别计算稳健仓和激进仓策略
-        strategies = {}
-        trade_actions = []
-        
-        # 2.1 稳健仓策略（评分最高+均线策略）
-        stable_etf = top_etfs.iloc[0]
-        stable_code = stable_etf["etf_code"]
-        stable_name = stable_etf["etf_name"]
-        stable_df = load_etf_daily_data(stable_code)
-        
-        # 稳健仓当前持仓
-        stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
-        if stable_position.empty:
-            logger.warning("未找到稳健仓记录，使用默认值")
-            stable_position = pd.Series({
-                "当前持仓ETF代码": "",
-                "当前持仓ETF名称": "",
-                "持仓成本价": 0.0,
-                "持仓日期": "",
-                "持仓数量": 0
-            })
+        # 获取稳健仓评分前5的ETF（使用稳健仓参数）
+        stable_top_etfs = get_top_rated_etfs(top_n=5, position_type="稳健仓")
+        if stable_top_etfs.empty:
+            logger.warning("无有效ETF评分数据，无法计算稳健仓策略")
+            stable_strategy = "【稳健仓】无有效ETF数据，无法生成操作建议"
         else:
-            stable_position = stable_position.iloc[0]
-        
-        strategy, actions = calculate_single_position_strategy(
-            position_type="稳健仓",
-            current_position=stable_position,
-            target_etf_code=stable_code,
-            target_etf_name=stable_name,
-            etf_df=stable_df,
-            is_stable=True
-        )
-        strategies["稳健仓"] = strategy
-        trade_actions.extend(actions)
-        
-        # 2.2 激进仓策略（近30天收益最高）
-        return_list = []
-        for _, row in top_etfs.iterrows():
-            code = row["etf_code"]
-            df = load_etf_daily_data(code)
-            if not df.empty and len(df) >= 30:
-                try:
-                    return_30d = (df.iloc[-1]["收盘"] / df.iloc[-30]["收盘"] - 1) * 100
-                    return_list.append({
-                        "etf_code": code,
-                        "etf_name": row["etf_name"],
-                        "return_30d": return_30d,
-                        "score": row["score"]
-                    })
-                except (IndexError, KeyError):
-                    logger.warning(f"计算ETF {code} 30天收益失败")
-                    continue
-        
-        if return_list:
-            aggressive_etf = max(return_list, key=lambda x: x["return_30d"])
-            aggressive_code = aggressive_etf["etf_code"]
-            aggressive_name = aggressive_etf["etf_name"]
-            aggressive_df = load_etf_daily_data(aggressive_code)
+            # 2.1 稳健仓策略（评分最高+均线策略）
+            stable_etf = stable_top_etfs.iloc[0]
+            stable_code = stable_etf["etf_code"]
+            stable_name = stable_etf["etf_name"]
+            stable_df = load_etf_daily_data(stable_code)
             
-            # 激进仓当前持仓
-            aggressive_position = position_df[position_df["仓位类型"] == "激进仓"]
-            if aggressive_position.empty:
-                logger.warning("未找到激进仓记录，使用默认值")
-                aggressive_position = pd.Series({
+            # 稳健仓当前持仓
+            stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
+            if stable_position.empty:
+                logger.warning("未找到稳健仓记录，使用默认值")
+                stable_position = pd.Series({
                     "当前持仓ETF代码": "",
                     "当前持仓ETF名称": "",
                     "持仓成本价": 0.0,
@@ -338,24 +285,88 @@ def calculate_position_strategy() -> str:
                     "持仓数量": 0
                 })
             else:
-                aggressive_position = aggressive_position.iloc[0]
+                stable_position = stable_position.iloc[0]
             
             strategy, actions = calculate_single_position_strategy(
-                position_type="激进仓",
-                current_position=aggressive_position,
-                target_etf_code=aggressive_code,
-                target_etf_name=aggressive_name,
-                etf_df=aggressive_df,
-                is_stable=False
+                position_type="稳健仓",
+                current_position=stable_position,
+                target_etf_code=stable_code,
+                target_etf_name=stable_name,
+                etf_df=stable_df,
+                is_stable=True
             )
-            strategies["激进仓"] = strategy
-            trade_actions.extend(actions)
+            stable_strategy = strategy
+            trade_actions = actions
+        # 获取激进仓评分前5的ETF（使用激进仓参数）
+        aggressive_top_etfs = get_top_rated_etfs(top_n=5, position_type="激进仓")
+        if aggressive_top_etfs.empty:
+            logger.warning("无有效ETF评分数据，无法计算激进仓策略")
+            aggressive_strategy = "【激进仓】无有效ETF数据，无法生成操作建议"
         else:
-            strategies["激进仓"] = "激进仓：无有效收益数据，暂不调整仓位"
+            # 2.2 激进仓策略（近30天收益最高）
+            return_list = []
+            for _, row in aggressive_top_etfs.iterrows():
+                code = row["etf_code"]
+                df = load_etf_daily_data(code)
+                if not df.empty and len(df) >= 30:
+                    try:
+                        return_30d = (df.iloc[-1]["收盘"] / df.iloc[-30]["收盘"] - 1) * 100
+                        return_list.append({
+                            "etf_code": code,
+                            "etf_name": row["etf_name"],
+                            "return_30d": return_30d,
+                            "score": row["score"]
+                        })
+                    except (IndexError, KeyError):
+                        logger.warning(f"计算ETF {code} 30天收益失败")
+                        continue
+            
+            if return_list:
+                aggressive_etf = max(return_list, key=lambda x: x["return_30d"])
+                aggressive_code = aggressive_etf["etf_code"]
+                aggressive_name = aggressive_etf["etf_name"]
+                aggressive_df = load_etf_daily_data(aggressive_code)
+                
+                # 激进仓当前持仓
+                aggressive_position = position_df[position_df["仓位类型"] == "激进仓"]
+                if aggressive_position.empty:
+                    logger.warning("未找到激进仓记录，使用默认值")
+                    aggressive_position = pd.Series({
+                        "当前持仓ETF代码": "",
+                        "当前持仓ETF名称": "",
+                        "持仓成本价": 0.0,
+                        "持仓日期": "",
+                        "持仓数量": 0
+                    })
+                else:
+                    aggressive_position = aggressive_position.iloc[0]
+                
+                strategy, actions = calculate_single_position_strategy(
+                    position_type="激进仓",
+                    current_position=aggressive_position,
+                    target_etf_code=aggressive_code,
+                    target_etf_name=aggressive_name,
+                    etf_df=aggressive_df,
+                    is_stable=False
+                )
+                aggressive_strategy = strategy
+                if 'trade_actions' in locals():
+                    trade_actions.extend(actions)
+                else:
+                    trade_actions = actions
+            else:
+                aggressive_strategy = "激进仓：无有效收益数据，暂不调整仓位"
         
-        # 3. 执行交易操作
-        for action in trade_actions:
-            record_trade(**action)
+        # 合并策略结果
+        strategies = {
+            "稳健仓": stable_strategy,
+            "激进仓": aggressive_strategy
+        }
+        
+        # 3. 执行交易操作（如果存在交易动作）
+        if 'trade_actions' in locals() and trade_actions:
+            for action in trade_actions:
+                record_trade(**action)
         
         # 4. 格式化消息
         return format_position_message(strategies)

@@ -25,15 +25,7 @@ from utils.file_utils import check_flag, set_flag
 from utils.date_utils import get_beijing_time
 
 # 初始化日志配置
-logging.basicConfig(
-    level=getattr(logging, Config.LOG_LEVEL, logging.INFO),
-    format=Config.LOG_FORMAT,
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(Config.LOG_FILE_PATH)
-    ]
-)
+Config.setup_logging(log_file=Config.LOG_FILE)
 logger = logging.getLogger(__name__)
 
 def setup_environment() -> bool:
@@ -42,8 +34,8 @@ def setup_environment() -> bool:
         # 确保必要的目录存在
         os.makedirs(Config.DATA_DIR, exist_ok=True)
         os.makedirs(Config.LOG_DIR, exist_ok=True)
-        os.makedirs(os.path.dirname(Config.ARBITRAGE_FLAG_FILE), exist_ok=True)
-        os.makedirs(os.path.dirname(Config.POSITION_FLAG_FILE), exist_ok=True)
+        os.makedirs(os.path.dirname(Config.get_arbitrage_flag_file()), exist_ok=True)
+        os.makedirs(os.path.dirname(Config.get_position_flag_file()), exist_ok=True)
         
         logger.info("环境设置完成")
         return True
@@ -68,7 +60,7 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
     """处理套利机会计算任务"""
     try:
         # 检查当天是否已推送套利结果
-        if check_flag(Config.ARBITRAGE_FLAG_FILE):
+        if check_flag(Config.get_arbitrage_flag_file()):
             logger.info("今日已推送套利机会，跳过本次计算")
             return {"status": "skipped", "message": "Arbitrage message already pushed today"}
         
@@ -81,7 +73,7 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         send_success = send_wechat_message(message)
         
         if send_success:
-            set_flag(Config.ARBITRAGE_FLAG_FILE)  # 标记已推送
+            set_flag(Config.get_arbitrage_flag_file())  # 标记已推送
             return {"status": "success", "message": "Arbitrage strategy pushed successfully"}
         else:
             error_msg = "套利策略推送失败"
@@ -99,7 +91,7 @@ def handle_calculate_position() -> Dict[str, Any]:
     """处理仓位策略计算任务"""
     try:
         # 检查当天是否已推送仓位策略
-        if check_flag(Config.POSITION_FLAG_FILE):
+        if check_flag(Config.get_position_flag_file()):
             logger.info("今日已推送仓位策略，跳过本次计算")
             return {"status": "skipped", "message": "Position strategy already pushed today"}
         
@@ -111,7 +103,7 @@ def handle_calculate_position() -> Dict[str, Any]:
         send_success = send_wechat_message(message)
         
         if send_success:
-            set_flag(Config.POSITION_FLAG_FILE)  # 标记已推送
+            set_flag(Config.get_position_flag_file())  # 标记已推送
             return {"status": "success", "message": "Position strategy pushed successfully"}
         else:
             error_msg = "仓位策略推送失败"
@@ -122,6 +114,7 @@ def handle_calculate_position() -> Dict[str, Any]:
         error_msg = f"仓位策略计算失败: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
+        send_wechat_message(f"【系统错误】仓位策略计算失败: {极客时间}")
         send_wechat_message(f"【系统错误】仓位策略计算失败: {str(e)}")
         return {"status": "error", "message": error_msg}
 
@@ -160,6 +153,7 @@ def main() -> Dict[str, Any]:
     task_handlers = {
         "crawl_etf_daily": handle_crawl_etf_daily,
         "calculate_arbitrage": handle_calculate_arbitrage,
+        "极客时间": handle_calculate_position,
         "calculate_position": handle_calculate_position,
         "update_etf_list": handle_update_etf_list
     }
@@ -200,3 +194,10 @@ if __name__ == "__main__":
         print(json.dumps(error_response, indent=2, ensure_ascii=False))
         
         sys.exit(1)
+
+# 文件信息
+# 总行数: 151
+# 函数数量: 6
+# 最后修改: 2025-08-28
+# 版本: 1.1.0
+# 描述: ETF套利策略系统主入口文件，包含完整的异常处理和日志输出

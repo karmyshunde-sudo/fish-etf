@@ -10,7 +10,7 @@ import os
 import time
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Any
 import pytz
 import pandas as pd
 from dateutil import parser, relativedelta
@@ -33,14 +33,15 @@ def get_beijing_time() -> datetime:
         datetime: 当前北京时间
     """
     try:
+        # 从UTC时间转换为北京时间
         utc_now = datetime.now(timezone.utc)
         beijing_time = utc_now.astimezone(BEIJING_TIMEZONE)
         logger.debug(f"获取北京时间: {beijing_time}")
         return beijing_time
     except Exception as e:
-        logger.error(f"获取北京时间失败: {str(e)}")
+        logger.error(f"获取北京时间失败: {str(e)}", exc_info=True)
         # 回退到本地时间（假设服务器在北京时区）
-        return datetime.now()
+        return datetime.now().replace(tzinfo=BEIJING_TIMEZONE)
 
 def get_utc_time() -> datetime:
     """
@@ -54,8 +55,8 @@ def get_utc_time() -> datetime:
         logger.debug(f"获取UTC时间: {utc_time}")
         return utc_time
     except Exception as e:
-        logger.error(f"获取UTC时间失败: {str(e)}")
-        return datetime.utcnow()
+        logger.error(f"获取UTC时间失败: {str(e)}", exc_info=True)
+        return datetime.utcnow().replace(tzinfo=timezone.utc)
 
 def convert_to_beijing_time(dt: Union[datetime, str]) -> Optional[datetime]:
     """
@@ -74,7 +75,7 @@ def convert_to_beijing_time(dt: Union[datetime, str]) -> Optional[datetime]:
         
         # 如果时间没有时区信息，假设为UTC时间
         if dt.tzinfo is None:
-            dt = pytz.utc.localize(dt)
+            dt = dt.replace(tzinfo=timezone.utc)
         
         # 转换为北京时间
         beijing_time = dt.astimezone(BEIJING_TIMEZONE)
@@ -82,7 +83,7 @@ def convert_to_beijing_time(dt: Union[datetime, str]) -> Optional[datetime]:
         return beijing_time
         
     except Exception as e:
-        logger.error(f"时间转换失败 {dt}: {str(e)}")
+        logger.error(f"时间转换失败 {dt}: {str(e)}", exc_info=True)
         return None
 
 def convert_to_utc_time(dt: Union[datetime, str]) -> Optional[datetime]:
@@ -102,7 +103,7 @@ def convert_to_utc_time(dt: Union[datetime, str]) -> Optional[datetime]:
         
         # 如果时间没有时区信息，假设为北京时间
         if dt.tzinfo is None:
-            dt = BEIJING_TIMEZONE.localize(dt)
+            dt = dt.replace(tzinfo=BEIJING_TIMEZONE)
         
         # 转换为UTC时间
         utc_time = dt.astimezone(UTC_TIMEZONE)
@@ -110,7 +111,7 @@ def convert_to_utc_time(dt: Union[datetime, str]) -> Optional[datetime]:
         return utc_time
         
     except Exception as e:
-        logger.error(f"时间转换失败 {dt}: {str(e)}")
+        logger.error(f"时间转换失败 {dt}: {str(e)}", exc_info=True)
         return None
 
 def is_trading_day(date: Optional[datetime] = None) -> bool:
@@ -144,7 +145,7 @@ def is_trading_day(date: Optional[datetime] = None) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"判断交易日失败 {date}: {str(e)}")
+        logger.error(f"判断交易日失败 {date}: {str(e)}", exc_info=True)
         return False
 
 def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
@@ -175,7 +176,7 @@ def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
         return is_open
         
     except Exception as e:
-        logger.error(f"判断市场状态失败 {time_to_check}: {str(e)}")
+        logger.error(f"判断市场状态失败 {time_to_check}: {str(e)}", exc_info=True)
         return False
 
 def format_date(dt: datetime, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
@@ -193,7 +194,7 @@ def format_date(dt: datetime, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         formatted = dt.strftime(fmt)
         return formatted
     except Exception as e:
-        logger.error(f"日期格式化失败 {dt}: {str(e)}")
+        logger.error(f"日期格式化失败 {dt}: {str(e)}", exc_info=True)
         return str(dt)
 
 def parse_date(date_str: str, fmt: Optional[str] = None) -> Optional[datetime]:
@@ -216,7 +217,7 @@ def parse_date(date_str: str, fmt: Optional[str] = None) -> Optional[datetime]:
         logger.debug(f"解析日期字符串: {date_str} -> {dt}")
         return dt
     except Exception as e:
-        logger.error(f"解析日期字符串失败 {date_str}: {str(e)}")
+        logger.error(f"解析日期字符串失败 {date_str}: {str(e)}", exc_info=True)
         return None
 
 def get_next_trading_day(date: Optional[datetime] = None) -> datetime:
@@ -243,10 +244,10 @@ def get_next_trading_day(date: Optional[datetime] = None) -> datetime:
             next_day += timedelta(days=1)
         
         logger.debug(f"下一个交易日: {date} -> {next_day}")
-        return datetime.combine(next_day, datetime.min.time())
+        return datetime.combine(next_day, datetime.min.time()).replace(tzinfo=BEIJING_TIMEZONE)
         
     except Exception as e:
-        logger.error(f"获取下一个交易日失败 {date}: {str(e)}")
+        logger.error(f"获取下一个交易日失败 {date}: {str(e)}", exc_info=True)
         # 回退：简单加一天
         return (date if date else get_beijing_time()) + timedelta(days=1)
 
@@ -274,10 +275,10 @@ def get_previous_trading_day(date: Optional[datetime] = None) -> datetime:
             prev_day -= timedelta(days=1)
         
         logger.debug(f"上一个交易日: {date} -> {prev_day}")
-        return datetime.combine(prev_day, datetime.min.time())
+        return datetime.combine(prev_day, datetime.min.time()).replace(tzinfo=BEIJING_TIMEZONE)
         
     except Exception as e:
-        logger.error(f"获取上一个交易日失败 {date}: {str(e)}")
+        logger.error(f"获取上一个交易日失败 {date}: {str(e)}", exc_info=True)
         # 回退：简单减一天
         return (date if date else get_beijing_time()) - timedelta(days=1)
 
@@ -305,7 +306,7 @@ def is_same_day(dt1: datetime, dt2: datetime) -> bool:
         return same_day
         
     except Exception as e:
-        logger.error(f"日期比较失败 {dt1} vs {dt2}: {str(e)}")
+        logger.error(f"日期比较失败 {dt1} vs {dt2}: {str(e)}", exc_info=True)
         return False
 
 def get_trading_days(start_date: datetime, end_date: datetime) -> List[datetime]:
@@ -324,6 +325,12 @@ def get_trading_days(start_date: datetime, end_date: datetime) -> List[datetime]
         if start_date > end_date:
             start_date, end_date = end_date, start_date
         
+        # 确保日期带有时区信息
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=BEIJING_TIMEZONE)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=BEIJING_TIMEZONE)
+        
         trading_days = []
         current_date = start_date
         
@@ -337,7 +344,7 @@ def get_trading_days(start_date: datetime, end_date: datetime) -> List[datetime]
         return trading_days
         
     except Exception as e:
-        logger.error(f"获取交易日范围失败 {start_date} 到 {end_date}: {str(e)}")
+        logger.error(f"获取交易日范围失败 {start_date} 到 {end_date}: {str(e)}", exc_info=True)
         return []
 
 def get_date_range(days: int, end_date: Optional[datetime] = None) -> Tuple[datetime, datetime]:
@@ -355,13 +362,17 @@ def get_date_range(days: int, end_date: Optional[datetime] = None) -> Tuple[date
         if end_date is None:
             end_date = get_beijing_time()
         
+        # 确保结束日期带有时区信息
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=BEIJING_TIMEZONE)
+        
         start_date = end_date - timedelta(days=days)
         
         logger.debug(f"获取日期范围: {days}天 -> {start_date} 到 {end_date}")
         return start_date, end_date
         
     except Exception as e:
-        logger.error(f"获取日期范围失败 {days}天: {str(e)}")
+        logger.error(f"获取日期范围失败 {days}天: {str(e)}", exc_info=True)
         # 回退：默认返回最近30天
         default_end = get_beijing_time()
         default_start = default_end - timedelta(days=30)
@@ -392,7 +403,7 @@ def get_cron_next_run(cron_expression: str) -> Optional[datetime]:
         logger.warning("croniter模块未安装，无法计算CRON下一次运行时间")
         return None
     except Exception as e:
-        logger.error(f"计算CRON下一次运行时间失败 {cron_expression}: {str(e)}")
+        logger.error(f"计算CRON下一次运行时间失败 {cron_expression}: {str(e)}", exc_info=True)
         return None
 
 def get_timestamp() -> int:
@@ -431,7 +442,7 @@ def sleep_until(target_time: datetime) -> None:
         time.sleep(sleep_seconds)
         
     except Exception as e:
-        logger.error(f"休眠直到指定时间失败 {target_time}: {str(e)}")
+        logger.error(f"休眠直到指定时间失败 {target_time}: {str(e)}", exc_info=True)
 
 def validate_date_range(start_date: datetime, end_date: datetime) -> bool:
     """
@@ -445,6 +456,12 @@ def validate_date_range(start_date: datetime, end_date: datetime) -> bool:
         bool: 如果日期范围有效返回True，否则返回False
     """
     try:
+        # 确保日期带有时区信息
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=BEIJING_TIMEZONE)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=BEIJING_TIMEZONE)
+        
         if start_date > end_date:
             logger.warning(f"日期范围无效: {start_date} > {end_date}")
             return False
@@ -459,7 +476,7 @@ def validate_date_range(start_date: datetime, end_date: datetime) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"日期范围验证失败 {start_date} 到 {end_date}: {str(e)}")
+        logger.error(f"日期范围验证失败 {start_date} 到 {end_date}: {str(e)}", exc_info=True)
         return False
 
 def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
@@ -470,24 +487,143 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
     :return: 如果文件过期返回True，否则返回False
     """
     if not os.path.exists(file_path):
+        logger.debug(f"文件不存在: {file_path}")
         return True
     
     try:
-        # 获取文件最后修改时间（转换为东八区时区）
+        # 获取文件最后修改时间
         last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        
+        # 修复：GitHub Actions中默认使用UTC时间，但os.path.getmtime返回的是本地时间
+        # 正确处理：将文件修改时间视为UTC时间，然后转换为北京时间
+        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(BEIJING_TIMEZONE)
+        
+        # 获取当前北京时间
+        current_time = get_beijing_time()
         
         # 计算距离上次更新的天数
-        days_since_update = (get_beijing_time() - last_modify_time).days
+        days_since_update = (current_time - last_modify_time).days
         need_update = days_since_update >= max_age_days
         
         if need_update:
-            print(f"ETF列表已过期({days_since_update}天)，需要更新")
+            logger.info(f"文件已过期({days_since_update}天)，需要更新")
         else:
-            print(f"ETF列表未过期({days_since_update}天)，无需更新")
+            logger.debug(f"文件未过期({days_since_update}天)，无需更新")
             
         return need_update
     except Exception as e:
-        print(f"检查ETF列表更新状态失败: {str(e)}")
+        logger.error(f"检查文件更新状态失败: {str(e)}", exc_info=True)
         # 出错时保守策略是要求更新
         return True
+
+def get_file_last_modified(file_path: Union[str, Path]) -> Optional[datetime]:
+    """
+    获取文件最后修改时间（北京时间）
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        Optional[datetime]: 文件最后修改时间，失败返回None
+    """
+    try:
+        if not os.path.exists(file_path):
+            logger.warning(f"文件不存在: {file_path}")
+            return None
+            
+        # 获取文件最后修改时间
+        last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+        
+        # 转换为北京时间
+        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(BEIJING_TIMEZONE)
+        
+        logger.debug(f"获取文件最后修改时间: {file_path} -> {last_modify_time}")
+        return last_modify_time
+    except Exception as e:
+        logger.error(f"获取文件最后修改时间失败: {str(e)}", exc_info=True)
+        return None
+
+def get_date_n_days_ago(n: int) -> datetime:
+    """
+    获取n天前的日期（北京时间）
+    
+    Args:
+        n: 天数
+        
+    Returns:
+        datetime: n天前的日期
+    """
+    try:
+        current_time = get_beijing_time()
+        date_n_days_ago = current_time - timedelta(days=n)
+        logger.debug(f"获取{n}天前的日期: {date_n_days_ago}")
+        return date_n_days_ago
+    except Exception as e:
+        logger.error(f"获取{n}天前的日期失败: {str(e)}", exc_info=True)
+        return get_beijing_time()
+
+def is_weekend(date: Optional[datetime] = None) -> bool:
+    """
+    判断是否为周末
+    
+    Args:
+        date: 要判断的日期，如果为None则使用当前日期
+        
+    Returns:
+        bool: 如果是周末返回True，否则返回False
+    """
+    try:
+        if date is None:
+            date = get_beijing_time()
+        
+        # 转换为日期对象
+        if isinstance(date, datetime):
+            date = date.date()
+        
+        # 周末是周六和周日
+        if date.weekday() >= 5:  # 5=周六, 6=周日
+            logger.debug(f"{date} 是周末")
+            return True
+        
+        logger.debug(f"{date} 不是周末")
+        return False
+    except Exception as e:
+        logger.error(f"判断是否为周末失败: {str(e)}", exc_info=True)
+        return False
+
+def get_business_days(start_date: datetime, end_date: datetime) -> List[datetime]:
+    """
+    获取指定日期范围内的所有工作日
+    
+    Args:
+        start_date: 开始日期
+        end_date: 结束日期
+        
+    Returns:
+        List[datetime]: 工作日列表
+    """
+    try:
+        # 确保日期范围正确
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
+        
+        # 确保日期带有时区信息
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=BEIJING_TIMEZONE)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=BEIJING_TIMEZONE)
+        
+        business_days = []
+        current_date = start_date
+        
+        # 遍历日期范围，收集所有工作日
+        while current_date <= end_date:
+            if not is_weekend(current_date):
+                business_days.append(current_date)
+            current_date += timedelta(days=1)
+        
+        logger.debug(f"获取工作日范围: {start_date} 到 {end_date} -> 共{len(business_days)}个工作日")
+        return business_days
+    except Exception as e:
+        logger.error(f"获取工作日范围失败 {start_date} 到 {end_date}: {str(e)}", exc_info=True)
+        return []

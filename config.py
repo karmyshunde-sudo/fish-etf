@@ -39,6 +39,10 @@ class Config:
     # -------------------------
     # 初次爬取默认时间范围（1年）
     INITIAL_CRAWL_DAYS: int = 365
+
+    # ETF列表更新间隔（天）
+    ETF_LIST_UPDATE_INTERVAL: int = 7  
+    # 每7天更新一次ETF列表
     
     # 中文列名映射（固化，所有数据源统一）
     STANDARD_COLUMNS: Dict[str, str] = {

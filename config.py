@@ -125,7 +125,7 @@ class Config:
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
         from datetime import datetime
-        date = date_str or datetime.now().strftime("%Y-%m-%极客时间
+        date = date_str or datetime.now().strftime("%Y-%m-%极客时间")
         date = date_str or datetime.now().strftime("%Y-%m-%d")
         return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
     

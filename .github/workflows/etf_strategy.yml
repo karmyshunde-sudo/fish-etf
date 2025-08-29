@@ -227,12 +227,12 @@ jobs:
             echo "任务 ${{ env.TASK }} 已跳过（今日已推送）"
           elif [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
             if [ ${{ steps.execute_task.outputs.file_count }} -gt 0 ]; then
-              echo "ETF任务[${{ env.TASK }}]执行成功，生成${{ steps.execute_task.outputs.file_count }}个文件"
+              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功，生成${{ steps.execute_task.outputs.file_count }}个文件"
             else
-              echo "ETF任务[${{ env.TASK }}]执行成功，但未生成新文件"
+              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功，但未生成新文件"
             fi
           else
-            echo "ETF任务[${{ env.TASK }}]执行失败"
+            echo "【GIT-fish-etf】[${{ env.TASK }}]执行失败"
           fi
       
       - name: 失败通知（企业微信）
@@ -243,7 +243,7 @@ jobs:
         run: |
           if [ -n "$WECOM_WEBHOOK" ]; then
             beijing_time=$(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')
-            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ ETF任务[${TASK}]执行失败\\n时间: ${beijing_time}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${TASK}]执行失败\\n时间: ${beijing_time}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
             curl -s -X POST "$WECOM_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "$payload" || echo "企业微信通知发送失败"

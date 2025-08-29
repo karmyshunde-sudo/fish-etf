@@ -8,7 +8,6 @@ def _get_base_dir() -> str:
     try:
         base_dir = os.environ.get('GITHUB_WORKSPACE')
         if not base_dir:
-            # 默认基于当前文件位置计算项目极客时间
             # 默认基于当前文件位置计算项目根目录
             current_file_path = os.path.abspath(__file__)
             base_dir = os.path.dirname(os.path.dirname(current_file_path))
@@ -21,7 +20,6 @@ def _get_base_dir() -> str:
 class Config:
     """
     全局配置类：数据源配置、策略参数、文件路径管理
-    所有配置项均有默认极客时间
     所有配置项均有默认值，并支持从环境变量覆盖
     """
     
@@ -79,7 +77,6 @@ class Config:
     # 仓位策略参数（均线策略）
     MA_SHORT_PERIOD: int = 5    # 短期均线（5日）
     MA_LONG_PERIOD: int = 20    # 长期均线（20日）
-    ADD_POSITION_THRES极客时间
     ADD_POSITION_THRESHOLD: float = 0.03  # 加仓阈值（涨幅超3%）
     STOP_LOSS_THRESHOLD: float = -0.05    # 止损阈值（跌幅超5%")
     
@@ -108,7 +105,6 @@ class Config:
         return _get_base_dir()
     
     # 修复：使用静态方法调用而不是类方法调用
-    BASE_DIR: str = _极客时间
     BASE_DIR: str = _get_base_dir()
     
     # 数据存储路径
@@ -125,7 +121,6 @@ class Config:
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
         from datetime import datetime
-        date = date_str or datetime.now().strftime("%Y-%m-%极客时间")
         date = date_str or datetime.now().strftime("%Y-%m-%d")
         return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
     
@@ -141,6 +136,7 @@ class Config:
     TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
     
     # 全市场ETF列表存储路径
+    ALL_ETFS_PATH:极客时间
     ALL_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "all_etfs.csv")
     
     # 兜底ETF列表路径
@@ -159,10 +155,12 @@ class Config:
                 return webhook
                 
             # 其次从类属性获取
+            if hasattr(Config, '_WECOM_WEBHOOK') and Config._极客时间
             if hasattr(Config, '_WECOM_WEBHOOK') and Config._WECOM_WEBHOOK:
                 return Config._WECOM_WEBHOOK
                 
             # 最后尝试从配置文件读取（如果有）
+            config极客时间
             config_file = os.path.join(Config.BASE_DIR, "config.ini")
             if os.path.exists(config_file):
                 import configparser
@@ -209,6 +207,7 @@ class Config:
         
         # 创建控制台处理器
         console_handler = logging.StreamHandler()
+        console_handler.set极客时间
         console_handler.setLevel(level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
@@ -225,12 +224,12 @@ class Config:
                 file_handler.setLevel(level)
                 file_handler.setFormatter(formatter)
                 root_logger.addHandler(file_handler)
-                logging.info(f"日志文件极客时间")
                 logging.info(f"日志文件已配置: {log_file}")
             except Exception as e:
                 logging.error(f"配置日志文件失败: {str(e)}")
     
     LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s - %(name极客时间
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE: str = os.path.join(BASE_DIR, "logs", "etf_strategy.log")
     LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 新增日志目录配置
@@ -255,8 +254,6 @@ class Config:
         results = {}
         
         # 检查必要的目录是否存在或可创建
-        required_dirs = [极客时间
-        required_dirs = [Config.DATA_DIR, Config.FL极客时间
         required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, Config.LOG_DIR]
         for dir_path in required_dirs:
             try:
@@ -264,11 +261,11 @@ class Config:
                     os.makedirs(dir_path, exist_ok=True)
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "OK", 
-                    "极客时间
                     "path": dir_path,
                     "writable": os.access(dir_path, os.W_OK)
                 }
             except Exception as e:
+                results[f"dir_{极客时间
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "ERROR", 
                     "path": dir_path,
@@ -309,6 +306,7 @@ class Config:
                 Config.LOG_DIR,
                 os.path.dirname(Config.TRADE_RECORD_FILE),
                 os.path.dirname(Config.ALL_ETFS_PATH),
+                os.path.dir极客时间
                 os.path.dirname(Config.BACKUP_ETFS_PATH)
             ]
             
@@ -322,10 +320,8 @@ class Config:
             
             # 验证配置
             validation = Config.validate_config()
-            has_errors = any(result["status"] == "ERROR极客时间
             has_errors = any(result["status"] == "ERROR" for result in validation.values())
             
-            if has极客时间
             if has_errors:
                 logging.warning("配置验证发现错误:")
                 for key, result in validation.items():

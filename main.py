@@ -260,13 +260,10 @@ def handle_update_etf_list() -> Dict[str, Any]:
         success_msg = f"全市场ETF列表更新完成，共{len(etf_list)}只"
         logger.info(success_msg)
         
-        # 获取文件修改时间
+        # 获取文件修改时间并转换为北京时间
         file_path = Config.ALL_ETFS_PATH
         last_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
-        
-        # 使用date_utils中的函数转换为北京时间
-        from utils.date_utils import convert_to_beijing_time
-        last_modified_beijing = convert_to_beijing_time(last_modified)
+        last_modified_beijing = last_modified.replace(tzinfo=timezone.utc).astimezone(BEIJING_TIMEZONE)
         
         # 计算过期时间（7天后）
         expiration_beijing = last_modified_beijing + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)

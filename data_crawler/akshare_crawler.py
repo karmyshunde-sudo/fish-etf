@@ -102,9 +102,10 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
             df = interface()
             if not df.empty:
                 # 对返回的数据进行日期过滤
-                df['date'] = pd.to_datetime(df['date'])
-                mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
-                df = df.loc[mask]
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
+                    df = df.loc[mask]
                 
                 if not df.empty:
                     logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据")
@@ -138,7 +139,7 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
         logger.warning(f"fund_etf_hist_em 接口调用失败: {str(e)}")
         return pd.DataFrame()
 
-def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:  # 移除了start_date和end_date参数
+def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
     """
     尝试使用 fund_etf_hist_sina 接口
     :param etf_code: ETF代码
@@ -149,8 +150,29 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:  # 移除了start_dat
         symbol = get_symbol_with_market_prefix(etf_code)
         logger.debug(f"尝试使用 fund_etf_hist_sina 接口获取ETF {symbol} 数据")
         
-        # 移除了period、start_date和end_date参数
+        # 调用新浪接口
         df = ak.fund_etf_hist_sina(symbol=symbol)
+        
+        # 新浪接口返回的数据可能需要特殊处理
+        if not df.empty:
+            # 新浪接口返回的列名可能是英文，需要转换为中文
+            column_mapping = {
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量',
+                'amount': '成交额'
+            }
+            
+            # 重命名列
+            df = df.rename(columns=column_mapping)
+            
+            # 确保日期列存在
+            if '日期' not in df.columns and 'date' in df.columns:
+                df = df.rename(columns={'date': '日期'})
+                
         return df
     except Exception as e:
         logger.warning(f"fund_etf_hist_sina 接口调用失败: {str(e)}")
@@ -217,14 +239,20 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 if col == "涨跌额" and "收盘" in df.columns:
                     # 计算涨跌额
                     df[col] = (df["收盘"] - df["收盘"].shift(1)).round(4)
-                    df.loc[0, col] = 0.0
+                    df.loc[df.index[0], col] = 0.0
                     logger.debug(f"计算涨跌额列完成")
                     
                 elif col == "振幅" and "最高" in df.columns and "最低" in df.columns and "收盘" in df.columns:
                     # 计算振幅
                     df[col] = ((df["最高"] - df["最低"]) / df["收盘"].shift(1) * 100).round(4)
-                    df.loc[0, col] = 0.0
+                    df.loc[df.index[0], col] = 0.0
                     logger.debug(f"计算振幅列完成")
+                    
+                elif col == "涨跌幅" and "收盘" in df.columns:
+                    # 计算涨跌幅
+                    df[col] = (df["收盘"].pct_change() * 100).round(4)
+                    df.loc[df.index[0], col] = 0.0
+                    logger.debug(f"计算涨跌幅列完成")
                     
                 elif col == "换手率" and "成交量" in df.columns and "成交额" in df.columns and "收盘" in df.columns:
                     # 计算换手率（近似计算）
@@ -331,4 +359,3 @@ try:
     logger.info("AkShare爬虫模块初始化完成")
 except Exception as e:
     print(f"AkShare爬虫模块初始化失败: {str(e)}")
-# 0828-1256【akshare_crawler.py代码】一共246行代码

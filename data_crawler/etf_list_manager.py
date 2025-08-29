@@ -179,6 +179,7 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
+
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
@@ -219,15 +220,15 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
         # 转换数据类型并处理单位
-        # 流通市值单位为万元，转换为亿元
-        valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 10000
-        # 成交额单位为元，转换为万元
+        # 流通市值单位为元，转换为亿元（除以1亿）
+        valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
+        # 成交额单位为元，转换为万元（除以1万）
         valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
         
         # 筛选条件：规模>10亿，日均成交额>5000万
         filtered_etfs = valid_etfs[
             (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
-            (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME / 10000)
+            (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)
         ].copy()
         
         # 如果没有ETF通过筛选，返回原始数据（不筛选）

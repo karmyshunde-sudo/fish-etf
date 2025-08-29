@@ -12,6 +12,7 @@ import logging
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
+from utils.date_utils import convert_to_beijing_time
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

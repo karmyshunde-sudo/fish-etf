@@ -1,19 +1,30 @@
 import os
 import logging
+import sys
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 # 先定义获取基础目录的函数，避免类定义时的循环引用问题
 def _get_base_dir() -> str:
     """获取项目根目录路径"""
     try:
+        # 优先使用GITHUB_WORKSPACE环境变量（GitHub Actions环境）
         base_dir = os.environ.get('GITHUB_WORKSPACE')
-        if not base_dir:
-            # 默认基于当前文件位置计算项目根目录
-            current_file_path = os.path.abspath(__file__)
-            base_dir = os.path.dirname(os.path.dirname(current_file_path))
-        return os.path.abspath(base_dir)
+        if base_dir and os.path.exists(base_dir):
+            return os.path.abspath(base_dir)
+        
+        # 尝试基于当前文件位置计算项目根目录
+        current_file_path = os.path.abspath(__file__)
+        base_dir = os.path.dirname(os.path.dirname(current_file_path))
+        
+        # 确保目录存在
+        if os.path.exists(base_dir):
+            return os.path.abspath(base_dir)
+        
+        # 作为最后手段，使用当前工作目录
+        return os.path.abspath(os.getcwd())
     except Exception as e:
-        print(f"获取项目根目录失败: {str(e)}")
+        print(f"获取项目根目录失败: {str(e)}", file=sys.stderr)
         # 退回到当前工作目录
         return os.path.abspath(os.getcwd())
 
@@ -108,13 +119,14 @@ class Config:
     BASE_DIR: str = _get_base_dir()
     
     # 数据存储路径
-    DATA_DIR: str = os.path.join(BASE_DIR, "data", "etf_daily")
+    DATA_DIR: str = os.path.join(BASE_DIR, "data")
+    ETFS_DAILY_DIR: str = os.path.join(DATA_DIR, "etf_daily")
     
     # ETF元数据（记录最后爬取日期）
-    METADATA_PATH: str = os.path.join(BASE_DIR, "data", "etf_metadata.csv")
+    METADATA_PATH: str = os.path.join(DATA_DIR, "etf_metadata.csv")
     
     # 策略结果标记（避免单日重复推送）
-    FLAG_DIR: str = os.path.join(BASE_DIR, "data", "flags")
+    FLAG_DIR: str = os.path.join(DATA_DIR, "flags")
     
     # 套利结果标记文件
     @staticmethod
@@ -133,13 +145,13 @@ class Config:
         return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
     
     # 交易记录文件
-    TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
+    TRADE_RECORD_FILE: str = os.path.join(DATA_DIR, "trade_records.csv")
     
     # 全市场ETF列表存储路径
-    ALL_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "all_etfs.csv")
+    ALL_ETFS_PATH: str = os.path.join(DATA_DIR, "all_etfs.csv")
     
     # 兜底ETF列表路径
-    BACKUP_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "karmy_etf.csv")
+    BACKUP_ETFS_PATH: str = os.path.join(DATA_DIR, "karmy_etf.csv")
 
     # -------------------------
     # 4. 日志配置
@@ -190,32 +202,30 @@ class Config:
     
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE: str = os.path.join(BASE_DIR, "logs", "etf_strategy.log")
-    LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 新增日志目录配置
-    LOG_FILE_PATH: str = LOG_FILE  # 兼容性配置
+    LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 日志目录配置
+    LOG_FILE: str = os.path.join(LOG_DIR, "etf_strategy.log")  # 日志文件路径
 
     # -------------------------
-    # 6. ETF筛选配置
+    # 5. 新增：网络请求配置
+    # -------------------------
+    # 请求超时设置（秒）
+    REQUEST_TIMEOUT: int = 30
+    
+    # -------------------------
+    # 6. 企业微信机器人配置
+    # -------------------------
+    # 直接作为类属性，确保其他模块能直接访问
+    WECOM_WEBHOOK: str = os.getenv("WECOM_WEBHOOK", "")
+    
+    # -------------------------
+    # 7. ETF筛选配置
     # -------------------------
     # ETF筛选参数
     MIN_FUND_SIZE: float = 5.0  # 最小基金规模（亿元）
-    MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股")
+    MIN_AVG_VOLUME: float = 1000.0  # 最小日均成交量（万股）
 
-
     # -------------------------
-    # 8. 企业微信机器人配置
-    # -------------------------
-    @staticmethod
-    def get_wecom_webhook() -> Optional[str]:
-        """
-        安全地从环境变量获取企业微信机器人的Webhook URL。
-        如果环境变量未设置，则返回None。
-        :return: Webhook URL字符串或None
-        """
-        return os.environ.get('WECOM_WEBHOOK_URL')
-    
-    # -------------------------
-    # 7. 配置验证方法
+    # 8. 配置验证方法
     # -------------------------
     @staticmethod
     def validate_config() -> Dict[str, Any]:
@@ -226,7 +236,12 @@ class Config:
         results = {}
         
         # 检查必要的目录是否存在或可创建
-        required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, Config.LOG_DIR]
+        required_dirs = [
+            Config.DATA_DIR, 
+            Config.ETFS_DAILY_DIR,
+            Config.FLAG_DIR, 
+            Config.LOG_DIR
+        ]
         for dir_path in required_dirs:
             try:
                 if not os.path.exists(dir_path):
@@ -251,17 +266,16 @@ class Config:
             "expected": 1.0
         }
 
-        # 检查微信配置 (现在这个调用不会报错了)
-        webhook = Config.get_wecom_webhook() # 现在这个方法已定义
+        # 检查微信配置
         results["wechat"] = {
-            "status": "OK" if webhook else "WARNING",
-            "webhook_configured": bool(webhook)
+            "status": "OK" if Config.WECOM_WEBHOOK else "WARNING",
+            "webhook_configured": bool(Config.WECOM_WEBHOOK)
         }
         
         return results
 
     # -------------------------
-    # 路径初始化方法
+    # 9. 路径初始化方法
     # -------------------------
     @staticmethod
     def init_dirs() -> bool:
@@ -273,6 +287,7 @@ class Config:
             # 确保数据目录存在
             dirs_to_create = [
                 Config.DATA_DIR,
+                Config.ETFS_DAILY_DIR,
                 Config.FLAG_DIR,
                 Config.LOG_DIR,
                 os.path.dirname(Config.TRADE_RECORD_FILE),
@@ -304,16 +319,98 @@ class Config:
             logging.error(f"初始化目录失败: {str(e)}")
             return False
 
+# -------------------------
 # 初始化配置
+# -------------------------
 try:
-    # 先设置基础日志配置
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
+    # 首先尝试初始化基础目录
+    base_dir = _get_base_dir()
+    
+    # 重新定义关键路径，确保它们基于正确的base_dir
+    Config.BASE_DIR = base_dir
+    Config.DATA_DIR = os.path.join(base_dir, "data")
+    Config.ETFS_DAILY_DIR = os.path.join(Config.DATA_DIR, "etf_daily")
+    Config.FLAG_DIR = os.path.join(Config.DATA_DIR, "flags")
+    Config.LOG_DIR = os.path.join(base_dir, "logs")
+    Config.LOG_FILE = os.path.join(Config.LOG_DIR, "etf_strategy.log")
+    
+    # 设置基础日志配置
+    logging.basicConfig(
+        level=Config.LOG_LEVEL,
+        format=Config.LOG_FORMAT,
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
     
     # 初始化目录
-    Config.init_dirs()
-    logging.info("配置初始化完成")
+    if Config.init_dirs():
+        logging.info("配置初始化完成")
+    else:
+        logging.warning("配置初始化完成，但存在警告")
+        
 except Exception as e:
-    print(f"配置初始化失败: {str(e)}")
-    # 退回到基础日志配置
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
+    # 创建一个临时的、基本的日志配置
+    logging.basicConfig(
+        level="INFO",
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # 记录错误但继续执行
     logging.error(f"配置初始化失败: {str(e)}")
+    logging.info("已设置基础日志配置，继续执行")
+
+# -------------------------
+# 额外验证 - 确保关键配置项存在
+# -------------------------
+def _validate_critical_config():
+    """验证关键配置项是否存在"""
+    critical_configs = [
+        "WECOM_WEBHOOK",
+        "REQUEST_TIMEOUT",
+        "BASE_DIR",
+        "DATA_DIR",
+        "ETFS_DAILY_DIR",
+        "LOG_DIR",
+        "LOG_FILE",
+        "ALL_ETFS_PATH",
+        "BACKUP_ETFS_PATH"
+    ]
+    
+    for config_name in critical_configs:
+        if not hasattr(Config, config_name):
+            logging.error(f"关键配置项缺失: {config_name}")
+            # 尝试修复
+            if config_name == "WECOM_WEBHOOK":
+                setattr(Config, "WECOM_WEBHOOK", "")
+                logging.warning("已添加缺失的WECOM_WEBHOOK配置项")
+            elif config_name == "REQUEST_TIMEOUT":
+                setattr(Config, "REQUEST_TIMEOUT", 30)
+                logging.warning("已添加缺失的REQUEST_TIMEOUT配置项")
+            elif config_name == "ETFS_DAILY_DIR":
+                setattr(Config, "ETFS_DAILY_DIR", os.path.join(Config.DATA_DIR, "etf_daily"))
+                logging.warning("已添加缺失的ETFS_DAILY_DIR配置项")
+
+# 执行额外验证
+try:
+    _validate_critical_config()
+except Exception as e:
+    logging.error(f"配置验证过程中发生错误: {str(e)}")
+
+# -------------------------
+# 检查环境变量
+# -------------------------
+try:
+    wecom_webhook = os.getenv("WECOM_WEBHOOK")
+    if wecom_webhook:
+        logging.info("检测到WECOM_WEBHOOK环境变量已设置")
+    else:
+        logging.warning("WECOM_WEBHOOK环境变量未设置，微信推送可能无法工作")
+        
+    # 确保Config中的WECOM_WEBHOOK与环境变量一致
+    Config.WECOM_WEBHOOK = wecom_webhook or ""
+except Exception as e:
+    logging.error(f"检查环境变量时出错: {str(e)}")

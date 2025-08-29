@@ -230,7 +230,6 @@ def handle_update_etf_list() -> Dict[str, Any]:
             error_msg = "ETF列表更新失败：获取到空的ETF列表"
             logger.error(error_msg)
             result = {"status": "error", "message": error_msg}
-            # 发送任务完成通知
             send_task_completion_notification("update_etf_list", result)
             return result
         
@@ -244,12 +243,19 @@ def handle_update_etf_list() -> Dict[str, Any]:
         success_msg = f"全市场ETF列表更新完成，共{len(etf_list)}只"
         logger.info(success_msg)
         
-        # 返回结果包含数据来源
+        # 记录文件最后修改时间
+        file_path = Config.ALL_ETFS_PATH
+        last_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
+        expiration = last_modified + timedelta(days=7)
+        
+        # 返回结果包含数据来源和有效期
         result = {
             "status": "success", 
             "message": success_msg, 
             "count": len(etf_list),
-            "source": source
+            "source": source,
+            "last_modified": last_modified.strftime("%Y-%m-%d %H:%M:%S"),
+            "expiration": expiration.strftime("%Y-%m-%d %H:%M:%S")
         }
         
         # 发送任务完成通知
@@ -261,12 +267,8 @@ def handle_update_etf_list() -> Dict[str, Any]:
         error_msg = f"ETF列表更新失败: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
-        
         result = {"status": "error", "message": error_msg}
-        
-        # 发送任务完成通知
         send_task_completion_notification("update_etf_list", result)
-        
         return result
 
 def main() -> Dict[str, Any]:

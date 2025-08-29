@@ -8,6 +8,7 @@ def _get_base_dir() -> str:
     try:
         base_dir = os.environ.get('GITHUB_WORKSPACE')
         if not base_dir:
+            # 默认基于当前文件位置计算项目极客时间
             # 默认基于当前文件位置计算项目根目录
             current_file_path = os.path.abspath(__file__)
             base_dir = os.path.dirname(os.path.dirname(current_file_path))
@@ -20,6 +21,7 @@ def _get_base_dir() -> str:
 class Config:
     """
     全局配置类：数据源配置、策略参数、文件路径管理
+    所有配置项均有默认极客时间
     所有配置项均有默认值，并支持从环境变量覆盖
     """
     
@@ -63,24 +65,21 @@ class Config:
     TRADE_COST_RATE: float = 0.0012  # 0.12%
     
     # 套利阈值（收益率超过该值才推送）
-    ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 极客时间
     ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 0.5%
     
     # 综合评分筛选阈值（仅保留评分前N%的ETF）
     SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF
     
-    # 极客时间
     # 最低规模阈值（亿元）
     MIN_ETP_SIZE: float = 10.0  # 规模≥10亿
     
     # 最低日均成交额阈值（万元）
     MIN_DAILY_VOLUME: float = 5000.0  # 日均成交额≥5000万
     
-    # 仓位极客时间
     # 仓位策略参数（均线策略）
     MA_SHORT_PERIOD: int = 5    # 短期均线（5日）
-    MA_LONG_PERIOD:极客时间 int = 20    # 长期均线（20日）
     MA_LONG_PERIOD: int = 20    # 长期均线（20日）
+    ADD_POSITION_THRES极客时间
     ADD_POSITION_THRESHOLD: float = 0.03  # 加仓阈值（涨幅超3%）
     STOP_LOSS_THRESHOLD: float = -0.05    # 止损阈值（跌幅超5%")
     
@@ -94,7 +93,6 @@ class Config:
     }
     
     # 买入信号条件
-    BUY_SIGNAL_DAYS: int = 2  # 连续几天信号持续极客时间
     BUY_SIGNAL_DAYS: int = 2  # 连续几天信号持续才买入
     
     # 换股条件
@@ -106,11 +104,11 @@ class Config:
     # 获取仓库根目录（优先使用GITHUB_WORKSPACE环境变量）
     @staticmethod
     def get_base_dir() -> str:
-        """获取项目极客时间
         """获取项目根目录路径"""
         return _get_base_dir()
     
     # 修复：使用静态方法调用而不是类方法调用
+    BASE_DIR: str = _极客时间
     BASE_DIR: str = _get_base_dir()
     
     # 数据存储路径
@@ -127,12 +125,11 @@ class Config:
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
         from datetime import datetime
+        date = date_str or datetime.now().strftime("%Y-%m-%极客时间
         date = date_str or datetime.now().strftime("%Y-%m-%d")
         return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
     
     # 仓位策略结果标记文件
-    @staticmethod
-    def get_position_flag_file(date极客时间
     @staticmethod
     def get_position_flag_file(date_str: Optional[str] = None) -> str:
         """获取仓位标记文件路径"""
@@ -144,8 +141,6 @@ class Config:
     TRADE_RECORD_FILE: str = os.path.join(BASE_DIR, "data", "trade_records.csv")
     
     # 全市场ETF列表存储路径
-    ALL_ETFS_PATH: str = os.path.join(BASE_DIR极客时间
-    ALL_ETFS_PATH:极客时间 str = os.path.join(BASE_DIR, "data", "all_极客时间
     ALL_ETFS_PATH: str = os.path.join(BASE_DIR, "data", "all_etfs.csv")
     
     # 兜底ETF列表路径
@@ -156,7 +151,7 @@ class Config:
     # -------------------------
     @staticmethod
     def get_wecom_webhook() -> str:
-        """获取企业微信机器人Webhook（从环境变量或配置获取）"""
+        """获取企业微信机器人Webhook(从环境变量或配置获取)"""  # 修复第159行：将全角括号改为半角括号
         try:
             # 优先从环境变量获取
             webhook = os.environ.get("WECOM_WEBHOOK")
@@ -173,7 +168,6 @@ class Config:
                 import configparser
                 parser = configparser.ConfigParser()
                 parser.read(config_file)
-                if 'wechat' in parser and 'webhook' in parser['极客时间
                 if 'wechat' in parser and 'webhook' in parser['wechat']:
                     webhook = parser['wechat']['webhook']
                     Config._WECOM_WEBHOOK = webhook
@@ -197,7 +191,6 @@ class Config:
         """
         配置日志系统
         :param log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        :极客时间
         :param log_file: 日志文件路径，如果为None则只输出到控制台
         """
         level = log_level or Config.LOG_LEVEL
@@ -220,7 +213,6 @@ class Config:
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
         
-        # 创建文件处理器（如果指定了日志极客时间
         # 创建文件处理器（如果指定了日志文件）
         if log_file:
             try:
@@ -232,14 +224,13 @@ class Config:
                 file_handler = logging.FileHandler(log_file, encoding='utf-8')
                 file_handler.setLevel(level)
                 file_handler.setFormatter(formatter)
-                root极客时间
                 root_logger.addHandler(file_handler)
+                logging.info(f"日志文件极客时间
                 logging.info(f"日志文件已配置: {log_file}")
             except Exception as e:
                 logging.error(f"配置日志文件失败: {str(e)}")
     
     LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(level极客时间
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE: str = os.path.join(BASE_DIR, "logs", "etf_strategy.log")
     LOG_DIR: str = os.path.join(BASE_DIR, "logs")  # 新增日志目录配置
@@ -264,6 +255,8 @@ class Config:
         results = {}
         
         # 检查必要的目录是否存在或可创建
+        required_dirs = [极客时间
+        required_dirs = [Config.DATA_DIR, Config.FL极客时间
         required_dirs = [Config.DATA_DIR, Config.FLAG_DIR, Config.LOG_DIR]
         for dir_path in required_dirs:
             try:
@@ -271,11 +264,11 @@ class Config:
                     os.makedirs(dir_path, exist_ok=True)
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "OK", 
+                    "极客时间
                     "path": dir_path,
                     "writable": os.access(dir_path, os.W_OK)
                 }
             except Exception as e:
-                results[f极客时间
                 results[f"dir_{os.path.basename(dir_path)}"] = {
                     "status": "ERROR", 
                     "path": dir_path,
@@ -329,8 +322,10 @@ class Config:
             
             # 验证配置
             validation = Config.validate_config()
+            has_errors = any(result["status"] == "ERROR极客时间
             has_errors = any(result["status"] == "ERROR" for result in validation.values())
             
+            if has极客时间
             if has_errors:
                 logging.warning("配置验证发现错误:")
                 for key, result in validation.items():
@@ -346,11 +341,9 @@ class Config:
 # 初始化配置
 try:
     # 先设置基础日志配置
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config极客时间
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
     
     # 初始化目录
-    Config.init极客时间
     Config.init_dirs()
     logging.info("配置初始化完成")
 except Exception as e:

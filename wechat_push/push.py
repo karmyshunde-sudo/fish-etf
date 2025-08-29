@@ -145,7 +145,10 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         return False
 
 def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
-    """发送消息到企业微信，自动添加固定末尾，支持消息分片和重试机制"""
+    """发送消息到企业微信，自动添加固定末尾，支持消息分片和重试机制
+    :param message: 消息内容
+    :param webhook: 企业微信Webhook地址，如果为None则使用配置中的地址
+    :return: 是否成功发送"""
     try:
         # 从环境变量获取Webhook（优先于配置文件）
         if webhook is None:
@@ -154,9 +157,8 @@ def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
             logger.error("企业微信Webhook未配置，无法发送消息")
             return False
             
-        # 动态生成当前时间并格式化消息
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-        full_message = f"{message}{Config.WECOM_MESFOOTER.format(current_time=current_time)}"
+        # 添加固定末尾
+        full_message = f"{message}{Config.WECOM_MESFOOTER}"
         
         # 检查消息长度并进行分片
         message_chunks = _check_message_length(full_message)

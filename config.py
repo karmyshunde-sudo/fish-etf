@@ -225,7 +225,7 @@ class Config:
                 file_handler.setLevel(level)
                 file_handler.setFormatter(formatter)
                 root_logger.addHandler(file_handler)
-                logging.info(f"日志文件极客时间
+                logging.info(f"日志文件极客时间")
                 logging.info(f"日志文件已配置: {log_file}")
             except Exception as e:
                 logging.error(f"配置日志文件失败: {str(e)}")

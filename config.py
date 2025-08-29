@@ -216,6 +216,7 @@ class Config:
     # -------------------------
     # 直接作为类属性，确保其他模块能直接访问
     WECOM_WEBHOOK: str = os.getenv("WECOM_WEBHOOK", "")
+    WECOM_MESFOOTER: str = "\n\n【GIT-fish-etf】 数据来源：AkShare | 更新时间: {current_time}"
     
     # -------------------------
     # 7. ETF筛选配置

@@ -3,19 +3,20 @@
 """
 策略模块主入口
 负责协调各个策略组件，提供统一的策略执行接口
+特别优化了消息推送格式，确保使用统一的消息模板
 """
 
 import os
 import pandas as pd
 import logging
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 from config import Config
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
-    is_market_open,
-    is_trading_day
+    is_file_outdated
 )
 from wechat_push.push import send_wechat_message
 
@@ -23,9 +24,13 @@ from wechat_push.push import send_wechat_message
 logger = logging.getLogger(__name__)
 
 # 直接导出策略函数，以便 main.py 可以导入
-from .arbitrage import calculate_arbitrage_opportunity, format_arbitrage_message
+from .arbitrage import (
+    calculate_arbitrage_opportunity,
+    generate_arbitrage_message_content,
+    send_arbitrage_opportunity
+)
 from .position import calculate_position_strategy, send_daily_report_via_wechat
-from .etf_scoring import get_top_rated_etfs
+from .etf_scoring import get_top_rated_etfs, get_etf_basic_info
 
 def run_all_strategies() -> Dict[str, Any]:
     """
@@ -35,7 +40,9 @@ def run_all_strategies() -> Dict[str, Any]:
         Dict[str, Any]: 包含所有策略结果的字典
     """
     try:
-        logger.info("开始运行所有ETF策略")
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        logger.info(f"开始运行所有ETF策略 (UTC: {utc_now}, CST: {beijing_now})")
         
         results = {
             "arbitrage": "",
@@ -70,6 +77,13 @@ def run_all_strategies() -> Dict[str, Any]:
     except Exception as e:
         error_msg = f"运行所有策略时发生未预期错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return {
             "arbitrage": f"【策略错误】{error_msg}",
             "position": f"【策略错误】{error_msg}",
@@ -83,10 +97,12 @@ def get_daily_report() -> str:
     生成每日策略报告
     
     Returns:
-        str: 格式化的策略报告
+        str: 业务内容字符串（不包含格式）
     """
     try:
-        logger.info("开始生成每日策略报告")
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        logger.info(f"开始生成每日策略报告 (UTC: {utc_now}, CST: {beijing_now})")
         
         strategies = run_all_strategies()
         
@@ -110,15 +126,20 @@ def get_daily_report() -> str:
         report += "\n💼 仓位操作建议\n"
         report += f"{strategies['position']}\n"
         
-        # 添加市场状态信息
-        market_status = "开市" if is_market_open() else "闭市"
-        trading_status = "交易日" if is_trading_day() else "非交易日"
-        
-        report += (
-            "\n📊 市场状态\n"
-            f"• 当前状态: {market_status}\n"
-            f"• 今日是否交易日: {trading_status}\n"
-        )
+        # 添加ETF评分统计
+        report += "\n📊 ETF评分统计\n"
+        try:
+            etf_list = get_etf_basic_info()
+            if not etf_list.empty:
+                avg_score = etf_list["综合评分"].mean()
+                report += f"• 评分平均值: {avg_score:.2f}\n"
+                report += f"• 评分最高ETF: {etf_list.iloc[0]['ETF名称']}({etf_list.iloc[0]['ETF代码']}) - {etf_list.iloc[0]['综合评分']:.2f}\n"
+                report += f"• 评分最低ETF: {etf_list.iloc[-1]['ETF名称']}({etf_list.iloc[-1]['ETF代码']}) - {etf_list.iloc[-1]['综合评分']:.2f}\n"
+            else:
+                report += "• 无法获取ETF评分数据\n"
+        except Exception as e:
+            logger.error(f"获取ETF评分统计失败: {str(e)}", exc_info=True)
+            report += "• ETF评分统计获取失败\n"
         
         # 添加风险提示
         report += (
@@ -133,6 +154,13 @@ def get_daily_report() -> str:
     except Exception as e:
         error_msg = f"生成每日报告失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return f"【报告生成错误】{error_msg}"
 
 def send_daily_report_via_wechat() -> bool:
@@ -167,14 +195,23 @@ def send_daily_report_via_wechat() -> bool:
             logger.info("每日策略报告已成功发送到微信")
         else:
             logger.error("微信消息发送失败")
+            
+            # 发送错误通知
+            send_wechat_message(
+                message="每日策略报告生成成功，但微信消息发送失败",
+                message_type="error"
+            )
         
         return success
     except Exception as e:
         error_msg = f"发送每日报告失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
-        # 发送错误通知（使用error类型）
-        send_wechat_message(error_msg, message_type="error")
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         
         return False
 
@@ -213,16 +250,16 @@ def check_arbitrage_exit_signals() -> bool:
         if not yesterday_arbitrage.empty:
             logger.info(f"发现{len(yesterday_arbitrage)}条需要退出的套利交易")
             
-            # 生成退出信号消息
-            exit_message = "【套利退出信号】\n"
+            # 生成退出信号内容
+            exit_content = "【套利退出信号】\n"
             for _, row in yesterday_arbitrage.iterrows():
-                exit_message += (
+                exit_content += (
                     f"• {row['ETF名称']}({row['ETF代码']})："
                     f"已持有1天，建议退出\n"
                 )
             
-            # 发送退出信号（使用default类型）
-            send_wechat_message(exit_message)
+            # 发送退出信号
+            send_wechat_message(exit_content)
             return True
         
         logger.info("未发现需要退出的套利交易")
@@ -232,8 +269,11 @@ def check_arbitrage_exit_signals() -> bool:
         error_msg = f"检查套利退出信号失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
-        # 发送错误通知（使用error类型）
-        send_wechat_message(error_msg, message_type="error")
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         
         return False
 
@@ -257,7 +297,9 @@ def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5)
         last_exception = None
         for attempt in range(max_retries):
             try:
-                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})")
+                # 获取当前双时区时间
+                utc_now, beijing_now = get_current_times()
+                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries}) (UTC: {utc_now}, CST: {beijing_now})")
                 return strategy_func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
@@ -268,43 +310,16 @@ def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5)
         
         logger.error(f"策略执行失败，已达最大重试次数")
         
-        # 发送错误通知（使用error类型）
+        # 发送错误通知
         error_msg = f"【策略执行失败】{strategy_func.__name__} 达到最大重试次数: {str(last_exception)}"
-        send_wechat_message(error_msg, message_type="error")
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         
         raise last_exception
     
     return wrapper
-
-def check_strategy_execution_conditions() -> Tuple[bool, str]:
-    """
-    检查策略执行条件
-    
-    Returns:
-        Tuple[bool, str]: (是否可以执行, 原因)
-    """
-    try:
-        # 检查是否为交易日
-        if not is_trading_day():
-            return False, "今日非交易日"
-        
-        # 检查市场是否开市
-        if not is_market_open():
-            return False, "当前非交易时间"
-        
-        # 检查ETF列表是否更新
-        if not os.path.exists(Config.ALL_ETFS_PATH):
-            return False, "ETF列表未更新"
-        
-        # 检查ETF列表是否过期
-        if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-            return False, "ETF列表已过期"
-        
-        return True, "所有条件满足"
-    
-    except Exception as e:
-        logger.error(f"检查策略执行条件失败: {str(e)}", exc_info=True)
-        return False, f"条件检查异常: {str(e)}"
 
 # 模块初始化
 try:
@@ -317,14 +332,39 @@ try:
     # 初始化日志
     logger.info("策略模块初始化完成")
     
-    # 记录当前市场状态
-    market_status = "开市" if is_market_open() else "闭市"
-    trading_status = "交易日" if is_trading_day() else "非交易日"
-    logger.info(f"当前市场状态: {trading_status}，{market_status}")
+    # 检查ETF列表是否过期
+    if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
+        warning_msg = "ETF列表已过期，请及时更新"
+        logger.warning(warning_msg)
+        
+        # 发送警告通知
+        send_wechat_message(
+            message=warning_msg,
+            message_type="error"
+        )
     
 except Exception as e:
-    logger.error(f"策略模块初始化失败: {str(e)}", exc_info=True)
-    # 退回到基础日志配置
-    import logging
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
-    logging.error(f"策略模块初始化失败: {str(e)}")
+    error_msg = f"策略模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)
+    
+    # 发送错误通知
+    try:
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

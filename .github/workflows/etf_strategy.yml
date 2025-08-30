@@ -257,7 +257,7 @@ jobs:
           if [ -n "$WECOM_WEBHOOK" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
-            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
             curl -s -X POST "$WECOM_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "$payload" || echo "企业微信通知发送失败"

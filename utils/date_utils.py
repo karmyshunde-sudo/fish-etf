@@ -534,27 +534,18 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
         return True
     
     try:
-        # 获取文件最后修改时间（以UTC时间处理）
-        timestamp = os.path.getmtime(file_path)
-        # 正确处理：将文件修改时间视为UTC时间
-        last_modify_time = datetime.fromtimestamp(timestamp, tz=UTC_TIMEZONE)
+        # 简单方法：直接计算时间差（秒）
+        current_time = time.time()
+        file_time = os.path.getmtime(file_path)
+        days_since_update = (current_time - file_time) / (24 * 3600)
         
-        # 转换为北京时间用于比较
-        last_modify_time_beijing = last_modify_time.astimezone(BEIJING_TIMEZONE)
-        
-        # 获取当前北京时间
-        current_time = get_beijing_time()
-        
-        # 计算距离上次更新的天数
-        time_diff = current_time - last_modify_time_beijing
-        days_since_update = time_diff.days
-        
+        # 由于GitHub是UTC，而我们需要UTC+8，但因为是计算天数差，所以直接使用时间戳差值即可
         need_update = days_since_update >= max_age_days
         
         if need_update:
-            logger.info(f"文件已过期({days_since_update}天)，需要更新")
+            logger.info(f"文件已过期({days_since_update:.1f}天)，需要更新")
         else:
-            logger.debug(f"文件未过期({days_since_update}天)，无需更新")
+            logger.debug(f"文件未过期({days_since_update:.1f}天)，无需更新")
             
         return need_update
     except Exception as e:

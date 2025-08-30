@@ -20,7 +20,7 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-from utils.file_utils import load_etf_daily_data  # 新增导入：用于动态计算日均成交额
+from utils.file_utils import load_etf_daily_data, ensure_chinese_columns, ensure_required_columns  # 修复：添加必要的导入
 from .etf_scoring import get_etf_basic_info, get_etf_name
 from wechat_push.push import send_wechat_message
 
@@ -128,8 +128,45 @@ def calculate_daily_volume(etf_code: str) -> float:
             logger.debug(f"ETF {etf_code} 无日线数据，无法计算日均成交额")
             return 0.0
         
+        # 修复：添加详细的调试日志
+        logger.debug(f"ETF {etf_code} 原始列名: {list(etf_df.columns)}")
+        
+        # 确保使用中文列名
+        etf_df = ensure_chinese_columns(etf_df)
+        
+        # 修复：确保所有必需列都存在
+        etf_df = ensure_required_columns(etf_df)
+        
+        # 修复：再次检查列名
+        logger.debug(f"ETF {etf_code} 标准化后列名: {list(etf_df.columns)}")
+        
+        # 修复：添加多种可能的日期列名检查
+        date_columns = ["日期", "date", "Date", "DATE", "交易日期", "dt", "datetime"]
+        date_col = next((col for col in date_columns if col in etf_df.columns), None)
+        
+        if not date_col:
+            logger.warning(f"ETF {etf_code} 数据缺少日期列（检查了: {', '.join(date_columns)}），无法计算日均成交额")
+            return 0.0
+        
+        logger.debug(f"ETF {etf_code} 使用日期列: {date_col}")
+        
+        # 修复：确保日期列是字符串类型
+        if not pd.api.types.is_string_dtype(etf_df[date_col]):
+            etf_df[date_col] = etf_df[date_col].astype(str)
+        
+        # 修复：处理可能的日期格式问题
+        try:
+            etf_df[date_col] = pd.to_datetime(etf_df[date_col]).dt.strftime("%Y-%m-%d")
+        except Exception as e:
+            logger.warning(f"ETF {etf_code} 日期格式转换失败: {str(e)}，尝试其他格式")
+            try:
+                etf_df[date_col] = pd.to_datetime(etf_df[date_col], format="%m/%d/%Y").dt.strftime("%Y-%m-%d")
+            except:
+                logger.error(f"ETF {etf_code} 无法解析日期列，无法计算日均成交额")
+                return 0.0
+        
         # 确保数据按日期排序
-        etf_df = etf_df.sort_values("日期", ascending=False)
+        etf_df = etf_df.sort_values(date_col, ascending=False)
         
         # 取最近30个交易日的数据
         recent_data = etf_df.head(30)
@@ -141,9 +178,12 @@ def calculate_daily_volume(etf_code: str) -> float:
         
         # 计算日均成交额（单位：万元）
         # 注意：成交额列的单位可能是元，需要转换为万元
-        if "成交额" in recent_data.columns:
+        amount_columns = ["成交额", "amount", "Amount", "AMOUNT"]
+        amount_col = next((col for col in amount_columns if col in recent_data.columns), None)
+        
+        if amount_col:
             # 假设成交额单位是元，转换为万元
-            avg_volume = recent_data["成交额"].mean() / 10000
+            avg_volume = recent_data[amount_col].mean() / 10000
             logger.debug(f"ETF {etf_code} 日均成交额: {avg_volume:.2f}万元（{len(recent_data)}天数据）")
             return avg_volume
         else:
@@ -213,10 +253,11 @@ def load_etf_list() -> pd.DataFrame:
             avg_daily_volume = calculate_daily_volume(etf_code)
             etf_list.at[_, "日均成交额"] = avg_daily_volume
         
+        # 修复：使用正确的配置属性
         # 筛选符合条件的ETF
         filtered_etfs = etf_list[
-            (etf_list["基金规模"] >= Config.MIN_FUND_SIZE) &
-            (etf_list["日均成交额"] >= Config.MIN_AVG_VOLUME)
+            (etf_list["基金规模"] >= Config.GLOBAL_MIN_FUND_SIZE) &
+            (etf_list["日均成交额"] >= Config.GLOBAL_MIN_AVG_VOLUME)
         ]
         
         logger.info(f"加载 {len(filtered_etfs)} 只符合条件的ETF")

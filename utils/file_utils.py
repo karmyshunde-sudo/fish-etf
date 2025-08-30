@@ -872,3 +872,86 @@ def write_excel(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool
     except Exception as e:
         logger.error(f"写入Excel文件失败 {file_path}: {str(e)}")
         return False
+
+def save_incremental_data(df: pd.DataFrame, etf_code: str) -> bool:
+    """
+    增量保存ETF日线数据（处理中文日期列）
+    
+    Args:
+        df: 包含ETF日线数据的DataFrame
+        etf_code: ETF代码
+        
+    Returns:
+        bool: 保存成功返回True，否则返回False
+    """
+    try:
+        # 获取正确的文件路径
+        file_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
+        logger.info(f"开始增量保存ETF {etf_code} 数据到: {file_path}")
+        
+        # 确保DataFrame包含必要列
+        if df.empty:
+            logger.warning(f"尝试保存空DataFrame: {etf_code}")
+            return False
+            
+        # 处理日期列 - 支持多种可能的列名
+        date_col = None
+        for col in df.columns:
+            if col.lower() in ['date', '日期', 'dt', 'trade_date']:
+                date_col = col
+                break
+                
+        if not date_col:
+            logger.error(f"DataFrame缺少日期列: {etf_code}")
+            return False
+            
+        # 确保日期列为datetime类型
+        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            df[date_col] = pd.to_datetime(df[date_col])
+            
+        # 处理现有数据
+        if os.path.exists(file_path):
+            existing_df = pd.read_csv(file_path)
+            
+            # 处理现有数据的日期列
+            existing_date_col = None
+            for col in existing_df.columns:
+                if col.lower() in ['date', '日期', 'dt', 'trade_date']:
+                    existing_date_col = col
+                    break
+                    
+            if not existing_date_col:
+                logger.error(f"现有文件缺少日期列: {file_path}")
+                return False
+                
+            # 确保日期列为datetime类型
+            if not pd.api.types.is_datetime64_any_dtype(existing_df[existing_date_col]):
+                existing_df[existing_date_col] = pd.to_datetime(existing_df[existing_date_col])
+                
+            # 合并并去重
+            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=[existing_date_col])
+            # 按日期排序
+            combined_df = combined_df.sort_values(existing_date_col)
+            # 格式化日期为字符串（YYYY-MM-DD）
+            combined_df[existing_date_col] = combined_df[existing_date_col].dt.strftime("%Y-%m-%d")
+        else:
+            # 新文件处理
+            combined_df = df.copy()
+            # 格式化日期为字符串
+            combined_df[date_col] = combined_df[date_col].dt.strftime("%Y-%m-%d")
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # 保存数据
+        combined_df.to_csv(file_path, index=False, encoding='utf-8-sig')
+        logger.info(f"✅ 增量保存成功: {file_path}（共{len(combined_df)}条数据）")
+        return True
+        
+    except Exception as e:
+        logger.error(f"增量保存失败 {etf_code}: {str(e)}", exc_info=True)
+        # 保存失败时创建错误标记
+        error_file = f"{file_path}.error"
+        with open(error_file, 'w') as f:
+            f.write(f"保存失败时间: {datetime.now().isoformat()}\n错误: {str(e)}")
+        return False

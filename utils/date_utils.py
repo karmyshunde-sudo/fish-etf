@@ -683,6 +683,7 @@ def validate_time_range(start_time: str, end_time: str) -> bool:
         bool: 如果时间范围有效返回True，否则返回False
     """
     try:
+        import re
         # 检查格式
         if not re.match(r'^\d{2}:\d{2}$', start_time) or not re.match(r'^\d{2}:\d{2}$', end_time):
             logger.error(f"时间格式无效，应为 HH:MM: {start_time} 或 {end_time}")

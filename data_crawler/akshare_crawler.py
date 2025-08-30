@@ -288,7 +288,8 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     
-    required_columns = Config.STANDARD_COLUMNS.values()
+    # 修复：STANDARD_COLUMNS 是列表，直接使用它，不需要调用 .values()
+    required_columns = Config.STANDARD_COLUMNS
     missing_columns = [col for col in required_columns if col not in df.columns]
     
     if missing_columns:

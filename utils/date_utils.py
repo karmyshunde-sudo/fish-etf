@@ -535,8 +535,8 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
     
     try:
         # 获取文件最后修改时间（以UTC时间处理）
-        # 在GitHub Actions中，系统默认是UTC时间
         timestamp = os.path.getmtime(file_path)
+        # 正确处理：将文件修改时间视为UTC时间
         last_modify_time = datetime.fromtimestamp(timestamp, tz=UTC_TIMEZONE)
         
         # 转换为北京时间用于比较

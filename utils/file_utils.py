@@ -14,7 +14,7 @@ import shutil
 import tempfile
 import pandas as pd
 from typing import Any, Dict, List, Optional, Union, TextIO, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone  # 确保timedelta已正确导入
 from pathlib import Path
 
 # 导入init_dirs函数
@@ -311,7 +311,7 @@ def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Opt
         utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         
         # 创建北京时间（UTC+8）
-        beijing_time = utc_time.astimezone(timezone(timedelta(hours=8)))
+        beijing_time = utc_time + timedelta(hours=8)
         
         logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
         return utc_time, beijing_time

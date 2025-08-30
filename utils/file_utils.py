@@ -69,6 +69,8 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df["涨跌幅"] = (df["涨跌额"] / df["前收盘"]) * 100
             elif chn_col == "涨跌额" and "收盘" in df.columns and "前收盘" in df.columns:
                 df["涨跌额"] = df["收盘"] - df["前收盘"]
+            elif chn_col == "振幅" and "最高" in df.columns and "最低" in df.columns and "前收盘" in df.columns:
+                df["振幅"] = ((df["最高"] - df["最低"]) / df["前收盘"]) * 100
             # 其他列的推导逻辑...
             else:
                 df[chn_col] = None  # 填充缺失列

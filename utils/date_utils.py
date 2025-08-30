@@ -9,7 +9,7 @@
 import os
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta  # 修复：添加对date的导入
 from typing import Optional, Tuple, List, Union, Any
 import pandas as pd
 from dateutil import parser, relativedelta

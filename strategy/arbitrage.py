@@ -18,7 +18,7 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time,
     is_trading_day,
-    is_file_outdated
+    is_market_open
 )
 from .etf_scoring import get_etf_basic_info, get_etf_name
 
@@ -39,8 +39,7 @@ def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
         
         # 检查是否为交易日
         if not is_trading_day():
-            logger.info("今日非交易日，跳过套利计算")
-            return "今日非交易日，无需计算套利机会"
+            logger.info("今日非交易日，但继续计算套利机会（按用户需求）")
         
         # 获取ETF列表
         etf_list = load_etf_list()
@@ -425,10 +424,8 @@ try:
     # 初始化日志
     logger.info("套利策略模块初始化完成")
     
-    # 记录当前市场状态
-    market_status = "开市" if is_market_open() else "闭市"
-    trading_status = "交易日" if is_trading_day() else "非交易日"
-    logger.info(f"当前市场状态: {trading_status}，{market_status}")
+    # 将市场状态检查移到函数内部，避免模块级代码执行
+    # 不再在模块初始化时检查市场状态
     
 except Exception as e:
     logger.error(f"套利策略模块初始化失败: {str(e)}", exc_info=True)

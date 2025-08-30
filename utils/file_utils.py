@@ -13,8 +13,8 @@ import logging
 import shutil
 import tempfile
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union, TextIO
-from datetime import datetime
 from pathlib import Path
 
 # 导入init_dirs函数
@@ -62,7 +62,7 @@ def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = No
         return df
         
     except Exception as e:
-        logger.error(f"加载ETF日线数据失败 {etf_code}: {str(e)}")
+        logger.error(f"加载ETF日线数据失败 {etf_code}: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def load_etf_metadata(file_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -99,7 +99,7 @@ def load_etf_metadata(file_path: Optional[Union[str, Path]] = None) -> Dict[str,
         return metadata
         
     except Exception as e:
-        logger.error(f"加载ETF元数据失败 {file_path}: {str(e)}")
+        logger.error(f"加载ETF元数据失败 {file_path}: {str(e)}", exc_info=True)
         return {}
 
 def save_etf_metadata(metadata: Dict[str, Any], 
@@ -134,7 +134,7 @@ def save_etf_metadata(metadata: Dict[str, Any],
         return success
         
     except Exception as e:
-        logger.error(f"保存ETF元数据失败 {file_path}: {str(e)}")
+        logger.error(f"保存ETF元数据失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def ensure_dir_exists(dir_path: Union[str, Path]) -> bool:
@@ -153,8 +153,58 @@ def ensure_dir_exists(dir_path: Union[str, Path]) -> bool:
         logger.debug(f"确保目录存在: {dir_path}")
         return True
     except Exception as e:
-        logger.error(f"创建目录失败 {dir_path}: {str(e)}")
+        logger.error(f"创建目录失败 {dir_path}: {str(e)}", exc_info=True)
         return False
+
+def get_file_mtime_utc(file_path: Union[str, Path]) -> Optional[datetime]:
+    """
+    获取文件修改时间（UTC时间）
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        Optional[datetime]: 文件修改时间（UTC），失败返回None
+    """
+    try:
+        file_path = Path(file_path)
+        
+        if file_path.exists() and file_path.is_file():
+            # 获取文件修改时间（本地时间，在GitHub Actions中为UTC时间）
+            mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+            # 明确标记为UTC时区
+            mtime_utc = mtime.replace(tzinfo=timezone.utc)
+            logger.debug(f"文件修改时间(UTC): {file_path} -> {mtime_utc}")
+            return mtime_utc
+        else:
+            logger.warning(f"文件不存在或不是文件: {file_path}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"获取文件UTC修改时间失败 {file_path}: {str(e)}", exc_info=True)
+        return None
+
+def get_file_mtime_beijing(file_path: Union[str, Path]) -> Optional[datetime]:
+    """
+    获取文件修改时间（北京时间）
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        Optional[datetime]: 文件修改时间（北京时间），失败返回None
+    """
+    try:
+        from utils.date_utils import convert_to_beijing_time
+        mtime_utc = get_file_mtime_utc(file_path)
+        if mtime_utc is None:
+            return None
+        mtime_beijing = convert_to_beijing_time(mtime_utc)
+        logger.debug(f"文件修改时间(北京时间): {file_path} -> {mtime_beijing}")
+        return mtime_beijing
+    except Exception as e:
+        logger.error(f"获取文件北京时间失败 {file_path}: {str(e)}", exc_info=True)
+        return None
 
 def check_flag(flag_file_path: Union[str, Path]) -> bool:
     """
@@ -176,10 +226,14 @@ def check_flag(flag_file_path: Union[str, Path]) -> bool:
         
         # 检查文件修改时间是否为今天
         from utils.date_utils import get_beijing_time, is_same_day
-        file_mtime = datetime.fromtimestamp(flag_file.stat().st_mtime)
+        file_mtime = get_file_mtime_beijing(flag_file)
         today = get_beijing_time().date()
         
-        if is_same_day(file_mtime, today):
+        if file_mtime is None:
+            logger.warning(f"无法获取标志文件修改时间: {flag_file}")
+            return False
+        
+        if is_same_day(file_mtime, datetime.combine(today, datetime.min.time())):
             logger.debug(f"标志文件存在且是今天创建的: {flag_file}")
             return True
         else:
@@ -187,7 +241,7 @@ def check_flag(flag_file_path: Union[str, Path]) -> bool:
             return False
             
     except Exception as e:
-        logger.error(f"检查标志文件失败 {flag_file_path}: {str(e)}")
+        logger.error(f"检查标志文件失败 {flag_file_path}: {str(e)}", exc_info=True)
         return False
 
 def set_flag(flag_file_path: Union[str, Path]) -> bool:
@@ -206,15 +260,19 @@ def set_flag(flag_file_path: Union[str, Path]) -> bool:
         # 确保目录存在
         ensure_dir_exists(flag_file.parent)
         
+        # 获取当前北京时间
+        from utils.date_utils import get_beijing_time
+        beijing_time = get_beijing_time()
+        
         # 创建标志文件
-        with open(flag_file, 'w') as f:
-            f.write(f"Flag created at: {datetime.now().isoformat()}\n")
+        with open(flag_file, 'w', encoding='utf-8') as f:
+            f.write(f"Flag created at: {beijing_time.isoformat()}\n")
         
         logger.debug(f"标志文件已创建: {flag_file}")
         return True
         
     except Exception as e:
-        logger.error(f"创建标志文件失败 {flag_file_path}: {str(e)}")
+        logger.error(f"创建标志文件失败 {flag_file_path}: {str(e)}", exc_info=True)
         return False
 
 def clear_flag(flag_file_path: Union[str, Path]) -> bool:
@@ -239,7 +297,7 @@ def clear_flag(flag_file_path: Union[str, Path]) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"删除标志文件失败 {flag_file_path}: {str(e)}")
+        logger.error(f"删除标志文件失败 {flag_file_path}: {str(e)}", exc_info=True)
         return False
 
 def read_json(file_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
@@ -258,7 +316,7 @@ def read_json(file_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         logger.debug(f"JSON文件读取成功: {file_path}")
         return data
     except Exception as e:
-        logger.error(f"读取JSON文件失败 {file_path}: {str(e)}")
+        logger.error(f"读取JSON文件失败 {file_path}: {str(e)}", exc_info=True)
         return None
 
 def write_json(file_path: Union[str, Path], data: Dict[str, Any], 
@@ -294,7 +352,7 @@ def write_json(file_path: Union[str, Path], data: Dict[str, Any],
         return True
         
     except Exception as e:
-        logger.error(f"写入JSON文件失败 {file_path}: {str(e)}")
+        logger.error(f"写入JSON文件失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def read_csv(file_path: Union[str, Path]) -> Optional[List[Dict[str, Any]]]:
@@ -314,7 +372,7 @@ def read_csv(file_path: Union[str, Path]) -> Optional[List[Dict[str, Any]]]:
         logger.debug(f"CSV文件读取成功: {file_path}, 共{len(data)}行")
         return data
     except Exception as e:
-        logger.error(f"读取CSV文件失败 {file_path}: {str(e)}")
+        logger.error(f"读取CSV文件失败 {file_path}: {str(e)}", exc_info=True)
         return None
 
 def write_csv(file_path: Union[str, Path], data: List[Dict[str, Any]], 
@@ -355,7 +413,7 @@ def write_csv(file_path: Union[str, Path], data: List[Dict[str, Any]],
         return True
         
     except Exception as e:
-        logger.error(f"写入CSV文件失败 {file_path}: {str(e)}")
+        logger.error(f"写入CSV文件失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def append_csv(file_path: Union[str, Path], data: List[Dict[str, Any]], 
@@ -420,7 +478,7 @@ def append_csv(file_path: Union[str, Path], data: List[Dict[str, Any]],
         return True
         
     except Exception as e:
-        logger.error(f"追加CSV数据失败 {file_path}: {str(e)}")
+        logger.error(f"追加CSV数据失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def incremental_save(file_path: Union[str, Path], data: List[Dict[str, Any]], 
@@ -485,7 +543,7 @@ def incremental_save(file_path: Union[str, Path], data: List[Dict[str, Any]],
             return False
             
     except Exception as e:
-        logger.error(f"增量保存失败 {file_path}: {str(e)}")
+        logger.error(f"增量保存失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def get_csv_writer(file_path: Union[str, Path], 
@@ -520,7 +578,7 @@ def get_csv_writer(file_path: Union[str, Path],
         return f, writer
         
     except Exception as e:
-        logger.error(f"创建CSV写入器失败 {file_path}: {str(e)}")
+        logger.error(f"创建CSV写入器失败 {file_path}: {str(e)}", exc_info=True)
         return None
 
 def close_csv_writer(file_obj: TextIO) -> bool:
@@ -537,7 +595,7 @@ def close_csv_writer(file_obj: TextIO) -> bool:
         file_obj.close()
         return True
     except Exception as e:
-        logger.error(f"关闭文件失败: {str(e)}")
+        logger.error(f"关闭文件失败: {str(e)}", exc_info=True)
         return False
 
 def safe_delete(file_path: Union[str, Path]) -> bool:
@@ -566,7 +624,7 @@ def safe_delete(file_path: Union[str, Path]) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"删除文件失败 {file_path}: {str(e)}")
+        logger.error(f"删除文件失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def get_file_size(file_path: Union[str, Path]) -> Optional[int]:
@@ -591,7 +649,7 @@ def get_file_size(file_path: Union[str, Path]) -> Optional[int]:
             return None
             
     except Exception as e:
-        logger.error(f"获取文件大小失败 {file_path}: {str(e)}")
+        logger.error(f"获取文件大小失败 {file_path}: {str(e)}", exc_info=True)
         return None
 
 def backup_file(file_path: Union[str, Path], 
@@ -633,7 +691,7 @@ def backup_file(file_path: Union[str, Path],
         return backup_file
         
     except Exception as e:
-        logger.error(f"备份文件失败 {file_path}: {str(e)}")
+        logger.error(f"备份文件失败 {file_path}: {str(e)}", exc_info=True)
         return None
 
 def backup_incremental_data(data_dir: Union[str, Path], 
@@ -655,14 +713,18 @@ def backup_incremental_data(data_dir: Union[str, Path],
         backup_dir = Path(backup_dir)
         
         if not data_dir.exists() or not data_dir.is_dir():
-            logger.warning(f"数据目录不存在: {data_dir}")  # 修复f-string语法错误
+            logger.warning(f"数据目录不存在: {data_dir}")
             return 0
         
         # 确保备份目录存在
         ensure_dir_exists(backup_dir)
         
+        # 获取当前北京时间
+        from utils.date_utils import get_beijing_time
+        beijing_time = get_beijing_time()
+        
         # 创建日期子目录
-        date_str = datetime.now().strftime("%Y%m%d")
+        date_str = beijing_time.strftime("%Y%m%d")
         daily_backup_dir = backup_dir / date_str
         ensure_dir_exists(daily_backup_dir)
         
@@ -681,7 +743,7 @@ def backup_incremental_data(data_dir: Union[str, Path],
         return backup_count
         
     except Exception as e:
-        logger.error(f"备份增量数据失败: {str(e)}")
+        logger.error(f"备份增量数据失败: {str(e)}", exc_info=True)
         return 0
 
 def clean_old_files(dir_path: Union[str, Path], 
@@ -706,19 +768,24 @@ def clean_old_files(dir_path: Union[str, Path],
             return 0
         
         from utils.date_utils import get_beijing_time
-        cutoff_time = get_beijing_time().timestamp() - (days * 24 * 3600)
+        # 获取当前UTC时间
+        current_time_utc = get_beijing_time().replace(tzinfo=timezone.utc)
+        cutoff_time = current_time_utc - timedelta(days=days)
         deleted_count = 0
         
         for file_path in dir_path.glob(pattern):
-            if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                safe_delete(file_path)
-                deleted_count += 1
+            if file_path.is_file():
+                # 获取文件修改时间（UTC）
+                file_mtime = get_file_mtime_utc(file_path)
+                if file_mtime and file_mtime < cutoff_time:
+                    safe_delete(file_path)
+                    deleted_count += 1
         
         logger.info(f"清理旧文件完成: {dir_path}, 删除了{deleted_count}个文件")
         return deleted_count
         
     except Exception as e:
-        logger.error(f"清理旧文件失败 {dir_path}: {str(e)}")
+        logger.error(f"清理旧文件失败 {dir_path}: {str(e)}", exc_info=True)
         return 0
 
 def atomic_write(file_path: Union[str, Path], content: str, 
@@ -730,7 +797,7 @@ def atomic_write(file_path: Union[str, Path], content: str,
         file_path: 文件路径
         content: 要写入的内容
         mode: 写入模式
-        encoding: 编码格式
+        encoding: 缩进编码
         
     Returns:
         bool: 成功写入返回True，否则返回False
@@ -755,7 +822,7 @@ def atomic_write(file_path: Union[str, Path], content: str,
         return True
         
     except Exception as e:
-        logger.error(f"原子性写入文件失败 {file_path}: {str(e)}")
+        logger.error(f"原子性写入文件失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def list_files(dir_path: Union[str, Path], pattern: str = "*") -> List[Path]:
@@ -781,7 +848,7 @@ def list_files(dir_path: Union[str, Path], pattern: str = "*") -> List[Path]:
         return files
         
     except Exception as e:
-        logger.error(f"列出文件失败 {dir_path}/{pattern}: {str(e)}")
+        logger.error(f"列出文件失败 {dir_path}/{pattern}: {str(e)}", exc_info=True)
         return []
 
 def file_exists(file_path: Union[str, Path]) -> bool:
@@ -800,7 +867,7 @@ def file_exists(file_path: Union[str, Path]) -> bool:
         logger.debug(f"文件存在检查: {file_path} -> {exists}")
         return exists
     except Exception as e:
-        logger.error(f"文件存在检查失败 {file_path}: {str(e)}")
+        logger.error(f"文件存在检查失败 {file_path}: {str(e)}", exc_info=True)
         return False
 
 def dir_exists(dir_path: Union[str, Path]) -> bool:
@@ -819,39 +886,5 @@ def dir_exists(dir_path: Union[str, Path]) -> bool:
         logger.debug(f"目录存在检查: {dir_path} -> {exists}")
         return exists
     except Exception as e:
-        logger.error(f"目录存在检查失败 {dir_path}: {str(e)}")
+        logger.error(f"目录存在检查失败 {dir_path}: {str(e)}", exc_info=True)
         return False
-
-def get_file_mtime(file_path: Union[str, Path]) -> Optional[datetime]:
-    """
-    获取文件修改时间
-    
-    Args:
-        file_path: 极客时间
-        file_path: 文件路径
-        
-    Returns:
-        Optional[datetime]: 文件修改时间，失败返回None
-    """
-    try:
-        file_path = Path(file_path)
-        
-        if file_path.exists() and file_path.is_file():
-            mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-            logger.debug(f"文件修改时间: {file_path} -> {mtime}")
-            return mtime
-        else:
-            logger.warning(f"文件不存在或不是文件: {极客时间}")
-            logger.warning(f"文件不存在或不是文件: {file_path}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"获取文件修改时间失败 {file_path}: {str(e)}")
-        return None
-
-# 文件信息
-# 总行数: 469
-# 函数数量: 24
-# 最后修改: 2025-08-28
-# 版本: 1.1.0
-# 描述: 生产级文件操作工具模块，包含完整的异常处理和日志输出

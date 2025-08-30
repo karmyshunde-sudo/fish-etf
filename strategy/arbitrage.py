@@ -3,7 +3,7 @@
 """
 套利策略计算模块
 基于ETF净值与市场价格的差异计算套利机会
-特别优化了消息推送格式，确保使用统一的消息模板
+特别优化了日均成交额的动态计算机制，确保符合量化交易规范
 """
 
 import pandas as pd
@@ -20,18 +20,19 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
+from utils.file_utils import load_etf_daily_data  # 新增导入：用于动态计算日均成交额
 from .etf_scoring import get_etf_basic_info, get_etf_name
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
+def calculate_arbitrage_opportunity() -> pd.DataFrame:
     """
     计算ETF套利机会
     
     Returns:
-        Union[pd.DataFrame, str]: 套利机会DataFrame或错误消息
+        pd.DataFrame: 套利机会DataFrame
     """
     try:
         # 获取当前双时区时间
@@ -42,7 +43,7 @@ def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
         etf_list = load_etf_list()
         if etf_list.empty:
             logger.warning("ETF列表为空，无法计算套利机会")
-            return "ETF列表为空，无法计算套利机会"
+            return pd.DataFrame()  # 确保始终返回DataFrame
         
         # 计算套利机会
         opportunities = []
@@ -77,7 +78,8 @@ def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
                         "单位净值": etf_nav["单位净值"],
                         "折溢价率": premium_discount,
                         "规模": etf["基金规模"],
-                        "成交量": etf_realtime["成交量"]
+                        "成交量": etf_realtime["成交量"],
+                        "日均成交额": etf["日均成交额"]  # 添加日均成交额信息
                     })
             except Exception as e:
                 logger.error(f"计算ETF {etf['ETF代码']} 套利机会失败: {str(e)}", exc_info=True)
@@ -106,7 +108,51 @@ def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
             message_type="error"
         )
         
-        return error_msg
+        return pd.DataFrame()  # 确保始终返回DataFrame
+
+def calculate_daily_volume(etf_code: str) -> float:
+    """
+    计算ETF的日均成交额（基于最近30个交易日）
+    
+    Args:
+        etf_code: ETF代码
+        
+    Returns:
+        float: 日均成交额（万元）
+    """
+    try:
+        # 加载ETF日线数据
+        etf_df = load_etf_daily_data(etf_code)
+        
+        if etf_df.empty:
+            logger.debug(f"ETF {etf_code} 无日线数据，无法计算日均成交额")
+            return 0.0
+        
+        # 确保数据按日期排序
+        etf_df = etf_df.sort_values("日期", ascending=False)
+        
+        # 取最近30个交易日的数据
+        recent_data = etf_df.head(30)
+        
+        # 检查是否有足够的数据
+        if len(recent_data) < 10:  # 至少需要10天数据
+            logger.debug(f"ETF {etf_code} 数据不足（{len(recent_data)}天），无法准确计算日均成交额")
+            return 0.0
+        
+        # 计算日均成交额（单位：万元）
+        # 注意：成交额列的单位可能是元，需要转换为万元
+        if "成交额" in recent_data.columns:
+            # 假设成交额单位是元，转换为万元
+            avg_volume = recent_data["成交额"].mean() / 10000
+            logger.debug(f"ETF {etf_code} 日均成交额: {avg_volume:.2f}万元（{len(recent_data)}天数据）")
+            return avg_volume
+        else:
+            logger.warning(f"ETF {etf_code} 缺少成交额数据，无法计算日均成交额")
+            return 0.0
+    
+    except Exception as e:
+        logger.error(f"计算ETF {etf_code} 日均成交额失败: {str(e)}", exc_info=True)
+        return 0.0
 
 def load_etf_list() -> pd.DataFrame:
     """
@@ -140,7 +186,7 @@ def load_etf_list() -> pd.DataFrame:
             return pd.DataFrame()
         
         # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "基金规模", "日均成交额"]
+        required_columns = ["ETF代码", "ETF名称", "基金规模"]
         for col in required_columns:
             if col not in etf_list.columns:
                 error_msg = f"ETF列表缺少必要列: {col}"
@@ -153,6 +199,19 @@ def load_etf_list() -> pd.DataFrame:
                 )
                 
                 return pd.DataFrame()
+        
+        # 添加日均成交额列（动态计算）
+        etf_list["日均成交额"] = 0.0
+        total = len(etf_list)
+        logger.info(f"开始计算 {total} 只ETF的日均成交额...")
+        
+        for i, (_, etf) in enumerate(etf_list.iterrows(), 1):
+            etf_code = etf["ETF代码"]
+            logger.debug(f"({i}/{total}) 计算ETF {etf_code} 的日均成交额")
+            
+            # 动态计算日均成交额
+            avg_daily_volume = calculate_daily_volume(etf_code)
+            etf_list.at[_, "日均成交额"] = avg_daily_volume
         
         # 筛选符合条件的ETF
         filtered_etfs = etf_list[
@@ -292,7 +351,7 @@ def generate_arbitrage_message_content(df: pd.DataFrame) -> str:
                 f"{i}. {row['ETF名称']}({row['ETF代码']})\n"
                 f"• {direction}: {abs(row['折溢价率']):.2f}%\n"
                 f"• 价格: {row['最新价']:.3f}元 | 净值: {row['单位净值']:.3f}元\n"
-                f"• 规模: {row['规模']:.2f}亿元 | 成交量: {row['成交量']:.0f}\n"
+                f"• 规模: {row['规模']:.2f}亿元 | 日均成交额: {row['日均成交额']:.2f}万元\n"
             )
         
         # 添加其他机会数量
@@ -334,9 +393,6 @@ def send_arbitrage_opportunity() -> bool:
         
         # 计算套利机会
         arbitrage_df = calculate_arbitrage_opportunity()
-        if isinstance(arbitrage_df, str):
-            logger.warning(f"套利机会计算失败: {arbitrage_df}")
-            return False
         
         # 生成消息内容（纯业务内容）
         content = generate_arbitrage_message_content(arbitrage_df)

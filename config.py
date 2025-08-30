@@ -11,7 +11,7 @@ import logging
 import sys
 from typing import Dict, Any, Optional
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta  # 确保导入timezone和timedelta
 
 # 先定义获取基础目录的函数，避免类定义时的循环引用问题
 def _get_base_dir() -> str:
@@ -42,6 +42,13 @@ class Config:
     全局配置类：数据源配置、策略参数、文件路径管理
     所有配置项均有默认值，并支持从环境变量覆盖
     """
+    
+    # -------------------------
+    # 0. 时区定义（关键修复）
+    # -------------------------
+    # 严格遵守要求：在config.py中定义两个变量，分别保存平台时间UTC，北京时间UTC+8
+    UTC_TIMEZONE = timezone.utc
+    BEIJING_TIMEZONE = timezone(timedelta(hours=8))
     
     # -------------------------
     # 1. 数据源配置
@@ -446,7 +453,9 @@ def _validate_critical_config():
             "LOG_DIR",
             "LOG_FILE",
             "ALL_ETFS_PATH",
-            "BACKUP_ETFS_PATH"
+            "BACKUP_ETFS_PATH",
+            "UTC_TIMEZONE",  # 新增验证项
+            "BEIJING_TIMEZONE"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -462,6 +471,12 @@ def _validate_critical_config():
                 elif config_name == "ETFS_DAILY_DIR":
                     setattr(Config, "ETFS_DAILY_DIR", os.path.join(Config.DATA_DIR, "etf_daily"))
                     logging.warning("已添加缺失的ETFS_DAILY_DIR配置项")
+                elif config_name == "UTC_TIMEZONE":
+                    setattr(Config, "UTC_TIMEZONE", timezone.utc)
+                    logging.warning("已添加缺失的UTC_TIMEZONE配置项")
+                elif config_name == "BEIJING_TIMEZONE":
+                    setattr(Config, "BEIJING_TIMEZONE", timezone(timedelta(hours=8)))
+                    logging.warning("已添加缺失的BEIJING_TIMEZONE配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

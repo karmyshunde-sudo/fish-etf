@@ -20,7 +20,9 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-from utils.file_utils import load_etf_daily_data, ensure_chinese_columns, ensure_required_columns  # 修复：添加必要的导入
+# 修复：从正确的模块导入函数
+from utils.file_utils import load_etf_daily_data, ensure_chinese_columns
+from data_crawler.akshare_crawler import ensure_required_columns  # 从akshare_crawler导入ensure_required_columns
 from .etf_scoring import get_etf_basic_info, get_etf_name
 from wechat_push.push import send_wechat_message
 

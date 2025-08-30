@@ -495,15 +495,6 @@ try:
     # 初始化日志
     logger.info("微信推送模块初始化完成")
     
-    # 记录当前市场状态
-    try:
-        from utils.date_utils import is_market_open, is_trading_day
-        market_status = "开市" if is_market_open() else "闭市"
-        trading_status = "交易日" if is_trading_day() else "非交易日"
-        logger.info(f"当前市场状态: {trading_status}，{market_status}")
-    except Exception as e:
-        logger.warning(f"无法获取市场状态: {str(e)}")
-    
     # 测试Webhook连接（仅在调试模式下）
     if os.getenv("DEBUG", "").lower() in ("true", "1", "yes"):
         logger.info("调试模式启用，测试Webhook连接")

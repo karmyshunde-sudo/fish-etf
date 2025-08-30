@@ -53,29 +53,33 @@ class Config:
     ETF_LIST_UPDATE_INTERVAL: int = 7  
     # 每7天更新一次ETF列表
     
-    # 中文列名映射（固化，所有数据源统一）
-    STANDARD_COLUMNS: Dict[str, str] = {
-        "日期": "date",
-        "开盘": "open",
-        "收盘": "close",
-        "最高": "high",
-        "最低": "low",
-        "成交量": "volume",
-        "成交额": "amount",
-        "振幅": "amplitude",
-        "涨跌幅": "pct_change",
-        "涨跌额": "price_change",
-        "换手率": "turnover",
-        "ETF代码": "etf_code",
-        "ETF名称": "etf_name",
-        "爬取时间": "crawl_time"
+    # 英文列名到中文列名的映射（关键修复：明确方向为英文->中文）
+    # 注意：这里定义的是源列名(英文) -> 目标列名(中文)的映射
+    COLUMN_NAME_MAPPING: Dict[str, str] = {
+        "date": "日期",
+        "open": "开盘",
+        "close": "收盘",
+        "high": "最高",
+        "low": "最低",
+        "volume": "成交量",
+        "amount": "成交额",
+        "amplitude": "振幅",
+        "pct_change": "涨跌幅",
+        "price_change": "涨跌额",
+        "turnover": "换手率",
+        "etf_code": "ETF代码",
+        "etf_name": "ETF名称",
+        "crawl_time": "爬取时间"
     }
+    
+    # 中文列名集合（用于验证）
+    CHINESE_COLUMNS: list = list(COLUMN_NAME_MAPPING.values())
     
     # ETF列表标准列（确保all_etfs.csv和karmy_etf.csv结构一致）
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF

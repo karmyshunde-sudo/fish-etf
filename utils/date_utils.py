@@ -25,6 +25,49 @@ UTC_TIMEZONE = pytz.utc
 MARKET_OPEN_TIME = (9, 30)  # 市场开盘时间 (小时, 分钟)
 MARKET_CLOSE_TIME = (15, 0)  # 市场收盘时间 (小时, 分钟)
 
+def get_current_times() -> Tuple[datetime, datetime]:
+    """
+    获取当前双时区时间（UTC和北京时间）
+    
+    Returns:
+        Tuple[datetime, datetime]: (UTC时间, 北京时间)
+    """
+    try:
+        # 获取UTC时间
+        utc_now = datetime.now(timezone.utc)
+        
+        # 转换为北京时间
+        beijing_now = utc_now.astimezone(BEIJING_TIMEZONE)
+        
+        logger.debug(f"获取当前时间: UTC={utc_now}, 北京={beijing_now}")
+        return utc_now, beijing_now
+    except Exception as e:
+        logger.error(f"获取当前时间失败: {str(e)}", exc_info=True)
+        # 回退机制
+        now = datetime.now()
+        return now, now
+
+def format_dual_time(dt: datetime, source_tz: str = 'UTC', target_tz: str = 'Asia/Shanghai') -> str:
+    """
+    格式化双时区时间字符串
+    :param dt: 原始时间（假设为source_tz时区）
+    :return: "YYYY-MM-DD HH:MM:SS (UTC) / YYYY-MM-DD HH:MM:SS (CST)"
+    """
+    try:
+        # 确保时间有时区信息
+        if dt.tzinfo is None:
+            source_tzinfo = pytz.timezone(source_tz)
+            dt = source_tzinfo.localize(dt)
+        
+        # 转换为目标时区
+        target_tzinfo = pytz.timezone(target_tz)
+        target_time = dt.astimezone(target_tzinfo)
+        
+        return f"{dt.strftime('%Y-%m-%d %H:%M:%S')} ({source_tz}) / {target_time.strftime('%Y-%m-%d %H:%M:%S')} ({target_tz})"
+    except Exception as e:
+        logger.error(f"时间格式化失败: {str(e)}", exc_info=True)
+        return str(dt)
+
 def get_beijing_time() -> datetime:
     """
     获取当前北京时间（带时区信息）
@@ -491,12 +534,12 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
         return True
     
     try:
-        # 获取文件最后修改时间
+        # 获取文件最后修改时间（注意：os.path.getmtime返回的是本地时间）
+        # 在GitHub Actions中，系统默认是UTC时间
         last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
         
-        # 修复：GitHub Actions中默认使用UTC时间，但os.path.getmtime返回的是本地时间
         # 正确处理：将文件修改时间视为UTC时间，然后转换为北京时间
-        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(BEIJING_TIMEZONE)
+        last_modify_time = last_modify_time.replace(tzinfo=UTC_TIMEZONE).astimezone(BEIJING_TIMEZONE)
         
         # 获取当前北京时间
         current_time = get_beijing_time()
@@ -516,32 +559,32 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
         # 出错时保守策略是要求更新
         return True
 
-def get_file_last_modified(file_path: Union[str, Path]) -> Optional[datetime]:
+def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Optional[datetime]]:
     """
-    获取文件最后修改时间（北京时间）
-    
-    Args:
-        file_path: 文件路径
-        
-    Returns:
-        Optional[datetime]: 文件最后修改时间，失败返回None
+    获取文件修改时间（UTC与北京时间）
+    :param file_path: 文件路径
+    :return: (UTC时间, 北京时间)
     """
     try:
-        if not os.path.exists(file_path):
-            logger.warning(f"文件不存在: {file_path}")
-            return None
-            
-        # 获取文件最后修改时间
-        last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+        file_path = Path(file_path)
+        if not file_path.exists() or not file_path.is_file():
+            logger.warning(f"文件不存在或不是文件: {file_path}")
+            return None, None
+        
+        # 获取文件修改时间（本地时间）
+        mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+        
+        # 转换为UTC时间（假设本地时间是UTC）
+        utc_time = mtime.replace(tzinfo=UTC_TIMEZONE)
         
         # 转换为北京时间
-        last_modify_time = last_modify_time.replace(tzinfo=timezone.utc).astimezone(BEIJING_TIMEZONE)
+        beijing_time = utc_time.astimezone(BEIJING_TIMEZONE)
         
-        logger.debug(f"获取文件最后修改时间: {file_path} -> {last_modify_time}")
-        return last_modify_time
+        logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
+        return utc_time, beijing_time
     except Exception as e:
-        logger.error(f"获取文件最后修改时间失败: {str(e)}", exc_info=True)
-        return None
+        logger.error(f"获取文件修改时间失败: {str(e)}", exc_info=True)
+        return None, None
 
 def get_date_n_days_ago(n: int) -> datetime:
     """
@@ -627,3 +670,61 @@ def get_business_days(start_date: datetime, end_date: datetime) -> List[datetime
     except Exception as e:
         logger.error(f"获取工作日范围失败 {start_date} 到 {end_date}: {str(e)}", exc_info=True)
         return []
+
+def validate_time_range(start_time: str, end_time: str) -> bool:
+    """
+    验证时间范围是否有效（24小时制）
+    
+    Args:
+        start_time: 开始时间（格式：HH:MM）
+        end_time: 结束时间（格式：HH:MM）
+        
+    Returns:
+        bool: 如果时间范围有效返回True，否则返回False
+    """
+    try:
+        # 检查格式
+        if not re.match(r'^\d{2}:\d{2}$', start_time) or not re.match(r'^\d{2}:\d{2}$', end_time):
+            logger.error(f"时间格式无效，应为 HH:MM: {start_time} 或 {end_time}")
+            return False
+        
+        # 转换为时间对象
+        start = datetime.strptime(start_time, "%H:%M").time()
+        end = datetime.strptime(end_time, "%H:%M").time()
+        
+        # 检查顺序
+        if start >= end:
+            logger.error(f"开始时间 {start_time} 不能晚于或等于结束时间 {end_time}")
+            return False
+            
+        return True
+    except Exception as e:
+        logger.error(f"时间范围验证失败 {start_time} 到 {end_time}: {str(e)}", exc_info=True)
+        return False
+
+def get_time_difference(dt1: datetime, dt2: datetime) -> timedelta:
+    """
+    计算两个时间点之间的差值（考虑时区）
+    
+    Args:
+        dt1: 第一个时间点
+        dt2: 第二个时间点
+        
+    Returns:
+        timedelta: 两个时间点之间的差值
+    """
+    try:
+        # 确保时间带有时区信息
+        if dt1.tzinfo is None:
+            dt1 = dt1.replace(tzinfo=BEIJING_TIMEZONE)
+        if dt2.tzinfo is None:
+            dt2 = dt2.replace(tzinfo=BEIJING_TIMEZONE)
+        
+        # 统一转换为同一时区
+        dt1_utc = dt1.astimezone(UTC_TIMEZONE)
+        dt2_utc = dt2.astimezone(UTC_TIMEZONE)
+        
+        return dt2_utc - dt1_utc
+    except Exception as e:
+        logger.error(f"计算时间差失败 {dt1} 和 {dt2}: {str(e)}", exc_info=True)
+        return timedelta()

@@ -154,7 +154,7 @@ def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
     判断指定日期是否为交易日（A股市场）
     
     Args:
-        date: 要判断的日期，如果为None则使用当前北京时间
+        date_param: 要判断的日期，如果为None则使用当前北京时间
         
     Returns:
         bool: 如果是交易日返回True，否则返回False
@@ -162,25 +162,31 @@ def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
     try:
         from config import Config
         
-        if date is None:
+        if date_param is None:
             # 直接使用config定义的北京时间
-            date = get_beijing_time().date()
-        elif isinstance(date, datetime):
+            date_param = get_beijing_time().date()
+        elif isinstance(date_param, datetime):
             # 如果传入的是datetime，确保使用config定义的时区
-            if date.tzinfo is None:
-                date = date.replace(tzinfo=Config.UTC_TIMEZONE)
-            date = date.astimezone(Config.BEIJING_TIMEZONE).date()
-        
-        # 周末不是交易日
-        if date.weekday() >= 5:  # 5=周六, 6=周日
-            logger.debug(f"{date} 是周末，非交易日")
+            if date_param.tzinfo is None:
+                date_param = date_param.replace(tzinfo=Config.UTC_TIMEZONE)
+            date_param = date_param.astimezone(Config.BEIJING_TIMEZONE).date()
+        elif isinstance(date_param, date):
+            # 如果传入的是date，直接使用
+            pass
+        else:
+            logger.error(f"无效的日期类型: {type(date_param)}")
             return False
         
-        logger.debug(f"{date} 是交易日")
+        # 周末不是交易日
+        if date_param.weekday() >= 5:  # 5=周六, 6=周日
+            logger.debug(f"{date_param} 是周末，非交易日")
+            return False
+        
+        logger.debug(f"{date_param} 是交易日")
         return True
         
     except Exception as e:
-        logger.error(f"判断交易日失败 {date}: {str(e)}", exc_info=True)
+        logger.error(f"判断交易日失败 {date_param}: {str(e)}", exc_info=True)
         return False
 
 def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
@@ -216,12 +222,12 @@ def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
         logger.error(f"判断市场状态失败 {time_to_check}: {str(e)}", exc_info=True)
         return False
 
-def get_next_trading_day(date: Optional[Union[datetime, date]] = None) -> datetime:
+def get_next_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
     """
     获取下一个交易日
     
     Args:
-        date: 起始日期，如果为None则使用当前日期
+        date_param: 起始日期，如果为None则使用当前日期
         
     Returns:
         datetime: 下一个交易日
@@ -229,32 +235,32 @@ def get_next_trading_day(date: Optional[Union[datetime, date]] = None) -> dateti
     try:
         from config import Config
         
-        if date is None:
-            date = get_beijing_time()
+        if date_param is None:
+            date_param = get_beijing_time()
         
         # 转换为日期对象
-        if isinstance(date, datetime):
-            date = date.date()
+        if isinstance(date_param, datetime):
+            date_param = date_param.date()
         
         # 循环查找下一个交易日
-        next_day = date + timedelta(days=1)
+        next_day = date_param + timedelta(days=1)
         while not is_trading_day(next_day):
             next_day += timedelta(days=1)
         
-        logger.debug(f"下一个交易日: {date} -> {next_day}")
+        logger.debug(f"下一个交易日: {date_param} -> {next_day}")
         return datetime.combine(next_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
         
     except Exception as e:
-        logger.error(f"获取下一个交易日失败 {date}: {str(e)}", exc_info=True)
+        logger.error(f"获取下一个交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：简单加一天
-        return (date if date else get_beijing_time()) + timedelta(days=1)
+        return (date_param if date_param else get_beijing_time()) + timedelta(days=1)
 
-def get_previous_trading_day(date: Optional[Union[datetime, date]] = None) -> datetime:
+def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
     """
     获取上一个交易日
     
     Args:
-        date: 起始日期，如果为None则使用当前日期
+        date_param: 起始日期，如果为None则使用当前日期
         
     Returns:
         datetime: 上一个交易日
@@ -262,22 +268,22 @@ def get_previous_trading_day(date: Optional[Union[datetime, date]] = None) -> da
     try:
         from config import Config
         
-        if date is None:
-            date = get_beijing_time()
+        if date_param is None:
+            date_param = get_beijing_time()
         
         # 转换为日期对象
-        if isinstance(date, datetime):
-            date = date.date()
+        if isinstance(date_param, datetime):
+            date_param = date_param.date()
         
         # 循环查找上一个交易日
-        prev_day = date - timedelta(days=1)
+        prev_day = date_param - timedelta(days=1)
         while not is_trading_day(prev_day):
             prev_day -= timedelta(days=1)
         
-        logger.debug(f"上一个交易日: {date} -> {prev_day}")
+        logger.debug(f"上一个交易日: {date_param} -> {prev_day}")
         return datetime.combine(prev_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
         
     except Exception as e:
-        logger.error(f"获取上一个交易日失败 {date}: {str(e)}", exc_info=True)
+        logger.error(f"获取上一个交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：简单减一天
-        return (date if date else get_beijing_time()) - timedelta(days=1)
+        return

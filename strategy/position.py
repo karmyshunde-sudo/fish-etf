@@ -210,16 +210,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
         for position_type, strategy in strategies.items():
             content += f"【{position_type}】\n{strategy}\n\n"
         
-        # 添加市场状态信息
-        market_status = "开市" if is_market_open() else "闭市"
-        trading_status = "交易日" if is_trading_day() else "非交易日"
-        
-        content += (
-            "📊 市场状态\n"
-            f"• 当前状态: {market_status}\n"
-            f"• 今日是否交易日: {trading_status}\n\n"
-        )
-        
         # 添加风险提示
         content += (
             "⚠️ 风险提示\n"

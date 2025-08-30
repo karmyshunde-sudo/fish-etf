@@ -2,11 +2,11 @@ name: ETF数据爬取与策略推送
 
 on:
   schedule:
-    # 北京时间对应关系 (UTC+8)
-    - cron: '0 8 * * 1-5'   # 日线爬取（16:00 北京时间）
-    - cron: '40 1-6 * * 1-5' # 套利计算（多时间点，9:40~14:40 北京时间）
-    - cron: '0 6 * * 1-5'   # 仓位策略（14:00 北京时间）
-    - cron: '0 12 * * 0'    # ETF列表更新（20:00 北京时间，周日）
+    # GitHub Actions使用UTC时区，注释中表示对应的北京时间
+    - cron: '0 8 * * 1-5'   # UTC 08:00 = 北京时间 16:00 (日线爬取)
+    - cron: '40 1-6 * * 1-5' # UTC 01:40-06:40 = 北京时间 09:40-14:40 (套利计算)
+    - cron: '0 6 * * 1-5'   # UTC 06:00 = 北京时间 14:00 (仓位策略)
+    - cron: '0 12 * * 0'    # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
   workflow_dispatch:
     inputs:
       task:
@@ -32,6 +32,13 @@ jobs:
       pull-requests: write
     
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "当前系统时区: $(date +%Z)"
+          echo "UTC时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
+          echo "北京时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          echo "验证时区偏移: UTC+8 = $(TZ=Asia/Shanghai date '+%z')"
+      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -58,7 +65,7 @@ jobs:
       - name: 输出调试信息
         run: |
           echo "当前UTC时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
-          echo "当前北京时间: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')"
+          echo "当前北京时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
           echo "事件类型: ${{ github.event_name }}"
           echo "定时表达式: ${{ github.event.schedule || '无' }}"
           echo "手动任务: ${{ github.event.inputs.task || '无' }}"
@@ -100,16 +107,19 @@ jobs:
       - name: 检查是否已推送标志
         id: check_flags
         run: |
+          # 获取当前北京时间
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
+          
           # 检查标志文件是否存在（模拟主程序中的检查逻辑）
           if [[ "$TASK" == "calculate_arbitrage" ]]; then
-            if [[ -f "data/flags/arbitrage_pushed.flag" ]]; then
+            if [[ -f "data/flags/arbitrage_pushed_${BEIJING_DATE}.txt" ]]; then
               echo "arbitrage_pushed=true" >> $GITHUB_OUTPUT
               echo "检测到套利策略已推送标志，将跳过执行"
             else
               echo "arbitrage_pushed=false" >> $GITHUB_OUTPUT
             fi
           elif [[ "$TASK" == "calculate_position" ]]; then
-            if [[ -f "data/flags/position_pushed.flag" ]]; then
+            if [[ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ]]; then
               echo "position_pushed=true" >> $GITHUB_OUTPUT
               echo "检测到仓位策略已推送标志，将跳过执行"
             else
@@ -133,11 +143,13 @@ jobs:
         env:
           TASK: ${{ env.TASK }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          TZ: Asia/Shanghai  # 设置时区为北京时间
         run: |
           echo "开始执行任务: $TASK"
           
-          # 创建日志文件
-          LOG_FILE="data/logs/task_${TASK}_$(date +%Y%m%d_%H%M%S).log"
+          # 创建日志文件（使用北京时间命名）
+          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/task_${TASK}_${BEIJING_TIME}.log"
           echo "日志文件: $LOG_FILE"
           
           # 执行任务并记录日志
@@ -189,7 +201,8 @@ jobs:
           
           # 检查是否有变更需要提交
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "自动更新数据[$TASK]: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M')"
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
+            git commit -m "自动更新数据[$TASK]: ${BEIJING_TIME}"
             git push origin main
             echo "数据提交成功"
           else
@@ -213,7 +226,8 @@ jobs:
           git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force
           
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "自动更新数据[$TASK]: $(date -u -d "+8 hours" '+%Y-%m-%d %H:%M') [冲突解决]"
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
+            git commit -m "自动更新数据[$TASK]: ${BEIJING_TIME} [冲突解决]"
             git push origin main || echo "推送失败"
             echo "冲突解决后提交成功"
           else
@@ -239,11 +253,11 @@ jobs:
         if: failure()
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TASK: ${{ env.TASK }}
         run: |
           if [ -n "$WECOM_WEBHOOK" ]; then
-            beijing_time=$(date -u -d "+8 hours" '+%Y-%m-%d %H:%M:%S')
-            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${TASK}]执行失败\\n时间: ${beijing_time}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
             curl -s -X POST "$WECOM_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "$payload" || echo "企业微信通知发送失败"

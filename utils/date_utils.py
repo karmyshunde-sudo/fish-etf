@@ -149,7 +149,7 @@ def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Opt
         logger.error(f"获取文件修改时间失败 {file_path}: {str(e)}", exc_info=True)
         return None, None
 
-def is_trading_day(date: Optional[Union[datetime, date]] = None) -> bool:
+def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
     """
     判断指定日期是否为交易日（A股市场）
     

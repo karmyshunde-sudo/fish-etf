@@ -26,20 +26,71 @@ logger = logging.getLogger(__name__)
 # 重新导出init_dirs函数，使其可以从file_utils模块导入
 init_dirs = Config.init_dirs
 
+def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    确保DataFrame使用中文列名
+    
+    Args:
+        df: 原始DataFrame
+    
+    Returns:
+        pd.DataFrame: 使用中文列名的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    # 如果已经是中文列名，直接返回
+    if all(col in Config.CHINESE_COLUMNS for col in df.columns):
+        return df
+    
+    # 尝试标准化列名
+    col_map = {}
+    for eng_col, chn_col in Config.COLUMN_NAME_MAPPING.items():
+        # 尝试精确匹配
+        if eng_col in df.columns:
+            col_map[eng_col] = chn_col
+        # 尝试模糊匹配
+        else:
+            for actual_col in df.columns:
+                if eng_col.lower() in actual_col.lower():
+                    col_map[actual_col] = chn_col
+                    break
+    
+    # 重命名列
+    if col_map:
+        df = df.rename(columns=col_map)
+        logger.debug(f"列名标准化: {col_map}")
+    
+    # 确保所有必需列都存在
+    for chn_col in Config.CHINESE_COLUMNS:
+        if chn_col not in df.columns:
+            # 尝试从其他列推导
+            if chn_col == "涨跌幅" and "涨跌额" in df.columns and "前收盘" in df.columns:
+                df["涨跌幅"] = (df["涨跌额"] / df["前收盘"]) * 100
+            elif chn_col == "涨跌额" and "收盘" in df.columns and "前收盘" in df.columns:
+                df["涨跌额"] = df["收盘"] - df["前收盘"]
+            # 其他列的推导逻辑...
+            else:
+                df[chn_col] = None  # 填充缺失列
+    
+    # 只保留标准中文列
+    df = df[Config.CHINESE_COLUMNS]
+    return df
+
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """
     加载ETF日线数据
     
     Args:
         etf_code: ETF代码
-        data_dir: 数据目录，如果为None则使用Config.ETF_DAILY_DIR
+        data_dir: 数据目录，如果为None则使用Config.ETFS_DAILY_DIR  # 修复：使用ETFS_DAILY_DIR
     
     Returns:
         pd.DataFrame: ETF日线数据
     """
     try:
         if data_dir is None:
-            data_dir = Config.ETF_DAILY_DIR
+            data_dir = Config.ETFS_DAILY_DIR  # 关键修复：使用ETFS_DAILY_DIR
         data_dir = Path(data_dir)
         
         # 构建文件路径
@@ -307,11 +358,9 @@ def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Opt
         # 获取文件修改时间戳
         timestamp = file_path.stat().st_mtime
         
-        # 创建UTC时间
-        utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        
-        # 创建北京时间（UTC+8）
-        beijing_time = utc_time + timedelta(hours=8)
+        # 使用config.py中定义的时区
+        utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
+        beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
         
         logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
         return utc_time, beijing_time
@@ -432,7 +481,7 @@ def backup_file(file_path: Union[str, Path], backup_dir: Optional[Union[str, Pat
         
         # 确定备份目录
         if backup_dir is None:
-            backup_dir = Path(Config.DATA_DIR) / "backups"
+            backup_dir = Path(Config.BACKUP_DIR)
         else:
             backup_dir = Path(backup_dir)
         
@@ -871,87 +920,4 @@ def write_excel(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool
     
     except Exception as e:
         logger.error(f"写入Excel文件失败 {file_path}: {str(e)}")
-        return False
-
-def save_incremental_data(df: pd.DataFrame, etf_code: str) -> bool:
-    """
-    增量保存ETF日线数据（处理中文日期列）
-    
-    Args:
-        df: 包含ETF日线数据的DataFrame
-        etf_code: ETF代码
-        
-    Returns:
-        bool: 保存成功返回True，否则返回False
-    """
-    try:
-        # 获取正确的文件路径
-        file_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
-        logger.info(f"开始增量保存ETF {etf_code} 数据到: {file_path}")
-        
-        # 确保DataFrame包含必要列
-        if df.empty:
-            logger.warning(f"尝试保存空DataFrame: {etf_code}")
-            return False
-            
-        # 处理日期列 - 支持多种可能的列名
-        date_col = None
-        for col in df.columns:
-            if col.lower() in ['date', '日期', 'dt', 'trade_date']:
-                date_col = col
-                break
-                
-        if not date_col:
-            logger.error(f"DataFrame缺少日期列: {etf_code}")
-            return False
-            
-        # 确保日期列为datetime类型
-        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            df[date_col] = pd.to_datetime(df[date_col])
-            
-        # 处理现有数据
-        if os.path.exists(file_path):
-            existing_df = pd.read_csv(file_path)
-            
-            # 处理现有数据的日期列
-            existing_date_col = None
-            for col in existing_df.columns:
-                if col.lower() in ['date', '日期', 'dt', 'trade_date']:
-                    existing_date_col = col
-                    break
-                    
-            if not existing_date_col:
-                logger.error(f"现有文件缺少日期列: {file_path}")
-                return False
-                
-            # 确保日期列为datetime类型
-            if not pd.api.types.is_datetime64_any_dtype(existing_df[existing_date_col]):
-                existing_df[existing_date_col] = pd.to_datetime(existing_df[existing_date_col])
-                
-            # 合并并去重
-            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=[existing_date_col])
-            # 按日期排序
-            combined_df = combined_df.sort_values(existing_date_col)
-            # 格式化日期为字符串（YYYY-MM-DD）
-            combined_df[existing_date_col] = combined_df[existing_date_col].dt.strftime("%Y-%m-%d")
-        else:
-            # 新文件处理
-            combined_df = df.copy()
-            # 格式化日期为字符串
-            combined_df[date_col] = combined_df[date_col].dt.strftime("%Y-%m-%d")
-        
-        # 确保目录存在
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        # 保存数据
-        combined_df.to_csv(file_path, index=False, encoding='utf-8-sig')
-        logger.info(f"✅ 增量保存成功: {file_path}（共{len(combined_df)}条数据）")
-        return True
-        
-    except Exception as e:
-        logger.error(f"增量保存失败 {etf_code}: {str(e)}", exc_info=True)
-        # 保存失败时创建错误标记
-        error_file = f"{file_path}.error"
-        with open(error_file, 'w') as f:
-            f.write(f"保存失败时间: {datetime.now().isoformat()}\n错误: {str(e)}")
         return False

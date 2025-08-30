@@ -540,7 +540,8 @@ try:
     logger.info("套利策略模块初始化完成")
     
 except Exception as e:
-    logger.error(f"套利策略模块初始化失败: {str(e)}", exc_info=True)
+    error_msg = f"套利策略模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
     
     try:
         # 退回到基础日志配置
@@ -550,7 +551,16 @@ except Exception as e:
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.StreamHandler()]
         )
-        logging.error(f"套利策略模块初始化失败: {str(e)}")
+        logging.error(error_msg)
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
-        print(f"套利策略模块初始化失败: {str(e)}")
+        print(error_msg)
+    
+    # 发送错误通知
+    try:
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

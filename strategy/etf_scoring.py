@@ -3,24 +3,26 @@
 """
 ETF评分系统
 基于多维度指标对ETF进行综合评分
+特别优化了消息推送格式，确保使用统一的消息模板
 """
 
 import pandas as pd
 import numpy as np
 import logging
 import akshare as ak
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
 from config import Config
 from utils.date_utils import (
     get_current_times,
-    format_dual_time,
     get_beijing_time,
     get_utc_time,
     is_file_outdated
 )
 from utils.file_utils import load_etf_daily_data, load_etf_metadata
 from data_crawler.etf_list_manager import load_all_etf_list, get_etf_name
+from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -46,13 +48,29 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         # 获取元数据
         metadata_df = load_etf_metadata()
         if metadata_df is None or metadata_df.empty:
-            logger.warning("元数据为空，无法获取ETF列表")
+            error_msg = "元数据为空，无法获取ETF列表"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return pd.DataFrame()
         
         # 获取所有ETF代码
         all_codes = metadata_df["etf_code"].tolist()
         if not all_codes:
-            logger.warning("元数据中无ETF代码")
+            error_msg = "元数据中无ETF代码"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return pd.DataFrame()
         
         # 计算评分
@@ -100,7 +118,11 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         
         # 检查是否有符合条件的ETF
         if not score_list:
-            logger.info(f"没有ETF达到最低评分阈值 {min_score}，或未满足规模({min_fund_size}亿元)和日均成交额({min_avg_volume}万元)要求")
+            warning_msg = (
+                f"没有ETF达到最低评分阈值 {min_score}，"
+                f"或未满足规模({min_fund_size}亿元)和日均成交额({min_avg_volume}万元)要求"
+            )
+            logger.info(warning_msg)
             return pd.DataFrame()
         
         # 创建评分DataFrame
@@ -121,7 +143,15 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         return score_df.head(top_count)
     
     except Exception as e:
-        logger.error(f"获取高分ETF列表时发生错误: {str(e)}", exc_info=True)
+        error_msg = f"获取高分ETF列表时发生错误: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return pd.DataFrame()
 
 def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
@@ -187,14 +217,30 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         return round(total_score, 2)
     
     except Exception as e:
-        logger.error(f"计算ETF {etf_code} 评分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算ETF {etf_code} 评分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_liquidity_score(df: pd.DataFrame) -> float:
     """计算流动性得分（日均成交额）"""
     try:
         if "成交额" not in df.columns:
-            logger.warning("DataFrame中缺少'成交额'列，流动性得分设为0")
+            error_msg = "DataFrame中缺少'成交额'列，流动性得分设为0"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return 0.0
         
         avg_volume = df["成交额"].mean() / 10000  # 转换为万元
@@ -203,7 +249,15 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
         return round(score, 2)
     
     except Exception as e:
-        logger.error(f"计算流动性得分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算流动性得分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_risk_score(df: pd.DataFrame) -> float:
@@ -226,7 +280,15 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
         return round(risk_score, 2)
     
     except Exception as e:
-        logger.error(f"计算风险得分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算风险得分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_return_score(df: pd.DataFrame) -> float:
@@ -238,7 +300,15 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         return round(return_score, 2)
     
     except Exception as e:
-        logger.error(f"计算收益得分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算收益得分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_sentiment_score(df: pd.DataFrame) -> float:
@@ -253,7 +323,15 @@ def calculate_sentiment_score(df: pd.DataFrame) -> float:
         return round(sentiment_score, 2)
     
     except Exception as e:
-        logger.error(f"计算情绪得分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算情绪得分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 50.0
 
 def calculate_fundamental_score(etf_code: str) -> float:
@@ -281,7 +359,15 @@ def calculate_fundamental_score(etf_code: str) -> float:
         return round(fundamental_score, 2)
     
     except Exception as e:
-        logger.error(f"计算基本面得分失败: {str(e)}", exc_info=True)
+        error_msg = f"计算基本面得分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_volatility(df: pd.DataFrame) -> float:
@@ -295,7 +381,15 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         return round(volatility, 4)
     
     except Exception as e:
-        logger.error(f"计算波动率失败: {str(e)}", exc_info=True)
+        error_msg = f"计算波动率失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
@@ -322,7 +416,15 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
         return round(sharpe_ratio, 4)
     
     except Exception as e:
-        logger.error(f"计算夏普比率失败: {str(e)}", exc_info=True)
+        error_msg = f"计算夏普比率失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def calculate_max_drawdown(df: pd.DataFrame) -> float:
@@ -339,7 +441,15 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
         return round(max_drawdown, 4)
     
     except Exception as e:
-        logger.error(f"计算最大回撤失败: {str(e)}", exc_info=True)
+        error_msg = f"计算最大回撤失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0
 
 def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
@@ -358,7 +468,15 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
         # 获取ETF基本信息
         df = ak.fund_etf_info_em(symbol=etf_code)
         if df.empty:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的基本信息")
+            error_msg = f"AkShare未返回ETF {etf_code} 的基本信息"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return 0.0, ""
         
         # 提取规模信息（单位：亿元）
@@ -379,7 +497,15 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
         return size, listing_date
     
     except Exception as e:
-        logger.error(f"获取ETF {etf_code} 基本信息失败: {str(e)}", exc_info=True)
+        error_msg = f"获取ETF {etf_code} 基本信息失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return 0.0, ""
 
 def analyze_etf_performance(etf_code: str, days: int = 30) -> Dict[str, Any]:
@@ -397,13 +523,29 @@ def analyze_etf_performance(etf_code: str, days: int = 30) -> Dict[str, Any]:
         # 获取ETF日线数据
         df = load_etf_daily_data(etf_code)
         if df.empty:
-            logger.warning(f"ETF {etf_code} 无日线数据，无法分析表现")
+            error_msg = f"ETF {etf_code} 无日线数据，无法分析表现"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return {}
         
         # 取最近days天数据
         recent_data = df.tail(days)
         if len(recent_data) < 2:
-            logger.warning(f"ETF {etf_code} 数据量不足，无法分析表现")
+            error_msg = f"ETF {etf_code} 数据量不足，无法分析表现"
+            logger.warning(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
+            
             return {}
         
         # 计算表现指标
@@ -441,100 +583,76 @@ def analyze_etf_performance(etf_code: str, days: int = 30) -> Dict[str, Any]:
         return analysis
     
     except Exception as e:
-        logger.error(f"分析ETF {etf_code} 表现失败: {str(e)}", exc_info=True)
+        error_msg = f"分析ETF {etf_code} 表现失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return {}
 
-def format_etf_analysis(etf_code: str, analysis: Dict[str, Any]) -> str:
+def generate_etf_analysis_content(etf_code: str, analysis: Dict[str, Any]) -> str:
     """
-    格式化ETF分析结果
+    生成ETF分析内容（不包含格式）
     
     Args:
         etf_code: ETF代码
         analysis: 分析结果
     
     Returns:
-        str: 格式化后的分析消息
+        str: 纯业务内容
     """
     try:
         if not analysis:
             return f"【ETF {etf_code} 分析】\n• 无有效分析数据"
         
-        # 获取当前双时区时间
-        _, beijing_now = get_current_times()
-        
-        # 生成分析消息
-        message = f"【ETF {analysis['etf_name']}({analysis['etf_code']}) 分析】\n"
-        message += f"⏰ 分析时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        message += f"📊 分析周期: {analysis['start_date']} 至 {analysis['end_date']} ({analysis['period_days']}天)\n\n"
+        # 生成分析内容
+        content = f"【ETF {analysis['etf_name']}({analysis['etf_code']}) 分析】\n"
+        content += f"📊 分析周期: {analysis['start_date']} 至 {analysis['end_date']} ({analysis['period_days']}天)\n\n"
         
         # 添加价格表现
-        message += "📈 价格表现\n"
-        message += f"• 起始价格: {analysis['start_price']:.3f}元\n"
-        message += f"• 结束价格: {analysis['end_price']:.3f}元\n"
-        message += f"• 收益率: {analysis['return_rate']:.2f}%\n\n"
+        content += "📈 价格表现\n"
+        content += f"• 起始价格: {analysis['start_price']:.3f}元\n"
+        content += f"• 结束价格: {analysis['end_price']:.3f}元\n"
+        content += f"• 收益率: {analysis['return_rate']:.2f}%\n\n"
         
         # 添加风险指标
-        message += "📉 风险指标\n"
-        message += f"• 波动率: {analysis['volatility']:.4f}\n"
-        message += f"• 最大回撤: {analysis['max_drawdown']:.4f}\n\n"
+        content += "📉 风险指标\n"
+        content += f"• 波动率: {analysis['volatility']:.4f}\n"
+        content += f"• 最大回撤: {analysis['max_drawdown']:.4f}\n\n"
         
         # 添加基本面信息
-        message += "📊 基本面信息\n"
-        message += f"• 基金规模: {analysis['fund_size']:.2f}亿元\n"
-        message += f"• 成立日期: {analysis['listing_date']}\n\n"
+        content += "📊 基本面信息\n"
+        content += f"• 基金规模: {analysis['fund_size']:.2f}亿元\n"
+        content += f"• 成立日期: {analysis['listing_date']}\n\n"
         
         # 添加投资建议
-        message += "💡 投资建议\n"
+        content += "💡 投资建议\n"
         if analysis['return_rate'] > 5 and analysis['volatility'] < 0.1:
-            message += "• 该ETF近期表现优异，风险较低，可考虑配置\n"
+            content += "• 该ETF近期表现优异，风险较低，可考虑配置\n"
         elif analysis['return_rate'] > 0 and analysis['volatility'] < 0.2:
-            message += "• 该ETF近期表现稳定，风险可控，可适度配置\n"
+            content += "• 该ETF近期表现稳定，风险可控，可适度配置\n"
         elif analysis['return_rate'] < 0 and analysis['max_drawdown'] > 0.1:
-            message += "• 该ETF近期表现不佳，回撤较大，建议谨慎配置\n"
+            content += "• 该ETF近期表现不佳，回撤较大，建议谨慎配置\n"
         else:
-            message += "• 该ETF表现中性，可根据个人风险偏好决定是否配置\n"
+            content += "• 该ETF表现中性，可根据个人风险偏好决定是否配置\n"
         
-        return message
+        return content
     
     except Exception as e:
-        logger.error(f"格式化ETF分析失败: {str(e)}", exc_info=True)
-        return f"【ETF分析】格式化消息失败"
-
-def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
-    """
-    获取ETF评分历史数据
-    
-    Args:
-        etf_code: ETF代码
-        days: 查询天数
-    
-    Returns:
-        pd.DataFrame: 评分历史数据
-    """
-    try:
-        history = []
-        beijing_now = get_beijing_time()
+        error_msg = f"生成ETF分析内容失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         
-        # 这里简化处理，实际应从历史评分文件中读取数据
-        for i in range(days):
-            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
-            # 生成模拟评分数据
-            score = 60 + (i % 10) * 2
-            history.append({
-                "日期": date,
-                "评分": score,
-                "排名": i + 1
-            })
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         
-        if not history:
-            logger.info(f"未找到ETF {etf_code} 的评分历史数据")
-            return pd.DataFrame()
-        
-        return pd.DataFrame(history)
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 评分历史数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
+        return f"【ETF分析】生成内容失败"
 
 def analyze_etf_score_trend(etf_code: str) -> str:
     """
@@ -574,7 +692,58 @@ def analyze_etf_score_trend(etf_code: str) -> str:
     except Exception as e:
         error_msg = f"ETF {etf_code} 评分趋势分析失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return f"【{etf_code} 评分趋势】{error_msg}"
+
+def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
+    """
+    获取ETF评分历史数据
+    
+    Args:
+        etf_code: ETF代码
+        days: 查询天数
+    
+    Returns:
+        pd.DataFrame: 评分历史数据
+    """
+    try:
+        history = []
+        beijing_now = get_beijing_time()
+        
+        # 这里简化处理，实际应从历史评分文件中读取数据
+        for i in range(days):
+            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
+            # 生成模拟评分数据
+            score = 60 + (i % 10) * 2
+            history.append({
+                "日期": date,
+                "评分": score,
+                "排名": i + 1
+            })
+        
+        if not history:
+            logger.info(f"未找到ETF {etf_code} 的评分历史数据")
+            return pd.DataFrame()
+        
+        return pd.DataFrame(history)
+    
+    except Exception as e:
+        error_msg = f"获取ETF {etf_code} 评分历史数据失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        return pd.DataFrame()
 
 # 模块初始化
 try:
@@ -583,14 +752,40 @@ try:
     
     # 检查ETF列表是否过期
     if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        logger.warning("ETF列表已过期，评分系统可能使用旧数据")
+        warning_msg = "ETF列表已过期，评分系统可能使用旧数据"
+        logger.warning(warning_msg)
+        
+        # 发送警告通知
+        send_wechat_message(
+            message=warning_msg,
+            message_type="error"
+        )
     
     # 初始化日志
     logger.info("ETF评分系统初始化完成")
     
 except Exception as e:
-    logger.error(f"ETF评分系统初始化失败: {str(e)}", exc_info=True)
-    # 退回到基础日志配置
-    import logging
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
-    logging.error(f"ETF评分系统初始化失败: {str(e)}")
+    error_msg = f"ETF评分系统初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)
+    
+    # 发送错误通知
+    try:
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

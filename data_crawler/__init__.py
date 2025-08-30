@@ -1,4 +1,11 @@
-# crawler_init.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ETF数据爬取模块
+提供ETF日线数据爬取、ETF列表管理等功能
+特别优化了增量保存和断点续爬机制
+"""
+
 import os
 import time
 import pandas as pd
@@ -13,15 +20,10 @@ from config import Config
 from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
 from .akshare_crawler import crawl_etf_daily_akshare
 from .sina_crawler import crawl_etf_daily_sina
-from utils.date_utils import get_beijing_time
-# 删除以下导入，改用 Config.init_dirs()
-# from utils.file_utils import init_dirs
+from utils.date_utils import get_beijing_time, is_trading_day
+from utils.file_utils import ensure_chinese_columns
 
 # 初始化日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 # 定义中国股市节假日日历（2025年）
@@ -51,22 +53,6 @@ def akshare_retry(func, *args, **kwargs):
     """带重试机制的函数调用封装"""
     return func(*args, **kwargs)
 
-def is_trading_day(check_date: date) -> bool:
-    """
-    判断是否为A股交易日
-    :param check_date: 检查日期
-    :return: 如果是交易日返回True，否则返回False
-    """
-    try:
-        if check_date.weekday() >= 5:  # 周六或周日
-            return False
-        
-        china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
-        return pd.Timestamp(check_date) == (pd.Timestamp(check_date) + 0 * china_bd)
-    except Exception as e:
-        logger.error(f"交易日判断失败: {str(e)}", exc_info=True)
-        return False
-
 def get_etf_name(etf_code: str) -> str:
     """
     根据ETF代码获取名称
@@ -90,17 +76,18 @@ def get_etf_name(etf_code: str) -> str:
             logger.debug(f"未在全市场列表中找到ETF代码: {target_code}")
             return f"ETF-{etf_code}"
     except Exception as e:
-        logger.error(f"获取ETF名称失败: {str(e)}")
+        logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
         return f"ETF-{etf_code}"
 
-def get_last_crawl_date(etf_code: str, data_dir: str) -> str:
-    """获取ETF最后爬取日期
+def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
+    """
+    获取ETF最后爬取日期
     :param etf_code: ETF代码
-    :param data_dir: 数据目录
+    :param etf_daily_dir: ETF日线数据目录
     :return: 最后爬取日期（格式：YYYY-MM-DD）
     """
     try:
-        file_path = os.path.join(data_dir, f"{etf_code}.csv")
+        file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
         if not os.path.exists(file_path):
             # 文件不存在，返回初始爬取日期
             current_date = get_beijing_time().date()
@@ -116,13 +103,16 @@ def get_last_crawl_date(etf_code: str, data_dir: str) -> str:
             logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
             return start_date
         
-        last_date = df["date"].max()
+        # 确保日期列是datetime类型
+        df["date"] = pd.to_datetime(df["date"])
+        last_date = df["date"].max().date()
+        
         # 计算下一个交易日作为开始日期
         china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
         next_trading_day = pd.Timestamp(last_date) + china_bd
-        return next_trading_day.strftime("%Y-%m-%d")
+        return next_trading_day.date().strftime("%Y-%m-%d")
     except Exception as e:
-        logger.error(f"获取{etf_code}最后爬取日期失败: {str(e)}")
+        logger.error(f"获取{etf_code}最后爬取日期失败: {str(e)}", exc_info=True)
         # 出错时返回初始爬取日期
         current_date = get_beijing_time().date()
         start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
@@ -149,28 +139,22 @@ def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str, error_me
         
         logger.debug(f"记录失败ETF: {etf_code} - {etf_name}")
     except Exception as e:
-        logger.error(f"记录失败ETF信息失败: {str(e)}")
+        logger.error(f"记录失败ETF信息失败: {str(e)}", exc_info=True)
 
 def crawl_etf_daily_incremental() -> None:
     """
     增量爬取ETF日线数据（单只保存+断点续爬逻辑）
-    支持交易日判断和分批爬取，避免过度请求
+    
+    注意：此函数不再包含是否执行的判断逻辑，由调用方决定是否执行
     """
     try:
         logger.info("===== 开始执行任务：crawl_etf_daily =====")
-        current_time = get_beijing_time()
-        current_date = current_time.date()
-        logger.info(f"当前时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）")
+        beijing_time = get_beijing_time()
+        logger.info(f"当前北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
-        # 非交易日且未到补爬时间（18点后允许补爬）
-        if not is_trading_day(current_date) and current_time.hour < 18:
-            logger.info(f"今日{current_date}非交易日且未到补爬时间，无需爬取日线数据")
-            return
-        
-        # 初始化目录 - 使用 Config.init_dirs() 而不是 utils.file_utils.init_dirs
+        # 初始化目录
         Config.init_dirs()
-        root_dir = Config.BASE_DIR
-        etf_daily_dir = Config.DATA_DIR
+        etf_daily_dir = Config.ETFS_DAILY_DIR  # 修复：使用正确的ETF日线数据目录
         logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
         
         # 已完成列表路径
@@ -184,7 +168,7 @@ def crawl_etf_daily_incremental() -> None:
                     completed_codes = set(line.strip() for line in f if line.strip())
                 logger.info(f"已完成爬取的ETF数量：{len(completed_codes)}")
             except Exception as e:
-                logger.error(f"读取已完成列表失败: {str(e)}")
+                logger.error(f"读取已完成列表失败: {str(e)}", exc_info=True)
                 completed_codes = set()
         
         # 获取待爬取ETF列表
@@ -220,7 +204,7 @@ def crawl_etf_daily_incremental() -> None:
                     
                     # 确定爬取时间范围（增量爬取）
                     start_date = get_last_crawl_date(etf_code, etf_daily_dir)
-                    end_date = current_date.strftime("%Y-%m-%d")
+                    end_date = beijing_time.date().strftime("%Y-%m-%d")
                     
                     if start_date > end_date:
                         logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
@@ -246,48 +230,32 @@ def crawl_etf_daily_incremental() -> None:
                         record_failed_etf(etf_daily_dir, etf_code, etf_name)
                         continue
                     
-                    # 统一列名（转为英文列名，使用config.py中的标准定义）
-                    col_map = Config.STANDARD_COLUMNS
-                    df = df.rename(columns=col_map)
+                    # 确保使用中文列名
+                    df = ensure_chinese_columns(df)
                     
                     # 补充ETF基本信息
-                    df["etf_code"] = etf_code
-                    df["etf_name"] = etf_name
-                    df["crawl_time"] = current_time.strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    # 确保所有标准列都存在
-                    for col in Config.STANDARD_COLUMNS.values():
-                        if col not in df.columns:
-                            # 填充缺失的列（除了etf_code, etf_name, crawl_time已经在上面添加）
-                            if col == "amplitude" and "振幅" in df.columns:
-                                df[col] = df["振幅"]
-                            elif col == "price_change" and "涨跌额" in df.columns:
-                                df[col] = df["涨跌额"]
-                            elif col == "turnover" and "换手率" in df.columns:
-                                df[col] = df["换手率"]
-                            else:
-                                df[col] = None  # 填充空值
-                    
-                    # 只保留标准列
-                    df = df[list(Config.STANDARD_COLUMNS.values())]
+                    df["ETF代码"] = etf_code
+                    df["ETF名称"] = etf_name
+                    df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
                     
                     # 处理已有数据的追加逻辑
                     save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
                     if os.path.exists(save_path):
                         try:
-                            existing_df = pd.read_csv(save_path, encoding="utf-8")
-                            # 去重后合并
-                            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=["date"], keep="last")
+                            existing_df = pd.read_csv(save_path)
+                            # 确保现有数据也是中文列名
+                            existing_df = ensure_chinese_columns(existing_df)
+                            
+                            # 合并数据并去重
+                            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=["日期"], keep="last")
                             # 按日期排序
-                            combined_df["date"] = pd.to_datetime(combined_df["date"])
-                            combined_df = combined_df.sort_values("date").reset_index(drop=True)
-                            combined_df["date"] = combined_df["date"].dt.strftime("%Y-%m-%d")
+                            combined_df = combined_df.sort_values("日期", ascending=False)
                             df = combined_df
                         except Exception as e:
-                            logger.error(f"合并现有数据失败: {str(e)}，将覆盖原文件")
+                            logger.error(f"合并现有数据失败: {str(e)}，将覆盖原文件", exc_info=True)
                     
                     # 保存数据
-                    df.to_csv(save_path, index=False, encoding="utf-8")
+                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
                     logger.info(f"✅ 保存成功：{save_path}（共{len(df)}条数据）")
                     
                     # 记录已完成
@@ -331,7 +299,7 @@ def update_etf_list() -> bool:
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF")
         return True
     except Exception as e:
-        logger.error(f"更新ETF列表失败: {str(e)}")
+        logger.error(f"更新ETF列表失败: {str(e)}", exc_info=True)
         return False
 
 def get_crawl_status() -> Dict[str, Any]:
@@ -340,8 +308,7 @@ def get_crawl_status() -> Dict[str, Any]:
     :return: 包含爬取状态信息的字典
     """
     try:
-        root_dir = Config.BASE_DIR
-        etf_daily_dir = Config.DATA_DIR
+        etf_daily_dir = Config.ETFS_DAILY_DIR
         
         # 获取已完成列表
         completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
@@ -368,7 +335,7 @@ def get_crawl_status() -> Dict[str, Any]:
             "percentage": round(len(completed_codes) / len(all_codes) * 100, 2) if all_codes else 0
         }
     except Exception as e:
-        logger.error(f"获取爬取状态失败: {str(e)}")
+        logger.error(f"获取爬取状态失败: {str(e)}", exc_info=True)
         return {
             "total_etfs": 0,
             "completed_etfs": 0,
@@ -380,14 +347,12 @@ def get_crawl_status() -> Dict[str, Any]:
 # 模块初始化
 try:
     # 确保必要的目录存在
-    Config.init_dirs()
-    
-    # 初始化ETF列表
-    update_etf_list()
-    
-    logger.info("数据爬取模块初始化完成")
+    if Config.init_dirs():
+        logger.info("数据爬取模块初始化完成")
+    else:
+        logger.warning("数据爬取模块初始化完成，但存在警告")
 except Exception as e:
-    logger.error(f"数据爬取模块初始化失败: {str(e)}")
+    logger.error(f"数据爬取模块初始化失败: {str(e)}", exc_info=True)
     # 退回到基础日志配置
     import logging
     logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)

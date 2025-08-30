@@ -1,286 +1,438 @@
-# arbitrage.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+套利策略计算模块
+基于ETF净值与市场价格的差异计算套利机会
+"""
+
 import pandas as pd
 import numpy as np
 import logging
-import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+import akshare as ak
+from datetime import datetime, timedelta
+from typing import Union, Optional, Tuple, Dict, Any
 from config import Config
-from utils.file_utils import load_etf_daily_data
-from .etf_scoring import get_etf_name, get_top_rated_etfs
+from utils.date_utils import (
+    get_current_times,
+    format_dual_time,
+    get_beijing_time,
+    get_utc_time,
+    is_trading_day,
+    is_file_outdated
+)
+from .etf_scoring import get_etf_basic_info, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-def calculate_premium_rate(etf_code: str) -> float:
+def calculate_arbitrage_opportunity() -> Union[pd.DataFrame, str]:
     """
-    计算ETF溢价率（需要实时数据，这里用简化版本）
-    :param etf_code: ETF代码
-    :return: 溢价率（小数形式，如0.01表示1%）
-    """
-    try:
-        # 实际应用中应该获取实时IOPV和市场价格
-        # 这里使用简化版本：随机生成一个溢价率用于演示
-        premium_rate = np.random.uniform(-0.02, 0.02)  # -2%到+2%的随机溢价率
-        logger.debug(f"ETF {etf_code} 溢价率: {premium_rate:.4f}")
-        return premium_rate
-    except Exception as e:
-        logger.error(f"计算ETF {etf_code} 溢价率失败: {str(e)}")
-        return 0.0
-
-def calculate_arbitrage_opportunity() -> pd.DataFrame:
-    """
-    计算ETF套利机会（基于溢价率，考虑交易成本）
-    逻辑：找溢价率超阈值（含成本）的机会
-    :return: 包含套利机会的DataFrame
+    计算ETF套利机会
+    
+    Returns:
+        Union[pd.DataFrame, str]: 套利机会DataFrame或错误消息
     """
     try:
-        logger.info("="*50)
-        logger.info("开始计算ETF套利机会")
-        logger.info("="*50)
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        arbitrage_list = []
-        # 获取高分ETF列表（前20%）
-        top_etfs = get_top_rated_etfs()
-        if top_etfs.empty:
-            logger.warning("无足够高分ETF用于计算套利机会")
-            return pd.DataFrame()
+        # 检查是否为交易日
+        if not is_trading_day():
+            logger.info("今日非交易日，跳过套利计算")
+            return "今日非交易日，无需计算套利机会"
         
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        logger.info(f"分析 {len(top_etfs)} 只高分ETF的套利机会")
+        # 获取ETF列表
+        etf_list = load_etf_list()
+        if etf_list.empty:
+            logger.warning("ETF列表为空，无法计算套利机会")
+            return "ETF列表为空，无法计算套利机会"
         
-        for idx, row in top_etfs.iterrows():
+        # 计算套利机会
+        opportunities = []
+        for _, etf in etf_list.iterrows():
             try:
-                etf_code = row["etf_code"]
-                etf_name = row["etf_name"]
+                # 获取ETF实时数据
+                etf_code = etf["ETF代码"]
+                etf_name = etf["ETF名称"]
                 
-                # 计算溢价率
-                premium_rate = calculate_premium_rate(etf_code)
+                # 获取ETF实时行情
+                etf_realtime = get_etf_realtime_data(etf_code)
+                if etf_realtime is None:
+                    continue
                 
-                # 计算扣除成本后的套利收益率
-                net_profit = abs(premium_rate) - Config.TRADE_COST_RATE
+                # 获取ETF净值数据
+                etf_nav = get_etf_nav_data(etf_code)
+                if etf_nav is None:
+                    continue
                 
-                # 判断套利机会：净收益超阈值
-                if net_profit >= Config.ARBITRAGE_PROFIT_THRESHOLD:
-                    if premium_rate > 0:
-                        action = f"溢价套利：卖出{etf_name}（{etf_code}）"
-                        direction = "溢价"
-                    else:
-                        action = f"折价套利：买入{etf_name}（{etf_code}）"
-                        direction = "折价"
-                    
-                    arbitrage_list.append({
+                # 计算折溢价率
+                premium_discount = calculate_premium_discount(
+                    etf_realtime["最新价"], 
+                    etf_nav["单位净值"]
+                )
+                
+                # 仅保留有套利机会的ETF（折溢价率绝对值大于阈值）
+                if abs(premium_discount) >= Config.ARBITRAGE_THRESHOLD:
+                    opportunities.append({
                         "ETF代码": etf_code,
                         "ETF名称": etf_name,
-                        "套利方向": action,
-                        "溢价率": f"{premium_rate:.3%}",
-                        "交易成本": f"{Config.TRADE_COST_RATE:.3%}",
-                        "净收益率": f"{net_profit:.3%}",
-                        "套利类型": direction,
-                        "发现时间": current_date
+                        "最新价": etf_realtime["最新价"],
+                        "单位净值": etf_nav["单位净值"],
+                        "折溢价率": premium_discount,
+                        "规模": etf["基金规模"],
+                        "成交量": etf_realtime["成交量"],
+                        "utc_time": utc_now.strftime("%Y-%m-%d %H:%M:%S"),
+                        "beijing_time": beijing_now.strftime("%Y-%m-%d %H:%M:%S")
                     })
-                    logger.info(f"发现套利机会: {etf_name}({etf_code}) {direction}套利, 净收益: {net_profit:.3%}")
-                
             except Exception as e:
-                logger.error(f"分析ETF {row.get('etf_code', '未知')} 套利机会时发生错误: {str(e)}")
-                continue
+                logger.error(f"计算ETF {etf['ETF代码']} 套利机会失败: {str(e)}", exc_info=True)
         
-        # 转换为DataFrame
-        if arbitrage_list:
-            arbitrage_df = pd.DataFrame(arbitrage_list)
-            logger.info(f"找到 {len(arbitrage_df)} 个套利机会")
-            
-            # 记录套利交易（假设执行）
-            record_arbitrage_trades(arbitrage_df)
-            
-            return arbitrage_df
-        else:
-            logger.info("未找到符合条件的套利机会")
+        # 创建DataFrame
+        if not opportunities:
+            logger.info("未发现有效套利机会")
             return pd.DataFrame()
-            
+        
+        df = pd.DataFrame(opportunities)
+        # 按折溢价率绝对值排序
+        df["abs_premium_discount"] = df["折溢价率"].abs()
+        df = df.sort_values("abs_premium_discount", ascending=False)
+        df = df.drop(columns=["abs_premium_discount"])
+        
+        logger.info(f"发现 {len(df)} 个套利机会")
+        return df
+    
     except Exception as e:
-        logger.error(f"计算套利机会时发生未预期错误: {str(e)}")
-        return pd.DataFrame()
+        error_msg = f"套利机会计算失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg
 
-def record_arbitrage_trades(arbitrage_df: pd.DataFrame) -> bool:
+def load_etf_list() -> pd.DataFrame:
     """
-    记录套利交易
-    :param arbitrage_df: 套利机会DataFrame
-    :return: 是否成功记录交易
+    加载ETF列表
+    
+    Returns:
+        pd.DataFrame: ETF列表
     """
     try:
-        from position import init_trade_record, record_trade
+        # 检查ETF列表文件是否存在
+        if not os.path.exists(Config.ALL_ETFS_PATH):
+            logger.warning("ETF列表文件不存在")
+            return pd.DataFrame()
         
-        init_trade_record()
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        # 检查ETF列表是否过期
+        if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
+            logger.warning("ETF列表已过期，可能影响套利计算准确性")
         
-        for _, row in arbitrage_df.iterrows():
-            try:
-                etf_code = row["ETF代码"]
-                etf_name = row["ETF名称"]
-                premium_rate = float(row["溢价率"].strip('%')) / 100
-                net_profit = float(row["净收益率"].strip('%')) / 100
-                
-                # 获取当前价格（简化处理）
-                df = load_etf_daily_data(etf_code)
-                if not df.empty:
-                    price = df.iloc[-1]["收盘"]
-                else:
-                    price = 1.0  # 默认价格
-                    logger.warning(f"无法获取ETF {etf_code} 价格，使用默认值 1.0")
-                
-                # 确定操作类型
-                if "溢价" in row["套利类型"]:
-                    operation = "卖出"
-                    reason = "溢价套利机会"
-                else:
-                    operation = "买入"
-                    reason = "折价套利机会"
-                
-                # 记录交易
-                record_trade(
-                    trade_date=current_date,
-                    position_type="套利仓",
-                    operation=operation,
-                    etf_code=etf_code,
-                    etf_name=etf_name,
-                    price=price,
-                    quantity=1000,
-                    amount=price * 1000,
-                    profit_rate=net_profit * 100,
-                    hold_days=1,  # 套利持仓1天
-                    reason=f"{reason}，溢价率：{premium_rate:.3%}"
-                )
-                
-            except Exception as e:
-                logger.error(f"记录ETF {row.get('ETF代码', '未知')} 套利交易时发生错误: {str(e)}")
-                continue
+        # 读取ETF列表
+        etf_list = pd.read_csv(Config.ALL_ETFS_PATH, encoding="utf-8")
+        if etf_list.empty:
+            logger.warning("ETF列表为空")
+            return pd.DataFrame()
         
-        logger.info(f"成功记录 {len(arbitrage_df)} 个套利交易")
-        return True
+        # 确保包含必要列
+        required_columns = ["ETF代码", "ETF名称", "基金规模"]
+        for col in required_columns:
+            if col not in etf_list.columns:
+                logger.error(f"ETF列表缺少必要列: {col}")
+                return pd.DataFrame()
         
-    except Exception as e:
-        logger.error(f"记录套利交易时发生未预期错误: {str(e)}")
-        return False
-
-def format_arbitrage_message(arbitrage_df: pd.DataFrame) -> str:
-    """
-    格式化套利机会消息
-    :param arbitrage_df: 套利机会DataFrame
-    :return: 格式化后的消息字符串
-    """
-    try:
-        if arbitrage_df.empty:
-            return "【ETF套利机会提示】\n今日未找到符合条件的ETF套利机会（考虑交易成本后）"
-        
-        message = "【ETF套利机会提示】\n"
-        message += f"共发现 {len(arbitrage_df)} 个套利机会（交易成本：{Config.TRADE_COST_RATE:.2%}）\n\n"
-        
-        for idx, (_, row) in enumerate(arbitrage_df.iterrows(), 1):
-            message += f"{idx}. {row['ETF名称']}（{row['ETF代码']}）\n"
-            message += f"   操作建议：{row['套利方向']}\n"
-            message += f"   溢价率：{row['溢价率']} | 净收益率：{row['净收益率']}\n"
-            message += f"   发现时间：{row['发现时间']}\n\n"
-        
-        message += "⚠️ 套利提示：套利机会通常短暂，需快速执行！次日请关注获利了结机会。"
-        return message
-        
-    except Exception as e:
-        logger.error(f"格式化套利消息时发生错误: {str(e)}")
-        return "【ETF套利机会提示】\n生成套利消息时发生错误"
-
-def check_arbitrage_exit_signals() -> bool:
-    """
-    检查套利退出信号（持有1天后）
-    :return: 是否成功检查退出信号
-    """
-    try:
-        from position import init_trade_record
-        from wechat_push import send_wechat_message
-        
-        init_trade_record()
-        trade_df = pd.read_csv(Config.TRADE_RECORD_FILE, encoding="utf-8")
-        
-        # 获取昨天的日期
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # 查找昨天执行的套利交易
-        yesterday_arbitrage = trade_df[
-            (trade_df["交易日期"] == yesterday) & 
-            (trade_df["仓位类型"] == "套利仓") &
-            (trade_df["操作类型"] == "买入")
+        # 筛选符合条件的ETF
+        filtered_etfs = etf_list[
+            (etf_list["基金规模"] >= Config.MIN_FUND_SIZE) &
+            (etf_list["日均成交额"] >= Config.MIN_AVG_VOLUME)
         ]
         
-        if not yesterday_arbitrage.empty:
-            exit_messages = []
-            for _, trade in yesterday_arbitrage.iterrows():
-                # 建议卖出套利持仓
-                exit_messages.append(
-                    f"套利持仓退出建议: 卖出 {trade['ETF名称']} ({trade['ETF代码']})，"
-                    f"买入价: {trade['价格']}元，建议获利了结"
-                )
-            
-            if exit_messages:
-                message = "【套利持仓退出提示】\n\n" + "\n".join(exit_messages)
-                message += "\n\n💡 套利持仓建议持有不超过1天，请及时了结！"
-                
-                # 发送微信消息
-                send_wechat_message(message)
-                logger.info("套利退出提示已发送")
-                
-        return True
-        
+        logger.info(f"加载 {len(filtered_etfs)} 只符合条件的ETF")
+        return filtered_etfs
+    
     except Exception as e:
-        logger.error(f"检查套利退出信号失败: {str(e)}")
+        logger.error(f"加载ETF列表失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
+    """
+    获取ETF实时行情数据
+    
+    Args:
+        etf_code: ETF代码
+    
+    Returns:
+        Optional[Dict[str, Any]]: 实时行情数据
+    """
+    try:
+        # 尝试使用AkShare获取实时数据
+        df = ak.fund_etf_spot_em(symbol=etf_code)
+        if df.empty or len(df) == 0:
+            logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")
+            return None
+        
+        # 提取最新行情
+        latest = df.iloc[0]
+        
+        # 提取必要字段
+        realtime_data = {
+            "最新价": float(latest["最新价"]),
+            "成交量": float(latest["成交量"]),
+            "涨跌幅": float(latest["涨跌幅"]),
+            "涨跌额": float(latest["涨跌额"]),
+            "开盘价": float(latest["开盘价"]),
+            "最高价": float(latest["最高价"]),
+            "最低价": float(latest["最低价"]),
+            "总市值": float(latest["总市值"])
+        }
+        
+        logger.debug(f"获取ETF {etf_code} 实时行情成功")
+        return realtime_data
+    
+    except Exception as e:
+        logger.error(f"获取ETF {etf_code} 实时行情失败: {str(e)}", exc_info=True)
+        return None
+
+def get_etf_nav_data(etf_code: str) -> Optional[Dict[str, Any]]:
+    """
+    获取ETF净值数据
+    
+    Args:
+        etf_code: ETF代码
+    
+    Returns:
+        Optional[Dict[str, Any]]: 净值数据
+    """
+    try:
+        # 获取ETF净值数据
+        df = ak.fund_etf_fund_info_em(symbol=etf_code, indicator="单位净值走势")
+        if df.empty or len(df) == 0:
+            logger.warning(f"AkShare未返回ETF {etf_code} 的净值数据")
+            return None
+        
+        # 提取最新净值
+        latest = df.iloc[-1]
+        
+        # 提取必要字段
+        nav_data = {
+            "单位净值": float(latest["单位净值"]),
+            "累计净值": float(latest["累计净值"]),
+            "净值日期": latest["净值日期"]
+        }
+        
+        logger.debug(f"获取ETF {etf_code} 净值数据成功")
+        return nav_data
+    
+    except Exception as e:
+        logger.error(f"获取ETF {etf_code} 净值数据失败: {str(e)}", exc_info=True)
+        return None
+
+def calculate_premium_discount(market_price: float, nav: float) -> float:
+    """
+    计算折溢价率
+    
+    Args:
+        market_price: 市场价格
+        nav: 单位净值
+    
+    Returns:
+        float: 折溢价率（百分比）
+    """
+    if nav <= 0:
+        logger.warning(f"无效的净值: {nav}")
+        return 0.0
+    
+    premium_discount = ((market_price - nav) / nav) * 100
+    return round(premium_discount, 2)
+
+def format_arbitrage_message(df: pd.DataFrame) -> str:
+    """
+    格式化套利机会消息
+    
+    Args:
+        df: 套利机会DataFrame
+    
+    Returns:
+        str: 格式化后的消息
+    """
+    try:
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        
+        if df.empty:
+            return "【套利机会】\n🔍 未发现有效套利机会"
+        
+        # 生成消息
+        message = "【套利机会】\n"
+        message += f"⏰ 消息生成时间: {format_dual_time(beijing_now)}\n\n"
+        
+        # 添加前3个最佳机会
+        top_opportunities = df.head(3)
+        message += "🏆 今日最佳套利机会:\n"
+        for i, (_, row) in enumerate(top_opportunities.iterrows(), 1):
+            direction = "溢价" if row["折溢价率"] > 0 else "折价"
+            message += (
+                f"{i}. {row['ETF名称']}({row['ETF代码']})\n"
+                f"   • {direction}: {abs(row['折溢价率']):.2f}%\n"
+                f"   • 价格: {row['最新价']:.3f}元 | 净值: {row['单位净值']:.3f}元\n"
+                f"   • 规模: {row['规模']:.2f}亿元 | 成交量: {row['成交量']:.0f}\n"
+            )
+        
+        # 添加其他机会数量
+        if len(df) > 3:
+            message += f"\n• 还有 {len(df) - 3} 个套利机会...\n"
+        
+        # 添加风险提示
+        message += (
+            "\n⚠️ 风险提示\n"
+            "• 套利机会转瞬即逝，请及时操作\n"
+            "• 交易成本可能影响套利收益\n"
+            "• 市场波动可能导致策略失效\n"
+        )
+        
+        return message
+    
+    except Exception as e:
+        error_msg = f"格式化套利消息失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"【套利机会】{error_msg}"
+
+def send_arbitrage_opportunity() -> bool:
+    """
+    计算并发送套利机会
+    
+    Returns:
+        bool: 发送是否成功
+    """
+    try:
+        # 检查是否已经发送过今日套利机会
+        today = get_beijing_time().date().strftime("%Y-%m-%d")
+        arbitrage_flag = os.path.join(Config.FLAG_DIR, f"arbitrage_sent_{today}.txt")
+        
+        if os.path.exists(arbitrage_flag):
+            logger.info("今日套利机会已发送，跳过重复发送")
+            return True
+        
+        # 计算套利机会
+        arbitrage_df = calculate_arbitrage_opportunity()
+        if isinstance(arbitrage_df, str):
+            logger.warning(f"套利机会计算失败: {arbitrage_df}")
+            return False
+        
+        # 生成消息
+        message = format_arbitrage_message(arbitrage_df)
+        
+        # 发送消息
+        success = send_wechat_message(message)
+        
+        if success:
+            # 标记已发送
+            os.makedirs(os.path.dirname(arbitrage_flag), exist_ok=True)
+            with open(arbitrage_flag, "w", encoding="utf-8") as f:
+                f.write(get_beijing_time().strftime("%Y-%m-%d %H:%M:%S"))
+            logger.info("套利机会已成功发送到微信")
+        else:
+            logger.error("微信消息发送失败")
+        
+        return success
+    
+    except Exception as e:
+        error_msg = f"发送套利机会失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         return False
 
-def get_real_time_premium_rate(etf_code: str) -> Optional[float]:
+def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
     """
-    尝试获取实时溢价率（实际生产环境中应实现此函数）
-    :param etf_code: ETF代码
-    :return: 实时溢价率或None（如果无法获取）
+    获取套利历史数据
+    
+    Args:
+        days: 查询天数
+    
+    Returns:
+        pd.DataFrame: 套利历史数据
     """
     try:
-        # 实际生产环境中，这里应该调用实时数据API
-        # 例如使用AkShare或其他金融数据API获取实时IOPV和市场价格
-        # 这里返回None表示未实现
+        history = []
+        beijing_now = get_beijing_time()
         
-        logger.warning(f"实时溢价率获取功能未实现，ETF: {etf_code}")
-        return None
+        for i in range(days):
+            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
+            flag_file = os.path.join(Config.FLAG_DIR, f"arbitrage_sent_{date}.txt")
+            
+            if os.path.exists(flag_file):
+                # 读取当日套利数据
+                # 这里简化处理，实际应从数据库或文件中读取历史套利数据
+                history.append({
+                    "日期": date,
+                    "机会数量": 3,  # 示例数据
+                    "最大折溢价率": 2.5,  # 示例数据
+                    "最小折溢价率": -1.8  # 示例数据
+                })
         
+        if not history:
+            logger.info("未找到套利历史数据")
+            return pd.DataFrame()
+        
+        return pd.DataFrame(history)
+    
     except Exception as e:
-        logger.error(f"获取实时溢价率失败: {str(e)}")
-        return None
+        logger.error(f"获取套利历史数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
-def simulate_real_time_data(etf_code: str) -> float:
+def analyze_arbitrage_performance() -> str:
     """
-    模拟实时数据获取（用于演示和测试）
-    :param etf_code: ETF代码
-    :return: 模拟的溢价率
+    分析套利表现
+    
+    Returns:
+        str: 分析结果
     """
     try:
-        # 基于历史数据模拟实时溢价率
-        df = load_etf_daily_data(etf_code)
-        if df.empty or len(df) < 5:
-            return np.random.uniform(-0.02, 0.02)
+        # 获取历史数据
+        history_df = get_arbitrage_history()
+        if history_df.empty:
+            return "【套利表现分析】\n• 无历史数据可供分析"
         
-        # 使用最近5天的波动性来模拟实时溢价率
-        recent_volatility = df["涨跌幅"].tail(5).std()
-        premium_rate = np.random.normal(0, recent_volatility * 2)
+        # 计算统计指标
+        avg_opportunities = history_df["机会数量"].mean()
+        max_premium = history_df["最大折溢价率"].max()
+        min_discount = history_df["最小折溢价率"].min()
         
-        # 限制溢价率范围在±5%以内
-        premium_rate = np.clip(premium_rate, -0.05, 0.05)
+        # 生成分析报告
+        report = "【套利表现分析】\n"
+        report += f"• 近期平均每天发现 {avg_opportunities:.1f} 个套利机会\n"
+        report += f"• 最大溢价率: {max_premium:.2f}%\n"
+        report += f"• 最大折价率: {min_discount:.2f}%\n\n"
         
-        logger.debug(f"模拟ETF {etf_code} 实时溢价率: {premium_rate:.4f}")
-        return premium_rate
+        # 添加趋势分析
+        if len(history_df) >= 3:
+            trend = "上升" if history_df["机会数量"].iloc[-3:].mean() > history_df["机会数量"].iloc[:3].mean() else "下降"
+            report += f"• 套利机会数量呈{trend}趋势\n"
         
+        # 添加建议
+        if max_premium > 2.0:
+            report += "\n💡 建议：溢价率较高时，可考虑卖出ETF\n"
+        if min_discount < -2.0:
+            report += "💡 建议：折价率较高时，可考虑买入ETF\n"
+        
+        return report
+    
     except Exception as e:
-        logger.error(f"模拟实时数据失败: {str(e)}")
-        return np.random.uniform(-0.02, 0.02)
+        error_msg = f"套利表现分析失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"【套利表现分析】{error_msg}"
 
 # 模块初始化
 try:
+    # 确保必要的目录存在
+    Config.init_dirs()
+    
+    # 初始化日志
     logger.info("套利策略模块初始化完成")
+    
+    # 记录当前市场状态
+    market_status = "开市" if is_market_open() else "闭市"
+    trading_status = "交易日" if is_trading_day() else "非交易日"
+    logger.info(f"当前市场状态: {trading_status}，{market_status}")
+    
 except Exception as e:
-    print(f"套利策略模块初始化失败: {str(e)}")
-# 0828-1256【arbitrage.py代码】一共202行代码
+    logger.error(f"套利策略模块初始化失败: {str(e)}", exc_info=True)
+    # 退回到基础日志配置
+    import logging
+    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
+    logging.error(f"套利策略模块初始化失败: {str(e)}")

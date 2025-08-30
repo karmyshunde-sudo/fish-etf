@@ -73,10 +73,22 @@ jobs:
           echo "仓库目录内容:"
           ls -la
       
-      - name: 确定任务类型
+      - name: 确定任务类型和触发方式
         id: set_task
         run: |
-          # 处理定时任务
+          # 设置触发方式环境变量
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "TRIGGER_TYPE=schedule" >> $GITHUB_ENV
+            echo "触发方式: 定时任务"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "TRIGGER_TYPE=manual" >> $GITHUB_ENV
+            echo "触发方式: 手动触发"
+          else
+            echo "TRIGGER_TYPE=unknown" >> $GITHUB_ENV
+            echo "触发方式: 未知"
+          fi
+          
+          # 确定任务类型
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
               echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
@@ -90,12 +102,12 @@ jobs:
               echo "未知的定时任务: ${{ github.event.schedule }}"
               echo "TASK=unknown" >> $GITHUB_ENV
             fi
-          # 处理手动触发任务
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "TASK=${{ github.event.inputs.task }}" >> $GITHUB_ENV
           fi
           
           echo "最终执行任务: $TASK"
+          echo "触发方式: $TRIGGER_TYPE"
       
       - name: 创建数据目录
         run: |
@@ -104,37 +116,44 @@ jobs:
           echo "数据目录结构:"
           find data/ -type d -exec ls -ld {} \;
       
-      - name: 检查是否已推送标志
+      - name: 检查是否已推送标志（仅定时任务）
         id: check_flags
         run: |
           # 获取当前北京时间
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           
-          # 检查标志文件是否存在（模拟主程序中的检查逻辑）
-          if [[ "$TASK" == "calculate_arbitrage" ]]; then
-            if [[ -f "data/flags/arbitrage_pushed_${BEIJING_DATE}.txt" ]]; then
-              echo "arbitrage_pushed=true" >> $GITHUB_OUTPUT
-              echo "检测到套利策略已推送标志，将跳过执行"
+          # 只有定时触发的任务才检查标志
+          if [[ "$TRIGGER_TYPE" == "schedule" ]]; then
+            # 检查标志文件是否存在
+            if [[ "$TASK" == "calculate_arbitrage" ]]; then
+              if [[ -f "data/flags/arbitrage_pushed_${BEIJING_DATE}.txt" ]]; then
+                echo "arbitrage_pushed=true" >> $GITHUB_OUTPUT
+                echo "检测到套利策略已推送标志，将跳过执行（定时任务）"
+              else
+                echo "arbitrage_pushed=false" >> $GITHUB_OUTPUT
+              fi
+            elif [[ "$TASK" == "calculate_position" ]]; then
+              if [[ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ]]; then
+                echo "position_pushed=true" >> $GITHUB_OUTPUT
+                echo "检测到仓位策略已推送标志，将跳过执行（定时任务）"
+              else
+                echo "position_pushed=false" >> $GITHUB_OUTPUT
+              fi
             else
-              echo "arbitrage_pushed=false" >> $GITHUB_OUTPUT
-            fi
-          elif [[ "$TASK" == "calculate_position" ]]; then
-            if [[ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ]]; then
-              echo "position_pushed=true" >> $GITHUB_OUTPUT
-              echo "检测到仓位策略已推送标志，将跳过执行"
-            else
-              echo "position_pushed=false" >> $GITHUB_OUTPUT
+              echo "无需检查推送标志的任务: $TASK"
             fi
           else
-            echo "无需检查推送标志的任务: $TASK"
+            echo "手动触发任务，跳过标志检查"
           fi
       
-      - name: 跳过已推送任务
+      - name: 跳过已推送任务（仅定时任务）
         if: >-
-          (steps.check_flags.outputs.arbitrage_pushed == 'true' && env.TASK == 'calculate_arbitrage') ||
-          (steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position')
+          env.TRIGGER_TYPE == 'schedule' && (
+            (steps.check_flags.outputs.arbitrage_pushed == 'true' && env.TASK == 'calculate_arbitrage') ||
+            (steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position')
+          )
         run: |
-          echo "任务 $TASK 今日已推送，跳过执行"
+          echo "任务 $TASK 今日已推送，跳过执行（定时任务）"
           echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 执行任务
@@ -142,10 +161,11 @@ jobs:
         if: env.skip_execution != 'true'
         env:
           TASK: ${{ env.TASK }}
+          TRIGGER_TYPE: ${{ env.TRIGGER_TYPE }}  # 关键：传递触发方式给main.py
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai  # 设置时区为北京时间
         run: |
-          echo "开始执行任务: $TASK"
+          echo "开始执行任务: $TASK (触发方式: $TRIGGER_TYPE)"
           
           # 创建日志文件（使用北京时间命名）
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
@@ -202,7 +222,7 @@ jobs:
           # 检查是否有变更需要提交
           if [ -n "$(git status --porcelain)" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
-            git commit -m "自动更新数据[$TASK]: ${BEIJING_TIME}"
+            git commit -m "自动更新数据[$TASK] (触发方式: $TRIGGER_TYPE): ${BEIJING_TIME}"
             git push origin main
             echo "数据提交成功"
           else
@@ -227,7 +247,7 @@ jobs:
           
           if [ -n "$(git status --porcelain)" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
-            git commit -m "自动更新数据[$TASK]: ${BEIJING_TIME} [冲突解决]"
+            git commit -m "自动更新数据[$TASK] (触发方式: $TRIGGER_TYPE): ${BEIJING_TIME} [冲突解决]"
             git push origin main || echo "推送失败"
             echo "冲突解决后提交成功"
           else
@@ -238,15 +258,15 @@ jobs:
         if: always()
         run: |
           if [ "${{ env.skip_execution }}" == "true" ]; then
-            echo "任务 ${{ env.TASK }} 已跳过（今日已推送）"
+            echo "任务 ${{ env.TASK }} 已跳过（定时任务且今日已推送）"
           elif [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
             if [ ${{ steps.execute_task.outputs.file_count }} -gt 0 ]; then
-              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功，生成${{ steps.execute_task.outputs.file_count }}个文件"
+              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功（触发方式: ${{ env.TRIGGER_TYPE }}），生成${{ steps.execute_task.outputs.file_count }}个文件"
             else
-              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功，但未生成新文件"
+              echo "【GIT-fish-etf】[${{ env.TASK }}]执行成功（触发方式: ${{ env.TRIGGER_TYPE }}），但未生成新文件"
             fi
           else
-            echo "【GIT-fish-etf】[${{ env.TASK }}]执行失败"
+            echo "【GIT-fish-etf】[${{ env.TASK }}]执行失败（触发方式: ${{ env.TRIGGER_TYPE }}）"
           fi
       
       - name: 失败通知（企业微信）
@@ -257,7 +277,8 @@ jobs:
           if [ -n "$WECOM_WEBHOOK" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
-            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
+            TRIGGER_TYPE="${{ env.TRIGGER_TYPE }}"
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\n触发方式: ${TRIGGER_TYPE}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}}"
             curl -s -X POST "$WECOM_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "$payload" || echo "企业微信通知发送失败"

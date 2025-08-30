@@ -1,8 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+配置模块
+提供项目全局配置参数，包括路径、日志、策略参数等
+特别优化了时区相关配置，确保所有时间显示为北京时间
+"""
+
 import os
 import logging
 import sys
 from typing import Dict, Any, Optional
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 # 先定义获取基础目录的函数，避免类定义时的循环引用问题
 def _get_base_dir() -> str:
@@ -66,7 +75,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -136,17 +145,35 @@ class Config:
     @staticmethod
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
-        from datetime import datetime
-        date = date_str or datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
+        try:
+            # 尝试使用北京时间
+            from utils.date_utils import get_beijing_time
+            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
+        except ImportError:
+            # 回退到简单实现（仅用于初始化阶段）
+            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
+        except Exception as e:
+            logging.error(f"获取套利标记文件路径失败: {str(e)}", exc_info=True)
+            return os.path.join(Config.FLAG_DIR, "arbitrage_pushed_error.txt")
     
     # 仓位策略结果标记文件
     @staticmethod
     def get_position_flag_file(date_str: Optional[str] = None) -> str:
         """获取仓位标记文件路径"""
-        from datetime import datetime
-        date = date_str or datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
+        try:
+            # 尝试使用北京时间
+            from utils.date_utils import get_beijing_time
+            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
+        except ImportError:
+            # 回退到简单实现（仅用于初始化阶段）
+            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
+        except Exception as e:
+            logging.error(f"获取仓位标记文件路径失败: {str(e)}", exc_info=True)
+            return os.path.join(Config.FLAG_DIR, "position_pushed_error.txt")
     
     # 交易记录文件
     TRADE_RECORD_FILE: str = os.path.join(DATA_DIR, "trade_records.csv")
@@ -168,41 +195,44 @@ class Config:
         :param log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         :param log_file: 日志文件路径，如果为None则只输出到控制台
         """
-        level = log_level or Config.LOG_LEVEL
-        log_format = Config.LOG_FORMAT
-        
-        # 创建根日志记录器
-        root_logger = logging.getLogger()
-        root_logger.setLevel(level)
-        
-        # 清除现有处理器
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-        
-        # 创建格式化器
-        formatter = logging.Formatter(log_format)
-        
-        # 创建控制台处理器
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(level)
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
-        
-        # 创建文件处理器（如果指定了日志文件）
-        if log_file:
-            try:
-                # 确保日志目录存在
-                log_dir = os.path.dirname(log_file)
-                if log_dir and not os.path.exists(log_dir):
-                    os.makedirs(log_dir, exist_ok=True)
-                
-                file_handler = logging.FileHandler(log_file, encoding='utf-8')
-                file_handler.setLevel(level)
-                file_handler.setFormatter(formatter)
-                root_logger.addHandler(file_handler)
-                logging.info(f"日志文件已配置: {log_file}")
-            except Exception as e:
-                logging.error(f"配置日志文件失败: {str(e)}")
+        try:
+            level = log_level or Config.LOG_LEVEL
+            log_format = Config.LOG_FORMAT
+            
+            # 创建根日志记录器
+            root_logger = logging.getLogger()
+            root_logger.setLevel(level)
+            
+            # 清除现有处理器
+            for handler in root_logger.handlers[:]:
+                root_logger.removeHandler(handler)
+            
+            # 创建格式化器
+            formatter = logging.Formatter(log_format)
+            
+            # 创建控制台处理器
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(level)
+            console_handler.setFormatter(formatter)
+            root_logger.addHandler(console_handler)
+            
+            # 创建文件处理器（如果指定了日志文件）
+            if log_file:
+                try:
+                    # 确保日志目录存在
+                    log_dir = os.path.dirname(log_file)
+                    if log_dir and not os.path.exists(log_dir):
+                        os.makedirs(log_dir, exist_ok=True)
+                    
+                    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+                    file_handler.setLevel(level)
+                    file_handler.setFormatter(formatter)
+                    root_logger.addHandler(file_handler)
+                    logging.info(f"日志文件已配置: {log_file}")
+                except Exception as e:
+                    logging.error(f"配置日志文件失败: {str(e)}", exc_info=True)
+        except Exception as e:
+            logging.error(f"配置日志系统失败: {str(e)}", exc_info=True)
     
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -226,7 +256,8 @@ class Config:
         "\n\n"
         "【GIT-fish-etf】\n"
         "📊 数据来源：AkShare | 环境：生产\n"
-        "🕒 消息生成时间：{current_time}"
+        "🌍 UTC时间：{utc_time}\n"
+        "⏰ 北京时间：{beijing_time}"
     )
     
     # -------------------------
@@ -260,44 +291,53 @@ class Config:
         """
         results = {}
         
-        # 检查必要的目录是否存在或可创建
-        required_dirs = [
-            Config.DATA_DIR, 
-            Config.ETFS_DAILY_DIR,
-            Config.FLAG_DIR, 
-            Config.LOG_DIR
-        ]
-        for dir_path in required_dirs:
-            try:
-                if not os.path.exists(dir_path):
-                    os.makedirs(dir_path, exist_ok=True)
-                results[f"dir_{os.path.basename(dir_path)}"] = {
-                    "status": "OK", 
-                    "path": dir_path,
-                    "writable": os.access(dir_path, os.W_OK)
-                }
-            except Exception as e:
-                results[f"dir_{os.path.basename(dir_path)}"] = {
-                    "status": "ERROR", 
-                    "path": dir_path,
-                    "error": str(e)
-                }
-        
-        # 检查权重配置是否合理
-        total_weight = sum(Config.SCORE_WEIGHTS.values())
-        results["weights"] = {
-            "status": "OK" if abs(total_weight - 1.0) < 0.001 else "WARNING",
-            "total": total_weight,
-            "expected": 1.0
-        }
+        try:
+            # 检查必要的目录是否存在或可创建
+            required_dirs = [
+                Config.DATA_DIR, 
+                Config.ETFS_DAILY_DIR,
+                Config.FLAG_DIR, 
+                Config.LOG_DIR
+            ]
+            for dir_path in required_dirs:
+                try:
+                    if not os.path.exists(dir_path):
+                        os.makedirs(dir_path, exist_ok=True)
+                    results[f"dir_{os.path.basename(dir_path)}"] = {
+                        "status": "OK", 
+                        "path": dir_path,
+                        "writable": os.access(dir_path, os.W_OK)
+                    }
+                except Exception as e:
+                    results[f"dir_{os.path.basename(dir_path)}"] = {
+                        "status": "ERROR", 
+                        "path": dir_path,
+                        "error": str(e)
+                    }
+            
+            # 检查权重配置是否合理
+            total_weight = sum(Config.SCORE_WEIGHTS.values())
+            results["weights"] = {
+                "status": "OK" if abs(total_weight - 1.0) < 0.001 else "WARNING",
+                "total": total_weight,
+                "expected": 1.0
+            }
 
-        # 检查微信配置
-        results["wechat"] = {
-            "status": "OK" if Config.WECOM_WEBHOOK else "WARNING",
-            "webhook_configured": bool(Config.WECOM_WEBHOOK)
-        }
-        
-        return results
+            # 检查微信配置
+            results["wechat"] = {
+                "status": "OK" if Config.WECOM_WEBHOOK else "WARNING",
+                "webhook_configured": bool(Config.WECOM_WEBHOOK)
+            }
+            
+            return results
+        except Exception as e:
+            logging.error(f"配置验证失败: {str(e)}", exc_info=True)
+            return {
+                "error": {
+                    "status": "ERROR",
+                    "message": str(e)
+                }
+            }
 
     # -------------------------
     # 9. 路径初始化方法
@@ -341,7 +381,7 @@ class Config:
             return not has_errors
             
         except Exception as e:
-            logging.error(f"初始化目录失败: {str(e)}")
+            logging.error(f"初始化目录失败: {str(e)}", exc_info=True)
             return False
 
 # -------------------------
@@ -385,7 +425,7 @@ except Exception as e:
     )
     
     # 记录错误但继续执行
-    logging.error(f"配置初始化失败: {str(e)}")
+    logging.error(f"配置初始化失败: {str(e)}", exc_info=True)
     logging.info("已设置基础日志配置，继续执行")
 
 # -------------------------
@@ -393,37 +433,40 @@ except Exception as e:
 # -------------------------
 def _validate_critical_config():
     """验证关键配置项是否存在"""
-    critical_configs = [
-        "WECOM_WEBHOOK",
-        "REQUEST_TIMEOUT",
-        "BASE_DIR",
-        "DATA_DIR",
-        "ETFS_DAILY_DIR",
-        "LOG_DIR",
-        "LOG_FILE",
-        "ALL_ETFS_PATH",
-        "BACKUP_ETFS_PATH"
-    ]
-    
-    for config_name in critical_configs:
-        if not hasattr(Config, config_name):
-            logging.error(f"关键配置项缺失: {config_name}")
-            # 尝试修复
-            if config_name == "WECOM_WEBHOOK":
-                setattr(Config, "WECOM_WEBHOOK", "")
-                logging.warning("已添加缺失的WECOM_WEBHOOK配置项")
-            elif config_name == "REQUEST_TIMEOUT":
-                setattr(Config, "REQUEST_TIMEOUT", 30)
-                logging.warning("已添加缺失的REQUEST_TIMEOUT配置项")
-            elif config_name == "ETFS_DAILY_DIR":
-                setattr(Config, "ETFS_DAILY_DIR", os.path.join(Config.DATA_DIR, "etf_daily"))
-                logging.warning("已添加缺失的ETFS_DAILY_DIR配置项")
+    try:
+        critical_configs = [
+            "WECOM_WEBHOOK",
+            "REQUEST_TIMEOUT",
+            "BASE_DIR",
+            "DATA_DIR",
+            "ETFS_DAILY_DIR",
+            "LOG_DIR",
+            "LOG_FILE",
+            "ALL_ETFS_PATH",
+            "BACKUP_ETFS_PATH"
+        ]
+        
+        for config_name in critical_configs:
+            if not hasattr(Config, config_name):
+                logging.error(f"关键配置项缺失: {config_name}")
+                # 尝试修复
+                if config_name == "WECOM_WEBHOOK":
+                    setattr(Config, "WECOM_WEBHOOK", "")
+                    logging.warning("已添加缺失的WECOM_WEBHOOK配置项")
+                elif config_name == "REQUEST_TIMEOUT":
+                    setattr(Config, "REQUEST_TIMEOUT", 30)
+                    logging.warning("已添加缺失的REQUEST_TIMEOUT配置项")
+                elif config_name == "ETFS_DAILY_DIR":
+                    setattr(Config, "ETFS_DAILY_DIR", os.path.join(Config.DATA_DIR, "etf_daily"))
+                    logging.warning("已添加缺失的ETFS_DAILY_DIR配置项")
+    except Exception as e:
+        logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 
 # 执行额外验证
 try:
     _validate_critical_config()
 except Exception as e:
-    logging.error(f"配置验证过程中发生错误: {str(e)}")
+    logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 
 # -------------------------
 # 检查环境变量
@@ -438,4 +481,35 @@ try:
     # 确保Config中的WECOM_WEBHOOK与环境变量一致
     Config.WECOM_WEBHOOK = wecom_webhook or ""
 except Exception as e:
-    logging.error(f"检查环境变量时出错: {str(e)}")
+    logging.error(f"检查环境变量时出错: {str(e)}", exc_info=True)
+
+# -------------------------
+# 时区检查
+# -------------------------
+try:
+    # 尝试获取当前北京时间
+    from utils.date_utils import get_beijing_time, get_utc_time
+    beijing_time = get_beijing_time()
+    utc_time = get_utc_time()
+    
+    logging.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info(f"当前UTC时间: {utc_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # 验证时区设置
+    if beijing_time.tzinfo is None or utc_time.tzinfo is None:
+        logging.warning("时区信息不完整，可能存在时区问题")
+    else:
+        logging.info(f"北京时间时区: {beijing_time.tzname()}")
+        logging.info(f"UTC时间时区: {utc_time.tzname()}")
+        
+        # 验证时差是否正确（北京时间应比UTC时间早8小时）
+        time_diff = beijing_time - utc_time
+        if abs(time_diff.total_seconds() - 28800) > 60:  # 8小时=28800秒，允许1分钟误差
+            logging.warning(f"时区偏移不正确: 北京时间与UTC时间相差 {time_diff.total_seconds()/3600:.2f} 小时")
+        else:
+            logging.info("时区设置验证通过")
+            
+except ImportError:
+    logging.warning("无法导入date_utils模块，时区检查跳过")
+except Exception as e:
+    logging.error(f"时区检查失败: {str(e)}", exc_info=True)

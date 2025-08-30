@@ -45,7 +45,7 @@ def get_current_times() -> Tuple[datetime, datetime]:
         logger.error(f"获取当前时间失败: {str(e)}", exc_info=True)
         # 回退机制
         now = datetime.now()
-        return now, now
+        return now.replace(tzinfo=UTC_TIMEZONE), now.replace(tzinfo=BEIJING_TIMEZONE)
 
 def format_dual_time(dt: datetime, source_tz: str = 'UTC', target_tz: str = 'Asia/Shanghai') -> str:
     """
@@ -534,18 +534,21 @@ def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
         return True
     
     try:
-        # 获取文件最后修改时间（注意：os.path.getmtime返回的是本地时间）
+        # 获取文件最后修改时间（以UTC时间处理）
         # 在GitHub Actions中，系统默认是UTC时间
-        last_modify_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+        timestamp = os.path.getmtime(file_path)
+        last_modify_time = datetime.fromtimestamp(timestamp, tz=UTC_TIMEZONE)
         
-        # 正确处理：将文件修改时间视为UTC时间，然后转换为北京时间
-        last_modify_time = last_modify_time.replace(tzinfo=UTC_TIMEZONE).astimezone(BEIJING_TIMEZONE)
+        # 转换为北京时间用于比较
+        last_modify_time_beijing = last_modify_time.astimezone(BEIJING_TIMEZONE)
         
         # 获取当前北京时间
         current_time = get_beijing_time()
         
         # 计算距离上次更新的天数
-        days_since_update = (current_time - last_modify_time).days
+        time_diff = current_time - last_modify_time_beijing
+        days_since_update = time_diff.days
+        
         need_update = days_since_update >= max_age_days
         
         if need_update:
@@ -572,16 +575,14 @@ def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Opt
             return None, None
         
         # 获取文件修改时间（本地时间）
-        mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-        
-        # 转换为UTC时间（假设本地时间是UTC）
-        utc_time = mtime.replace(tzinfo=UTC_TIMEZONE)
+        timestamp = file_path.stat().st_mtime
+        mtime = datetime.fromtimestamp(timestamp, tz=UTC_TIMEZONE)
         
         # 转换为北京时间
-        beijing_time = utc_time.astimezone(BEIJING_TIMEZONE)
+        beijing_time = mtime.astimezone(BEIJING_TIMEZONE)
         
-        logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
-        return utc_time, beijing_time
+        logger.debug(f"获取文件修改时间: {file_path} -> UTC: {mtime}, CST: {beijing_time}")
+        return mtime, beijing_time
     except Exception as e:
         logger.error(f"获取文件修改时间失败: {str(e)}", exc_info=True)
         return None, None
@@ -721,7 +722,7 @@ def get_time_difference(dt1: datetime, dt2: datetime) -> timedelta:
         if dt2.tzinfo is None:
             dt2 = dt2.replace(tzinfo=BEIJING_TIMEZONE)
         
-        # 统一转换为同一时区
+        # 统一转换为UTC时间
         dt1_utc = dt1.astimezone(UTC_TIMEZONE)
         dt2_utc = dt2.astimezone(UTC_TIMEZONE)
         

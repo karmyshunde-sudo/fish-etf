@@ -18,7 +18,10 @@ from utils.date_utils import (
     get_current_times,
     format_dual_time,
     get_beijing_time,
-    get_utc_time
+    get_utc_time,
+    is_market_open,
+    is_trading_day,
+    is_file_outdated
 )
 
 # 初始化日志
@@ -159,7 +162,7 @@ def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
     
     Args:
         message: 消息内容
-        webhook: 企业微信Webhook地址，如果为None则使用配置中的地址
+        webhook: 企业微信Webhook地址
         
     Returns:
         bool: 是否成功发送
@@ -175,14 +178,19 @@ def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         
+        # 生成双时区时间字符串
+        time_info = (
+            f"\n     UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"     北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
         # 动态生成当前时间并格式化消息
         try:
-            # 尝试使用双时区格式
-            full_message = f"{message}{Config.WECOM_MESFOOTER.format(utc_time=utc_now.strftime('%Y-%m-%d %H:%M'), beijing_time=beijing_now.strftime('%Y-%m-%d %H:%M'))}"
-        except KeyError:
-            # 如果配置中缺少占位符，使用单一时区格式
-            logger.warning("WECOM_MESFOOTER配置缺少占位符，使用默认格式")
-            full_message = f"{message}\n\n⏰ 时间: {beijing_now.strftime('%Y-%m-%d %H:%M')}"
+            # 使用原始配置中的WECOM_MESFOOTER格式
+            full_message = f"{message}{Config.WECOM_MESFOOTER.format(current_time=time_info)}"
+        except Exception as e:
+            logger.error(f"格式化消息失败: {str(e)}，使用默认格式", exc_info=True)
+            full_message = f"{message}\n\n🕒 消息生成时间：{time_info}"
         
         # 检查消息长度并进行分片
         message_chunks = _check_message_length(full_message)
@@ -285,12 +293,17 @@ def test_webhook_connection(webhook: Optional[str] = None) -> bool:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         
+        # 生成双时区时间字符串
+        time_info = (
+            f"\n     UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"     北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
         # 发送测试消息
         test_message = (
             "【测试消息】\n"
             "企业微信Webhook连接测试成功\n\n"
-            f"🌍 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"⏰ 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}"
+            f"🕒 消息生成时间：{time_info}"
         )
         
         logger.info("开始测试Webhook连接")
@@ -326,60 +339,43 @@ def send_task_completion_notification(task: str, result: Dict[str, Any]):
             status_emoji = "❌"
             status_msg = "失败"
         
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        
-        # 构建任务总结消息
+        # 构建任务总结消息（保持原有格式）
         summary_msg = (
             f"【任务执行】{task}\n\n"
             f"{status_emoji} 状态: {status_msg}\n"
             f"📝 详情: {result.get('message', '无详细信息')}\n"
         )
         
-        # 添加任务特定信息
+        # 添加任务特定信息（保持原有格式）
         if task == "update_etf_list" and result["status"] == "success":
             count = result.get('count', 0)
             source = result.get('source', '未知')
-            last_modified_utc = result.get('last_modified_utc', '未知')
-            last_modified_beijing = result.get('last_modified_beijing', '未知')
-            expiration_utc = result.get('expiration_utc', '未知')
-            expiration_beijing = result.get('expiration_beijing', '未知')
-            
             summary_msg += (
                 f"📊 ETF数量: {count}只\n"
                 f" sourceMapping: {source}\n"
-                f"🌍 UTC时间: {last_modified_utc}\n"
-                f"⏰ 北京时间: {last_modified_beijing}\n"
-                f"⏳ UTC过期: {expiration_utc}\n"
-                f"⏳ 北京过期: {expiration_beijing}\n"
             )
-        
+            
+            # 添加列表有效期信息（保持原有格式）
+            try:
+                last_modified_utc = result.get('last_modified_utc', '未知')
+                last_modified_beijing = result.get('last_modified_beijing', '未知')
+                expiration_utc = result.get('expiration_utc', '未知')
+                expiration_beijing = result.get('expiration_beijing', '未知')
+                summary_msg += (
+                    f"📅 生成时间: {last_modified_beijing}\n"
+                    f"⏳ 过期时间: {expiration_beijing}\n"
+                )
+            except:
+                pass
+                
         elif task == "crawl_etf_daily" and result["status"] == "success":
-            crawl_time_utc = result.get('crawl_time_utc', '未知')
-            crawl_time_beijing = result.get('crawl_time_beijing', '未知')
-            summary_msg += (
-                f"📈 数据爬取: 完成\n"
-                f"🌍 UTC时间: {crawl_time_utc}\n"
-                f"⏰ 北京时间: {crawl_time_beijing}\n"
-            )
+            summary_msg += "📈 数据爬取: 完成\n"
             
         elif task == "calculate_arbitrage" and result["status"] == "success":
-            calculation_time_utc = result.get('calculation_time_utc', '未知')
-            calculation_time_beijing = result.get('calculation_time_beijing', '未知')
-            summary_msg += (
-                f"🔍 套利机会: 已推送\n"
-                f"🌍 UTC时间: {calculation_time_utc}\n"
-                f"⏰ 北京时间: {calculation_time_beijing}\n"
-            )
+            summary_msg += "🔍 套利机会: 已推送\n"
             
         elif task == "calculate_position" and result["status"] == "success":
-            calculation_time_utc = result.get('calculation_time_utc', '未知')
-            calculation_time_beijing = result.get('calculation_time_beijing', '未知')
-            summary_msg += (
-                f"💼 仓位策略: 已推送\n"
-                f"🌍 UTC时间: {calculation_time_utc}\n"
-                f"⏰ 北京时间: {calculation_time_beijing}\n"
-            )
+            summary_msg += "💼 仓位策略: 已推送\n"
         
         # 发送任务总结通知
         send_wechat_message(summary_msg)

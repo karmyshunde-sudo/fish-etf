@@ -29,7 +29,7 @@ from .arbitrage import (
     generate_arbitrage_message_content,
     send_arbitrage_opportunity
 )
-from .position import calculate_position_strategy, send_daily_report_via_wechat
+from .position import calculate_position_strategy
 from .etf_scoring import get_top_rated_etfs, get_etf_basic_info
 
 def run_all_strategies() -> Dict[str, Any]:

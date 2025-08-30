@@ -13,7 +13,7 @@ import logging
 import shutil
 import tempfile
 import pandas as pd
-from typing import Any, Dict, List, Optional, Union, TextIO
+from typing import Any, Dict, List, Optional, Union, TextIO, Tuple
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -872,10 +872,3 @@ def write_excel(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool
     except Exception as e:
         logger.error(f"写入Excel文件失败 {file_path}: {str(e)}")
         return False
-
-# 文件信息
-# 总行数: 730
-# 函数数量: 24
-# 最后修改: 2025-08-30
-# 版本: 1.2.0
-# 描述: 文件操作工具模块，提供全面的文件操作功能，包含完整的异常处理和日志输出

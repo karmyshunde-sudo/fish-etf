@@ -11,7 +11,7 @@ import logging
 import sys
 from typing import Dict, Any, Optional
 from pathlib import Path
-from datetime import datetime, timezone, timedelta  # 确保导入timezone和timedelta
+from datetime import datetime, timezone, timedelta  # 确保timedelta已正确导入
 
 # 先定义获取基础目录的函数，避免类定义时的循环引用问题
 def _get_base_dir() -> str:
@@ -44,7 +44,7 @@ class Config:
     """
     
     # -------------------------
-    # 0. 时区定义（关键修复）
+    # 0. 时区定义
     # -------------------------
     # 严格遵守要求：在config.py中定义两个变量，分别保存平台时间UTC，北京时间UTC+8
     UTC_TIMEZONE = timezone.utc
@@ -60,8 +60,7 @@ class Config:
     ETF_LIST_UPDATE_INTERVAL: int = 7  
     # 每7天更新一次ETF列表
     
-    # 英文列名到中文列名的映射（关键修复：明确方向为英文->中文）
-    # 注意：这里定义的是源列名(英文) -> 目标列名(中文)的映射
+    # 英文列名到中文列名的映射
     COLUMN_NAME_MAPPING: Dict[str, str] = {
         "date": "日期",
         "open": "开盘",
@@ -78,6 +77,9 @@ class Config:
         "etf_name": "ETF名称",
         "crawl_time": "爬取时间"
     }
+    
+    # 标准列名（中文）- 修复：添加STANDARD_COLUMNS属性
+    STANDARD_COLUMNS: list = list(COLUMN_NAME_MAPPING.values())
     
     # 中文列名集合（用于验证）
     CHINESE_COLUMNS: list = list(COLUMN_NAME_MAPPING.values())
@@ -455,7 +457,8 @@ def _validate_critical_config():
             "ALL_ETFS_PATH",
             "BACKUP_ETFS_PATH",
             "UTC_TIMEZONE",  # 新增验证项
-            "BEIJING_TIMEZONE"  # 新增验证项
+            "BEIJING_TIMEZONE",  # 新增验证项
+            "STANDARD_COLUMNS"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -477,6 +480,9 @@ def _validate_critical_config():
                 elif config_name == "BEIJING_TIMEZONE":
                     setattr(Config, "BEIJING_TIMEZONE", timezone(timedelta(hours=8)))
                     logging.warning("已添加缺失的BEIJING_TIMEZONE配置项")
+                elif config_name == "STANDARD_COLUMNS":
+                    setattr(Config, "STANDARD_COLUMNS", list(Config.COLUMN_NAME_MAPPING.values()))
+                    logging.warning("已添加缺失的STANDARD_COLUMNS配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 
@@ -502,7 +508,7 @@ except Exception as e:
     logging.error(f"检查环境变量时出错: {str(e)}", exc_info=True)
 
 # -------------------------
-# 时区检查
+# 时区检查 - 修复：简化时区验证逻辑
 # -------------------------
 try:
     # 尝试获取当前北京时间
@@ -520,10 +526,13 @@ try:
         logging.info(f"北京时间时区: {beijing_time.tzname()}")
         logging.info(f"UTC时间时区: {utc_time.tzname()}")
         
-        # 验证时差是否正确（北京时间应比UTC时间早8小时）
-        time_diff = beijing_time - utc_time
-        if abs(time_diff.total_seconds() - 28800) > 60:  # 8小时=28800秒，允许1分钟误差
-            logging.warning(f"时区偏移不正确: 北京时间与UTC时间相差 {time_diff.total_seconds()/3600:.2f} 小时")
+        # 简化验证：直接检查时区偏移
+        beijing_offset = beijing_time.utcoffset().total_seconds() / 3600
+        utc_offset = utc_time.utcoffset().total_seconds() / 3600
+        time_diff = beijing_offset - utc_offset
+        
+        if abs(time_diff - 8) > 0.01:  # 允许0.01小时的误差
+            logging.warning(f"时区偏移不正确: 北京时间比UTC时间快 {time_diff:.2f} 小时")
         else:
             logging.info("时区设置验证通过")
             

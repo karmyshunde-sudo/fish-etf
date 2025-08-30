@@ -203,55 +203,63 @@ jobs:
           echo "拉取远程最新代码..."
           git pull origin main --rebase --autostash || echo "拉取代码失败，继续执行"
       
-      - name: 提交数据变更
+      - name: 提交数据变更（每保存一个文件就提交一次）
         if: >-
           env.skip_execution != 'true' && 
-          steps.execute_task.outputs.file_count != '0' &&
-          steps.execute_task.outputs.task_status == 'success'
+          steps.execute_task.outputs.task_status == 'success' &&
+          (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list')
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
-          # 添加所有数据文件
-          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force
-          
-          echo "=== 暂存区文件 ==="
-          git status --porcelain
-          echo "=================="
-          
-          # 检查是否有变更需要提交
-          if [ -n "$(git status --porcelain)" ]; then
-            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
-            git commit -m "自动更新数据[$TASK] (触发方式: $TRIGGER_TYPE): ${BEIJING_TIME}"
-            git push origin main
-            echo "数据提交成功"
-          else
-            echo "无数据变更需要提交"
+          # 1. 提交每个新保存的ETF日线数据文件
+          if [[ "$TASK" == "crawl_etf_daily" ]]; then
+            echo "【断点续传】开始提交每个ETF日线数据文件..."
+            for etf_file in data/etf_daily/*.csv; do
+              if [ -f "$etf_file" ]; then
+                # 检查文件是否是新创建或已修改
+                if ! git diff --quiet HEAD -- "$etf_file"; then
+                  echo "检测到变化: $etf_file"
+                  git add "$etf_file"
+                  
+                  # 获取ETF代码
+                  etf_code=$(basename "$etf_file" .csv)
+                  
+                  # 提交单个ETF文件
+                  git commit -m "【断点续传】自动更新ETF日线数据: ${etf_code} [${TRIGGER_TYPE}]"
+                  echo "已提交: $etf_file"
+                  
+                  # 立即推送到仓库
+                  git push origin main || echo "推送失败，继续处理下一个文件"
+                fi
+              fi
+            done
           fi
-      
-      - name: 处理提交冲突
-        if: >-
-          env.skip_execution != 'true' && 
-          steps.execute_task.outputs.file_count != '0' &&
-          failure()
-        run: |
-          echo "处理提交冲突..."
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
           
-          # 尝试拉取最新代码并合并
-          git pull origin main --rebase --autostash || echo "拉取代码失败"
+          # 2. 提交ETF列表文件
+          if [[ "$TASK" == "update_etf_list" ]]; then
+            echo "【断点续传】提交ETF列表文件..."
+            git add data/all_etfs.csv
+            if ! git diff --quiet HEAD -- data/all_etfs.csv; then
+              git commit -m "【断点续传】自动更新ETF列表 [${TRIGGER_TYPE}]"
+              git push origin main || echo "ETF列表推送失败"
+              echo "ETF列表提交成功"
+            else
+              echo "ETF列表无变化，无需提交"
+            fi
+          fi
           
-          # 再次尝试提交
-          git add data/etf_daily/ data/flags/ data/logs/ data/*.csv --force
-          
-          if [ -n "$(git status --porcelain)" ]; then
-            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
-            git commit -m "自动更新数据[$TASK] (触发方式: $TRIGGER_TYPE): ${BEIJING_TIME} [冲突解决]"
-            git push origin main || echo "推送失败"
-            echo "冲突解决后提交成功"
-          else
-            echo "无数据变更需要提交"
+          # 3. 提交标志文件（如果存在变化）
+          if [[ "$TASK" == "calculate_arbitrage" || "$TASK" == "calculate_position" ]]; then
+            echo "提交标志文件..."
+            git add data/flags/
+            if ! git diff --quiet HEAD -- data/flags/; then
+              git commit -m "【断点续传】自动更新策略标志文件 [${TRIGGER_TYPE}]"
+              git push origin main || echo "标志文件推送失败"
+              echo "标志文件提交成功"
+            else
+              echo "标志文件无变化，无需提交"
+            fi
           fi
       
       - name: 任务完成通知

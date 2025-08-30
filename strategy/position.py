@@ -3,26 +3,26 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
+特别优化了消息推送格式，确保使用统一的消息模板
 """
 
 import pandas as pd
 import os
 import numpy as np
 import logging
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from config import Config
 from utils.date_utils import (
     get_current_times,
-    format_dual_time,
     get_beijing_time,
     get_utc_time,
-    is_market_open,
-    is_trading_day,
     is_file_outdated
 )
 from utils.file_utils import load_etf_daily_data, init_dirs
 from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
+from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -64,30 +64,54 @@ def init_position_record() -> pd.DataFrame:
         return create_default_position_record()
     
     except Exception as e:
-        logger.error(f"初始化仓位记录失败: {str(e)}", exc_info=True)
+        error_msg = f"初始化仓位记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return create_default_position_record()
 
 def create_default_position_record() -> pd.DataFrame:
     """创建默认仓位记录"""
-    default_positions = [
-        {
-            "仓位类型": "稳健仓",
-            "ETF代码": "",
-            "ETF名称": "",
-            "持仓成本价": 0.0,
-            "持仓日期": "",
-            "持仓数量": 0
-        },
-        {
-            "仓位类型": "激进仓",
-            "ETF代码": "",
-            "ETF名称": "",
-            "持仓成本价": 0.0,
-            "持仓日期": "",
-            "持仓数量": 0
-        }
-    ]
-    return pd.DataFrame(default_positions)
+    try:
+        default_positions = [
+            {
+                "仓位类型": "稳健仓",
+                "ETF代码": "",
+                "ETF名称": "",
+                "持仓成本价": 0.0,
+                "持仓日期": "",
+                "持仓数量": 0
+            },
+            {
+                "仓位类型": "激进仓",
+                "ETF代码": "",
+                "ETF名称": "",
+                "持仓成本价": 0.0,
+                "持仓日期": "",
+                "持仓数量": 0
+            }
+        ]
+        return pd.DataFrame(default_positions)
+    
+    except Exception as e:
+        error_msg = f"创建默认仓位记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        # 返回空DataFrame但包含必要列
+        return pd.DataFrame(columns=[
+            "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量"
+        ])
 
 def init_trade_record():
     """初始化交易记录文件"""
@@ -109,7 +133,14 @@ def init_trade_record():
             logger.info("交易记录文件已存在")
     
     except Exception as e:
-        logger.error(f"初始化交易记录失败: {str(e)}", exc_info=True)
+        error_msg = f"初始化交易记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
 
 def record_trade(**kwargs):
     """
@@ -153,14 +184,70 @@ def record_trade(**kwargs):
         logger.info(f"已记录交易: {trade_record['持仓类型']} - {trade_record['操作']} {trade_record['ETF代码']}")
     
     except Exception as e:
-        logger.error(f"记录交易失败: {str(e)}", exc_info=True)
+        error_msg = f"记录交易失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+
+def generate_position_content(strategies: Dict[str, str]) -> str:
+    """
+    生成仓位策略内容（不包含格式）
+    
+    Args:
+        strategies: 策略字典
+    
+    Returns:
+        str: 纯业务内容
+    """
+    try:
+        content = "【ETF仓位操作提示】\n"
+        content += "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
+        
+        for position_type, strategy in strategies.items():
+            content += f"【{position_type}】\n{strategy}\n\n"
+        
+        # 添加市场状态信息
+        market_status = "开市" if is_market_open() else "闭市"
+        trading_status = "交易日" if is_trading_day() else "非交易日"
+        
+        content += (
+            "📊 市场状态\n"
+            f"• 当前状态: {market_status}\n"
+            f"• 今日是否交易日: {trading_status}\n\n"
+        )
+        
+        # 添加风险提示
+        content += (
+            "⚠️ 风险提示\n"
+            "• 操作建议仅供参考，不构成投资建议\n"
+            "• 市场有风险，投资需谨慎\n"
+            "• 请结合个人风险承受能力做出投资决策\n"
+        )
+        
+        return content
+    
+    except Exception as e:
+        error_msg = f"生成仓位内容失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        return "【ETF仓位操作提示】生成仓位内容时发生错误"
 
 def calculate_position_strategy() -> str:
     """
     计算仓位操作策略（稳健仓、激进仓）
     
     Returns:
-        str: 策略消息字符串
+        str: 策略内容字符串（不包含格式）
     """
     try:
         # 获取当前双时区时间
@@ -174,7 +261,15 @@ def calculate_position_strategy() -> str:
         # 获取评分前5的ETF（用于选仓）
         top_etfs = get_top_rated_etfs(top_n=5)
         if top_etfs.empty:
-            logger.warning("无有效ETF评分数据，无法计算仓位策略")
+            warning_msg = "无有效ETF评分数据，无法计算仓位策略"
+            logger.warning(warning_msg)
+            
+            # 发送警告通知
+            send_wechat_message(
+                message=warning_msg,
+                message_type="error"
+            )
+            
             return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
         
         # 2. 分别计算稳健仓和激进仓策略
@@ -192,8 +287,8 @@ def calculate_position_strategy() -> str:
         if stable_position.empty:
             logger.warning("未找到稳健仓记录，使用默认值")
             stable_position = pd.Series({
-                "当前持仓ETF代码": "",
-                "当前持仓ETF名称": "",
+                "ETF代码": "",
+                "ETF名称": "",
                 "持仓成本价": 0.0,
                 "持仓日期": "",
                 "持仓数量": 0
@@ -241,8 +336,8 @@ def calculate_position_strategy() -> str:
             if aggressive_position.empty:
                 logger.warning("未找到激进仓记录，使用默认值")
                 aggressive_position = pd.Series({
-                    "当前持仓ETF代码": "",
-                    "当前持仓ETF名称": "",
+                    "ETF代码": "",
+                    "ETF名称": "",
                     "持仓成本价": 0.0,
                     "持仓日期": "",
                     "持仓数量": 0
@@ -267,12 +362,19 @@ def calculate_position_strategy() -> str:
         for action in trade_actions:
             record_trade(**action)
         
-        # 4. 格式化消息
-        return format_position_message(strategies)
+        # 4. 生成内容
+        return generate_position_content(strategies)
         
     except Exception as e:
         error_msg = f"计算仓位策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return "【ETF仓位操作提示】\n计算仓位策略时发生错误，请检查日志"
 
 def calculate_single_position_strategy(
@@ -395,19 +497,32 @@ def calculate_single_position_strategy(
                 )
         
         # 4. 继续持有
-        hold_days = (beijing_now - datetime.strptime(current_date_held, "%Y-%m-%d")).days if current_date_held else 0
+        try:
+            hold_days = (beijing_now - datetime.strptime(current_date_held, "%Y-%m-%d")).days if current_date_held else 0
+        except (ValueError, TypeError):
+            logger.warning(f"解析持仓日期失败: {current_date_held}")
+            hold_days = 0
+            
         ma_status = "5日均线＞20日均线" if not ma_bearish else "5日均线＜20日均线"
         
         return (
-            f"{position_type}：继续持有【{current_name}（{current_code}）】"
-            f"当前价格：{latest_close:.2f}元，成本价：{current_cost:.2f}元"
-            f"收益率：{profit_rate:.2f}%，持仓天数：{hold_days}天"
+            f"{position_type}：继续持有【{current_name}（{current_code}）】\n"
+            f"当前价格：{latest_close:.2f}元，成本价：{current_cost:.2f}元\n"
+            f"收益率：{profit_rate:.2f}%，持仓天数：{hold_days}天\n"
             f"均线状态：{ma_status}",
             trade_actions
         )
     
     except Exception as e:
-        logger.error(f"计算{position_type}策略失败: {str(e)}", exc_info=True)
+        error_msg = f"计算{position_type}策略失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return f"{position_type}：计算策略时发生错误", []
 
 def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -> Tuple[bool, bool]:
@@ -446,7 +561,15 @@ def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -
         return ma_bullish, ma_bearish
     
     except Exception as e:
-        logger.error(f"计算均线信号失败: {str(e)}", exc_info=True)
+        error_msg = f"计算均线信号失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return False, False
 
 def get_etf_score(etf_code: str) -> float:
@@ -462,66 +585,30 @@ def get_etf_score(etf_code: str) -> float:
     try:
         # 从评分结果中获取
         top_etfs = get_top_rated_etfs(top_n=100)
-        etf_row = top_etfs[top_etfs["etf_code"] == etf_code]
-        if not etf_row.empty:
-            return etf_row.iloc[0]["score"]
+        if not top_etfs.empty:
+            etf_row = top_etfs[top_etfs["etf_code"] == etf_code]
+            if not etf_row.empty:
+                return etf_row.iloc[0]["score"]
         
-        # 如果不在评分结果中，计算评分
+        # 如果不在评分结果中，尝试计算评分
         df = load_etf_daily_data(etf_code)
-        if df.empty:
-            return 0.0
+        if not df.empty:
+            # 这里简化处理，实际应使用etf_scoring.py中的评分逻辑
+            return 50.0  # 默认评分
         
-        # 这里简化处理，实际应使用etf_scoring.py中的评分逻辑
-        return 50.0  # 默认评分
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 评分失败: {str(e)}", exc_info=True)
         return 0.0
-
-def format_position_message(strategies: Dict[str, str]) -> str:
-    """
-    格式化仓位策略消息
-    
-    Args:
-        strategies: 策略字典
-    
-    Returns:
-        str: 格式化后的消息字符串
-    """
-    try:
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        
-        message = "【ETF仓位操作提示】\n"
-        message += f"⏰ 消息生成时间: {format_dual_time(beijing_now)}\n"
-        message += "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
-        
-        for position_type, content in strategies.items():
-            message += f"【{position_type}】\n{content}\n\n"
-        
-        # 添加市场状态信息
-        market_status = "开市" if is_market_open() else "闭市"
-        trading_status = "交易日" if is_trading_day() else "非交易日"
-        
-        message += (
-            "📊 市场状态\n"
-            f"• 当前状态: {market_status}\n"
-            f"• 今日是否交易日: {trading_status}\n\n"
-        )
-        
-        # 添加风险提示
-        message += (
-            "⚠️ 风险提示\n"
-            "• 操作建议仅供参考，不构成投资建议\n"
-            "• 市场有风险，投资需谨慎\n"
-            "• 请结合个人风险承受能力做出投资决策\n"
-        )
-        
-        return message
     
     except Exception as e:
-        logger.error(f"格式化仓位消息失败: {str(e)}", exc_info=True)
-        return "【ETF仓位操作提示】生成仓位消息时发生错误"
+        error_msg = f"获取ETF {etf_code} 评分失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        return 0.0
 
 def get_position_history(days: int = 30) -> pd.DataFrame:
     """
@@ -556,7 +643,15 @@ def get_position_history(days: int = 30) -> pd.DataFrame:
         return pd.DataFrame(history)
     
     except Exception as e:
-        logger.error(f"获取仓位历史数据失败: {str(e)}", exc_info=True)
+        error_msg = f"获取仓位历史数据失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return pd.DataFrame()
 
 def analyze_position_performance() -> str:
@@ -596,6 +691,13 @@ def analyze_position_performance() -> str:
     except Exception as e:
         error_msg = f"仓位表现分析失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
         return f"【仓位表现分析】{error_msg}"
 
 # 模块初始化
@@ -608,11 +710,37 @@ try:
     
     # 检查ETF列表是否过期
     if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        logger.warning("ETF列表已过期，请及时更新")
+        warning_msg = "ETF列表已过期，请及时更新"
+        logger.warning(warning_msg)
+        
+        # 发送警告通知
+        send_wechat_message(
+            message=warning_msg,
+            message_type="error"
+        )
     
 except Exception as e:
-    logger.error(f"仓位管理模块初始化失败: {str(e)}", exc_info=True)
-    # 退回到基础日志配置
-    import logging
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
-    logging.error(f"仓位管理模块初始化失败: {str(e)}")
+    error_msg = f"仓位管理模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)
+    
+    # 发送错误通知
+    try:
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

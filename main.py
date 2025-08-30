@@ -35,12 +35,108 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated
+    is_file_outdated,
+    is_trading_day
 )
 
 # 初始化日志配置
 Config.setup_logging(log_file=Config.LOG_FILE)
 logger = logging.getLogger(__name__)
+
+def is_manual_trigger() -> bool:
+    """
+    检查是否为手动触发任务
+    
+    Returns:
+        bool: 如果是手动触发返回True，否则返回False
+    """
+    try:
+        # GitHub Actions手动触发事件名称
+        return os.getenv("GITHUB_EVENT_NAME", "") == "workflow_dispatch"
+    except Exception as e:
+        logger.error(f"检查触发方式失败: {str(e)}", exc_info=True)
+        # 出错时保守策略：认为不是手动触发
+        return False
+
+def should_execute_crawl_etf_daily() -> bool:
+    """
+    判断是否应该执行ETF日线数据爬取任务
+    
+    Returns:
+        bool: 如果应该执行返回True，否则返回False
+    """
+    # 手动触发的任务总是执行
+    if is_manual_trigger():
+        logger.info("手动触发的任务，总是执行ETF日线数据爬取")
+        return True
+    
+    # 定时触发的任务：检查是否是交易日或是否已过18点
+    beijing_time = get_beijing_time()
+    beijing_date = beijing_time.date()
+    
+    # 非交易日且未到补爬时间（18点后允许补爬）
+    if not is_trading_day(beijing_date) and beijing_time.hour < 18:
+        logger.info(f"今日{beijing_date}非交易日且未到补爬时间（{beijing_time.hour}点），跳过爬取日线数据（定时任务）")
+        return False
+    
+    return True
+
+def should_execute_calculate_arbitrage() -> bool:
+    """
+    判断是否应该执行套利机会计算任务
+    
+    Returns:
+        bool: 如果应该执行返回True，否则返回False
+    """
+    # 手动触发的任务总是执行
+    if is_manual_trigger():
+        logger.info("手动触发的任务，总是执行套利机会计算")
+        return True
+    
+    # 定时触发的任务：检查当天是否已推送
+    if check_flag(Config.get_arbitrage_flag_file()):
+        logger.info("今日已推送套利机会，跳过本次计算（定时任务）")
+        return False
+    
+    return True
+
+def should_execute_calculate_position() -> bool:
+    """
+    判断是否应该执行仓位策略计算任务
+    
+    Returns:
+        bool: 如果应该执行返回True，否则返回False
+    """
+    # 手动触发的任务总是执行
+    if is_manual_trigger():
+        logger.info("手动触发的任务，总是执行仓位策略计算")
+        return True
+    
+    # 定时触发的任务：检查当天是否已推送
+    if check_flag(Config.get_position_flag_file()):
+        logger.info("今日已推送仓位策略，跳过本次计算（定时任务）")
+        return False
+    
+    return True
+
+def should_execute_update_etf_list() -> bool:
+    """
+    判断是否应该执行ETF列表更新任务
+    
+    Returns:
+        bool: 如果应该执行返回True，否则返回False
+    """
+    # 手动触发的任务总是执行
+    if is_manual_trigger():
+        logger.info("手动触发的任务，总是执行ETF列表更新")
+        return True
+    
+    # 定时触发的任务：检查是否需要更新
+    if not is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
+        logger.info("ETF列表未到更新周期，跳过更新（定时任务）")
+        return False
+    
+    return True
 
 def setup_environment() -> bool:
     """
@@ -92,6 +188,11 @@ def handle_update_etf_list() -> Dict[str, Any]:
         Dict[str, Any]: 任务执行结果
     """
     try:
+        # 检查是否应该执行任务（仅对定时任务有效）
+        if not is_manual_trigger() and not should_execute_update_etf_list():
+            logger.info("根据定时任务规则，跳过ETF列表更新任务")
+            return {"status": "skipped", "message": "ETF列表未到更新周期"}
+        
         logger.info("开始更新全市场ETF列表")
         etf_list = update_all_etf_list()
         
@@ -151,6 +252,11 @@ def handle_crawl_etf_daily() -> Dict[str, Any]:
         Dict[str, Any]: 任务执行结果
     """
     try:
+        # 检查是否应该执行任务（仅对定时任务有效）
+        if not is_manual_trigger() and not should_execute_crawl_etf_daily():
+            logger.info("根据定时任务规则，跳过ETF日线数据爬取任务")
+            return {"status": "skipped", "message": "非交易日且未到补爬时间"}
+        
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始执行ETF日线数据增量爬取 (UTC: {utc_now}, CST: {beijing_now})")
@@ -189,9 +295,9 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         Dict[str, Any]: 任务执行结果
     """
     try:
-        # 检查当天是否已推送套利结果
-        if check_flag(Config.get_arbitrage_flag_file()):
-            logger.info("今日已推送套利机会，跳过本次计算")
+        # 检查是否应该执行任务（仅对定时任务有效）
+        if not is_manual_trigger() and not should_execute_calculate_arbitrage():
+            logger.info("根据定时任务规则，跳过套利机会计算任务")
             return {"status": "skipped", "message": "Arbitrage message already pushed today"}
         
         # 获取当前双时区时间
@@ -235,9 +341,9 @@ def handle_calculate_position() -> Dict[str, Any]:
         Dict[str, Any]: 任务执行结果
     """
     try:
-        # 检查当天是否已推送仓位策略
-        if check_flag(Config.get_position_flag_file()):
-            logger.info("今日已推送仓位策略，跳过本次计算")
+        # 检查是否应该执行任务（仅对定时任务有效）
+        if not is_manual_trigger() and not should_execute_calculate_position():
+            logger.info("根据定时任务规则，跳过仓位策略计算任务")
             return {"status": "skipped", "message": "Position strategy already pushed today"}
         
         # 获取当前双时区时间

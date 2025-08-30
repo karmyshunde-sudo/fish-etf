@@ -158,7 +158,7 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
 
 def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
     """
-    发送消息到企业微信，自动添加固定末尾，支持消息分片和重试机制
+    发送结构化微信消息（Markdown格式），针对不同场景使用不同模板
     
     Args:
         message: 消息内容
@@ -178,22 +178,23 @@ def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         
-        # 生成双时区时间字符串
-        time_info = (
-            f"\n     UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"     北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        
-        # 动态生成当前时间并格式化消息
-        try:
-            # 使用原始配置中的WECOM_MESFOOTER格式
-            full_message = f"{message}{Config.WECOM_MESFOOTER.format(current_time=time_info)}"
-        except Exception as e:
-            logger.error(f"格式化消息失败: {str(e)}，使用默认格式", exc_info=True)
-            full_message = f"{message}\n\n🕒 消息生成时间：{time_info}"
+        # 根据消息内容自动识别消息类型
+        if "【任务执行】" in message:
+            formatted_message = _format_task_message(message, utc_now, beijing_now)
+        elif "【套利机会】" in message:
+            formatted_message = _format_arbitrage_message(message, utc_now, beijing_now)
+        elif "【仓位策略】" in message:
+            formatted_message = _format_position_message(message, utc_now, beijing_now)
+        elif "【每日报告】" in message:
+            formatted_message = _format_daily_report(message, utc_now, beijing_now)
+        elif "执行失败" in message or "错误" in message or "异常" in message:
+            formatted_message = _format_error_message(message, utc_now, beijing_now)
+        else:
+            # 默认格式
+            formatted_message = _format_default_message(message, utc_now, beijing_now)
         
         # 检查消息长度并进行分片
-        message_chunks = _check_message_length(full_message)
+        message_chunks = _check_message_length(formatted_message)
         
         # 发送所有消息分片
         all_success = True
@@ -223,6 +224,153 @@ def send_wechat_message(message: str, webhook: Optional[str] = None) -> bool:
     except Exception as e:
         logger.error(f"发送微信消息时发生未预期错误: {str(e)}", exc_info=True)
         return False
+
+def _format_task_message(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化任务执行消息"""
+    # 提取任务信息
+    task_name = message.split("【任务执行】")[1].split("\n")[0].strip()
+    
+    # 提取状态信息
+    status_line = next((line for line in message.split("\n") if "状态:" in line), "")
+    status = status_line.split("状态:")[1].strip() if status_line else "未知"
+    
+    # 提取详情信息
+    detail_line = next((line for line in message.split("\n") if "详情:" in line), "")
+    detail = detail_line.split("详情:")[1].strip() if detail_line else "无详情"
+    
+    # 生成Markdown格式消息
+    status_emoji = "✅" if "成功" in status else "❌" if "失败" in status else "⏭️"
+    
+    return (
+        f"{status_emoji} **【任务执行】{task_name}**\n\n"
+        f"**状态**: {status}\n"
+        f"**详情**: {detail}\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
+
+def _format_arbitrage_message(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化套利机会消息"""
+    # 提取关键信息
+    opportunities = []
+    for line in message.split("\n"):
+        if "• 溢价" in line or "• 折价" in line:
+            opportunities.append(line.strip())
+    
+    # 生成Markdown格式消息
+    return (
+        "🔍 **【套利机会】**\n\n"
+        f"{'🏆 今日最佳套利机会:' if opportunities else '🔍 未发现有效套利机会'}\n"
+        f"{chr(10).join(opportunities[:3])}\n\n"
+        f"{'• 还有 ' + str(len(opportunities)-3) + ' 个机会...' if len(opportunities) > 3 else ''}\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
+
+def _format_position_message(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化仓位策略消息"""
+    # 提取关键信息
+    etfs = []
+    for line in message.split("\n"):
+        if "•" in line and ("ETF" in line or "规模" in line):
+            etfs.append(line.strip())
+    
+    # 生成Markdown格式消息
+    return (
+        "💼 **【仓位策略】**\n\n"
+        f"{'🏆 推荐ETF组合:' if etfs else '⚠️ 未找到符合条件的ETF'}\n"
+        f"{chr(10).join(etfs[:5])}\n\n"
+        "💡 **仓位建议**\n"
+        "• 稳健型投资者：建议配置5-10只ETF，每只仓位10%-20%\n"
+        "• 激进型投资者：可集中配置3-5只ETF，每只仓位20%-30%\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
+
+def _format_daily_report(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化每日报告消息"""
+    # 提取关键信息
+    market_info = []
+    hot_etfs = []
+    in_position = []
+    
+    for line in message.split("\n"):
+        if "• 全市场ETF总数" in line or "• 平均基金规模" in line:
+            market_info.append(line.strip())
+        elif "🔥 热门ETF" in line or ("• 规模" in line and "成交额" in line):
+            hot_etfs.append(line.strip())
+        elif "💡 仓位建议" in line or ("稳健型" in line or "激进型" in line):
+            in_position.append(line.strip())
+    
+    # 生成Markdown格式消息
+    return (
+        "📈 **【每日报告】**\n\n"
+        "**📊 市场概况**\n"
+        f"{chr(10).join(market_info)}\n\n"
+        "**🔥 热门ETF**\n"
+        f"{chr(10).join(hot_etfs[1:4])}\n\n"
+        "**💡 仓位建议**\n"
+        f"{chr(10).join(in_position[1:3])}\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
+
+def _format_error_message(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化错误消息"""
+    # 提取任务名称
+    task = "未知任务"
+    if "【GIT-fish-etf】[" in message:
+        task = message.split("【GIT-fish-etf】[")[1].split("]")[0]
+    
+    # 提取错误详情
+    error_detail = "无详细信息"
+    if "执行失败" in message:
+        error_detail = message.split("执行失败")[1].strip().lstrip("：").lstrip(":")
+    
+    # 生成GitHub日志链接
+    github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+    repo = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+    log_url = f"https://github.com/{repo}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+    
+    # 生成Markdown格式消息
+    return (
+        "⚠️ **【系统异常】**\n\n"
+        f"**任务**: `{task}`\n"
+        "**状态**: ❌ 执行失败\n\n"
+        "**错误详情**:\n"
+        f"> {error_detail}\n\n"
+        "**日志链接**:\n"
+        f"> [点击查看完整日志]({log_url})\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
+
+def _format_default_message(message: str, utc_now: datetime, beijing_now: datetime) -> str:
+    """格式化默认消息"""
+    return (
+        "ℹ️ **【系统消息】**\n\n"
+        f"{message}\n\n"
+        "──────────────────\n"
+        f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        "──────────────────\n"
+        "📊 数据来源：AkShare | 环境：生产"
+    )
 
 def send_wechat_markdown(message: str, webhook: Optional[str] = None) -> bool:
     """

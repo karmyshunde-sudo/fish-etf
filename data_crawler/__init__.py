@@ -154,7 +154,7 @@ def crawl_etf_daily_incremental() -> None:
         
         # 初始化目录
         Config.init_dirs()
-        etf_daily_dir = Config.ETFS_DAILY_DIR  # 修复：使用正确的ETF日线数据目录
+        etf_daily_dir = Config.ETFS_DAILY_DIR
         logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
         
         # 已完成列表路径

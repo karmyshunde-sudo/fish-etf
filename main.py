@@ -13,6 +13,7 @@ import logging
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
+import time
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -285,11 +286,6 @@ def handle_send_daily_report() -> Dict[str, Any]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始生成并发送每日报告 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 检查是否为交易日
-        if not is_trading_day():
-            logger.info("今日非交易日，跳过每日报告生成")
-            return {"status": "skipped", "message": "Today is not trading day"}
-        
         # 生成并发送报告
         success = send_daily_report_via_wechat()
         
@@ -437,11 +433,6 @@ def run_scheduled_tasks():
     """
     try:
         logger.info("开始运行定时任务")
-        
-        # 检查是否为交易日
-        if not is_trading_day():
-            logger.info("今日非交易日，跳过所有交易相关任务")
-            return
         
         # 获取当前双时区时间
         _, beijing_now = get_current_times()

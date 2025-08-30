@@ -23,7 +23,7 @@ from data_crawler import crawl_etf_daily_incremental
 from data_crawler.etf_list_manager import update_all_etf_list
 from strategy import (
     calculate_arbitrage_opportunity,
-    format_arbitrage_message,
+    generate_arbitrage_message_content,
     calculate_position_strategy,
     send_daily_report_via_wechat,
     send_arbitrage_opportunity,
@@ -33,11 +33,8 @@ from wechat_push.push import send_wechat_message, send_task_completion_notificat
 from utils.file_utils import check_flag, set_flag, get_file_mtime
 from utils.date_utils import (
     get_current_times,
-    format_dual_time,
     get_beijing_time,
     get_utc_time,
-    is_market_open,
-    is_trading_day,
     is_file_outdated
 )
 
@@ -79,13 +76,12 @@ def setup_environment() -> bool:
         
         # 记录环境信息
         logger.info(f"当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"当前市场状态: {'开市' if is_market_open() else '闭市'}")
-        logger.info(f"今日是否交易日: {'是' if is_trading_day() else '否'}")
         
         logger.info("环境设置完成")
         return True
     except Exception as e:
-        logger.error(f"环境设置失败: {str(e)}", exc_info=True)
+        error_msg = f"环境设置失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         return False
 
 def handle_update_etf_list() -> Dict[str, Any]:
@@ -142,8 +138,7 @@ def handle_update_etf_list() -> Dict[str, Any]:
     
     except Exception as e:
         error_msg = f"ETF列表更新失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
+        logger.error(error_msg, exc_info=True)
         result = {"status": "error", "message": error_msg}
         send_task_completion_notification("update_etf_list", result)
         return result
@@ -181,8 +176,7 @@ def handle_crawl_etf_daily() -> Dict[str, Any]:
     
     except Exception as e:
         error_msg = f"ETF日线数据增量爬取失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
+        logger.error(error_msg, exc_info=True)
         result = {"status": "error", "message": error_msg}
         send_task_completion_notification("crawl_etf_daily", result)
         return result
@@ -208,8 +202,8 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         arbitrage_df = calculate_arbitrage_opportunity()
         
         # 格式化并推送消息
-        message = format_arbitrage_message(arbitrage_df)
-        send_success = send_wechat_message(message)
+        message = generate_arbitrage_message_content(arbitrage_df)
+        send_success = send_wechat_message(message, message_type="arbitrage")
         
         if send_success:
             set_flag(Config.get_arbitrage_flag_file())  # 标记已推送
@@ -226,9 +220,11 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
             
     except Exception as e:
         error_msg = f"套利机会计算失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        send_wechat_message(f"【系统错误】套利机会计算失败: {str(e)}")
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         return {"status": "error", "message": error_msg}
 
 def handle_calculate_position() -> Dict[str, Any]:
@@ -252,7 +248,7 @@ def handle_calculate_position() -> Dict[str, Any]:
         message = calculate_position_strategy()
         
         # 推送消息
-        send_success = send_wechat_message(message)
+        send_success = send_wechat_message(message, message_type="position")
         
         if send_success:
             set_flag(Config.get_position_flag_file())  # 标记已推送
@@ -269,9 +265,11 @@ def handle_calculate_position() -> Dict[str, Any]:
             
     except Exception as e:
         error_msg = f"仓位策略计算失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        send_wechat_message(f"【系统错误】仓位策略计算失败: {str(e)}")
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         return {"status": "error", "message": error_msg}
 
 def handle_send_daily_report() -> Dict[str, Any]:
@@ -303,9 +301,11 @@ def handle_send_daily_report() -> Dict[str, Any]:
             
     except Exception as e:
         error_msg = f"每日报告处理失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        send_wechat_message(f"【系统错误】每日报告处理失败: {str(e)}")
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         return {"status": "error", "message": error_msg}
 
 def handle_check_arbitrage_exit() -> Dict[str, Any]:
@@ -339,9 +339,11 @@ def handle_check_arbitrage_exit() -> Dict[str, Any]:
             
     except Exception as e:
         error_msg = f"套利退出信号检查失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        send_wechat_message(f"【系统错误】套利退出信号检查失败: {str(e)}")
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
         return {"status": "error", "message": error_msg}
 
 def main() -> Dict[str, Any]:
@@ -361,8 +363,6 @@ def main() -> Dict[str, Any]:
         logger.info(f"===== 开始执行任务：{task} =====")
         logger.info(f"UTC时间：{utc_now.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"北京时间：{beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"当前市场状态：{'开市' if is_market_open() else '闭市'}")
-        logger.info(f"今日是否交易日：{'是' if is_trading_day() else '否'}")
         
         # 设置环境
         if not setup_environment():
@@ -395,7 +395,10 @@ def main() -> Dict[str, Any]:
                 f"{', '.join(task_handlers.keys())}）"
             )
             logger.error(error_msg)
-            send_wechat_message(f"【系统错误】{error_msg}")
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
             response = {"status": "error", "task": task, "message": error_msg}
         
         logger.info(f"===== 任务执行结束：{response['status']} =====")
@@ -407,14 +410,16 @@ def main() -> Dict[str, Any]:
         
     except Exception as e:
         error_msg = f"主程序执行失败: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
+        logger.error(error_msg, exc_info=True)
         
         # 尝试发送错误消息
         try:
-            send_wechat_message(f"【系统错误】主程序执行失败: {str(e)}")
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
         except Exception as wechat_e:
-            logger.error(f"发送微信错误消息失败: {str(wechat_e)}")
+            logger.error(f"发送微信错误消息失败: {str(wechat_e)}", exc_info=True)
         
         # 返回错误响应
         response = {
@@ -437,40 +442,34 @@ def run_scheduled_tasks():
         # 获取当前双时区时间
         _, beijing_now = get_current_times()
         
-        # 判断当前是否在交易时段内
-        if is_market_open():
-            logger.info("当前处于交易时段，执行交易相关任务")
-            
-            # 每30分钟检查一次套利机会
-            if beijing_now.minute % 30 == 0:
-                logger.info("执行套利机会计算任务")
-                handle_calculate_arbitrage()
-            
-            # 每小时检查一次仓位策略
-            if beijing_now.minute == 0:
-                logger.info("执行仓位策略计算任务")
-                handle_calculate_position()
-            
-            # 检查套利退出信号
-            if beijing_now.hour >= 14 and beijing_now.minute >= 55:
-                logger.info("临近收盘，检查套利退出信号")
-                handle_check_arbitrage_exit()
+        # 每30分钟检查一次套利机会
+        if beijing_now.minute % 30 == 0:
+            logger.info("执行套利机会计算任务")
+            handle_calculate_arbitrage()
         
-        # 闭市后执行的任务
-        elif beijing_now.hour >= 15 and beijing_now.minute >= 30:
-            logger.info("交易已结束，执行闭市后任务")
-            
-            # 每日报告
-            if not check_flag(Config.get_arbitrage_flag_file()):
-                logger.info("执行每日报告发送任务")
-                handle_send_daily_report()
-            
-            # 更新ETF列表
+        # 每小时检查一次仓位策略
+        if beijing_now.minute == 0:
+            logger.info("执行仓位策略计算任务")
+            handle_calculate_position()
+        
+        # 检查套利退出信号
+        if beijing_now.hour >= 14 and beijing_now.minute >= 55:
+            logger.info("临近收盘，检查套利退出信号")
+            handle_check_arbitrage_exit()
+        
+        # 每日报告
+        if beijing_now.hour == 15 and beijing_now.minute == 30:
+            logger.info("执行每日报告发送任务")
+            handle_send_daily_report()
+        
+        # 更新ETF列表（每周日20:00）
+        if beijing_now.weekday() == 6 and beijing_now.hour == 20 and beijing_now.minute == 0:
             if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
                 logger.info("ETF列表已过期，执行更新任务")
                 handle_update_etf_list()
-            
-            # 爬取日线数据
+        
+        # 爬取日线数据
+        if beijing_now.hour == 16 and beijing_now.minute == 0:
             logger.info("执行ETF日线数据增量爬取任务")
             handle_crawl_etf_daily()
         

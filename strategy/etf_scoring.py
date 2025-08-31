@@ -9,7 +9,6 @@ ETF评分系统
 import pandas as pd
 import numpy as np
 import logging
-import akshare as ak
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -47,26 +46,48 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         
         # 获取元数据
         metadata_df = load_etf_metadata()
-        # 修复：确保metadata_df是DataFrame类型
+        
+        # 检查元数据是否有效
         if metadata_df is None or not isinstance(metadata_df, pd.DataFrame) or metadata_df.empty:
-            error_msg = "元数据为空或格式错误，无法获取ETF列表"
-            logger.warning(error_msg)
+            # 检查元数据文件是否存在
+            metadata_path = Config.ETF_METADATA_PATH
+            if not os.path.exists(metadata_path):
+                logger.warning("ETF元数据文件不存在，尝试从本地数据重建...")
+                rebuild_etf_metadata()
+            else:
+                logger.warning("ETF元数据文件存在但格式错误，尝试修复...")
+                if repair_etf_metadata(metadata_path):
+                    metadata_df = load_etf_metadata()
+                else:
+                    logger.warning("ETF元数据修复失败，尝试重建...")
+                    rebuild_etf_metadata()
+                    metadata_df = load_etf_metadata()
             
-            # 发送错误通知
-            send_wechat_message(
-                message=error_msg,
-                message_type="error"
-            )
-            
-            return pd.DataFrame()
+            # 再次检查元数据是否有效
+            if metadata_df is None or not isinstance(metadata_df, pd.DataFrame) or metadata_df.empty:
+                # 最后一次尝试：使用基础ETF列表
+                logger.warning("ETF元数据重建失败，尝试使用基础ETF列表...")
+                metadata_df = create_basic_metadata_from_list()
+                
+                if metadata_df is None or metadata_df.empty:
+                    error_msg = "ETF元数据重建失败，无法获取ETF列表"
+                    logger.error(error_msg)
+                    
+                    # 发送错误通知
+                    send_wechat_message(
+                        message=error_msg,
+                        message_type="error"
+                    )
+                    
+                    return pd.DataFrame()
         
         # 确保列名正确（修复CSV文件列名问题）
         if "etf_code" not in metadata_df.columns:
             # 如果列名是中文，尝试映射
-            if "ETF代码" in metadata_df.columns:
-                metadata_df = metadata_df.rename(columns={"ETF代码": "etf_code"})
+            if Config.ETF_CODE_COL in metadata_df.columns:
+                metadata_df = metadata_df.rename(columns={Config.ETF_CODE_COL: "etf_code"})
             elif "etf_code" not in metadata_df.columns:
-                error_msg = "ETF元数据缺少必要列: etf_code"
+                error_msg = f"ETF元数据缺少必要列: {Config.ETF_CODE_COL} (映射为 etf_code)"
                 logger.warning(error_msg)
                 send_wechat_message(
                     message=error_msg,
@@ -94,7 +115,7 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         
         for etf_code in all_codes:
             try:
-                # 获取ETF日线数据
+                # 获取ETF日线数据（从本地文件加载）
                 df = load_etf_daily_data(etf_code)
                 if df.empty:
                     logger.debug(f"ETF {etf_code} 无日线数据，跳过评分")
@@ -105,16 +126,22 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
                 if score < min_score:
                     continue
                 
-                # 获取ETF基本信息
-                size, listing_date = get_etf_basic_info(etf_code)
+                # 获取ETF基本信息（从本地元数据获取）
+                size = 0.0
+                listing_date = ""
+                
+                if etf_code in metadata_df["etf_code"].values:
+                    size = metadata_df[metadata_df["etf_code"] == etf_code]["size"].values[0]
+                    listing_date = metadata_df[metadata_df["etf_code"] == etf_code]["listing_date"].values[0]
+                
                 etf_name = get_etf_name(etf_code)
                 
                 # 计算日均成交额（单位：万元）
                 avg_volume = 0.0
-                if "成交额" in df.columns:
+                if Config.AMOUNT_COL in df.columns:
                     recent_30d = df.tail(30)
                     if len(recent_30d) > 0:
-                        avg_volume = recent_30d["成交额"].mean() / 10000  # 转换为万元
+                        avg_volume = recent_30d[Config.AMOUNT_COL].mean() / 10000  # 转换为万元
                 
                 # 应用动态筛选参数
                 if size >= min_fund_size and avg_volume >= min_avg_volume:
@@ -169,6 +196,154 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         
         return pd.DataFrame()
 
+def rebuild_etf_metadata():
+    """
+    从本地数据重建ETF元数据
+    """
+    try:
+        logger.info("开始从本地数据重建ETF元数据...")
+        
+        # 获取所有ETF代码
+        etf_list = load_all_etf_list()
+        if etf_list.empty:
+            logger.warning("ETF列表为空，无法重建元数据")
+            return False
+        
+        # 初始化元数据列表
+        metadata_list = []
+        
+        # 遍历所有ETF，从本地日线数据计算元数据
+        for _, etf in etf_list.iterrows():
+            etf_code = etf[Config.ETF_CODE_COL]
+            
+            # 获取ETF日线数据（从本地文件加载）
+            df = load_etf_daily_data(etf_code)
+            if df.empty:
+                logger.debug(f"ETF {etf_code} 无日线数据，跳过元数据重建")
+                continue
+            
+            # 计算波动率
+            volatility = calculate_volatility(df)
+            
+            # 从ETF列表获取规模和成立日期
+            size = etf[Config.FUND_SIZE_COL] if Config.FUND_SIZE_COL in etf else 0.0
+            listing_date = etf[Config.LISTING_DATE_COL] if Config.LISTING_DATE_COL in etf else ""
+            
+            # 添加元数据
+            metadata_list.append({
+                "etf_code": etf_code,
+                "etf_name": etf[Config.ETF_NAME_COL],
+                "volatility": volatility,
+                "size": size,
+                "listing_date": listing_date,
+                "update_time": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        if not metadata_list:
+            logger.warning("没有有效的ETF元数据可重建")
+            return False
+        
+        # 创建DataFrame
+        metadata_df = pd.DataFrame(metadata_list)
+        
+        # 保存元数据
+        metadata_path = Config.ETF_METADATA_PATH
+        metadata_df.to_csv(metadata_path, index=False, encoding="utf-8-sig")
+        logger.info(f"ETF元数据已重建，共{len(metadata_df)}条记录，保存至: {metadata_path}")
+        return True
+    
+    except Exception as e:
+        error_msg = f"重建ETF元数据失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        return False
+
+def repair_etf_metadata(file_path: str) -> bool:
+    """
+    尝试修复损坏的ETF元数据文件
+    
+    Args:
+        file_path: 元数据文件路径
+    
+    Returns:
+        bool: 修复成功返回True，否则返回False
+    """
+    try:
+        logger.info(f"尝试修复ETF元数据文件: {file_path}")
+        
+        # 读取文件内容
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 检查是否是有效的CSV
+        if ',' not in content[:100]:  # 检查前100字符是否有逗号
+            logger.warning("元数据文件格式异常，可能是JSON或损坏的CSV")
+            return False
+        
+        # 检查列名是否正确
+        metadata_df = pd.read_csv(file_path, encoding="utf-8")
+        if "etf_code" not in metadata_df.columns and Config.ETF_CODE_COL in metadata_df.columns:
+            metadata_df = metadata_df.rename(columns={Config.ETF_CODE_COL: "etf_code"})
+            metadata_df.to_csv(file_path, index=False, encoding="utf-8-sig")
+            logger.info("成功修复元数据文件列名")
+            return True
+        
+        return False
+    
+    except Exception as e:
+        logger.error(f"修复ETF元数据失败: {str(e)}", exc_info=True)
+        return False
+
+def create_basic_metadata_from_list() -> pd.DataFrame:
+    """
+    从ETF列表创建基础ETF元数据
+    
+    Returns:
+        pd.DataFrame: 基础ETF元数据
+    """
+    try:
+        logger.info("从ETF列表创建基础ETF元数据...")
+        
+        # 获取ETF列表
+        etf_list = load_all_etf_list()
+        if etf_list.empty:
+            logger.warning("ETF列表为空，无法创建基础元数据")
+            return pd.DataFrame()
+        
+        # 创建基础元数据
+        metadata_list = []
+        for _, etf in etf_list.iterrows():
+            # 处理规模
+            size = 0.0
+            if Config.FUND_SIZE_COL in etf:
+                size_str = etf[Config.FUND_SIZE_COL]
+                if isinstance(size_str, str):
+                    if "亿" in size_str:
+                        size = float(size_str.replace("亿", ""))
+                    elif "万" in size_str:
+                        size = float(size_str.replace("万", "")) / 10000
+                elif isinstance(size_str, (int, float)):
+                    size = size_str
+            
+            metadata_list.append({
+                "etf_code": etf[Config.ETF_CODE_COL],
+                "etf_name": etf[Config.ETF_NAME_COL],
+                "volatility": 0.1,  # 默认波动率
+                "size": size,
+                "listing_date": etf.get(Config.LISTING_DATE_COL, "2020-01-01"),
+                "update_time": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        return pd.DataFrame(metadata_list)
+    
+    except Exception as e:
+        logger.error(f"创建基础ETF元数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
 def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
     """
     计算ETF综合评分
@@ -185,7 +360,8 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         _, beijing_now = get_current_times()
         
         # 确保数据按日期排序
-        df = df.sort_values("date")
+        if Config.DATE_COL in df.columns:
+            df = df.sort_values(Config.DATE_COL)
         
         # 检查数据量
         if len(df) < 30:
@@ -246,8 +422,8 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
 def calculate_liquidity_score(df: pd.DataFrame) -> float:
     """计算流动性得分（日均成交额）"""
     try:
-        if "成交额" not in df.columns:
-            error_msg = "DataFrame中缺少'成交额'列，流动性得分设为0"
+        if Config.AMOUNT_COL not in df.columns:
+            error_msg = f"DataFrame中缺少'{Config.AMOUNT_COL}'列，流动性得分设为0"
             logger.warning(error_msg)
             
             # 发送错误通知
@@ -258,7 +434,7 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
             
             return 0.0
         
-        avg_volume = df["成交额"].mean() / 10000  # 转换为万元
+        avg_volume = df[Config.AMOUNT_COL].mean() / 10000  # 转换为万元
         # 线性映射到0-100分，日均成交额1000万=60分，5000万=100分
         score = min(max(avg_volume * 0.01 + 50, 0), 100)
         return round(score, 2)
@@ -309,10 +485,14 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
 def calculate_return_score(df: pd.DataFrame) -> float:
     """计算收益能力得分"""
     try:
-        return_30d = (df.iloc[-1]["收盘"] / df.iloc[0]["收盘"] - 1) * 100
-        # 线性映射到0-100分，-5%=-50分，+5%=100分
-        return_score = min(max(return_30d * 10 + 100, 0), 100)
-        return round(return_score, 2)
+        if Config.CLOSE_COL in df.columns and Config.DATE_COL in df.columns:
+            return_30d = (df[Config.CLOSE_COL].iloc[-1] / df[Config.CLOSE_COL].iloc[0] - 1) * 100
+            # 线性映射到0-100分，-5%=-50分，+5%=100分
+            return_score = min(max(return_30d * 10 + 100, 0), 100)
+            return round(return_score, 2)
+        else:
+            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL} 或 {Config.DATE_COL}")
+            return 0.0
     
     except Exception as e:
         error_msg = f"计算收益得分失败: {str(e)}"
@@ -329,13 +509,17 @@ def calculate_return_score(df: pd.DataFrame) -> float:
 def calculate_sentiment_score(df: pd.DataFrame) -> float:
     """计算情绪指标得分（成交量变化率）"""
     try:
-        if len(df) >= 5:
-            volume_change = (df["成交量"].iloc[-1] / df["成交量"].iloc[-5] - 1) * 100
-            sentiment_score = min(max(volume_change + 50, 0), 100)
+        if Config.VOLUME_COL in df.columns:
+            if len(df) >= 5:
+                volume_change = (df[Config.VOLUME_COL].iloc[-1] / df[Config.VOLUME_COL].iloc[-5] - 1) * 100
+                sentiment_score = min(max(volume_change + 50, 0), 100)
+            else:
+                sentiment_score = 50
+            
+            return round(sentiment_score, 2)
         else:
-            sentiment_score = 50
-        
-        return round(sentiment_score, 2)
+            logger.warning(f"DataFrame缺少必要列: {Config.VOLUME_COL}")
+            return 50.0
     
     except Exception as e:
         error_msg = f"计算情绪得分失败: {str(e)}"
@@ -352,26 +536,46 @@ def calculate_sentiment_score(df: pd.DataFrame) -> float:
 def calculate_fundamental_score(etf_code: str) -> float:
     """计算基本面得分（规模、成立时间等）"""
     try:
-        size, listing_date = get_etf_basic_info(etf_code)
+        # 从ETF列表获取规模和成立日期
+        etf_list = load_all_etf_list()
+        etf_row = etf_list[etf_list[Config.ETF_CODE_COL] == etf_code]
         
-        # 规模得分（10亿=60分，100亿=100分）
-        size_score = min(max(size * 0.4 + 50, 0), 100)
-        
-        # 成立时间得分（1年=50分，5年=100分）
-        if not listing_date:
-            age_score = 50.0
-        else:
-            try:
-                listing_date = datetime.strptime(listing_date, "%Y-%m-%d")
-                age = (get_beijing_time() - listing_date).days / 365
-                age_score = min(max(age * 10 + 40, 0), 100)
-            except Exception as e:
-                logger.error(f"解析成立日期失败: {str(e)}", exc_info=True)
+        if not etf_row.empty:
+            # 处理规模
+            size = 0.0
+            size_str = etf_row.iloc[0][Config.FUND_SIZE_COL]
+            if isinstance(size_str, str):
+                if "亿" in size_str:
+                    size = float(size_str.replace("亿", ""))
+                elif "万" in size_str:
+                    size = float(size_str.replace("万", "")) / 10000
+            elif isinstance(size_str, (int, float)):
+                size = size_str
+            
+            # 处理成立日期
+            listing_date = etf_row.iloc[0].get(Config.LISTING_DATE_COL, "")
+            
+            # 规模得分（10亿=60分，100亿=100分）
+            size_score = min(max(size * 0.4 + 50, 0), 100)
+            
+            # 成立时间得分（1年=50分，5年=100分）
+            if not listing_date:
                 age_score = 50.0
-        
-        # 综合基本面得分
-        fundamental_score = (size_score * 0.6 + age_score * 0.4)
-        return round(fundamental_score, 2)
+            else:
+                try:
+                    listing_date = datetime.strptime(listing_date, "%Y-%m-%d")
+                    age = (get_beijing_time() - listing_date).days / 365
+                    age_score = min(max(age * 10 + 40, 0), 100)
+                except Exception as e:
+                    logger.error(f"解析成立日期失败: {str(e)}", exc_info=True)
+                    age_score = 50.0
+            
+            # 综合基本面得分
+            fundamental_score = (size_score * 0.6 + age_score * 0.4)
+            return round(fundamental_score, 2)
+        else:
+            logger.warning(f"ETF {etf_code} 未在ETF列表中找到，使用默认值")
+            return 50.0
     
     except Exception as e:
         error_msg = f"计算基本面得分失败: {str(e)}"
@@ -383,13 +587,17 @@ def calculate_fundamental_score(etf_code: str) -> float:
             message_type="error"
         )
         
-        return 0.0
+        return 50.0
 
 def calculate_volatility(df: pd.DataFrame) -> float:
     """计算波动率（年化）"""
     try:
+        if Config.CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+            return 0.0
+        
         # 计算日收益率
-        df["daily_return"] = df["收盘"].pct_change()
+        df["daily_return"] = df[Config.CLOSE_COL].pct_change()
         
         # 计算年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -410,11 +618,15 @@ def calculate_volatility(df: pd.DataFrame) -> float:
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
     """计算夏普比率（年化）"""
     try:
+        if Config.CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+            return 0.0
+        
         # 计算日收益率
-        df["daily_return"] = df["收盘"].pct_change()
+        df["daily_return"] = df[Config.CLOSE_COL].pct_change()
         
         # 年化收益率
-        annual_return = (df["收盘"].iloc[-1] / df["收盘"].iloc[0]) ** (252 / len(df)) - 1
+        annual_return = (df[Config.CLOSE_COL].iloc[-1] / df[Config.CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
         
         # 年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -445,8 +657,12 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
 def calculate_max_drawdown(df: pd.DataFrame) -> float:
     """计算最大回撤"""
     try:
+        if Config.CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+            return 0.0
+        
         # 计算累计收益率
-        df["cum_return"] = (1 + df["收盘"].pct_change()).cumprod()
+        df["cum_return"] = (1 + df[Config.CLOSE_COL].pct_change()).cumprod()
         
         # 计算回撤
         df["drawdown"] = 1 - df["cum_return"] / df["cum_return"].cummax()
@@ -467,299 +683,6 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
         
         return 0.0
 
-def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
-    """
-    从AkShare获取ETF基本信息（规模、成立日期等）
-    
-    Args:
-        etf_code: ETF代码 (6位数字)
-    
-    Returns:
-        Tuple[float, str]: (基金规模(单位:亿元), 上市日期字符串)
-    """
-    try:
-        logger.debug(f"尝试获取ETF基本信息，代码: {etf_code}")
-        
-        # 获取ETF基本信息
-        df = ak.fund_etf_info_em(symbol=etf_code)
-        if df.empty:
-            error_msg = f"AkShare未返回ETF {etf_code} 的基本信息"
-            logger.warning(error_msg)
-            
-            # 发送错误通知
-            send_wechat_message(
-                message=error_msg,
-                message_type="error"
-            )
-            
-            return 0.0, ""
-        
-        # 提取规模信息（单位：亿元）
-        size_str = df.iloc[0]["基金规模"]
-        # 处理"12.34亿"格式
-        if "亿" in size_str:
-            size = float(size_str.replace("亿", ""))
-        # 处理"123400万"格式
-        elif "万" in size_str:
-            size = float(size_str.replace("万", "")) / 10000
-        else:
-            size = 0.0
-        
-        # 提取成立日期
-        listing_date = df.iloc[0]["成立日期"]
-        
-        logger.debug(f"ETF {etf_code} 基本信息: 规模={size}亿元, 成立日期={listing_date}")
-        return size, listing_date
-    
-    except Exception as e:
-        error_msg = f"获取ETF {etf_code} 基本信息失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return 0.0, ""
-
-def analyze_etf_performance(etf_code: str, days: int = 30) -> Dict[str, Any]:
-    """
-    分析ETF历史表现
-    
-    Args:
-        etf_code: ETF代码
-        days: 分析天数
-    
-    Returns:
-        Dict[str, Any]: 分析结果
-    """
-    try:
-        # 获取ETF日线数据
-        df = load_etf_daily_data(etf_code)
-        if df.empty:
-            error_msg = f"ETF {etf_code} 无日线数据，无法分析表现"
-            logger.warning(error_msg)
-            
-            # 发送错误通知
-            send_wechat_message(
-                message=error_msg,
-                message_type="error"
-            )
-            
-            return {}
-        
-        # 取最近days天数据
-        recent_data = df.tail(days)
-        if len(recent_data) < 2:
-            error_msg = f"ETF {etf_code} 数据量不足，无法分析表现"
-            logger.warning(error_msg)
-            
-            # 发送错误通知
-            send_wechat_message(
-                message=error_msg,
-                message_type="error"
-            )
-            
-            return {}
-        
-        # 计算表现指标
-        start_price = recent_data.iloc[0]["收盘"]
-        end_price = recent_data.iloc[-1]["收盘"]
-        return_rate = (end_price - start_price) / start_price * 100
-        
-        # 计算波动率
-        volatility = calculate_volatility(recent_data)
-        
-        # 计算最大回撤
-        max_drawdown = calculate_max_drawdown(recent_data)
-        
-        # 获取ETF基本信息
-        size, listing_date = get_etf_basic_info(etf_code)
-        etf_name = get_etf_name(etf_code)
-        
-        # 生成分析结果
-        analysis = {
-            "etf_code": etf_code,
-            "etf_name": etf_name,
-            "period_days": days,
-            "start_date": recent_data.iloc[0]["date"],
-            "end_date": recent_data.iloc[-1]["date"],
-            "start_price": start_price,
-            "end_price": end_price,
-            "return_rate": return_rate,
-            "volatility": volatility,
-            "max_drawdown": max_drawdown,
-            "fund_size": size,
-            "listing_date": listing_date
-        }
-        
-        logger.info(f"ETF {etf_code} {days}天表现分析完成")
-        return analysis
-    
-    except Exception as e:
-        error_msg = f"分析ETF {etf_code} 表现失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return {}
-
-def generate_etf_analysis_content(etf_code: str, analysis: Dict[str, Any]) -> str:
-    """
-    生成ETF分析内容（不包含格式）
-    
-    Args:
-        etf_code: ETF代码
-        analysis: 分析结果
-    
-    Returns:
-        str: 纯业务内容
-    """
-    try:
-        if not analysis:
-            return f"【ETF {etf_code} 分析】\n• 无有效分析数据"
-        
-        # 生成分析内容
-        content = f"【ETF {analysis['etf_name']}({analysis['etf_code']}) 分析】\n"
-        content += f"📊 分析周期: {analysis['start_date']} 至 {analysis['end_date']} ({analysis['period_days']}天)\n\n"
-        
-        # 添加价格表现
-        content += "📈 价格表现\n"
-        content += f"• 起始价格: {analysis['start_price']:.3f}元\n"
-        content += f"• 结束价格: {analysis['end_price']:.3f}元\n"
-        content += f"• 收益率: {analysis['return_rate']:.2f}%\n\n"
-        
-        # 添加风险指标
-        content += "📉 风险指标\n"
-        content += f"• 波动率: {analysis['volatility']:.4f}\n"
-        content += f"• 最大回撤: {analysis['max_drawdown']:.4f}\n\n"
-        
-        # 添加基本面信息
-        content += "📊 基本面信息\n"
-        content += f"• 基金规模: {analysis['fund_size']:.2f}亿元\n"
-        content += f"• 成立日期: {analysis['listing_date']}\n\n"
-        
-        # 添加投资建议
-        content += "💡 投资建议\n"
-        if analysis['return_rate'] > 5 and analysis['volatility'] < 0.1:
-            content += "• 该ETF近期表现优异，风险较低，可考虑配置\n"
-        elif analysis['return_rate'] > 0 and analysis['volatility'] < 0.2:
-            content += "• 该ETF近期表现稳定，风险可控，可适度配置\n"
-        elif analysis['return_rate'] < 0 and analysis['max_drawdown'] > 0.1:
-            content += "• 该ETF近期表现不佳，回撤较大，建议谨慎配置\n"
-        else:
-            content += "• 该ETF表现中性，可根据个人风险偏好决定是否配置\n"
-        
-        return content
-    
-    except Exception as e:
-        error_msg = f"生成ETF分析内容失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return f"【ETF分析】生成内容失败"
-
-def analyze_etf_score_trend(etf_code: str) -> str:
-    """
-    分析ETF评分趋势
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        str: 分析结果
-    """
-    try:
-        # 获取评分历史
-        history_df = get_etf_score_history(etf_code)
-        if history_df.empty:
-            return f"【{etf_code} 评分趋势】\n• 无历史评分数据"
-        
-        # 计算趋势
-        latest_score = history_df.iloc[0]["评分"]
-        avg_score = history_df["评分"].mean()
-        trend = "上升" if latest_score > avg_score else "下降"
-        
-        # 生成分析报告
-        report = f"【{etf_code} 评分趋势】\n"
-        report += f"• 当前评分: {latest_score:.2f}\n"
-        report += f"• 近期平均评分: {avg_score:.2f}\n"
-        report += f"• 评分趋势: {trend}\n\n"
-        
-        # 添加建议
-        if trend == "上升":
-            report += "💡 建议：评分持续上升，可关注该ETF\n"
-        else:
-            report += "💡 建议：评分有所下降，建议关注原因\n"
-        
-        return report
-    
-    except Exception as e:
-        error_msg = f"ETF {etf_code} 评分趋势分析失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return f"【{etf_code} 评分趋势】{error_msg}"
-
-def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
-    """
-    获取ETF评分历史数据
-    
-    Args:
-        etf_code: ETF代码
-        days: 查询天数
-    
-    Returns:
-        pd.DataFrame: 评分历史数据
-    """
-    try:
-        history = []
-        beijing_now = get_beijing_time()
-        
-        # 这里简化处理，实际应从历史评分文件中读取数据
-        for i in range(days):
-            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
-            # 生成模拟评分数据
-            score = 60 + (i % 10) * 2
-            history.append({
-                "日期": date,
-                "评分": score,
-                "排名": i + 1
-            })
-        
-        if not history:
-            logger.info(f"未找到ETF {etf_code} 的评分历史数据")
-            return pd.DataFrame()
-        
-        return pd.DataFrame(history)
-    
-    except Exception as e:
-        error_msg = f"获取ETF {etf_code} 评分历史数据失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return pd.DataFrame()
-
 # 模块初始化
 try:
     # 确保必要的目录存在
@@ -775,6 +698,14 @@ try:
             message=warning_msg,
             message_type="error"
         )
+    
+    # 检查元数据文件是否存在
+    if not os.path.exists(Config.ETF_METADATA_PATH):
+        logger.warning("ETF元数据文件不存在，将在需要时重建")
+    else:
+        # 检查元数据是否需要更新
+        if is_file_outdated(Config.ETF_METADATA_PATH, Config.ETF_METADATA_UPDATE_INTERVAL):
+            logger.info("ETF元数据已过期，将在需要时重建")
     
     # 初始化日志
     logger.info("ETF评分系统初始化完成")

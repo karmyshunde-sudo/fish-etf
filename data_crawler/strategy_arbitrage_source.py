@@ -55,7 +55,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                 
                 # 获取ETF实时行情
                 realtime_data = get_etf_realtime_data(etf_code)
-                if not realtime_
+                if not realtime_data:  # 修复：添加冒号，修正变量名
                     continue
                 
                 # 获取ETF IOPV数据
@@ -71,7 +71,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                     "IOPV": iopv_data["IOPV"],
                     "净值时间": iopv_data["净值时间"],
                     "计算时间": beijing_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "溢价率": calculate_premium_discount(realtime_data["最新价"], iopv_data["IOPV"])
+                    "折溢价率": calculate_premium_discount(realtime_data["最新价"], iopv_data["IOPV"])
                 })
                 
                 # 交易间隔控制，避免请求过于频繁
@@ -80,7 +80,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                 logger.error(f"爬取ETF {etf_code} 套利数据失败: {str(e)}", exc_info=True)
                 continue
         
-        if not arbitrage_
+        if not arbitrage_data:
             logger.warning("未获取到有效的套利数据")
             return pd.DataFrame()
         
@@ -298,11 +298,11 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         
         # 筛选有套利机会的数据
         opportunities = df[
-            (df["溢价率"].abs() >= Config.ARBITRAGE_THRESHOLD)
+            (df["折溢价率"].abs() >= Config.ARBITRAGE_THRESHOLD)
         ].copy()
         
         # 按溢价率绝对值排序
-        opportunities["abs_premium_discount"] = opportunities["溢价率"].abs()
+        opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
         opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
         opportunities = opportunities.drop(columns=["abs_premium_discount"])
         

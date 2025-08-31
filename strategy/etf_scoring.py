@@ -26,6 +26,16 @@ from wechat_push.push import send_wechat_message
 # 初始化日志
 logger = logging.getLogger(__name__)
 
+# 从Config中获取标准列名
+ETF_CODE_COL = Config.ETF_STANDARD_COLUMNS[0]  # "ETF代码"
+ETF_NAME_COL = Config.ETF_STANDARD_COLUMNS[1]  # "ETF名称"
+FUND_SIZE_COL = Config.ETF_STANDARD_COLUMNS[3]  # "基金规模"
+LISTING_DATE_COL = "成立日期"  # 成立日期列名（未在ETF_STANDARD_COLUMNS中定义）
+DATE_COL = Config.COLUMN_NAME_MAPPING["date"]
+CLOSE_COL = Config.COLUMN_NAME_MAPPING["close"]
+AMOUNT_COL = Config.COLUMN_NAME_MAPPING["amount"]
+VOLUME_COL = Config.COLUMN_NAME_MAPPING["volume"]
+
 def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, position_type: str = "稳健仓") -> pd.DataFrame:
     """
     从全市场ETF中筛选高分ETF
@@ -84,10 +94,10 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         # 确保列名正确（修复CSV文件列名问题）
         if "etf_code" not in metadata_df.columns:
             # 如果列名是中文，尝试映射
-            if Config.ETF_CODE_COL in metadata_df.columns:
-                metadata_df = metadata_df.rename(columns={Config.ETF_CODE_COL: "etf_code"})
+            if ETF_CODE_COL in metadata_df.columns:
+                metadata_df = metadata_df.rename(columns={ETF_CODE_COL: "etf_code"})
             elif "etf_code" not in metadata_df.columns:
-                error_msg = f"ETF元数据缺少必要列: {Config.ETF_CODE_COL} (映射为 etf_code)"
+                error_msg = f"ETF元数据缺少必要列: {ETF_CODE_COL} (映射为 etf_code)"
                 logger.warning(error_msg)
                 send_wechat_message(
                     message=error_msg,
@@ -138,10 +148,10 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
                 
                 # 计算日均成交额（单位：万元）
                 avg_volume = 0.0
-                if Config.AMOUNT_COL in df.columns:
+                if AMOUNT_COL in df.columns:
                     recent_30d = df.tail(30)
                     if len(recent_30d) > 0:
-                        avg_volume = recent_30d[Config.AMOUNT_COL].mean() / 10000  # 转换为万元
+                        avg_volume = recent_30d[AMOUNT_COL].mean() / 10000  # 转换为万元
                 
                 # 应用动态筛选参数
                 if size >= min_fund_size and avg_volume >= min_avg_volume:
@@ -214,7 +224,7 @@ def rebuild_etf_metadata():
         
         # 遍历所有ETF，从本地日线数据计算元数据
         for _, etf in etf_list.iterrows():
-            etf_code = etf[Config.ETF_CODE_COL]
+            etf_code = etf[ETF_CODE_COL]
             
             # 获取ETF日线数据（从本地文件加载）
             df = load_etf_daily_data(etf_code)
@@ -226,13 +236,13 @@ def rebuild_etf_metadata():
             volatility = calculate_volatility(df)
             
             # 从ETF列表获取规模和成立日期
-            size = etf[Config.FUND_SIZE_COL] if Config.FUND_SIZE_COL in etf else 0.0
-            listing_date = etf[Config.LISTING_DATE_COL] if Config.LISTING_DATE_COL in etf else ""
+            size = etf[FUND_SIZE_COL] if FUND_SIZE_COL in etf else 0.0
+            listing_date = etf[LISTING_DATE_COL] if LISTING_DATE_COL in etf else ""
             
             # 添加元数据
             metadata_list.append({
                 "etf_code": etf_code,
-                "etf_name": etf[Config.ETF_NAME_COL],
+                "etf_name": etf[ETF_NAME_COL],
                 "volatility": volatility,
                 "size": size,
                 "listing_date": listing_date,
@@ -286,8 +296,8 @@ def repair_etf_metadata(file_path: str) -> bool:
         
         # 检查列名是否正确
         metadata_df = pd.read_csv(file_path, encoding="utf-8")
-        if "etf_code" not in metadata_df.columns and Config.ETF_CODE_COL in metadata_df.columns:
-            metadata_df = metadata_df.rename(columns={Config.ETF_CODE_COL: "etf_code"})
+        if "etf_code" not in metadata_df.columns and ETF_CODE_COL in metadata_df.columns:
+            metadata_df = metadata_df.rename(columns={ETF_CODE_COL: "etf_code"})
             metadata_df.to_csv(file_path, index=False, encoding="utf-8-sig")
             logger.info("成功修复元数据文件列名")
             return True
@@ -319,8 +329,8 @@ def create_basic_metadata_from_list() -> pd.DataFrame:
         for _, etf in etf_list.iterrows():
             # 处理规模
             size = 0.0
-            if Config.FUND_SIZE_COL in etf:
-                size_str = etf[Config.FUND_SIZE_COL]
+            if FUND_SIZE_COL in etf:
+                size_str = etf[FUND_SIZE_COL]
                 if isinstance(size_str, str):
                     if "亿" in size_str:
                         size = float(size_str.replace("亿", ""))
@@ -330,11 +340,11 @@ def create_basic_metadata_from_list() -> pd.DataFrame:
                     size = size_str
             
             metadata_list.append({
-                "etf_code": etf[Config.ETF_CODE_COL],
-                "etf_name": etf[Config.ETF_NAME_COL],
+                "etf_code": etf[ETF_CODE_COL],
+                "etf_name": etf[ETF_NAME_COL],
                 "volatility": 0.1,  # 默认波动率
                 "size": size,
-                "listing_date": etf.get(Config.LISTING_DATE_COL, "2020-01-01"),
+                "listing_date": etf.get(LISTING_DATE_COL, "2020-01-01"),
                 "update_time": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
             })
         
@@ -360,8 +370,8 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         _, beijing_now = get_current_times()
         
         # 确保数据按日期排序
-        if Config.DATE_COL in df.columns:
-            df = df.sort_values(Config.DATE_COL)
+        if DATE_COL in df.columns:
+            df = df.sort_values(DATE_COL)
         
         # 检查数据量
         if len(df) < 30:
@@ -422,8 +432,8 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
 def calculate_liquidity_score(df: pd.DataFrame) -> float:
     """计算流动性得分（日均成交额）"""
     try:
-        if Config.AMOUNT_COL not in df.columns:
-            error_msg = f"DataFrame中缺少'{Config.AMOUNT_COL}'列，流动性得分设为0"
+        if AMOUNT_COL not in df.columns:
+            error_msg = f"DataFrame中缺少'{AMOUNT_COL}'列，流动性得分设为0"
             logger.warning(error_msg)
             
             # 发送错误通知
@@ -434,7 +444,7 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
             
             return 0.0
         
-        avg_volume = df[Config.AMOUNT_COL].mean() / 10000  # 转换为万元
+        avg_volume = df[AMOUNT_COL].mean() / 10000  # 转换为万元
         # 线性映射到0-100分，日均成交额1000万=60分，5000万=100分
         score = min(max(avg_volume * 0.01 + 50, 0), 100)
         return round(score, 2)
@@ -485,13 +495,13 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
 def calculate_return_score(df: pd.DataFrame) -> float:
     """计算收益能力得分"""
     try:
-        if Config.CLOSE_COL in df.columns and Config.DATE_COL in df.columns:
-            return_30d = (df[Config.CLOSE_COL].iloc[-1] / df[Config.CLOSE_COL].iloc[0] - 1) * 100
+        if CLOSE_COL in df.columns and DATE_COL in df.columns:
+            return_30d = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0] - 1) * 100
             # 线性映射到0-100分，-5%=-50分，+5%=100分
             return_score = min(max(return_30d * 10 + 100, 0), 100)
             return round(return_score, 2)
         else:
-            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL} 或 {Config.DATE_COL}")
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL} 或 {DATE_COL}")
             return 0.0
     
     except Exception as e:
@@ -509,16 +519,16 @@ def calculate_return_score(df: pd.DataFrame) -> float:
 def calculate_sentiment_score(df: pd.DataFrame) -> float:
     """计算情绪指标得分（成交量变化率）"""
     try:
-        if Config.VOLUME_COL in df.columns:
+        if VOLUME_COL in df.columns:
             if len(df) >= 5:
-                volume_change = (df[Config.VOLUME_COL].iloc[-1] / df[Config.VOLUME_COL].iloc[-5] - 1) * 100
+                volume_change = (df[VOLUME_COL].iloc[-1] / df[VOLUME_COL].iloc[-5] - 1) * 100
                 sentiment_score = min(max(volume_change + 50, 0), 100)
             else:
                 sentiment_score = 50
             
             return round(sentiment_score, 2)
         else:
-            logger.warning(f"DataFrame缺少必要列: {Config.VOLUME_COL}")
+            logger.warning(f"DataFrame缺少必要列: {VOLUME_COL}")
             return 50.0
     
     except Exception as e:
@@ -548,12 +558,12 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
         
         # 从ETF列表获取规模和成立日期
         etf_list = load_all_etf_list()
-        etf_row = etf_list[etf_list[Config.ETF_CODE_COL] == etf_code]
+        etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         
         if not etf_row.empty:
             # 处理规模
             size = 0.0
-            size_str = etf_row.iloc[0][Config.FUND_SIZE_COL]
+            size_str = etf_row.iloc[0][FUND_SIZE_COL]
             if isinstance(size_str, str):
                 if "亿" in size_str:
                     size = float(size_str.replace("亿", ""))
@@ -563,7 +573,7 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
                 size = size_str
             
             # 处理成立日期
-            listing_date = etf_row.iloc[0].get(Config.LISTING_DATE_COL, "")
+            listing_date = etf_row.iloc[0].get(LISTING_DATE_COL, "")
             
             logger.debug(f"ETF {etf_code} 基本信息: 规模={size}亿元, 成立日期={listing_date}")
             return size, listing_date
@@ -622,12 +632,12 @@ def calculate_fundamental_score(etf_code: str) -> float:
 def calculate_volatility(df: pd.DataFrame) -> float:
     """计算波动率（年化）"""
     try:
-        if Config.CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+        if CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
         
         # 计算日收益率
-        df["daily_return"] = df[Config.CLOSE_COL].pct_change()
+        df["daily_return"] = df[CLOSE_COL].pct_change()
         
         # 计算年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -648,15 +658,15 @@ def calculate_volatility(df: pd.DataFrame) -> float:
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
     """计算夏普比率（年化）"""
     try:
-        if Config.CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+        if CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
         
         # 计算日收益率
-        df["daily_return"] = df[Config.CLOSE_COL].pct_change()
+        df["daily_return"] = df[CLOSE_COL].pct_change()
         
         # 年化收益率
-        annual_return = (df[Config.CLOSE_COL].iloc[-1] / df[Config.CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
+        annual_return = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
         
         # 年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -687,12 +697,12 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
 def calculate_max_drawdown(df: pd.DataFrame) -> float:
     """计算最大回撤"""
     try:
-        if Config.CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {Config.CLOSE_COL}")
+        if CLOSE_COL not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
         
         # 计算累计收益率
-        df["cum_return"] = (1 + df[Config.CLOSE_COL].pct_change()).cumprod()
+        df["cum_return"] = (1 + df[CLOSE_COL].pct_change()).cumprod()
         
         # 计算回撤
         df["drawdown"] = 1 - df["cum_return"] / df["cum_return"].cummax()

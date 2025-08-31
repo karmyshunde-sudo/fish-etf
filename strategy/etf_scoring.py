@@ -47,8 +47,9 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         
         # 获取元数据
         metadata_df = load_etf_metadata()
-        if metadata_df is None or metadata_df.empty:
-            error_msg = "元数据为空，无法获取ETF列表"
+        # 修复：确保metadata_df是DataFrame类型
+        if metadata_df is None or not isinstance(metadata_df, pd.DataFrame) or metadata_df.empty:
+            error_msg = "元数据为空或格式错误，无法获取ETF列表"
             logger.warning(error_msg)
             
             # 发送错误通知

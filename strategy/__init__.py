@@ -1,305 +1,210 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-策略模块主入口
-负责协调各个策略组件，提供统一的策略执行接口
-特别优化了消息推送格式，确保使用统一的消息模板
-"""
-
+# strategy/__init__.py
 import os
 import pandas as pd
 import logging
-import sys
+import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, List
 from config import Config
-from utils.date_utils import (
-    get_current_times,
-    get_beijing_time,
-    is_file_outdated
-)
-from wechat_push.push import send_wechat_message
+from wechat_push.push import _format_arbitrage_message, send_wechat_message
+from utils.date_utils import get_current_times, get_beijing_time, get_utc_time
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
 # 直接导出策略函数，以便 main.py 可以导入
-from .arbitrage import (
-    calculate_arbitrage_opportunity,
-    generate_arbitrage_message_content,
-    send_arbitrage_opportunity
-)
+from .arbitrage import calculate_arbitrage_opportunity
 from .position import calculate_position_strategy
-from .etf_scoring import get_top_rated_etfs, get_etf_basic_info
+from .etf_scoring import get_etf_basic_info, get_etf_name
 
 def run_all_strategies() -> Dict[str, Any]:
-    """
-    运行所有策略并返回结果
-    
-    Returns:
-        Dict[str, Any]: 包含所有策略结果的字典
+    """运行所有策略并返回结果
+    :return: 包含所有策略结果的字典
     """
     try:
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        logger.info(f"开始运行所有ETF策略 (UTC: {utc_now}, CST: {beijing_now})")
-        
+        logger.info("开始运行所有ETF策略...")
         results = {
-            "arbitrage": "",
-            "position": "",
             "arbitrage_df": pd.DataFrame(),
+            "position_msg": "",
             "success": False,
             "error": None
         }
-        
+
         # 1. 运行套利策略
-        arbitrage_result = calculate_arbitrage_opportunity()
-        if isinstance(arbitrage_result, pd.DataFrame):
-            results["arbitrage_df"] = arbitrage_result
-            results["arbitrage"] = "套利机会已识别"
-        else:
-            results["arbitrage"] = f"套利机会计算失败: {arbitrage_result}"
-            results["error"] = results["arbitrage"]
-        
+        logger.info("\n" + "="*50)
+        logger.info("运行套利策略")
+        logger.info("="*50)
+        try:
+            arbitrage_df = calculate_arbitrage_opportunity()
+            results["arbitrage_df"] = arbitrage_df
+            logger.info(f"套利策略执行完成，发现 {len(arbitrage_df)} 个机会")
+        except Exception as e:
+            error_msg = f"套利策略执行失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            results["error"] = error_msg
+
         # 2. 运行仓位策略
-        position_result = calculate_position_strategy()
-        results["position"] = position_result
-        
+        logger.info("\n" + "="*50)
+        logger.info("运行仓位策略")
+        logger.info("="*50)
+        try:
+            position_msg = calculate_position_strategy()
+            results["position_msg"] = position_msg
+            logger.info("仓位策略执行完成")
+        except Exception as e:
+            error_msg = f"仓位策略执行失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            results["error"] = error_msg if not results["error"] else f"{results['error']}; {error_msg}"
+
         # 标记执行成功
         if not results["error"]:
             results["success"] = True
-            logger.info("所有策略执行成功")
-        else:
-            logger.warning("策略执行完成，但存在错误")
-            
+        logger.info("所有策略执行完成")
         return results
-    
     except Exception as e:
         error_msg = f"运行所有策略时发生未预期错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return {
-            "arbitrage": f"【策略错误】{error_msg}",
-            "position": f"【策略错误】{error_msg}",
             "arbitrage_df": pd.DataFrame(),
+            "position_msg": "",
             "success": False,
             "error": error_msg
         }
 
 def get_daily_report() -> str:
-    """
-    生成每日策略报告
-    
-    Returns:
-        str: 业务内容字符串（不包含格式）
+    """生成每日策略报告
+    :return: 格式化后的每日报告字符串
     """
     try:
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        logger.info(f"开始生成每日策略报告 (UTC: {utc_now}, CST: {beijing_now})")
-        
+        logger.info("开始生成每日策略报告")
         strategies = run_all_strategies()
         
-        # 生成报告标题
-        report = "【ETF量化策略每日报告】\n"
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
         
-        # 添加套利机会分析
-        report += "🔍 套利机会分析\n"
+        # 构建报告
+        report = f"【ETF量化策略每日报告】\n"
+        report += f"📅 报告时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report += f"🌍 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        # 格式化套利消息
+        report += "📊 套利机会分析：\n"
         if not strategies["arbitrage_df"].empty:
-            top_opportunities = strategies["arbitrage_df"].head(3)
-            for _, row in top_opportunities.iterrows():
-                report += (
-                    f"• {row['ETF名称']}({row['ETF代码']}): "
-                    f"折溢价率 {row['折溢价率']:.2f}% | "
-                    f"当前价格 {row['最新价']:.3f}元\n"
-                )
+            report += _format_arbitrage_message(strategies["arbitrage_df"]) + "\n"
         else:
-            report += "• 未发现有效套利机会\n"
+            report += "【套利机会】\n未发现有效套利机会\n\n"
         
-        # 添加仓位操作建议
-        report += "\n💼 仓位操作建议\n"
-        report += f"{strategies['position']}\n"
+        report += "\n📈 仓位操作建议：\n"
+        report += strategies["position_msg"] + "\n"
         
-        # 添加ETF评分统计
-        report += "\n📊 ETF评分统计\n"
-        try:
-            etf_list = get_etf_basic_info()
-            if not etf_list.empty:
-                avg_score = etf_list["综合评分"].mean()
-                report += f"• 评分平均值: {avg_score:.2f}\n"
-                report += f"• 评分最高ETF: {etf_list.iloc[0]['ETF名称']}({etf_list.iloc[0]['ETF代码']}) - {etf_list.iloc[0]['综合评分']:.2f}\n"
-                report += f"• 评分最低ETF: {etf_list.iloc[-1]['ETF名称']}({etf_list.iloc[-1]['ETF代码']}) - {etf_list.iloc[-1]['综合评分']:.2f}\n"
-            else:
-                report += "• 无法获取ETF评分数据\n"
-        except Exception as e:
-            logger.error(f"获取ETF评分统计失败: {str(e)}", exc_info=True)
-            report += "• ETF评分统计获取失败\n"
+        if strategies["error"]:
+            report += "\n⚠️ 执行警告：\n"
+            report += f"部分策略执行过程中出现错误: {strategies['error']}"
         
-        # 添加风险提示
-        report += (
-            "\n⚠️ 风险提示\n"
-            "• 本策略基于历史数据和统计模型，不构成投资建议\n"
-            "• 市场有风险，投资需谨慎\n"
-            "• 请结合个人风险承受能力做出投资决策\n"
-        )
-        
+        report += "\n💡 温馨提示：以上建议仅供参考，请结合市场情况谨慎决策！"
         logger.info("每日策略报告生成完成")
         return report
     except Exception as e:
         error_msg = f"生成每日报告失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return f"【报告生成错误】{error_msg}"
 
 def send_daily_report_via_wechat() -> bool:
-    """
-    生成并发送每日策略报告到微信
-    
-    Returns:
-        bool: 发送是否成功
+    """生成并发送每日策略报告到微信
+    :return: 是否成功发送报告
     """
     try:
-        # 获取当前北京时间用于文件命名
-        beijing_now = get_beijing_time()
-        today = beijing_now.date().strftime("%Y-%m-%d")
-        
-        # 检查是否已经发送过今日报告
-        report_sent_flag = os.path.join(Config.FLAG_DIR, f"report_sent_{today}.txt")
-        if os.path.exists(report_sent_flag):
-            logger.info("今日报告已发送，跳过重复发送")
-            return True
-        
-        # 生成报告
         report = get_daily_report()
-        
-        # 发送到微信（使用daily_report类型）
-        success = send_wechat_message(report, message_type="daily_report")
-        
-        if success:
-            # 标记已发送
-            os.makedirs(os.path.dirname(report_sent_flag), exist_ok=True)
-            with open(report_sent_flag, "w", encoding="utf-8") as f:
-                f.write(beijing_now.strftime("%Y-%m-%d %H:%M:%S"))
-            logger.info("每日策略报告已成功发送到微信")
-        else:
-            logger.error("微信消息发送失败")
-            
-            # 发送错误通知
-            send_wechat_message(
-                message="每日策略报告生成成功，但微信消息发送失败",
-                message_type="error"
-            )
-        
-        return success
+        return send_wechat_message(report, message_type="daily_report")
     except Exception as e:
-        error_msg = f"发送每日报告失败: {str(e)}"
+        error_msg = f"发送微信报告失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return False
 
 def check_arbitrage_exit_signals() -> bool:
-    """
-    检查套利退出信号（持有1天后）
-    
-    Returns:
-        bool: 是否成功检查退出信号
+    """检查套利退出信号（持有1天后）
+    :return: 是否成功检查退出信号
     """
     try:
-        from .position import init_trade_record
-        logger.info("开始检查套利退出信号")
-        
-        # 初始化交易记录
-        init_trade_record()
-        
-        # 检查交易记录文件是否存在
-        if not os.path.exists(Config.TRADE_RECORD_FILE):
-            logger.warning("交易记录文件不存在，无法检查套利退出信号")
-            return False
-        
-        # 读取交易记录
-        trade_df = pd.read_csv(Config.TRADE_RECORD_FILE, encoding="utf-8")
-        
-        # 获取昨天的日期（基于北京时间）
-        yesterday = (get_beijing_time() - timedelta(days=1)).strftime("%Y-%m-%d")
-        logger.debug(f"检查昨天({yesterday})执行的套利交易")
-        
-        # 查找昨天执行的套利交易
-        yesterday_arbitrage = trade_df[
-            (trade_df["操作"] == "套利买入") & 
-            (trade_df["创建日期"] == yesterday)
-        ]
-        
-        if not yesterday_arbitrage.empty:
-            logger.info(f"发现{len(yesterday_arbitrage)}条需要退出的套利交易")
-            
-            # 生成退出信号内容
-            exit_content = "【套利退出信号】\n"
-            for _, row in yesterday_arbitrage.iterrows():
-                exit_content += (
-                    f"• {row['ETF名称']}({row['ETF代码']})："
-                    f"已持有1天，建议退出\n"
-                )
-            
-            # 发送退出信号
-            send_wechat_message(exit_content)
-            return True
-        
-        logger.info("未发现需要退出的套利交易")
-        return False
-    
+        from .arbitrage import check_arbitrage_exit_signals as check_arbitrage
+        return check_arbitrage()
     except Exception as e:
         error_msg = f"检查套利退出信号失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return False
 
-def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5) -> Any:
+def analyze_arbitrage_performance() -> Dict[str, Any]:
+    """分析套利表现
+    :return: 分析结果
     """
-    带重试的策略执行函数
-    
-    Args:
-        strategy_func: 策略函数
-        max_retries: 最大重试次数
-        delay: 重试延迟（秒）
+    try:
+        logger.info("开始分析套利表现")
         
-    Returns:
-        Any: 策略执行结果
-    """
-    from functools import wraps
-    import time
+        # 获取历史数据
+        from .arbitrage import get_arbitrage_history
+        history_df = get_arbitrage_history()
+        
+        if history_df.empty:
+            logger.info("无历史数据可供分析")
+            return {
+                "avg_opportunities": 0,
+                "max_premium": 0,
+                "min_discount": 0,
+                "trend": "无数据",
+                "has_high_premium": False,
+                "has_high_discount": False
+            }
+        
+        # 计算统计指标
+        avg_opportunities = history_df["机会数量"].mean()
+        max_premium = history_df["最大折溢价率"].max()
+        min_discount = history_df["最小折溢价率"].min()
+        
+        # 添加趋势分析
+        trend = "平稳"
+        if len(history_df) >= 3:
+            trend = "上升" if history_df["机会数量"].iloc[-3:].mean() > history_df["机会数量"].iloc[:3].mean() else "下降"
+        
+        # 返回结构化分析结果
+        result = {
+            "avg_opportunities": avg_opportunities,
+            "max_premium": max_premium,
+            "min_discount": min_discount,
+            "trend": trend,
+            "has_high_premium": max_premium > 2.0,
+            "has_high_discount": min_discount < -2.0
+        }
+        
+        logger.info("套利表现分析完成")
+        return result
+    except Exception as e:
+        error_msg = f"套利表现分析失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            "avg_opportunities": 0,
+            "max_premium": 0,
+            "min_discount": 0,
+            "trend": "分析失败",
+            "has_high_premium": False,
+            "has_high_discount": False
+        }
 
+def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5) -> Any:
+    """带重试的策略执行函数
+    :param strategy_func: 策略函数
+    :param max_retries: 最大重试次数
+    :param delay: 重试延迟（秒）
+    :return: 策略执行结果
+    """
+    import time
+    from functools import wraps
+    
     @wraps(strategy_func)
     def wrapper(*args, **kwargs):
         last_exception = None
         for attempt in range(max_retries):
             try:
-                # 获取当前双时区时间
-                utc_now, beijing_now = get_current_times()
-                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries}) (UTC: {utc_now}, CST: {beijing_now})")
+                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})")
                 return strategy_func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
@@ -307,18 +212,9 @@ def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5)
                 if attempt < max_retries - 1:
                     logger.info(f"{delay}秒后重试...")
                     time.sleep(delay)
-        
+                    
         logger.error(f"策略执行失败，已达最大重试次数")
-        
-        # 发送错误通知
-        error_msg = f"【策略执行失败】{strategy_func.__name__} 达到最大重试次数: {str(last_exception)}"
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         raise last_exception
-    
     return wrapper
 
 # 模块初始化
@@ -329,41 +225,28 @@ try:
     # 创建策略标志目录
     os.makedirs(Config.FLAG_DIR, exist_ok=True)
     
-    # 初始化日志
     logger.info("策略模块初始化完成")
-    
-    # 检查ETF列表是否过期
-    if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        warning_msg = "ETF列表已过期，请及时更新"
-        logger.warning(warning_msg)
-        
-        # 发送警告通知
-        send_wechat_message(
-            message=warning_msg,
-            message_type="error"
-        )
-    
 except Exception as e:
-    error_msg = f"策略模块初始化失败: {str(e)}"
-    logger.error(error_msg, exc_info=True)
+    logger.error(f"策略模块初始化失败: {str(e)}", exc_info=True)
     
+    # 退回到基础日志配置
     try:
-        # 退回到基础日志配置
         import logging
         logging.basicConfig(
             level="INFO",
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.StreamHandler()]
         )
-        logging.error(error_msg)
+        logging.error(f"策略模块初始化失败: {str(e)}")
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
-        print(error_msg)
+        print(f"策略模块初始化失败: {str(e)}")
     
     # 发送错误通知
     try:
+        from wechat_push.push import send_wechat_message
         send_wechat_message(
-            message=error_msg,
+            message=f"策略模块初始化失败: {str(e)}",
             message_type="error"
         )
     except Exception as send_error:

@@ -1,295 +1,359 @@
-# strategy/__init__.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ETF数据爬取模块
+提供ETF日线数据爬取、ETF列表管理等功能
+特别优化了增量保存和断点续爬机制
+"""
+
 import os
+import time
 import pandas as pd
 import logging
-import json
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from datetime import datetime, date, timedelta
+from typing import Dict, List, Optional, Any, Tuple
+from retrying import retry
+import akshare as ak
+from pandas.tseries.offsets import CustomBusinessDay
+from pandas.tseries.holiday import AbstractHolidayCalendar, Holiday
 from config import Config
-from wechat_push.push import _format_arbitrage_message, send_wechat_message
+from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
+from .akshare_crawler import crawl_etf_daily_akshare
+from .sina_crawler import crawl_etf_daily_sina
+from utils.date_utils import get_beijing_time, is_trading_day
+from utils.file_utils import ensure_chinese_columns
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-# 直接导出策略函数，以便 main.py 可以导入
-from .arbitrage import calculate_arbitrage_opportunity
-from .position import calculate_position_strategy, check_arbitrage_exit_signals as check_position_exit_signals
-from .etf_scoring import get_etf_basic_info, get_etf_name
+# 定义中国股市节假日日历（2025年）
+class ChinaStockHolidayCalendar(AbstractHolidayCalendar):
+    rules = [
+        Holiday("元旦", month=1, day=1),
+        Holiday("春节", month=1, day=29, observance=lambda d: d + pd.DateOffset(days=+5)),
+        Holiday("清明节", month=4, day=4),
+        Holiday("劳动节", month=5, day=1, observance=lambda d: d + pd.DateOffset(days=+2)),
+        Holiday("端午节", month=6, day=2),
+        Holiday("中秋节", month=9, day=8),
+        Holiday("国庆节", month=10, day=1, observance=lambda d: d + pd.DateOffset(days=+6)),
+    ]
 
-def run_all_strategies() -> Dict[str, Any]:
-    """运行所有策略并返回结果
-    :return: 包含所有策略结果的字典
+# 重试装饰器配置
+def retry_if_exception(exception: Exception) -> bool:
+    """重试条件：网络或数据相关错误"""
+    return isinstance(exception, (ConnectionError, TimeoutError, ValueError, pd.errors.EmptyDataError))
+
+@retry(
+    stop_max_attempt_number=3,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=10000,
+    retry_on_exception=retry_if_exception
+)
+def akshare_retry(func, *args, **kwargs):
+    """带重试机制的函数调用封装"""
+    return func(*args, **kwargs)
+
+def get_etf_name(etf_code: str) -> str:
+    """
+    根据ETF代码获取名称
+    :param etf_code: ETF代码
+    :return: ETF名称
     """
     try:
-        logger.info("开始运行所有ETF策略...")
-        results = {
-            "arbitrage_df": pd.DataFrame(),
-            "position_msg": "",
-            "success": False,
-            "error": None
-        }
-
-        # 1. 运行套利策略
-        logger.info("\n" + "="*50)
-        logger.info("运行套利策略")
-        logger.info("="*50)
-        try:
-            arbitrage_df = calculate_arbitrage_opportunity()
-            results["arbitrage_df"] = arbitrage_df
-            logger.info(f"套利策略执行完成，发现 {len(arbitrage_df)} 个机会")
-        except Exception as e:
-            error_msg = f"套利策略执行失败: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            results["error"] = error_msg
-
-        # 2. 运行仓位策略
-        logger.info("\n" + "="*50)
-        logger.info("运行仓位策略")
-        logger.info("="*50)
-        try:
-            position_msg = calculate_position_strategy()
-            results["position_msg"] = position_msg
-            logger.info("仓位策略执行完成")
-        except Exception as e:
-            error_msg = f"仓位策略执行失败: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            results["error"] = error_msg if not results["error"] else f"{results['error']}; {error_msg}"
-
-        # 标记执行成功
-        if not results["error"]:
-            results["success"] = True
-        logger.info("所有策略执行完成")
-        return results
-    except Exception as e:
-        error_msg = f"运行所有策略时发生未预期错误: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return {
-            "arbitrage_df": pd.DataFrame(),
-            "position_msg": "",
-            "success": False,
-            "error": error_msg
-        }
-
-def get_daily_report() -> str:
-    """生成每日策略报告
-    :return: 格式化后的每日报告字符串
-    """
-    try:
-        logger.info("开始生成每日策略报告")
-        strategies = run_all_strategies()
+        etf_list = load_all_etf_list()
+        if etf_list.empty:
+            logger.warning("全市场ETF列表为空")
+            return f"ETF-{etf_code}"
         
-        # 格式化套利消息
-        arbitrage_msg = ""
-        if not strategies["arbitrage_df"].empty:
-            arbitrage_msg = _format_arbitrage_message(strategies["arbitrage_df"])
-        else:
-            arbitrage_msg = "【套利机会】\n未发现有效套利机会"
-        
-        # 获取当前双时区时间
-        from utils.date_utils import get_current_times
-        utc_now, beijing_now = get_current_times()
-        
-        # 构建报告
-        report = f"【ETF量化策略每日报告】\n"
-        report += f"📅 报告时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        report += f"🌍 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
-        report += "📊 套利机会分析：\n"
-        report += arbitrage_msg + "\n"
-        
-        report += "\n📈 仓位操作建议：\n"
-        report += strategies["position_msg"] + "\n"
-        
-        if strategies["error"]:
-            report += "\n⚠️ 执行警告：\n"
-            report += f"部分策略执行过程中出现错误: {strategies['error']}"
-        
-        report += "\n💡 温馨提示：以上建议仅供参考，请结合市场情况谨慎决策！"
-        logger.info("每日策略报告生成完成")
-        return report
-    except Exception as e:
-        error_msg = f"生成每日报告失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return f"【报告生成错误】{error_msg}"
-
-def send_daily_report_via_wechat() -> bool:
-    """生成并发送每日策略报告到微信
-    :return: 是否成功发送报告
-    """
-    try:
-        report = get_daily_report()
-        return send_wechat_message(report, message_type="daily_report")
-    except Exception as e:
-        error_msg = f"发送微信报告失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return False
-
-def check_arbitrage_exit_signals() -> bool:
-    """检查套利退出信号（持有1天后）
-    :return: 是否成功检查退出信号
-    """
-    try:
-        from utils.date_utils import get_current_times, get_beijing_time
-        from wechat_push.push import send_wechat_message
-        logger.info("开始检查套利退出信号")
-        
-        # 检查交易记录文件是否存在
-        if not os.path.exists(Config.TRADE_RECORD_FILE):
-            logger.warning("交易记录文件不存在，无法检查套利退出信号")
-            return False
-            
-        # 读取交易记录
-        trade_df = pd.read_csv(Config.TRADE_RECORD_FILE, encoding="utf-8")
-        
-        # 获取昨天的日期（基于北京时间）
-        utc_now, beijing_now = get_current_times()
-        yesterday = (beijing_now - timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # 查找昨天执行的套利交易
-        yesterday_arbitrage = trade_df[
-            (trade_df["操作"] == "套利买入") & 
-            (trade_df["创建日期"] == yesterday)
+        target_code = str(etf_code).strip().zfill(6)
+        name_row = etf_list[
+            etf_list["ETF代码"].astype(str).str.strip().str.zfill(6) == target_code
         ]
         
-        if not yesterday_arbitrage.empty:
-            logger.info(f"发现{len(yesterday_arbitrage)}条需要退出的套利交易")
-            
-            # 生成退出信号消息内容
-            exit_content = "【套利退出信号】\n"
-            exit_content += f"发现 {len(yesterday_arbitrage)} 条需要退出的套利交易\n\n"
-            
-            for _, row in yesterday_arbitrage.iterrows():
-                exit_content += (
-                    f"• {row['ETF名称']}({row['ETF代码']})："
-                    f"已持有1天，建议退出\n"
-                )
-            
-            # 发送退出信号
-            send_wechat_message(exit_content, message_type="arbitrage")
-            return True
-        
-        logger.info("未发现需要退出的套利交易")
-        return False
+        if not name_row.empty:
+            return name_row.iloc[0]["ETF名称"]
+        else:
+            logger.debug(f"未在全市场列表中找到ETF代码: {target_code}")
+            return f"ETF-{etf_code}"
     except Exception as e:
-        error_msg = f"检查套利退出信号失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return False
+        logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
+        return f"ETF-{etf_code}"
 
-def analyze_arbitrage_performance() -> Dict[str, Any]:
-    """分析套利表现
-    :return: 分析结果
+def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
+    """
+    获取ETF最后爬取日期
+    :param etf_code: ETF代码
+    :param etf_daily_dir: ETF日线数据目录
+    :return: 最后爬取日期（格式：YYYY-MM-DD）
     """
     try:
-        logger.info("开始分析套利表现")
+        file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+        if not os.path.exists(file_path):
+            # 文件不存在，返回初始爬取日期
+            current_date = get_beijing_time().date()
+            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 无历史数据，使用初始日期: {start_date}")
+            return start_date
         
-        # 获取历史数据
-        from .arbitrage import get_arbitrage_history
-        history_df = get_arbitrage_history()
+        df = pd.read_csv(file_path, encoding="utf-8")
+        if df.empty or "date" not in df.columns:
+            # 文件为空或没有date列，返回初始爬取日期
+            current_date = get_beijing_time().date()
+            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
+            return start_date
         
-        if history_df.empty:
-            logger.info("无历史数据可供分析")
-            return {
-                "avg_opportunities": 0,
-                "max_premium": 0,
-                "min_discount": 0,
-                "trend": "无数据",
-                "has_high_premium": False,
-                "has_high_discount": False
-            }
+        # 确保日期列是datetime类型
+        df["date"] = pd.to_datetime(df["date"])
+        last_date = df["date"].max().date()
         
-        # 计算统计指标
-        avg_opportunities = history_df["机会数量"].mean()
-        max_premium = history_df["最大折溢价率"].max()
-        min_discount = history_df["最小折溢价率"].min()
-        
-        # 添加趋势分析
-        trend = "平稳"
-        if len(history_df) >= 3:
-            trend = "上升" if history_df["机会数量"].iloc[-3:].mean() > history_df["机会数量"].iloc[:3].mean() else "下降"
-        
-        # 返回结构化分析结果
-        result = {
-            "avg_opportunities": avg_opportunities,
-            "max_premium": max_premium,
-            "min_discount": min_discount,
-            "trend": trend,
-            "has_high_premium": max_premium > 2.0,
-            "has_high_discount": min_discount < -2.0
-        }
-        
-        logger.info("套利表现分析完成")
-        return result
+        # 计算下一个交易日作为开始日期
+        china_bd = CustomBusinessDay(calendar=ChinaStockHolidayCalendar())
+        next_trading_day = pd.Timestamp(last_date) + china_bd
+        return next_trading_day.date().strftime("%Y-%m-%d")
     except Exception as e:
-        error_msg = f"套利表现分析失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return {
-            "avg_opportunities": 0,
-            "max_premium": 0,
-            "min_discount": 0,
-            "trend": "分析失败",
-            "has_high_premium": False,
-            "has_high_discount": False
-        }
+        logger.error(f"获取{etf_code}最后爬取日期失败: {str(e)}", exc_info=True)
+        # 出错时返回初始爬取日期
+        current_date = get_beijing_time().date()
+        start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        logger.debug(f"ETF {etf_code} 获取最后爬取日期失败，使用初始日期: {start_date}")
+        return start_date
 
-def run_strategy_with_retry(strategy_func, max_retries: int = 3, delay: int = 5) -> Any:
-    """带重试的策略执行函数
-    :param strategy_func: 策略函数
-    :param max_retries: 最大重试次数
-    :param delay: 重试延迟（秒）
-    :return: 策略执行结果
+def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str, error_message: Optional[str] = None) -> None:
     """
-    import time
-    from functools import wraps
+    记录失败的ETF信息
+    :param etf_daily_dir: ETF日线数据目录
+    :param etf_code: ETF代码
+    :param etf_name: ETF名称
+    :param error_message: 错误信息
+    """
+    try:
+        failed_file = os.path.join(etf_daily_dir, "failed_etfs.txt")
+        timestamp = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+        
+        with open(failed_file, "a", encoding="utf-8") as f:
+            if error_message:
+                f.write(f"{etf_code}|{etf_name}|{timestamp}|{error_message}\n")
+            else:
+                f.write(f"{etf_code}|{etf_name}|{timestamp}\n")
+        
+        logger.debug(f"记录失败ETF: {etf_code} - {etf_name}")
+    except Exception as e:
+        logger.error(f"记录失败ETF信息失败: {str(e)}", exc_info=True)
+
+def crawl_etf_daily_incremental() -> None:
+    """
+    增量爬取ETF日线数据（单只保存+断点续爬逻辑）
     
-    @wraps(strategy_func)
-    def wrapper(*args, **kwargs):
-        last_exception = None
-        for attempt in range(max_retries):
+    注意：此函数不再包含是否执行的判断逻辑，由调用方决定是否执行
+    """
+    try:
+        logger.info("===== 开始执行任务：crawl_etf_daily =====")
+        beijing_time = get_beijing_time()
+        logger.info(f"当前北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
+        
+        # 初始化目录
+        Config.init_dirs()
+        etf_daily_dir = Config.ETFS_DAILY_DIR
+        logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
+        
+        # 已完成列表路径
+        completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
+        
+        # 加载已完成列表
+        completed_codes = set()
+        if os.path.exists(completed_file):
             try:
-                logger.info(f"尝试执行策略 ({attempt + 1}/{max_retries})")
-                return strategy_func(*args, **kwargs)
+                with open(completed_file, "r", encoding="utf-8") as f:
+                    completed_codes = set(line.strip() for line in f if line.strip())
+                logger.info(f"已完成爬取的ETF数量：{len(completed_codes)}")
             except Exception as e:
-                last_exception = e
-                logger.warning(f"策略执行失败 ({attempt + 1}/{max_retries}): {str(e)}")
-                if attempt < max_retries - 1:
-                    logger.info(f"{delay}秒后重试...")
-                    time.sleep(delay)
+                logger.error(f"读取已完成列表失败: {str(e)}", exc_info=True)
+                completed_codes = set()
+        
+        # 获取待爬取ETF列表
+        all_codes = get_filtered_etf_codes()
+        to_crawl_codes = [code for code in all_codes if code not in completed_codes]
+        total = len(to_crawl_codes)
+        
+        if total == 0:
+            logger.info("所有ETF日线数据均已爬取完成，无需继续")
+            return
+        
+        logger.info(f"待爬取ETF总数：{total}只")
+        
+        # 分批爬取（每批50只）
+        batch_size = Config.CRAWL_BATCH_SIZE
+        batches = [to_crawl_codes[i:i+batch_size] for i in range(0, total, batch_size)]
+        logger.info(f"共分为 {len(batches)} 个批次，每批 {batch_size} 只ETF")
+        
+        # 逐批、逐只爬取
+        for batch_idx, batch in enumerate(batches, 1):
+            batch_num = len(batch)
+            logger.info(f"==============================")
+            logger.info(f"正在处理批次 {batch_idx}/{len(batches)}")
+            logger.info(f"ETF范围：{batch_idx*batch_size - batch_size + 1}-{min(batch_idx*batch_size, total)}只（共{batch_num}只）")
+            logger.info(f"==============================")
+            
+            for idx, etf_code in enumerate(batch, 1):
+                try:
+                    # 打印当前进度
+                    logger.info(f"--- 批次{batch_idx} - 第{idx}只 / 共{batch_num}只 ---")
+                    etf_name = get_etf_name(etf_code)
+                    logger.info(f"ETF代码：{etf_code} | 名称：{etf_name}")
                     
-        logger.error(f"策略执行失败，已达最大重试次数")
-        raise last_exception
-    return wrapper
+                    # 确定爬取时间范围（增量爬取）
+                    start_date = get_last_crawl_date(etf_code, etf_daily_dir)
+                    end_date = beijing_time.date().strftime("%Y-%m-%d")
+                    
+                    if start_date > end_date:
+                        logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
+                        # 标记为已完成
+                        with open(completed_file, "a", encoding="utf-8") as f:
+                            f.write(f"{etf_code}\n")
+                        continue
+                    
+                    logger.info(f"📅 爬取时间范围：{start_date} 至 {end_date}")
+                    
+                    # 先尝试AkShare爬取
+                    df = crawl_etf_daily_akshare(etf_code, start_date, end_date)
+                    
+                    # AkShare失败则尝试新浪爬取
+                    if df.empty:
+                        logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
+                        df = crawl_etf_daily_sina(etf_code, start_date, end_date)
+                    
+                    # 数据校验
+                    if df.empty:
+                        logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
+                        # 记录失败日志，但不标记为已完成，以便下次重试
+                        record_failed_etf(etf_daily_dir, etf_code, etf_name)
+                        continue
+                    
+                    # 确保使用中文列名
+                    df = ensure_chinese_columns(df)
+                    
+                    # 补充ETF基本信息
+                    df["ETF代码"] = etf_code
+                    df["ETF名称"] = etf_name
+                    df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 处理已有数据的追加逻辑
+                    save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+                    if os.path.exists(save_path):
+                        try:
+                            existing_df = pd.read_csv(save_path)
+                            # 确保现有数据也是中文列名
+                            existing_df = ensure_chinese_columns(existing_df)
+                            
+                            # 合并数据并去重
+                            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=["日期"], keep="last")
+                            # 按日期排序
+                            combined_df = combined_df.sort_values("日期", ascending=False)
+                            df = combined_df
+                        except Exception as e:
+                            logger.error(f"合并现有数据失败: {str(e)}，将覆盖原文件", exc_info=True)
+                    
+                    # 保存数据
+                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                    logger.info(f"✅ 保存成功：{save_path}（共{len(df)}条数据）")
+                    
+                    # 记录已完成
+                    with open(completed_file, "a", encoding="utf-8") as f:
+                        f.write(f"{etf_code}\n")
+                    
+                    # 单只爬取后短休眠
+                    time.sleep(1)
+                    
+                except Exception as e:
+                    # 单只失败不中断，记录日志后继续
+                    logger.error(f"❌ 爬取失败：{str(e)}", exc_info=True)
+                    # 记录失败日志
+                    record_failed_etf(etf_daily_dir, etf_code, etf_name, str(e))
+                    time.sleep(3)  # 失败后延长休眠
+                    continue
+            
+            # 批次间长休眠（减轻服务器压力）
+            if batch_idx < len(batches):
+                logger.info(f"批次{batch_idx}处理完成，休眠10秒后继续...")
+                time.sleep(10)
+        
+        logger.info("===== 所有待爬取ETF处理完毕 =====")
+        
+    except Exception as e:
+        logger.error(f"增量爬取任务执行失败: {str(e)}", exc_info=True)
+        raise
+
+def update_etf_list() -> bool:
+    """
+    更新ETF列表
+    :return: 是否成功更新
+    """
+    try:
+        logger.info("开始更新ETF列表")
+        etf_list = update_all_etf_list()
+        if etf_list.empty:
+            logger.warning("ETF列表更新后为空")
+            return False
+        
+        logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF")
+        return True
+    except Exception as e:
+        logger.error(f"更新ETF列表失败: {str(e)}", exc_info=True)
+        return False
+
+def get_crawl_status() -> Dict[str, Any]:
+    """
+    获取爬取状态信息
+    :return: 包含爬取状态信息的字典
+    """
+    try:
+        etf_daily_dir = Config.ETFS_DAILY_DIR
+        
+        # 获取已完成列表
+        completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
+        completed_codes = set()
+        if os.path.exists(completed_file):
+            with open(completed_file, "r", encoding="utf-8") as f:
+                completed_codes = set(line.strip() for line in f if line.strip())
+        
+        # 获取失败列表
+        failed_file = os.path.join(etf_daily_dir, "failed_etfs.txt")
+        failed_count = 0
+        if os.path.exists(failed_file):
+            with open(failed_file, "r", encoding="utf-8") as f:
+                failed_count = len(f.readlines())
+        
+        # 获取所有ETF列表
+        all_codes = get_filtered_etf_codes()
+        
+        return {
+            "total_etfs": len(all_codes),
+            "completed_etfs": len(completed_codes),
+            "failed_etfs": failed_count,
+            "progress": f"{len(completed_codes)}/{len(all_codes)}",
+            "percentage": round(len(completed_codes) / len(all_codes) * 100, 2) if all_codes else 0
+        }
+    except Exception as e:
+        logger.error(f"获取爬取状态失败: {str(e)}", exc_info=True)
+        return {
+            "total_etfs": 0,
+            "completed_etfs": 0,
+            "failed_etfs": 0,
+            "progress": "0/0",
+            "percentage": 0
+        }
 
 # 模块初始化
 try:
     # 确保必要的目录存在
-    Config.init_dirs()
-    
-    # 创建策略标志目录
-    os.makedirs(Config.FLAG_DIR, exist_ok=True)
-    
-    logger.info("策略模块初始化完成")
+    if Config.init_dirs():
+        logger.info("数据爬取模块初始化完成")
+    else:
+        logger.warning("数据爬取模块初始化完成，但存在警告")
 except Exception as e:
-    logger.error(f"策略模块初始化失败: {str(e)}", exc_info=True)
-    
+    logger.error(f"数据爬取模块初始化失败: {str(e)}", exc_info=True)
     # 退回到基础日志配置
-    try:
-        import logging
-        logging.basicConfig(
-            level="INFO",
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[logging.StreamHandler()]
-        )
-        logging.error(f"策略模块初始化失败: {str(e)}")
-    except Exception as basic_log_error:
-        print(f"基础日志配置失败: {str(basic_log_error)}")
-        print(f"策略模块初始化失败: {str(e)}")
-    
-    # 发送错误通知
-    try:
-        from wechat_push.push import send_wechat_message
-        send_wechat_message(
-            message=f"策略模块初始化失败: {str(e)}",
-            message_type="error"
-        )
-    except Exception as send_error:
-        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)
+    import logging
+    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
+    logging.error(f"数据爬取模块初始化失败: {str(e)}")

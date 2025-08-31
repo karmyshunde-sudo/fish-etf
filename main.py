@@ -23,10 +23,8 @@ from data_crawler import crawl_etf_daily_incremental
 from data_crawler.etf_list_manager import update_all_etf_list
 from strategy import (
     calculate_arbitrage_opportunity,
-    generate_arbitrage_message_content,
     calculate_position_strategy,
     send_daily_report_via_wechat,
-    send_arbitrage_opportunity,
     check_arbitrage_exit_signals
 )
 from wechat_push.push import send_wechat_message, send_task_completion_notification
@@ -307,9 +305,8 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         logger.info("开始计算套利机会")
         arbitrage_df = calculate_arbitrage_opportunity()
         
-        # 格式化并推送消息
-        message = generate_arbitrage_message_content(arbitrage_df)
-        send_success = send_wechat_message(message, message_type="arbitrage")
+        # 推送消息（直接传递DataFrame，由push.py负责格式化）
+        send_success = send_wechat_message(arbitrage_df, message_type="arbitrage")
         
         if send_success:
             set_flag(Config.get_arbitrage_flag_file())  # 标记已推送

@@ -2,17 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 套利策略计算模块
-基于ETF净值与市场价格的差异计算套利机会
-特别优化了日均成交额的动态计算机制，确保符合量化交易规范
+基于已保存的实时数据计算套利机会
+严格遵循项目架构原则：只负责计算，不涉及数据爬取和消息格式化
 """
 
 import pandas as pd
 import numpy as np
 import logging
-import akshare as ak
 import os
 from datetime import datetime, timedelta
-from typing import Union, Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any, List
 from config import Config
 from utils.date_utils import (
     get_current_times,
@@ -20,97 +19,82 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-# 修复：从正确的模块导入函数
 from utils.file_utils import load_etf_daily_data, ensure_chinese_columns
-from data_crawler.akshare_crawler import ensure_required_columns  # 从akshare_crawler导入ensure_required_columns
+from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 使用新数据源
 from .etf_scoring import get_etf_basic_info, get_etf_name
-from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
 def calculate_arbitrage_opportunity() -> pd.DataFrame:
     """
-    计算ETF套利机会
+    基于实时数据计算ETF套利机会
     
     Returns:
-        pd.DataFrame: 套利机会DataFrame
+        pd.DataFrame: 套利机会DataFrame（仅包含原始数据，不进行格式化）
     """
     try:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 获取ETF列表
-        etf_list = load_etf_list()
-        if etf_list.empty:
-            logger.warning("ETF列表为空，无法计算套利机会")
-            return pd.DataFrame()  # 确保始终返回DataFrame
+        # 获取最新的套利机会
+        opportunities = get_latest_arbitrage_opportunities()
         
-        # 计算套利机会
-        opportunities = []
-        for _, etf in etf_list.iterrows():
-            try:
-                # 获取ETF实时数据
-                etf_code = etf["ETF代码"]
-                etf_name = etf["ETF名称"]
-                
-                # 获取ETF实时行情
-                etf_realtime = get_etf_realtime_data(etf_code)
-                if etf_realtime is None:
-                    continue
-                
-                # 获取ETF净值数据
-                etf_nav = get_etf_nav_data(etf_code)
-                if etf_nav is None:
-                    continue
-                
-                # 计算折溢价率
-                premium_discount = calculate_premium_discount(
-                    etf_realtime["最新价"], 
-                    etf_nav["单位净值"]
-                )
-                
-                # 仅保留有套利机会的ETF（折溢价率绝对值大于阈值）
-                if abs(premium_discount) >= Config.ARBITRAGE_THRESHOLD:
-                    opportunities.append({
-                        "ETF代码": etf_code,
-                        "ETF名称": etf_name,
-                        "最新价": etf_realtime["最新价"],
-                        "单位净值": etf_nav["单位净值"],
-                        "折溢价率": premium_discount,
-                        "规模": etf["基金规模"],
-                        "成交量": etf_realtime["成交量"],
-                        "日均成交额": etf["日均成交额"]  # 添加日均成交额信息
-                    })
-            except Exception as e:
-                logger.error(f"计算ETF {etf['ETF代码']} 套利机会失败: {str(e)}", exc_info=True)
-        
-        # 创建DataFrame
-        if not opportunities:
+        if opportunities.empty:
             logger.info("未发现有效套利机会")
             return pd.DataFrame()
         
-        df = pd.DataFrame(opportunities)
-        # 按折溢价率绝对值排序
-        df["abs_premium_discount"] = df["折溢价率"].abs()
-        df = df.sort_values("abs_premium_discount", ascending=False)
-        df = df.drop(columns=["abs_premium_discount"])
+        # 添加规模和日均成交额信息
+        opportunities = add_etf_basic_info(opportunities)
         
-        logger.info(f"发现 {len(df)} 个套利机会")
-        return df
+        # 按折溢价率绝对值排序
+        opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
+        opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
+        opportunities = opportunities.drop(columns=["abs_premium_discount"])
+        
+        logger.info(f"发现 {len(opportunities)} 个套利机会")
+        return opportunities
     
     except Exception as e:
         error_msg = f"套利机会计算失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return pd.DataFrame()  # 确保始终返回DataFrame
+
+def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    为套利机会数据添加ETF基本信息（规模、日均成交额）
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 添加基本信息后的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 加载ETF列表
+        etf_list = load_etf_list()
+        if etf_list.empty:
+            logger.warning("ETF列表为空，无法添加基本信息")
+            return df
+        
+        # 为每只ETF添加基本信息
+        for idx, row in df.iterrows():
+            etf_code = row["ETF代码"]
+            etf_info = etf_list[etf_list["ETF代码"] == etf_code]
+            
+            if not etf_info.empty:
+                df.at[idx, "规模"] = etf_info["基金规模"].values[0]
+                df.at[idx, "日均成交额"] = etf_info["日均成交额"].values[0]
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"添加ETF基本信息失败: {str(e)}", exc_info=True)
+        return df
 
 def calculate_daily_volume(etf_code: str) -> float:
     """
@@ -130,45 +114,16 @@ def calculate_daily_volume(etf_code: str) -> float:
             logger.debug(f"ETF {etf_code} 无日线数据，无法计算日均成交额")
             return 0.0
         
-        # 修复：添加详细的调试日志
-        logger.debug(f"ETF {etf_code} 原始列名: {list(etf_df.columns)}")
-        
         # 确保使用中文列名
         etf_df = ensure_chinese_columns(etf_df)
         
-        # 修复：确保所有必需列都存在
-        etf_df = ensure_required_columns(etf_df)
-        
-        # 修复：再次检查列名
-        logger.debug(f"ETF {etf_code} 标准化后列名: {list(etf_df.columns)}")
-        
-        # 修复：添加多种可能的日期列名检查
-        date_columns = ["日期", "date", "Date", "DATE", "交易日期", "dt", "datetime"]
-        date_col = next((col for col in date_columns if col in etf_df.columns), None)
-        
-        if not date_col:
-            logger.warning(f"ETF {etf_code} 数据缺少日期列（检查了: {', '.join(date_columns)}），无法计算日均成交额")
+        # 检查是否包含"日期"列
+        if "日期" not in etf_df.columns:
+            logger.warning(f"ETF {etf_code} 数据缺少'日期'列，无法计算日均成交额")
             return 0.0
         
-        logger.debug(f"ETF {etf_code} 使用日期列: {date_col}")
-        
-        # 修复：确保日期列是字符串类型
-        if not pd.api.types.is_string_dtype(etf_df[date_col]):
-            etf_df[date_col] = etf_df[date_col].astype(str)
-        
-        # 修复：处理可能的日期格式问题
-        try:
-            etf_df[date_col] = pd.to_datetime(etf_df[date_col]).dt.strftime("%Y-%m-%d")
-        except Exception as e:
-            logger.warning(f"ETF {etf_code} 日期格式转换失败: {str(e)}，尝试其他格式")
-            try:
-                etf_df[date_col] = pd.to_datetime(etf_df[date_col], format="%m/%d/%Y").dt.strftime("%Y-%m-%d")
-            except:
-                logger.error(f"ETF {etf_code} 无法解析日期列，无法计算日均成交额")
-                return 0.0
-        
         # 确保数据按日期排序
-        etf_df = etf_df.sort_values(date_col, ascending=False)
+        etf_df = etf_df.sort_values("日期", ascending=False)
         
         # 取最近30个交易日的数据
         recent_data = etf_df.head(30)
@@ -179,13 +134,9 @@ def calculate_daily_volume(etf_code: str) -> float:
             return 0.0
         
         # 计算日均成交额（单位：万元）
-        # 注意：成交额列的单位可能是元，需要转换为万元
-        amount_columns = ["成交额", "amount", "Amount", "AMOUNT"]
-        amount_col = next((col for col in amount_columns if col in recent_data.columns), None)
-        
-        if amount_col:
+        if "成交额" in recent_data.columns:
             # 假设成交额单位是元，转换为万元
-            avg_volume = recent_data[amount_col].mean() / 10000
+            avg_volume = recent_data["成交额"].mean() / 10000
             logger.debug(f"ETF {etf_code} 日均成交额: {avg_volume:.2f}万元（{len(recent_data)}天数据）")
             return avg_volume
         else:
@@ -206,15 +157,7 @@ def load_etf_list() -> pd.DataFrame:
     try:
         # 检查ETF列表文件是否存在
         if not os.path.exists(Config.ALL_ETFS_PATH):
-            error_msg = "ETF列表文件不存在"
-            logger.error(error_msg)
-            
-            # 发送错误通知
-            send_wechat_message(
-                message=error_msg,
-                message_type="error"
-            )
-            
+            logger.error("ETF列表文件不存在")
             return pd.DataFrame()
         
         # 检查ETF列表是否过期
@@ -231,15 +174,7 @@ def load_etf_list() -> pd.DataFrame:
         required_columns = ["ETF代码", "ETF名称", "基金规模"]
         for col in required_columns:
             if col not in etf_list.columns:
-                error_msg = f"ETF列表缺少必要列: {col}"
-                logger.error(error_msg)
-                
-                # 发送错误通知
-                send_wechat_message(
-                    message=error_msg,
-                    message_type="error"
-                )
-                
+                logger.error(f"ETF列表缺少必要列: {col}")
                 return pd.DataFrame()
         
         # 添加日均成交额列（动态计算）
@@ -255,7 +190,6 @@ def load_etf_list() -> pd.DataFrame:
             avg_daily_volume = calculate_daily_volume(etf_code)
             etf_list.at[_, "日均成交额"] = avg_daily_volume
         
-        # 修复：使用正确的配置属性
         # 筛选符合条件的ETF
         filtered_etfs = etf_list[
             (etf_list["基金规模"] >= Config.GLOBAL_MIN_FUND_SIZE) &
@@ -266,211 +200,26 @@ def load_etf_list() -> pd.DataFrame:
         return filtered_etfs
     
     except Exception as e:
-        error_msg = f"加载ETF列表失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
+        logger.error(f"加载ETF列表失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
-    """
-    获取ETF实时行情数据
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        Optional[Dict[str, Any]]: 实时行情数据
-    """
-    try:
-        # 尝试使用AkShare获取实时数据
-        df = ak.fund_etf_spot_em(symbol=etf_code)
-        if df.empty or len(df) == 0:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")
-            return None
-        
-        # 提取最新行情
-        latest = df.iloc[0]
-        
-        # 提取必要字段
-        realtime_data = {
-            "最新价": float(latest["最新价"]),
-            "成交量": float(latest["成交量"]),
-            "涨跌幅": float(latest["涨跌幅"]),
-            "涨跌额": float(latest["涨跌额"]),
-            "开盘价": float(latest["开盘价"]),
-            "最高价": float(latest["最高价"]),
-            "最低价": float(latest["最低价"]),
-            "总市值": float(latest["总市值"])
-        }
-        
-        logger.debug(f"获取ETF {etf_code} 实时行情成功")
-        return realtime_data
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 实时行情失败: {str(e)}", exc_info=True)
-        return None
-
-def get_etf_nav_data(etf_code: str) -> Optional[Dict[str, Any]]:
-    """
-    获取ETF净值数据
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        Optional[Dict[str, Any]]: 净值数据
-    """
-    try:
-        # 获取ETF净值数据
-        df = ak.fund_etf_fund_info_em(symbol=etf_code, indicator="单位净值走势")
-        if df.empty or len(df) == 0:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的净值数据")
-            return None
-        
-        # 提取最新净值
-        latest = df.iloc[-1]
-        
-        # 提取必要字段
-        nav_data = {
-            "单位净值": float(latest["单位净值"]),
-            "累计净值": float(latest["累计净值"]),
-            "净值日期": latest["净值日期"]
-        }
-        
-        logger.debug(f"获取ETF {etf_code} 净值数据成功")
-        return nav_data
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 净值数据失败: {str(e)}", exc_info=True)
-        return None
-
-def calculate_premium_discount(market_price: float, nav: float) -> float:
+def calculate_premium_discount(market_price: float, iopv: float) -> float:
     """
     计算折溢价率
     
     Args:
         market_price: 市场价格
-        nav: 单位净值
+        iopv: IOPV(基金份额参考净值)
     
     Returns:
         float: 折溢价率（百分比）
     """
-    if nav <= 0:
-        logger.warning(f"无效的净值: {nav}")
+    if iopv <= 0:
+        logger.warning(f"无效的IOPV: {iopv}")
         return 0.0
     
-    premium_discount = ((market_price - nav) / nav) * 100
+    premium_discount = ((market_price - iopv) / iopv) * 100
     return round(premium_discount, 2)
-
-def generate_arbitrage_message_content(df: pd.DataFrame) -> str:
-    """
-    生成套利机会消息内容（不包含格式）
-    
-    Args:
-        df: 套利机会DataFrame
-    
-    Returns:
-        str: 纯业务内容
-    """
-    try:
-        if df.empty:
-            return "【套利机会】\n未发现有效套利机会"
-        
-        # 生成消息内容
-        content = "【套利机会】\n"
-        
-        # 添加前3个最佳机会
-        top_opportunities = df.head(3)
-        content += "今日最佳套利机会:\n"
-        for i, (_, row) in enumerate(top_opportunities.iterrows(), 1):
-            direction = "溢价" if row["折溢价率"] > 0 else "折价"
-            content += (
-                f"{i}. {row['ETF名称']}({row['ETF代码']})\n"
-                f"• {direction}: {abs(row['折溢价率']):.2f}%\n"
-                f"• 价格: {row['最新价']:.3f}元 | 净值: {row['单位净值']:.3f}元\n"
-                f"• 规模: {row['规模']:.2f}亿元 | 日均成交额: {row['日均成交额']:.2f}万元\n"
-            )
-        
-        # 添加其他机会数量
-        if len(df) > 3:
-            content += f"• 还有 {len(df) - 3} 个套利机会...\n"
-        
-        # 添加风险提示
-        content += (
-            "\n风险提示\n"
-            "• 套利机会转瞬即逝，请及时操作\n"
-            "• 交易成本可能影响套利收益\n"
-            "• 市场波动可能导致策略失效"
-        )
-        
-        return content
-    
-    except Exception as e:
-        error_msg = f"生成套利消息内容失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return f"【套利机会】生成套利消息内容失败: {str(e)}"
-
-def send_arbitrage_opportunity() -> bool:
-    """
-    计算并发送套利机会
-    
-    Returns:
-        bool: 发送是否成功
-    """
-    try:
-        # 获取当前北京时间用于文件命名
-        beijing_now = get_beijing_time()
-        today = beijing_now.date().strftime("%Y-%m-%d")
-        
-        # 检查是否已经发送过今日套利机会
-        arbitrage_flag = os.path.join(Config.FLAG_DIR, f"arbitrage_sent_{today}.txt")
-        if os.path.exists(arbitrage_flag):
-            logger.info("今日套利机会已发送，跳过重复发送")
-            return True
-        
-        # 计算套利机会
-        arbitrage_df = calculate_arbitrage_opportunity()
-        
-        # 生成消息内容（纯业务内容）
-        content = generate_arbitrage_message_content(arbitrage_df)
-        
-        # 发送到微信（使用arbitrage类型）
-        success = send_wechat_message(content, message_type="arbitrage")
-        
-        if success:
-            # 标记已发送
-            os.makedirs(os.path.dirname(arbitrage_flag), exist_ok=True)
-            with open(arbitrage_flag, "w", encoding="utf-8") as f:
-                f.write(beijing_now.strftime("%Y-%m-%d %H:%M:%S"))
-            logger.info("套利机会已成功发送到微信")
-        else:
-            logger.error("微信消息发送失败")
-            
-            # 发送错误通知
-            send_wechat_message(
-                message="套利机会计算成功，但微信消息发送失败",
-                message_type="error"
-            )
-        
-        return success
-    
-    except Exception as e:
-        error_msg = f"发送套利机会失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return False
 
 def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
     """
@@ -488,7 +237,7 @@ def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
         
         for i in range(days):
             date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
-            flag_file = os.path.join(Config.FLAG_DIR, f"arbitrage_sent_{date}.txt")
+            flag_file = os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
             
             if os.path.exists(flag_file):
                 # 读取当日套利数据
@@ -509,70 +258,67 @@ def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
     except Exception as e:
         error_msg = f"获取套利历史数据失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return pd.DataFrame()
 
-def analyze_arbitrage_performance() -> str:
+def analyze_arbitrage_performance() -> Dict[str, Any]:
     """
     分析套利表现
     
     Returns:
-        str: 分析结果
+        Dict[str, Any]: 分析结果
     """
     try:
         # 获取历史数据
         history_df = get_arbitrage_history()
         if history_df.empty:
-            return "【套利表现分析】\n• 无历史数据可供分析"
+            logger.info("无历史数据可供分析")
+            return {
+                "avg_opportunities": 0,
+                "max_premium": 0,
+                "min_discount": 0,
+                "trend": "无数据",
+                "has_high_premium": False,
+                "has_high_discount": False
+            }
         
         # 计算统计指标
         avg_opportunities = history_df["机会数量"].mean()
         max_premium = history_df["最大折溢价率"].max()
         min_discount = history_df["最小折溢价率"].min()
         
-        # 生成分析报告
-        report = "【套利表现分析】\n"
-        report += f"• 近期平均每天发现 {avg_opportunities:.1f} 个套利机会\n"
-        report += f"• 最大溢价率: {max_premium:.2f}%\n"
-        report += f"• 最大折价率: {min_discount:.2f}%\n\n"
-        
         # 添加趋势分析
+        trend = "平稳"
         if len(history_df) >= 3:
             trend = "上升" if history_df["机会数量"].iloc[-3:].mean() > history_df["机会数量"].iloc[:3].mean() else "下降"
-            report += f"• 套利机会数量呈{trend}趋势\n"
         
-        # 添加建议
-        if max_premium > 2.0:
-            report += "\n💡 建议：溢价率较高时，可考虑卖出ETF\n"
-        if min_discount < -2.0:
-            report += "💡 建议：折价率较高时，可考虑买入ETF\n"
-        
-        return report
+        # 返回结构化分析结果
+        return {
+            "avg_opportunities": avg_opportunities,
+            "max_premium": max_premium,
+            "min_discount": min_discount,
+            "trend": trend,
+            "has_high_premium": max_premium > 2.0,
+            "has_high_discount": min_discount < -2.0
+        }
     
     except Exception as e:
         error_msg = f"套利表现分析失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return f"【套利表现分析】{error_msg}"
+        return {
+            "avg_opportunities": 0,
+            "max_premium": 0,
+            "min_discount": 0,
+            "trend": "分析失败",
+            "has_high_premium": False,
+            "has_high_discount": False
+        }
 
-def check_arbitrage_exit_signals() -> bool:
+def check_arbitrage_exit_signals() -> List[Dict[str, Any]]:
     """
     检查套利退出信号（持有1天后）
     
     Returns:
-        bool: 是否发现需要退出的套利交易
+        List[Dict[str, Any]]: 需要退出的套利交易列表
     """
     try:
         logger.info("开始检查套利退出信号")
@@ -583,7 +329,7 @@ def check_arbitrage_exit_signals() -> bool:
         # 检查交易记录文件是否存在
         if not os.path.exists(Config.TRADE_RECORD_FILE):
             logger.warning("交易记录文件不存在，无法检查套利退出信号")
-            return False
+            return []
         
         # 读取交易记录
         trade_df = pd.read_csv(Config.TRADE_RECORD_FILE, encoding="utf-8")
@@ -601,34 +347,25 @@ def check_arbitrage_exit_signals() -> bool:
         if not yesterday_arbitrage.empty:
             logger.info(f"发现{len(yesterday_arbitrage)}条需要退出的套利交易")
             
-            # 生成退出信号消息内容
-            exit_content = "【套利退出信号】\n"
-            exit_content += f"发现 {len(yesterday_arbitrage)} 条需要退出的套利交易\n\n"
-            
+            # 构建退出信号列表
+            exit_signals = []
             for _, row in yesterday_arbitrage.iterrows():
-                exit_content += (
-                    f"• {row['ETF名称']}({row['ETF代码']})："
-                    f"已持有1天，建议退出\n"
-                )
+                exit_signals.append({
+                    "ETF代码": row["ETF代码"],
+                    "ETF名称": row["ETF名称"],
+                    "买入价格": row["价格"],
+                    "买入日期": row["创建日期"]
+                })
             
-            # 发送退出信号
-            send_wechat_message(exit_content)
-            return True
+            return exit_signals
         
         logger.info("未发现需要退出的套利交易")
-        return False
+        return []
     
     except Exception as e:
         error_msg = f"检查套利退出信号失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return False
+        return []
 
 # 模块初始化
 try:
@@ -654,12 +391,3 @@ except Exception as e:
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
         print(error_msg)
-    
-    # 发送错误通知
-    try:
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-    except Exception as send_error:
-        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

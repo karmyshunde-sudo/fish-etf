@@ -50,7 +50,7 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
         # 检查元数据是否有效
         if metadata_df is None or not isinstance(metadata_df, pd.DataFrame) or metadata_df.empty:
             # 检查元数据文件是否存在
-            metadata_path = Config.ETF_METADATA_PATH
+            metadata_path = Config.METADATA_PATH
             if not os.path.exists(metadata_path):
                 logger.warning("ETF元数据文件不存在，尝试从本地数据重建...")
                 rebuild_etf_metadata()
@@ -247,7 +247,7 @@ def rebuild_etf_metadata():
         metadata_df = pd.DataFrame(metadata_list)
         
         # 保存元数据
-        metadata_path = Config.ETF_METADATA_PATH
+        metadata_path = Config.METADATA_PATH
         metadata_df.to_csv(metadata_path, index=False, encoding="utf-8-sig")
         logger.info(f"ETF元数据已重建，共{len(metadata_df)}条记录，保存至: {metadata_path}")
         return True
@@ -700,11 +700,11 @@ try:
         )
     
     # 检查元数据文件是否存在
-    if not os.path.exists(Config.ETF_METADATA_PATH):
+    if not os.path.exists(Config.METADATA_PATH):
         logger.warning("ETF元数据文件不存在，将在需要时重建")
     else:
         # 检查元数据是否需要更新
-        if is_file_outdated(Config.ETF_METADATA_PATH, Config.ETF_METADATA_UPDATE_INTERVAL):
+        if is_file_outdated(Config.METADATA_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
             logger.info("ETF元数据已过期，将在需要时重建")
     
     # 初始化日志

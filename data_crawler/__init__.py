@@ -353,7 +353,16 @@ try:
         logger.warning("数据爬取模块初始化完成，但存在警告")
 except Exception as e:
     logger.error(f"数据爬取模块初始化失败: {str(e)}", exc_info=True)
+    
     # 退回到基础日志配置
-    import logging
-    logging.basicConfig(level=Config.LOG_LEVEL, format=Config.LOG_FORMAT)
-    logging.error(f"数据爬取模块初始化失败: {str(e)}")
+    try:
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(f"数据爬取模块初始化失败: {str(e)}")
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(f"数据爬取模块初始化失败: {str(e)}")

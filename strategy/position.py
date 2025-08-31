@@ -49,13 +49,45 @@ def init_position_record() -> pd.DataFrame:
             
             # 确保包含所有必要列
             required_columns = [
-                "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量"
+                "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", "最新操作", "操作日期", "创建时间", "更新时间"
             ]
             for col in required_columns:
                 if col not in position_df.columns:
                     logger.warning(f"仓位记录缺少必要列: {col}")
                     # 重新初始化
                     return create_default_position_record()
+            
+            # 确保包含稳健仓和激进仓
+            if "稳健仓" not in position_df["仓位类型"].values:
+                position_df = pd.concat([position_df, pd.DataFrame([{
+                    "仓位类型": "稳健仓",
+                    "ETF代码": "",
+                    "ETF名称": "",
+                    "持仓成本价": 0.0,
+                    "持仓日期": "",
+                    "持仓数量": 0,
+                    "最新操作": "未持仓",
+                    "操作日期": "",
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }])], ignore_index=True)
+            
+            if "激进仓" not in position_df["仓位类型"].values:
+                position_df = pd.concat([position_df, pd.DataFrame([{
+                    "仓位类型": "激进仓",
+                    "ETF代码": "",
+                    "ETF名称": "",
+                    "持仓成本价": 0.0,
+                    "持仓日期": "",
+                    "持仓数量": 0,
+                    "最新操作": "未持仓",
+                    "操作日期": "",
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }])], ignore_index=True)
+            
+            # 保存更新后的记录
+            position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
             
             logger.info(f"已加载仓位记录，共 {len(position_df)} 条")
             return position_df
@@ -85,7 +117,11 @@ def create_default_position_record() -> pd.DataFrame:
                 "ETF名称": "",
                 "持仓成本价": 0.0,
                 "持仓日期": "",
-                "持仓数量": 0
+                "持仓数量": 0,
+                "最新操作": "未持仓",
+                "操作日期": "",
+                "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             },
             {
                 "仓位类型": "激进仓",
@@ -93,7 +129,11 @@ def create_default_position_record() -> pd.DataFrame:
                 "ETF名称": "",
                 "持仓成本价": 0.0,
                 "持仓日期": "",
-                "持仓数量": 0
+                "持仓数量": 0,
+                "最新操作": "未持仓",
+                "操作日期": "",
+                "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
         ]
         return pd.DataFrame(default_positions)
@@ -110,11 +150,14 @@ def create_default_position_record() -> pd.DataFrame:
         
         # 返回空DataFrame但包含必要列
         return pd.DataFrame(columns=[
-            "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量"
+            "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
+            "最新操作", "操作日期", "创建时间", "更新时间"
         ])
 
-def init_trade_record():
-    """初始化交易记录文件"""
+def init_trade_record() -> None:
+    """
+    初始化交易记录文件
+    """
     try:
         # 确保目录存在
         os.makedirs(os.path.dirname(TRADE_RECORD_PATH), exist_ok=True)
@@ -230,7 +273,7 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             message_type="error"
         )
         
-        return "【ETF仓位操作提示】生成仓位内容时发生错误"
+        return "【ETF仓位操作提示】\n生成仓位内容时发生错误"
 
 def calculate_position_strategy() -> str:
     """
@@ -250,7 +293,7 @@ def calculate_position_strategy() -> str:
         
         # 获取评分前5的ETF（用于选仓）
         top_etfs = get_top_rated_etfs(top_n=5)
-        if top_etfs.empty:
+        if top_etfs.empty or len(top_etfs) == 0:
             warning_msg = "无有效ETF评分数据，无法计算仓位策略"
             logger.warning(warning_msg)
             
@@ -261,6 +304,8 @@ def calculate_position_strategy() -> str:
             )
             
             return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
+        
+        logger.info(f"获取到 {len(top_etfs)} 个高评分ETF")
         
         # 2. 分别计算稳健仓和激进仓策略
         strategies = {}
@@ -281,7 +326,11 @@ def calculate_position_strategy() -> str:
                 "ETF名称": "",
                 "持仓成本价": 0.0,
                 "持仓日期": "",
-                "持仓数量": 0
+                "持仓数量": 0,
+                "最新操作": "未持仓",
+                "操作日期": "",
+                "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         else:
             stable_position = stable_position.iloc[0]
@@ -330,7 +379,11 @@ def calculate_position_strategy() -> str:
                     "ETF名称": "",
                     "持仓成本价": 0.0,
                     "持仓日期": "",
-                    "持仓数量": 0
+                    "持仓数量": 0,
+                    "最新操作": "未持仓",
+                    "操作日期": "",
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             else:
                 aggressive_position = aggressive_position.iloc[0]
@@ -389,14 +442,15 @@ def calculate_single_position_strategy(
     Returns:
         Tuple[str, List[Dict]]: (策略描述, 交易动作列表)
     """
+    if etf_df.empty or len(etf_df) < Config.MA_LONG_PERIOD:
+        return f"{position_type}：目标ETF数据不足，暂不调整", []
+    
+    trade_actions = []
+    
     try:
-        if etf_df.empty or len(etf_df) < Config.MA_LONG_PERIOD:
-            return f"{position_type}：目标ETF数据不足，暂不调整", []
-        
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         current_date = beijing_now.strftime("%Y-%m-%d")
-        trade_actions = []
         
         # 计算均线信号
         ma_bullish, ma_bearish = calculate_ma_signal(
@@ -407,46 +461,60 @@ def calculate_single_position_strategy(
         latest_close = etf_df.iloc[-1]["收盘"]
         
         # 当前持仓信息
-        current_code = current_position["ETF代码"]
-        current_name = current_position["ETF名称"]
-        current_cost = current_position["持仓成本价"]
-        current_date_held = current_position["持仓日期"]
+        current_code = str(current_position["ETF代码"]).strip()
+        current_name = str(current_position["ETF名称"]).strip()
+        current_cost = float(current_position["持仓成本价"])
+        current_date_held = str(current_position["持仓日期"]).strip()
+        current_quantity = int(current_position["持仓数量"])
+        
+        # 目标ETF信息
+        target_etf_code = str(target_etf_code).strip()
+        target_etf_name = str(target_etf_name).strip()
+        
+        # 计算当前持仓评分
+        current_score = 0.0
+        if current_code and current_code != "":
+            # 获取当前持仓ETF的评分
+            etf_list = get_top_rated_etfs(10)
+            if not etf_list.empty and current_code in etf_list["etf_code"].values:
+                current_score = etf_list[etf_list["etf_code"] == current_code]["score"].values[0]
         
         # 1. 检查是否需要换仓
         if current_code and current_code != target_etf_code:
-            # 检查换股条件
-            current_score = get_etf_score(current_code)
-            target_score = get_etf_score(target_etf_code)
+            # 执行换仓
+            trade_actions.append({
+                "position_type": position_type,
+                "etf_code": current_code,
+                "etf_name": current_name,
+                "price": latest_close,
+                "quantity": current_quantity,
+                "action": "卖出",
+                "note": "换仓操作"
+            })
+            trade_actions.append({
+                "position_type": position_type,
+                "etf_code": target_etf_code,
+                "etf_name": target_etf_name,
+                "price": latest_close,
+                "quantity": 1000,  # 默认买入1000份
+                "action": "买入",
+                "note": "换仓操作"
+            })
             
-            if target_score > current_score * (1 + Config.SWITCH_THRESHOLD):
-                # 执行换仓
-                trade_actions.append({
-                    "position_type": position_type,
-                    "etf_code": current_code,
-                    "etf_name": current_name,
-                    "price": latest_close,
-                    "quantity": current_position["持仓数量"],
-                    "action": "卖出",
-                    "note": "换仓操作"
-                })
-                trade_actions.append({
-                    "position_type": position_type,
-                    "etf_code": target_etf_code,
-                    "etf_name": target_etf_name,
-                    "price": latest_close,
-                    "quantity": 1000,  # 默认买入1000份
-                    "action": "买入",
-                    "note": "换仓操作"
-                })
-                
+            if current_score > 0:
                 return (
                     f"{position_type}：执行换仓【{current_name}（{current_code}）→ {target_etf_name}（{target_etf_code}）】"
-                    f"评分从 {current_score:.2f} 升至 {target_score:.2f}（提升 {target_score/current_score-1:.1%}）",
+                    f"评分从 {current_score:.2f} 升至 {target_etf_name:.2f}（提升 {target_etf_name/current_score-1:.1%}）", 
+                    trade_actions
+                )
+            else:
+                return (
+                    f"{position_type}：执行换仓【{current_name}（{current_code}）→ {target_etf_name}（{target_etf_code}）】", 
                     trade_actions
                 )
         
         # 2. 检查是否需要建仓
-        if not current_code:
+        if not current_code or current_code == "":
             # 执行建仓
             trade_actions.append({
                 "position_type": position_type,
@@ -457,62 +525,131 @@ def calculate_single_position_strategy(
                 "action": "买入",
                 "note": "新建仓位"
             })
-            
             return (
                 f"{position_type}：新建仓位【{target_etf_name}（{target_etf_code}）】"
-                f"当前价格：{latest_close:.2f}元",
+                f"当前价格：{latest_close:.2f}元", 
                 trade_actions
             )
         
         # 3. 检查是否需要止损
         if current_cost > 0:
-            profit_rate = (latest_close - current_cost) / current_cost
-            
-            # 检查止损条件
-            if profit_rate <= -Config.STOP_LOSS_THRESHOLD:
+            profit_loss = (latest_close - current_cost) / current_cost
+            if is_stable and profit_loss < -Config.STABLE_LOSS_THRESHOLD:
+                # 稳健仓止损
                 trade_actions.append({
                     "position_type": position_type,
                     "etf_code": current_code,
                     "etf_name": current_name,
                     "price": latest_close,
-                    "quantity": current_position["持仓数量"],
+                    "quantity": current_quantity,
                     "action": "卖出",
                     "note": "止损操作"
                 })
-                
                 return (
-                    f"{position_type}：执行止损【{current_name}（{current_code}）】"
-                    f"收益率：{profit_rate:.2f}%（跌破止损阈值{Config.STOP_LOSS_THRESHOLD*100:.1f}%）",
+                    f"{position_type}：止损操作【{current_name}（{current_code}）】"
+                    f"亏损 {profit_loss:.2%}（超过阈值 {Config.STABLE_LOSS_THRESHOLD:.2%}）", 
+                    trade_actions
+                )
+            elif not is_stable and profit_loss < -Config.AGGRESSIVE_LOSS_THRESHOLD:
+                # 激进仓止损
+                trade_actions.append({
+                    "position_type": position_type,
+                    "etf_code": current_code,
+                    "etf_name": current_name,
+                    "price": latest_close,
+                    "quantity": current_quantity,
+                    "action": "卖出",
+                    "note": "止损操作"
+                })
+                return (
+                    f"{position_type}：止损操作【{current_name}（{current_code}）】"
+                    f"亏损 {profit_loss:.2%}（超过阈值 {Config.AGGRESSIVE_LOSS_THRESHOLD:.2%}）", 
                     trade_actions
                 )
         
-        # 4. 继续持有
-        try:
-            hold_days = (beijing_now - datetime.strptime(current_date_held, "%Y-%m-%d")).days if current_date_held else 0
-        except (ValueError, TypeError):
-            logger.warning(f"解析持仓日期失败: {current_date_held}")
-            hold_days = 0
-            
-        ma_status = "5日均线＞20日均线" if not ma_bearish else "5日均线＜20日均线"
+        # 4. 检查是否需要止盈
+        if current_cost > 0:
+            profit_loss = (latest_close - current_cost) / current_cost
+            if is_stable and profit_loss > Config.STABLE_PROFIT_THRESHOLD:
+                # 稳健仓止盈
+                trade_actions.append({
+                    "position_type": position_type,
+                    "etf_code": current_code,
+                    "etf_name": current_name,
+                    "price": latest_close,
+                    "quantity": current_quantity,
+                    "action": "卖出",
+                    "note": "止盈操作"
+                })
+                return (
+                    f"{position_type}：止盈操作【{current_name}（{current_code}）】"
+                    f"盈利 {profit_loss:.2%}（超过阈值 {Config.STABLE_PROFIT_THRESHOLD:.2%}）", 
+                    trade_actions
+                )
+            elif not is_stable and profit_loss > Config.AGGRESSIVE_PROFIT_THRESHOLD:
+                # 激进仓止盈
+                trade_actions.append({
+                    "position_type": position_type,
+                    "etf_code": current_code,
+                    "etf_name": current_name,
+                    "price": latest_close,
+                    "quantity": current_quantity,
+                    "action": "卖出",
+                    "note": "止盈操作"
+                })
+                return (
+                    f"{position_type}：止盈操作【{current_name}（{current_code}）】"
+                    f"盈利 {profit_loss:.2%}（超过阈值 {Config.AGGRESSIVE_PROFIT_THRESHOLD:.2%}）", 
+                    trade_actions
+                )
         
-        return (
-            f"{position_type}：继续持有【{current_name}（{current_code}）】\n"
-            f"当前价格：{latest_close:.2f}元，成本价：{current_cost:.2f}元\n"
-            f"收益率：{profit_rate:.2f}%，持仓天数：{hold_days}天\n"
-            f"均线状态：{ma_status}",
-            trade_actions
-        )
+        # 5. 检查是否需要加仓
+        if current_code == target_etf_code and current_quantity < 2000:
+            # 加仓条件：均线金叉且价格在均线上方
+            if ma_bullish and latest_close > etf_df["ma_short"].iloc[-1]:
+                trade_actions.append({
+                    "position_type": position_type,
+                    "etf_code": target_etf_code,
+                    "etf_name": target_etf_name,
+                    "price": latest_close,
+                    "quantity": 1000,  # 加仓1000份
+                    "action": "买入",
+                    "note": "加仓操作"
+                })
+                return (
+                    f"{position_type}：加仓操作【{target_etf_name}（{target_etf_code}）】"
+                    f"当前价格：{latest_close:.2f}元", 
+                    trade_actions
+                )
+        
+        # 6. 检查是否需要减仓
+        if current_code == target_etf_code and current_quantity > 1000:
+            # 减仓条件：均线死叉且价格在均线下方
+            if ma_bearish and latest_close < etf_df["ma_short"].iloc[-1]:
+                trade_actions.append({
+                    "position_type": position_type,
+                    "etf_code": target_etf_code,
+                    "etf_name": target_etf_name,
+                    "price": latest_close,
+                    "quantity": 1000,  # 减仓1000份
+                    "action": "卖出",
+                    "note": "减仓操作"
+                })
+                return (
+                    f"{position_type}：减仓操作【{target_etf_name}（{target_etf_code}）】"
+                    f"当前价格：{latest_close:.2f}元", 
+                    trade_actions
+                )
+        
+        # 无操作
+        if current_code and current_code != "":
+            return f"{position_type}：当前持仓【{current_name}（{current_code}）】状态良好，无需操作", []
+        else:
+            return f"{position_type}：当前无持仓，等待建仓信号", []
     
     except Exception as e:
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
         return f"{position_type}：计算策略时发生错误", []
 
 def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -> Tuple[bool, bool]:
@@ -533,21 +670,32 @@ def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -
         # 计算长期均线
         df["ma_long"] = df["收盘"].rolling(window=long_period).mean()
         
-        # 获取最新数据
-        latest = df.iloc[-1]
+        # 检查数据量是否足够
+        if len(df) < long_period:
+            logger.warning(f"数据量不足，无法计算均线信号（需要至少{long_period}条数据，实际{len(df)}条）")
+            return False, False
         
         # 检查是否有多头信号（短期均线上穿长期均线）
         ma_bullish = False
         if len(df) > 1:
             prev = df.iloc[-2]
-            ma_bullish = prev["ma_short"] <= prev["ma_long"] and latest["ma_short"] > latest["ma_long"]
+            curr = df.iloc[-1]
+            # 检查前一日短期均线 <= 长期均线，当日短期均线 > 长期均线
+            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
+               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
+                ma_bullish = prev["ma_short"] <= prev["ma_long"] and curr["ma_short"] > curr["ma_long"]
         
         # 检查是否有空头信号（短期均线下穿长期均线）
         ma_bearish = False
         if len(df) > 1:
             prev = df.iloc[-2]
-            ma_bearish = prev["ma_short"] >= prev["ma_long"] and latest["ma_short"] < latest["ma_long"]
+            curr = df.iloc[-1]
+            # 检查前一日短期均线 >= 长期均线，当日短期均线 < 长期均线
+            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
+               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
+                ma_bearish = prev["ma_short"] >= prev["ma_long"] and curr["ma_short"] < curr["ma_long"]
         
+        logger.debug(f"均线信号计算结果: 多头={ma_bullish}, 空头={ma_bearish}")
         return ma_bullish, ma_bearish
     
     except Exception as e:

@@ -60,6 +60,20 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
             
             return pd.DataFrame()
         
+        # 确保列名正确（修复CSV文件列名问题）
+        if "etf_code" not in metadata_df.columns:
+            # 如果列名是中文，尝试映射
+            if "ETF代码" in metadata_df.columns:
+                metadata_df = metadata_df.rename(columns={"ETF代码": "etf_code"})
+            elif "etf_code" not in metadata_df.columns:
+                error_msg = "ETF元数据缺少必要列: etf_code"
+                logger.warning(error_msg)
+                send_wechat_message(
+                    message=error_msg,
+                    message_type="error"
+                )
+                return pd.DataFrame()
+        
         # 获取所有ETF代码
         all_codes = metadata_df["etf_code"].tolist()
         if not all_codes:

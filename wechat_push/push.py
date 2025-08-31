@@ -11,7 +11,8 @@ import requests
 import time
 import logging
 import json
-from typing import Optional, Dict, Any, List
+import pandas as pd
+from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import (
@@ -152,10 +153,60 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
-def _apply_message_template(message: str, message_type: str) -> str:
+def _format_arbitrage_message(df: pd.DataFrame) -> str:
+    """
+    格式化套利机会消息
+    
+    Args:
+        df: 套利机会DataFrame
+    
+    Returns:
+        str: 格式化后的消息
+    """
+    try:
+        if df.empty:
+            return "【套利机会】\n未发现有效套利机会"
+        
+        # 生成消息内容
+        content = "【ETF溢价套利机会】\n\n"
+        content += "💡 套利原理：当ETF市场价格高于IOPV（基金份额参考净值）时，可申购ETF份额并卖出获利\n"
+        content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
+        content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
+        content += f"🎯 套利阈值：收益率超过{Config.ARBITRAGE_THRESHOLD*100:.2f}%\n\n"
+        
+        # 添加套利机会
+        for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
+            direction = "溢价" if row["折溢价率"] > 0 else "折价"
+            content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
+            content += f"   💹 {direction}率: {abs(row['折溢价率']):.2f}%\n"
+            content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+            content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
+            content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
+            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n\n"
+        
+        # 添加其他机会数量
+        if len(df) > 3:
+            content += f"• 还有 {len(df) - 3} 个套利机会...\n"
+        
+        # 添加风险提示
+        content += (
+            "\n⚠️ 风险提示：\n"
+            "1. 套利机会转瞬即逝，请及时操作\n"
+            "2. 实际交易中可能因价格变动导致套利失败\n"
+            "3. 本策略仅供参考，不构成投资建议\n"
+        )
+        
+        return content
+    
+    except Exception as e:
+        error_msg = f"生成套利消息内容失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"【套利策略】生成消息内容时发生错误，请检查日志"
+
+def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> str:
     """
     应用对应类型的消息模板
-    :param message: 原始消息内容
+    :param message: 原始消息内容（可以是字符串或DataFrame）
     :param message_type: 消息类型
     :return: 格式化后的消息
     """
@@ -167,6 +218,14 @@ def _apply_message_template(message: str, message_type: str) -> str:
         github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
         github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
         log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        
+        # 特殊处理套利消息
+        if message_type == "arbitrage" and isinstance(message, pd.DataFrame):
+            message = _format_arbitrage_message(message)
+        
+        # 确保message是字符串
+        if not isinstance(message, str):
+            message = str(message)
         
         # 根据消息类型应用不同的模板
         if message_type == "task":
@@ -240,14 +299,14 @@ def _apply_message_template(message: str, message_type: str) -> str:
             "⚠️ 注意: 消息格式化过程中发生错误"
         )
 
-def send_wechat_message(message: str, 
+def send_wechat_message(message: Union[str, pd.DataFrame], 
                        message_type: str = "default",
                        webhook: Optional[str] = None) -> bool:
     """
     发送消息到企业微信，自动应用消息模板
     
     Args:
-        message: 消息内容（纯业务内容）
+        message: 消息内容（纯业务内容，可以是字符串或DataFrame）
         message_type: 消息类型（task, arbitrage, position, error, daily_report等）
         webhook: 企业微信Webhook地址
         
@@ -501,8 +560,9 @@ try:
         test_webhook_connection()
 except Exception as e:
     logger.error(f"微信推送模块初始化失败: {str(e)}", exc_info=True)
-    # 退回到基础日志配置
+    
     try:
+        # 退回到基础日志配置
         import logging
         logging.basicConfig(
             level="INFO",

@@ -533,9 +533,19 @@ def calculate_sentiment_score(df: pd.DataFrame) -> float:
         
         return 50.0
 
-def calculate_fundamental_score(etf_code: str) -> float:
-    """计算基本面得分（规模、成立时间等）"""
+def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
+    """
+    获取ETF基本信息（规模、成立日期等）
+    
+    Args:
+        etf_code: ETF代码 (6位数字)
+    
+    Returns:
+        Tuple[float, str]: (基金规模(单位:亿元), 上市日期字符串)
+    """
     try:
+        logger.debug(f"尝试获取ETF基本信息，代码: {etf_code}")
+        
         # 从ETF列表获取规模和成立日期
         etf_list = load_all_etf_list()
         etf_row = etf_list[etf_list[Config.ETF_CODE_COL] == etf_code]
@@ -555,27 +565,47 @@ def calculate_fundamental_score(etf_code: str) -> float:
             # 处理成立日期
             listing_date = etf_row.iloc[0].get(Config.LISTING_DATE_COL, "")
             
-            # 规模得分（10亿=60分，100亿=100分）
-            size_score = min(max(size * 0.4 + 50, 0), 100)
-            
-            # 成立时间得分（1年=50分，5年=100分）
-            if not listing_date:
-                age_score = 50.0
-            else:
-                try:
-                    listing_date = datetime.strptime(listing_date, "%Y-%m-%d")
-                    age = (get_beijing_time() - listing_date).days / 365
-                    age_score = min(max(age * 10 + 40, 0), 100)
-                except Exception as e:
-                    logger.error(f"解析成立日期失败: {str(e)}", exc_info=True)
-                    age_score = 50.0
-            
-            # 综合基本面得分
-            fundamental_score = (size_score * 0.6 + age_score * 0.4)
-            return round(fundamental_score, 2)
+            logger.debug(f"ETF {etf_code} 基本信息: 规模={size}亿元, 成立日期={listing_date}")
+            return size, listing_date
         else:
             logger.warning(f"ETF {etf_code} 未在ETF列表中找到，使用默认值")
-            return 50.0
+            return 0.0, ""
+    
+    except Exception as e:
+        error_msg = f"获取ETF {etf_code} 基本信息失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        return 0.0, ""
+
+def calculate_fundamental_score(etf_code: str) -> float:
+    """计算基本面得分（规模、成立时间等）"""
+    try:
+        size, listing_date = get_etf_basic_info(etf_code)
+        
+        # 规模得分（10亿=60分，100亿=100分）
+        size_score = min(max(size * 0.4 + 50, 0), 100)
+        
+        # 成立时间得分（1年=50分，5年=100分）
+        if not listing_date:
+            age_score = 50.0
+        else:
+            try:
+                listing_date = datetime.strptime(listing_date, "%Y-%m-%d")
+                age = (get_beijing_time() - listing_date).days / 365
+                age_score = min(max(age * 10 + 40, 0), 100)
+            except Exception as e:
+                logger.error(f"解析成立日期失败: {str(e)}", exc_info=True)
+                age_score = 50.0
+        
+        # 综合基本面得分
+        fundamental_score = (size_score * 0.6 + age_score * 0.4)
+        return round(fundamental_score, 2)
     
     except Exception as e:
         error_msg = f"计算基本面得分失败: {str(e)}"
@@ -587,7 +617,7 @@ def calculate_fundamental_score(etf_code: str) -> float:
             message_type="error"
         )
         
-        return 50.0
+        return 0.0
 
 def calculate_volatility(df: pd.DataFrame) -> float:
     """计算波动率（年化）"""

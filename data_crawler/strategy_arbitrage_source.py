@@ -106,16 +106,14 @@ def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     """
     try:
         # 尝试使用AkShare获取实时数据
-        df = ak.fund_etf_spot_em(symbol=etf_code)
+        # 注意：在akshare 1.17.44中，fund_etf_spot_em不再接受symbol参数
+        df = ak.fund_etf_spot_em()
         
-        # 添加关键日志：打印返回的列名
-        if not df.empty:
-            logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
-            # 打印前2行数据示例
-            logger.info(f"fund_etf_spot_em 数据示例:\n{df.head(2).to_dict()}")
-        else:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情数据")
-            return None
+        # 添加列名日志（关键调试信息）
+        logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
+        
+        # 过滤出特定ETF
+        df = df[df['代码'] == etf_code]
         
         if df.empty or len(df) == 0:
             logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")

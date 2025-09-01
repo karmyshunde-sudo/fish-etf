@@ -281,12 +281,15 @@ def crawl_arbitrage_data() -> str:
         # 爬取数据
         df = fetch_arbitrage_realtime_data()
         
-        # 保存数据
-        if not df.empty:
-            return save_arbitrage_data(df)
-        else:
-            logger.warning("未获取到有效的套利数据，无需保存")
+        # 详细检查爬取结果
+        if df.empty:
+            logger.error("未获取到有效的套利数据，爬取结果为空")
             return ""
+        else:
+            logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
+        
+        # 保存数据
+        return save_arbitrage_data(df)
     
     except Exception as e:
         logger.error(f"套利数据爬取任务执行失败: {str(e)}", exc_info=True)
@@ -307,13 +310,22 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         if df.empty:
             logger.warning("无今日套利数据，尝试重新爬取")
             file_path = crawl_arbitrage_data()
-            if file_path:
+            
+            # 详细检查爬取结果
+            if file_path and os.path.exists(file_path):
+                logger.info(f"成功爬取并保存套利数据到: {file_path}")
                 df = load_arbitrage_data(today)
             else:
-                logger.warning("重新爬取后仍无套利数据")
+                logger.error("重新爬取后仍无套利数据，文件路径无效或为空")
+                logger.error(f"文件路径: {file_path}")
+                logger.error(f"文件是否存在: {os.path.exists(file_path) if file_path else 'N/A'}")
                 return pd.DataFrame()
         
         # 筛选有套利机会的数据
+        if "折溢价率" not in df.columns:
+            logger.error("数据中缺少'折溢价率'列，无法筛选套利机会")
+            return pd.DataFrame()
+        
         opportunities = df[
             (df["折溢价率"].abs() >= Config.ARBITRAGE_THRESHOLD)
         ].copy()
@@ -329,27 +341,3 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
-# 模块初始化
-try:
-    # 确保必要的目录存在
-    arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
-    ensure_dir_exists(arbitrage_dir)
-    
-    logger.info("套利策略数据源模块初始化完成")
-    
-except Exception as e:
-    logger.error(f"套利策略数据源模块初始化失败: {str(e)}", exc_info=True)
-    
-    try:
-        # 退回到基础日志配置
-        import logging
-        logging.basicConfig(
-            level="INFO",
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[logging.StreamHandler()]
-        )
-        logging.error(f"套利策略数据源模块初始化失败: {str(e)}")
-    except Exception as basic_log_error:
-        print(f"基础日志配置失败: {str(basic_log_error)}")
-        print(f"套利策略数据源模块初始化失败: {str(e)}")

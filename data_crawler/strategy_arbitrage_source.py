@@ -201,16 +201,33 @@ def save_arbitrage_data(df: pd.DataFrame) -> str:
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
         ensure_dir_exists(arbitrage_dir)
         
+        # 添加目录权限检查
+        if not os.access(arbitrage_dir, os.W_OK):
+            logger.warning(f"目录 {arbitrage_dir} 没有写入权限，尝试修复...")
+            try:
+                os.chmod(arbitrage_dir, 0o777)
+                logger.info(f"已修复目录权限: {arbitrage_dir}")
+            except Exception as e:
+                logger.error(f"修复目录权限失败: {str(e)}")
+        
         # 生成文件名 (YYYYMMDD.csv)
         beijing_time = get_beijing_time()
         file_date = beijing_time.strftime("%Y%m%d")
         file_path = os.path.join(arbitrage_dir, f"{file_date}.csv")
         
+        # 保存数据前检查
+        logger.debug(f"准备保存套利数据到: {file_path}")
+        
         # 保存数据
         df.to_csv(file_path, index=False, encoding="utf-8-sig")
-        logger.info(f"套利数据已保存至: {file_path} (共{len(df)}条记录)")
         
-        return file_path
+        # 验证文件是否成功创建
+        if os.path.exists(file_path):
+            logger.info(f"套利数据已成功保存至: {file_path} (共{len(df)}条记录)")
+            return file_path
+        else:
+            logger.error(f"文件保存失败，但无异常: {file_path}")
+            return ""
     
     except Exception as e:
         logger.error(f"保存套利数据失败: {str(e)}", exc_info=True)

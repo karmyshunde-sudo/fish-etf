@@ -232,26 +232,25 @@ def write_json(file_path: Union[str, Path], data: Dict) -> bool:
         logger.error(f"写入JSON文件失败 {file_path}: {str(e)}")
         return False
 
-def ensure_dir_exists(dir_path: Union[str, Path]) -> bool:
+def ensure_dir_exists(path: str) -> None:
     """
     确保目录存在，如果不存在则创建
-    
-    Args:
-        dir_path: 目录路径
-    
-    Returns:
-        bool: 目录存在或创建成功返回True，否则返回False
     """
     try:
-        dir_path = Path(dir_path)
-        if not dir_path.exists():
-            dir_path.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"创建目录: {dir_path}")
-        return True
-    
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+            logger.info(f"创建目录: {path}")
+        
+        # 确保目录有写入权限
+        if not os.access(path, os.W_OK):
+            try:
+                os.chmod(path, 0o777)
+                logger.info(f"设置目录权限: {path}")
+            except Exception as e:
+                logger.warning(f"无法设置目录权限: {str(e)}")
     except Exception as e:
-        logger.error(f"创建目录失败 {dir_path}: {str(e)}")
-        return False
+        logger.error(f"创建目录失败: {str(e)}", exc_info=True)
+        raise
 
 def check_flag(flag_file_path: Union[str, Path]) -> bool:
     """

@@ -93,6 +93,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
 def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     """
     获取ETF实时行情数据
@@ -106,6 +107,16 @@ def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     try:
         # 尝试使用AkShare获取实时数据
         df = ak.fund_etf_spot_em(symbol=etf_code)
+        
+        # 添加关键日志：打印返回的列名
+        if not df.empty:
+            logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
+            # 打印前2行数据示例
+            logger.info(f"fund_etf_spot_em 数据示例:\n{df.head(2).to_dict()}")
+        else:
+            logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情数据")
+            return None
+        
         if df.empty or len(df) == 0:
             logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")
             return None

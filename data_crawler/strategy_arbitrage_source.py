@@ -55,12 +55,14 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                 
                 # 获取ETF实时行情
                 realtime_data = get_etf_realtime_data(etf_code)
-                if not realtime_data:  # 修复：添加冒号，修正变量名
+                if not realtime_data:
+                    logger.warning(f"ETF {etf_code} 实时行情数据为空")
                     continue
                 
                 # 获取ETF IOPV数据
                 iopv_data = get_etf_iopv_data(etf_code)
                 if not iopv_data:
+                    logger.warning(f"ETF {etf_code} IOPV数据为空")
                     continue
                 
                 # 合并数据
@@ -91,7 +93,6 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     """
     获取ETF实时行情数据
@@ -342,73 +343,3 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def fetch_arbitrage_realtime_data() -> pd.DataFrame:
-    """
-    爬取所有ETF的实时市场价格和IOPV数据
-    
-    Returns:
-        pd.DataFrame: 包含ETF代码、名称、市场价格、IOPV等信息的DataFrame
-    """
-    try:
-        logger.info("开始爬取套利策略所需实时数据")
-        beijing_time = get_beijing_time()
-        
-        # 检查是否为交易日和交易时间
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过套利数据爬取")
-            return pd.DataFrame()
-        
-        # 获取需要监控的ETF列表
-        etf_codes = get_filtered_etf_codes()
-        logger.info(f"获取到 {len(etf_codes)} 只符合条件的ETF进行套利监控")
-        
-        if not etf_codes:
-            logger.warning("无符合条件的ETF，跳过套利数据爬取")
-            return pd.DataFrame()
-        
-        # 爬取数据
-        arbitrage_data = []
-        for idx, etf_code in enumerate(etf_codes, 1):
-            try:
-                logger.debug(f"({idx}/{len(etf_codes)}) 爬取ETF {etf_code} 套利数据")
-                
-                # 获取ETF实时行情
-                realtime_data = get_etf_realtime_data(etf_code)
-                if not realtime_data:
-                    logger.warning(f"ETF {etf_code} 实时行情数据为空")
-                    continue
-                
-                # 获取ETF IOPV数据
-                iopv_data = get_etf_iopv_data(etf_code)
-                if not iopv_data:
-                    logger.warning(f"ETF {etf_code} IOPV数据为空")
-                    continue
-                
-                # 合并数据
-                arbitrage_data.append({
-                    "ETF代码": etf_code,
-                    "ETF名称": get_etf_name(etf_code),
-                    "市场价格": realtime_data["最新价"],
-                    "IOPV": iopv_data["IOPV"],
-                    "净值时间": iopv_data["净值时间"],
-                    "计算时间": beijing_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "折溢价率": calculate_premium_discount(realtime_data["最新价"], iopv_data["IOPV"])
-                })
-                
-                # 交易间隔控制，避免请求过于频繁
-                time.sleep(0.5)
-            except Exception as e:
-                logger.error(f"爬取ETF {etf_code} 套利数据失败: {str(e)}", exc_info=True)
-                continue
-        
-        if not arbitrage_data:
-            logger.warning("未获取到有效的套利数据")
-            return pd.DataFrame()
-        
-        df = pd.DataFrame(arbitrage_data)
-        logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
-        return df
-    
-    except Exception as e:
-        logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
-        return pd.DataFrame()

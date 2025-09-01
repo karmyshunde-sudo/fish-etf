@@ -31,12 +31,22 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         pd.DataFrame: 包含ETF代码、名称、市场价格、IOPV等信息的DataFrame
     """
     try:
-        logger.info("开始爬取套利策略所需实时数据")
+        logger.info("===== 开始执行套利数据爬取 =====")
         beijing_time = get_beijing_time()
+        logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 检查是否为交易日和交易时间
         if not is_trading_day():
             logger.warning("当前不是交易日，跳过套利数据爬取")
+            return pd.DataFrame()
+        
+        # 检查是否为交易时间
+        current_time = beijing_time.time()
+        trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+        trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
+        
+        if not (trading_start <= current_time <= trading_end):
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
             return pd.DataFrame()
         
         # 获取需要监控的ETF列表
@@ -47,46 +57,47 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             logger.warning("无符合条件的ETF，跳过套利数据爬取")
             return pd.DataFrame()
         
-        # 爬取数据
-        arbitrage_data = []
-        for idx, etf_code in enumerate(etf_codes, 1):
-            try:
-                logger.debug(f"({idx}/{len(etf_codes)}) 爬取ETF {etf_code} 套利数据")
-                
-                # 获取ETF实时行情
-                realtime_data = get_etf_realtime_data(etf_code)
-                if not realtime_data:
-                    logger.warning(f"ETF {etf_code} 实时行情数据为空")
-                    continue
-                
-                # 获取ETF IOPV数据
-                iopv_data = get_etf_iopv_data(etf_code)
-                if not iopv_data:
-                    logger.warning(f"ETF {etf_code} IOPV数据为空")
-                    continue
-                
-                # 合并数据
-                arbitrage_data.append({
-                    "ETF代码": etf_code,
-                    "ETF名称": get_etf_name(etf_code),
-                    "市场价格": realtime_data["最新价"],
-                    "IOPV": iopv_data["IOPV"],
-                    "净值时间": iopv_data["净值时间"],
-                    "计算时间": beijing_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "折溢价率": calculate_premium_discount(realtime_data["最新价"], iopv_data["IOPV"])
-                })
-                
-                # 交易间隔控制，避免请求过于频繁
-                time.sleep(0.5)
-            except Exception as e:
-                logger.error(f"爬取ETF {etf_code} 套利数据失败: {str(e)}", exc_info=True)
-                continue
+        # 爬取数据 - 使用单个API调用获取所有数据
+        df = ak.fund_etf_spot_em()
         
-        if not arbitrage_data:
-            logger.warning("未获取到有效的套利数据")
+        # 记录返回的列名
+        logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
+        
+        if df.empty:
+            logger.error("AkShare未返回ETF实时行情数据")
             return pd.DataFrame()
         
-        df = pd.DataFrame(arbitrage_data)
+        # 过滤出需要的ETF
+        df = df[df['代码'].isin(etf_codes)]
+        
+        if df.empty:
+            logger.warning("筛选后无符合条件的ETF数据")
+            return pd.DataFrame()
+        
+        # 重命名列名以匹配我们的需求
+        column_mapping = {
+            '代码': 'ETF代码',
+            '名称': 'ETF名称',
+            '最新价': '市场价格',
+            'IOPV实时估值': 'IOPV',
+            '基金折价率': '折溢价率',
+            '更新时间': '净值时间'
+        }
+        
+        # 只保留我们需要的列
+        available_columns = [col for col in column_mapping.keys() if col in df.columns]
+        df = df[available_columns].rename(columns=column_mapping)
+        
+        # 添加计算时间
+        df['计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 如果没有直接提供折溢价率，我们自己计算
+        if '折溢价率' not in df.columns and 'IOPV' in df.columns and '市场价格' in df.columns:
+            df['折溢价率'] = df.apply(
+                lambda row: calculate_premium_discount(row['市场价格'], row['IOPV']), 
+                axis=1
+            )
+        
         logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
         return df
     
@@ -96,7 +107,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
 
 def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     """
-    获取ETF实时行情数据
+    获取ETF实时行情数据（已不再需要，但保留以防其他模块调用）
     
     Args:
         etf_code: ETF代码
@@ -106,16 +117,12 @@ def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
     """
     try:
         # 尝试使用AkShare获取实时数据
-        # 注意：在akshare 1.17.44中，fund_etf_spot_em不再接受symbol参数
         df = ak.fund_etf_spot_em()
-        
-        # 添加列名日志（关键调试信息）
-        logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
         
         # 过滤出特定ETF
         df = df[df['代码'] == etf_code]
         
-        if df.empty or len(df) == 0:
+        if df.empty:
             logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")
             return None
         
@@ -131,7 +138,7 @@ def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
             "开盘价": float(latest["开盘价"]),
             "最高价": float(latest["最高价"]),
             "最低价": float(latest["最低价"]),
-            "总市值": float(latest["总市值"])
+            "总市值": float(latest["总市值"]) if "总市值" in latest else 0.0
         }
         
         logger.debug(f"获取ETF {etf_code} 实时行情成功")
@@ -141,46 +148,8 @@ def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
         logger.error(f"获取ETF {etf_code} 实时行情失败: {str(e)}", exc_info=True)
         return None
 
-def get_etf_iopv_data(etf_code: str) -> Optional[Dict[str, Any]]:
-    """
-    获取ETF IOPV(基金份额参考净值)数据
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        Optional[Dict[str, Any]]: IOPV数据
-    """
-    try:
-        # 获取ETF IOPV数据
-        # 注意：在akshare 1.17.44中，fund_etf_fund_info_em参数可能已变化
-        df = ak.fund_etf_fund_info_em(indicator="IOPV")
-        
-        # 添加列名日志（关键调试信息）
-        logger.info(f"fund_etf_fund_info_em(IOPV) 接口返回列名: {df.columns.tolist()}")
-        
-        # 过滤出特定ETF
-        df = df[df['基金代码'] == etf_code]
-        
-        if df.empty or len(df) == 0:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的IOPV数据")
-            return None
-        
-        # 提取最新IOPV
-        latest = df.iloc[-1]
-        
-        # 提取必要字段
-        iopv_data = {
-            "IOPV": float(latest["IOPV"]),
-            "净值时间": latest["净值时间"]
-        }
-        
-        logger.debug(f"获取ETF {etf_code} IOPV数据成功")
-        return iopv_data
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} IOPV数据失败: {str(e)}", exc_info=True)
-        return None
+# 移除 get_etf_iopv_data 函数，因为我们不再需要单独获取IOPV
+# 原来的 get_etf_iopv_data 函数已不再需要
 
 def calculate_premium_discount(market_price: float, iopv: float) -> float:
     """
@@ -335,15 +304,24 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
                 df = load_arbitrage_data(today)
             else:
                 logger.error("重新爬取后仍无套利数据，文件路径无效或为空")
-                logger.error(f"文件路径: {file_path}")
-                logger.error(f"文件是否存在: {os.path.exists(file_path) if file_path else 'N/A'}")
+                if 'file_path' in locals():
+                    logger.error(f"文件路径: {file_path}")
+                    logger.error(f"文件是否存在: {os.path.exists(file_path)}")
+                return pd.DataFrame()
+        
+        # 检查数据完整性
+        if df.empty:
+            logger.error("加载的套利数据为空")
+            return pd.DataFrame()
+        
+        # 确保包含必要列
+        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
+        for col in required_columns:
+            if col not in df.columns:
+                logger.error(f"数据中缺少必要列: {col}")
                 return pd.DataFrame()
         
         # 筛选有套利机会的数据
-        if "折溢价率" not in df.columns:
-            logger.error("数据中缺少'折溢价率'列，无法筛选套利机会")
-            return pd.DataFrame()
-        
         opportunities = df[
             (df["折溢价率"].abs() >= Config.ARBITRAGE_THRESHOLD)
         ].copy()
@@ -359,4 +337,3 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-

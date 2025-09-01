@@ -156,6 +156,16 @@ def get_etf_iopv_data(etf_code: str) -> Optional[Dict[str, Any]]:
     try:
         # 获取ETF IOPV数据
         df = ak.fund_etf_fund_info_em(symbol=etf_code, indicator="IOPV")
+        
+        # 添加关键日志：打印返回的列名
+        if not df.empty:
+            logger.info(f"fund_etf_fund_info_em(IOPV) 接口返回列名: {df.columns.tolist()}")
+            # 打印前2行数据示例
+            logger.info(f"fund_etf_fund_info_em(IOPV) 数据示例:\n{df.head(2).to_dict()}")
+        else:
+            logger.warning(f"AkShare未返回ETF {etf_code} 的IOPV数据")
+            return None
+        
         if df.empty or len(df) == 0:
             logger.warning(f"AkShare未返回ETF {etf_code} 的IOPV数据")
             return None

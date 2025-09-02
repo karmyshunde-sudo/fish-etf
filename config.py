@@ -51,6 +51,13 @@ class Config:
     BEIJING_TIMEZONE = timezone(timedelta(hours=8))
     
     # -------------------------
+    # 0.1 新增：交易时间配置
+    # -------------------------
+    TRADING_START_TIME: str = "09:30"  # 交易开始时间
+    TRADING_END_TIME: str = "15:00"    # 交易结束时间
+    ARBITRAGE_THRESHOLD: float = 0.5   # 折溢价率阈值（百分比）
+    
+    # -------------------------
     # 1. 数据源配置
     # -------------------------
     # 初次爬取默认时间范围（1年）

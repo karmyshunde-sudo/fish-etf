@@ -32,7 +32,8 @@ _MESSAGE_CHUNK_SIZE = 1500  # 消息分块大小(字符)
 
 # 发送失败重试配置
 _MAX_RETRIES = 3
-_RETRY_DELAYS = [1, 3, 5]  # 重试延迟(秒)
+_RETRY_DELAYS = [1, 2, 3]  # 重试延迟(秒) - 修改为更短的重试间隔
+_REQUEST_TIMEOUT = 5  # 新增：请求超时时间(秒)
 
 def _check_message_length(message: str) -> List[str]:
     """
@@ -128,7 +129,7 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         }
         
         logger.debug(f"发送消息到企业微信 (重试 {retry_count}): {message[:100]}...")
-        response = requests.post(webhook, json=payload, timeout=10)
+        response = requests.post(webhook, json=payload, timeout=_REQUEST_TIMEOUT)  # 修改为使用_REQUEST_TIMEOUT
         response.raise_for_status()
         result = response.json()
         
@@ -413,7 +414,7 @@ def send_wechat_markdown(message: str,
         }
         
         logger.debug(f"发送Markdown消息到企业微信: {message[:100]}...")
-        response = requests.post(webhook, json=payload, timeout=10)
+        response = requests.post(webhook, json=payload, timeout=_REQUEST_TIMEOUT)  # 修改为使用_REQUEST_TIMEOUT
         response.raise_for_status()
         result = response.json()
         

@@ -32,7 +32,7 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
-from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities_from_source  # 修复：使用专门的数据源函数
+from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 恢复为原始导入语句
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -55,7 +55,7 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 获取最新的套利机会（直接从数据源获取，不经过缓存）
+        # 获取最新的套利机会
         opportunities = get_latest_arbitrage_opportunities()
         
         if opportunities.empty:
@@ -620,8 +620,8 @@ def crawl_arbitrage_data() -> Optional[str]:
         # 构建文件路径
         file_path = os.path.join(arbitrage_dir, f"{today}.csv")
         
-        # 获取套利数据 - 修复：直接从数据源获取，避免递归调用
-        df = get_latest_arbitrage_opportunities_from_source()
+        # 获取套利数据 - 恢复为原始导入语句
+        df = get_latest_arbitrage_opportunities()
         
         if df.empty:
             logger.warning("未获取到套利数据，无法保存")

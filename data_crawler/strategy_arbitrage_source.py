@@ -13,11 +13,12 @@ import logging
 import akshare as ak
 import os
 import time
+import datetime
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from config import Config
 from utils.date_utils import get_beijing_time, is_trading_day, is_trading_time
-from utils.file_utils import ensure_dir_exists, get_file_creation_time
+from utils.file_utils import ensure_dir_exists
 from data_crawler.etf_list_manager import get_filtered_etf_codes, get_etf_name
 
 # 初始化日志

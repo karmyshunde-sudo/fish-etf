@@ -25,7 +25,8 @@ from strategy import (
     calculate_arbitrage_opportunity,
     calculate_position_strategy,
     send_daily_report_via_wechat,
-    check_arbitrage_exit_signals
+    check_arbitrage_exit_signals,
+    mark_arbitrage_opportunities_pushed  # 新增：导入增量推送标记函数
 )
 from wechat_push.push import send_wechat_message, send_task_completion_notification
 from utils.file_utils import check_flag, set_flag, get_file_mtime
@@ -91,11 +92,17 @@ def should_execute_calculate_arbitrage() -> bool:
         logger.info("手动触发的任务，总是执行套利机会计算")
         return True
     
-    # 定时触发的任务：检查当天是否已推送
-    if check_flag(Config.get_arbitrage_flag_file()):
-        logger.info("今日已推送套利机会，跳过本次计算（定时任务）")
+    # 交易时间检查：9:30-15:00之间才执行
+    beijing_time = get_beijing_time()
+    current_time_str = beijing_time.strftime("%H:%M")
+    
+    # 检查是否在交易时间内
+    if not (Config.TRADING_START_TIME <= current_time_str <= Config.TRADING_END_TIME):
+        logger.info(f"当前时间 {current_time_str} 不在交易时间范围内 ({Config.TRADING_START_TIME}-{Config.TRADING_END_TIME})，跳过套利计算")
         return False
     
+    # 增量推送功能：不需要检查是否已推送，因为要持续检查新机会
+    logger.info("交易时间内，执行套利机会计算任务")
     return True
 
 def should_execute_calculate_position() -> bool:
@@ -296,7 +303,7 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         # 检查是否应该执行任务（仅对定时任务有效）
         if not is_manual_trigger() and not should_execute_calculate_arbitrage():
             logger.info("根据定时任务规则，跳过套利机会计算任务")
-            return {"status": "skipped", "message": "Arbitrage message already pushed today"}
+            return {"status": "skipped", "message": "Not in trading hours"}
         
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
@@ -305,14 +312,24 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         logger.info("开始计算套利机会")
         arbitrage_df = calculate_arbitrage_opportunity()
         
+        # 检查是否有新的套利机会
+        if arbitrage_df.empty:
+            logger.info("未发现需要推送的新套利机会")
+            return {
+                "status": "skipped", 
+                "message": "No new arbitrage opportunities to push"
+            }
+        
         # 推送消息（直接传递DataFrame，由push.py负责格式化）
         send_success = send_wechat_message(arbitrage_df, message_type="arbitrage")
         
         if send_success:
-            set_flag(Config.get_arbitrage_flag_file())  # 标记已推送
+            # 标记所有推送的ETF为已推送（增量推送功能）
+            mark_arbitrage_opportunities_pushed(arbitrage_df)
+            
             return {
                 "status": "success", 
-                "message": "Arbitrage strategy pushed successfully",
+                "message": f"Arbitrage strategy pushed successfully ({len(arbitrage_df)} ETFs)",
                 "calculation_time_utc": utc_now.strftime("%Y-%m-%d %H:%M"),
                 "calculation_time_beijing": beijing_now.strftime("%Y-%m-%d %H:%M")
             }
@@ -545,8 +562,8 @@ def run_scheduled_tasks():
         # 获取当前双时区时间
         _, beijing_now = get_current_times()
         
-        # 每30分钟检查一次套利机会
-        if beijing_now.minute % 30 == 0:
+        # 每5分钟检查一次套利机会（交易时间内）
+        if beijing_now.minute % 5 == 0 and Config.TRADING_START_TIME <= beijing_now.strftime("%H:%M") <= Config.TRADING_END_TIME:
             logger.info("执行套利机会计算任务")
             handle_calculate_arbitrage()
         

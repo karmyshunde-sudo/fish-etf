@@ -215,7 +215,7 @@ def rebuild_etf_metadata():
         
         # 获取所有ETF代码
         etf_list = load_all_etf_list()
-        if etf_list.empty:
+        if etf_list is None or etf_list.empty:
             logger.warning("ETF列表为空，无法重建元数据")
             return False
         
@@ -228,7 +228,7 @@ def rebuild_etf_metadata():
             
             # 获取ETF日线数据（从本地文件加载）
             df = load_etf_daily_data(etf_code)
-            if df.empty:
+            if df is None or df.empty:
                 logger.debug(f"ETF {etf_code} 无日线数据，跳过元数据重建")
                 continue
             
@@ -320,7 +320,7 @@ def create_basic_metadata_from_list() -> pd.DataFrame:
         
         # 获取ETF列表
         etf_list = load_all_etf_list()
-        if etf_list.empty:
+        if etf_list is None or etf_list.empty:
             logger.warning("ETF列表为空，无法创建基础元数据")
             return pd.DataFrame()
         
@@ -368,6 +368,14 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
     try:
         # 获取当前双时区时间
         _, beijing_now = get_current_times()
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        if df is None or df.empty:
+            logger.warning(f"ETF {etf_code} 无日线数据，评分设为0")
+            return 0.0
+        
+        # 创建安全副本
+        df = df.copy(deep=True)
         
         # 确保数据按日期排序
         if DATE_COL in df.columns:
@@ -432,6 +440,13 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
 def calculate_liquidity_score(df: pd.DataFrame) -> float:
     """计算流动性得分（日均成交额）"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，流动性得分设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if AMOUNT_COL not in df.columns:
             error_msg = f"DataFrame中缺少'{AMOUNT_COL}'列，流动性得分设为0"
             logger.warning(error_msg)
@@ -464,6 +479,13 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
 def calculate_risk_score(df: pd.DataFrame) -> float:
     """计算风险控制得分"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，风险得分设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 1. 波动率得分
         volatility = calculate_volatility(df)
         volatility_score = max(0, 100 - (volatility * 100))
@@ -495,6 +517,13 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
 def calculate_return_score(df: pd.DataFrame) -> float:
     """计算收益能力得分"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，收益得分设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if CLOSE_COL in df.columns and DATE_COL in df.columns:
             return_30d = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0] - 1) * 100
             # 线性映射到0-100分，-5%=-50分，+5%=100分
@@ -519,6 +548,13 @@ def calculate_return_score(df: pd.DataFrame) -> float:
 def calculate_sentiment_score(df: pd.DataFrame) -> float:
     """计算情绪指标得分（成交量变化率）"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，情绪得分设为50")
+            return 50.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if VOLUME_COL in df.columns:
             if len(df) >= 5:
                 volume_change = (df[VOLUME_COL].iloc[-1] / df[VOLUME_COL].iloc[-5] - 1) * 100
@@ -558,22 +594,40 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
         
         # 从ETF列表获取规模和成立日期
         etf_list = load_all_etf_list()
+        
+        # 检查ETF列表是否有效
+        if etf_list is None or etf_list.empty:
+            logger.warning("ETF列表为空或无效，使用默认值")
+            return 0.0, ""
+        
+        # 确保ETF列表包含必要的列
+        required_columns = [ETF_CODE_COL, FUND_SIZE_COL]
+        for col in required_columns:
+            if col not in etf_list.columns:
+                logger.warning(f"ETF列表缺少必要列: {col}")
+                return 0.0, ""
+        
         etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         
         if not etf_row.empty:
             # 处理规模
             size = 0.0
-            size_str = etf_row.iloc[0][FUND_SIZE_COL]
-            if isinstance(size_str, str):
-                if "亿" in size_str:
-                    size = float(size_str.replace("亿", ""))
-                elif "万" in size_str:
-                    size = float(size_str.replace("万", "")) / 10000
-            elif isinstance(size_str, (int, float)):
-                size = size_str
+            if FUND_SIZE_COL in etf_row.iloc[0]:
+                size_str = etf_row.iloc[0][FUND_SIZE_COL]
+                if isinstance(size_str, str):
+                    if "亿" in size_str:
+                        size = float(size_str.replace("亿", ""))
+                    elif "万" in size_str:
+                        size = float(size_str.replace("万", "")) / 10000
+                elif isinstance(size_str, (int, float)):
+                    size = size_str
+            else:
+                logger.warning(f"ETF {etf_code} 缺少基金规模信息，使用默认值")
             
             # 处理成立日期
-            listing_date = etf_row.iloc[0].get(LISTING_DATE_COL, "")
+            listing_date = ""
+            if LISTING_DATE_COL in etf_list.columns and LISTING_DATE_COL in etf_row.iloc[0]:
+                listing_date = etf_row.iloc[0][LISTING_DATE_COL]
             
             logger.debug(f"ETF {etf_code} 基本信息: 规模={size}亿元, 成立日期={listing_date}")
             return size, listing_date
@@ -606,9 +660,28 @@ def calculate_fundamental_score(etf_code: str) -> float:
             age_score = 50.0
         else:
             try:
-                listing_date = datetime.strptime(listing_date, "%Y-%m-%d")
-                age = (get_beijing_time() - listing_date).days / 365
-                age_score = min(max(age * 10 + 40, 0), 100)
+                # 处理不同格式的日期字符串
+                if isinstance(listing_date, str):
+                    # 尝试多种日期格式
+                    date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
+                    parsed_date = None
+                    
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(listing_date, fmt)
+                            break
+                        except:
+                            continue
+                    
+                    if parsed_date is None:
+                        logger.warning(f"无法解析ETF {etf_code} 的成立日期: {listing_date}")
+                        age_score = 50.0
+                    else:
+                        age = (get_beijing_time() - parsed_date).days / 365
+                        age_score = min(max(age * 10 + 40, 0), 100)
+                else:
+                    logger.warning(f"ETF {etf_code} 的成立日期格式不正确: {listing_date}")
+                    age_score = 50.0
             except Exception as e:
                 logger.error(f"解析成立日期失败: {str(e)}", exc_info=True)
                 age_score = 50.0
@@ -632,6 +705,13 @@ def calculate_fundamental_score(etf_code: str) -> float:
 def calculate_volatility(df: pd.DataFrame) -> float:
     """计算波动率（年化）"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，波动率设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if CLOSE_COL not in df.columns:
             logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
@@ -658,6 +738,13 @@ def calculate_volatility(df: pd.DataFrame) -> float:
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
     """计算夏普比率（年化）"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，夏普比率设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if CLOSE_COL not in df.columns:
             logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
@@ -666,7 +753,10 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
         df["daily_return"] = df[CLOSE_COL].pct_change()
         
         # 年化收益率
-        annual_return = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
+        if len(df) > 1:
+            annual_return = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
+        else:
+            annual_return = 0.0
         
         # 年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -697,6 +787,13 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
 def calculate_max_drawdown(df: pd.DataFrame) -> float:
     """计算最大回撤"""
     try:
+        if df is None or df.empty:
+            logger.warning("传入的DataFrame为空，最大回撤设为0")
+            return 0.0
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if CLOSE_COL not in df.columns:
             logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
             return 0.0
@@ -741,6 +838,13 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         float: 综合评分 (0-100)
     """
     try:
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        if df is None or df.empty:
+            logger.warning(f"ETF {etf_code} 无日线数据，无法计算套利综合评分")
+            return 0.0
+        
+        df = df.copy(deep=True)
+        
         # 计算基础ETF评分
         base_score = calculate_etf_score(etf_code, df)
         
@@ -768,6 +872,13 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         
         # 获取评分权重
         weights = Config.ARBITRAGE_SCORE_WEIGHTS
+        
+        # 确保权重字典包含所有必要的键
+        required_keys = ['liquidity', 'risk', 'return', 'market_sentiment', 'fundamental', 'component_stability', 'premium_discount']
+        for key in required_keys:
+            if key not in weights:
+                logger.warning(f"权重字典缺少必要键: {key}, 使用默认值0.1")
+                weights[key] = 0.1
         
         # 综合评分（加权平均）
         total_score = (
@@ -798,9 +909,12 @@ def calculate_component_stability_score(etf_code: str, df: pd.DataFrame) -> floa
         float: 成分股稳定性评分 (0-100)
     """
     try:
-        if df.empty:
+        if df is None or df.empty:
             logger.warning(f"ETF {etf_code} 无日线数据，无法计算成分股稳定性评分")
             return 70.0  # 默认中等偏高评分
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
         
         # 计算波动率
         volatility = calculate_volatility(df)

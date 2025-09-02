@@ -11,7 +11,7 @@ import numpy as np
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from config import Config
 from utils.date_utils import (
     get_current_times,
@@ -25,20 +25,30 @@ from utils.file_utils import (
     load_arbitrage_status,
     save_arbitrage_status,
     should_push_arbitrage,
-    mark_arbitrage_pushed
+    mark_arbitrage_pushed,
+    should_push_discount,
+    should_push_premium,
+    mark_discount_pushed,
+    mark_premium_pushed,
+    load_etf_metadata
 )
 from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 使用新数据源
-from .etf_scoring import get_etf_basic_info, get_etf_name
+from .etf_scoring import (
+    get_etf_basic_info, 
+    get_etf_name,
+    calculate_arbitrage_score,
+    calculate_component_stability_score
+)
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-def calculate_arbitrage_opportunity() -> pd.DataFrame:
+def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    基于实时数据计算ETF套利机会
+    基于实时数据计算ETF套利机会，分离折价和溢价机会
     
     Returns:
-        pd.DataFrame: 套利机会DataFrame（仅包含原始数据，不进行格式化）
+        Tuple[pd.DataFrame, pd.DataFrame]: (折价机会DataFrame, 溢价机会DataFrame)
     """
     try:
         # 获取当前双时区时间
@@ -50,36 +60,47 @@ def calculate_arbitrage_opportunity() -> pd.DataFrame:
         
         if opportunities.empty:
             logger.info("未发现有效套利机会")
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
         
         # 添加规模和日均成交额信息
         opportunities = add_etf_basic_info(opportunities)
         
-        # 按折溢价率绝对值排序
-        opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
-        opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
-        opportunities = opportunities.drop(columns=["abs_premium_discount"])
+        # 计算综合评分
+        opportunities = calculate_arbitrage_scores(opportunities)
+        
+        # 过滤有效的套利机会
+        opportunities = filter_valid_arbitrage_opportunities(opportunities)
+        
+        # 分离折价和溢价机会
+        discount_opportunities = opportunities[opportunities["折溢价率"] < 0].copy()
+        premium_opportunities = opportunities[opportunities["折溢价率"] > 0].copy()
+        
+        # 按绝对值排序
+        discount_opportunities = sort_opportunities_by_abs_premium(discount_opportunities)
+        premium_opportunities = sort_opportunities_by_abs_premium(premium_opportunities)
         
         # 筛选今天尚未推送的套利机会（增量推送功能）
-        opportunities = filter_new_arbitrage_opportunities(opportunities)
+        discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
+        premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
-        logger.info(f"发现 {len(opportunities)} 个新的套利机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
-        return opportunities
+        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会")
+        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会")
+        return discount_opportunities, premium_opportunities
     
     except Exception as e:
         error_msg = f"套利机会计算失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return pd.DataFrame()  # 确保始终返回DataFrame
+        return pd.DataFrame(), pd.DataFrame()  # 确保始终返回DataFrame
 
-def filter_new_arbitrage_opportunities(df: pd.DataFrame) -> pd.DataFrame:
+def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
-    过滤掉今天已经推送过的套利机会
+    过滤掉今天已经推送过的折价机会
     
     Args:
-        df: 原始套利机会DataFrame
+        df: 原始折价机会DataFrame
     
     Returns:
-        pd.DataFrame: 仅包含新发现的套利机会的DataFrame
+        pd.DataFrame: 仅包含新发现的折价机会的DataFrame
     """
     if df.empty:
         return df
@@ -90,18 +111,73 @@ def filter_new_arbitrage_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         for _, row in df.iterrows():
             etf_code = row["ETF代码"]
-            if should_push_arbitrage(etf_code):
+            if should_push_discount(etf_code):
                 etfs_to_push.append(etf_code)
         
         # 过滤DataFrame
         new_opportunities = df[df["ETF代码"].isin(etfs_to_push)].copy()
         
-        logger.info(f"从 {len(df)} 个机会中筛选出 {len(new_opportunities)} 个新机会（增量推送）")
+        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(new_opportunities)} 个新机会（增量推送）")
         return new_opportunities
     
     except Exception as e:
-        logger.error(f"过滤新套利机会失败: {str(e)}", exc_info=True)
+        logger.error(f"过滤新折价机会失败: {str(e)}", exc_info=True)
         # 出错时返回原始DataFrame，确保至少能推送新发现的机会
+        return df
+
+def filter_new_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    过滤掉今天已经推送过的溢价机会
+    
+    Args:
+        df: 原始溢价机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 仅包含新发现的溢价机会的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 创建一个列表，包含应该推送的ETF代码
+        etfs_to_push = []
+        
+        for _, row in df.iterrows():
+            etf_code = row["ETF代码"]
+            if should_push_premium(etf_code):
+                etfs_to_push.append(etf_code)
+        
+        # 过滤DataFrame
+        new_opportunities = df[df["ETF代码"].isin(etfs_to_push)].copy()
+        
+        logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(new_opportunities)} 个新机会（增量推送）")
+        return new_opportunities
+    
+    except Exception as e:
+        logger.error(f"过滤新溢价机会失败: {str(e)}", exc_info=True)
+        # 出错时返回原始DataFrame，确保至少能推送新发现的机会
+        return df
+
+def sort_opportunities_by_abs_premium(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    按折溢价率绝对值排序
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 排序后的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        df["abs_premium_discount"] = df["折溢价率"].abs()
+        df = df.sort_values("abs_premium_discount", ascending=False)
+        df = df.drop(columns=["abs_premium_discount"])
+        return df
+    except Exception as e:
+        logger.error(f"排序套利机会失败: {str(e)}", exc_info=True)
         return df
 
 def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,17 +209,90 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
                 df.at[idx, "规模"] = etf_info["基金规模"].values[0]
                 df.at[idx, "日均成交额"] = etf_info["日均成交额"].values[0]
         
-        # 确保只保留满足筛选条件的ETF
-        filtered_df = df[
-            (df["规模"] >= Config.GLOBAL_MIN_FUND_SIZE) &
-            (df["日均成交额"] >= Config.GLOBAL_MIN_AVG_VOLUME)
-        ]
-        
-        logger.info(f"从 {len(df)} 个机会中筛选出 {len(filtered_df)} 个符合条件的机会")
-        return filtered_df
+        logger.info(f"添加ETF基本信息完成，共处理 {len(df)} 个机会")
+        return df
     
     except Exception as e:
         logger.error(f"添加ETF基本信息失败: {str(e)}", exc_info=True)
+        return df
+
+def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    计算ETF套利综合评分
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 包含综合评分的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 获取ETF元数据
+        metadata = load_etf_metadata()
+        
+        # 为每只ETF计算综合评分
+        scores = []
+        for _, row in df.iterrows():
+            etf_code = row["ETF代码"]
+            
+            # 获取ETF日线数据
+            etf_df = load_etf_daily_data(etf_code)
+            if etf_df.empty:
+                logger.warning(f"ETF {etf_code} 无日线数据，无法计算综合评分")
+                scores.append(0.0)
+                continue
+            
+            # 计算综合评分
+            score = calculate_arbitrage_score(
+                etf_code, 
+                etf_df, 
+                row["折溢价率"],
+                metadata
+            )
+            scores.append(score)
+        
+        # 添加评分列
+        df["综合评分"] = scores
+        
+        logger.info(f"计算ETF套利综合评分完成，共 {len(df)} 个机会")
+        return df
+    
+    except Exception as e:
+        logger.error(f"计算ETF套利综合评分失败: {str(e)}", exc_info=True)
+        # 添加默认评分列
+        df["综合评分"] = 0.0
+        return df
+
+def filter_valid_arbitrage_opportunities(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    过滤有效的套利机会（基于综合评分和阈值）
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 过滤后的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 按阈值过滤
+        filtered_df = df[
+            ((df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD) & 
+             (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)) |
+            ((df["折溢价率"] >= Config.PREMIUM_THRESHOLD) & 
+             (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD))
+        ]
+        
+        logger.info(f"从 {len(df)} 个机会中筛选出 {len(filtered_df)} 个有效机会")
+        return filtered_df
+    
+    except Exception as e:
+        logger.error(f"过滤有效套利机会失败: {str(e)}", exc_info=True)
         return df
 
 def calculate_daily_volume(etf_code: str) -> float:
@@ -527,53 +676,46 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
                 logger.error(f"数据中缺少必要列: {col}")
                 return pd.DataFrame()
         
-        # 筛选有套利机会的数据 - 只保留折价率≥3.0%的机会（市场价格低于IOPV）
-        # 注意：折价率是负数，所以使用 <= -阈值
-        opportunities = df[
-            (df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD)
-        ].copy()
-        
-        # 按折价率绝对值排序（从大到小）
-        opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
-        opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
-        opportunities = opportunities.drop(columns=["abs_premium_discount"])
-        
-        logger.info(f"发现 {len(opportunities)} 个折价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
-        return opportunities
+        logger.info(f"发现 {len(df)} 个套利机会")
+        return df
     
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def mark_arbitrage_opportunities_pushed(opportunities: pd.DataFrame) -> bool:
+def mark_arbitrage_opportunities_pushed(discount_opportunities: pd.DataFrame, premium_opportunities: pd.DataFrame) -> bool:
     """
     标记套利机会已推送
     
     Args:
-        opportunities: 套利机会DataFrame
+        discount_opportunities: 折价机会DataFrame
+        premium_opportunities: 溢价机会DataFrame
     
     Returns:
         bool: 是否成功标记
     """
-    if opportunities.empty:
-        logger.info("无套利机会需要标记为已推送")
-        return True
+    success = True
     
-    try:
-        success = True
-        for _, row in opportunities.iterrows():
+    # 标记折价机会
+    if not discount_opportunities.empty:
+        for _, row in discount_opportunities.iterrows():
             etf_code = row["ETF代码"]
-            if not mark_arbitrage_pushed(etf_code):
-                logger.error(f"标记ETF {etf_code} 套利机会已推送失败")
+            if not mark_discount_pushed(etf_code):
+                logger.error(f"标记ETF {etf_code} 折价机会已推送失败")
                 success = False
-        
-        if success:
-            logger.info(f"成功标记 {len(opportunities)} 个ETF套利机会为已推送")
-        return success
     
-    except Exception as e:
-        logger.error(f"标记套利机会已推送失败: {str(e)}", exc_info=True)
-        return False
+    # 标记溢价机会
+    if not premium_opportunities.empty:
+        for _, row in premium_opportunities.iterrows():
+            etf_code = row["ETF代码"]
+            if not mark_premium_pushed(etf_code):
+                logger.error(f"标记ETF {etf_code} 溢价机会已推送失败")
+                success = False
+    
+    if success:
+        logger.info(f"成功标记 {len(discount_opportunities) + len(premium_opportunities)} 个ETF套利机会为已推送")
+    
+    return success
 
 def get_arbitrage_push_statistics() -> Dict[str, Any]:
     """
@@ -583,41 +725,94 @@ def get_arbitrage_push_statistics() -> Dict[str, Any]:
         Dict[str, Any]: 套利推送统计信息
     """
     try:
-        from utils.file_utils import get_arbitrage_push_count, get_arbitrage_push_history
+        from utils.file_utils import (
+            get_arbitrage_push_count, 
+            get_discount_push_count,
+            get_premium_push_count,
+            get_arbitrage_push_history,
+            get_discount_push_history,
+            get_premium_push_history
+        )
         
         # 获取总推送量和今日推送量
-        count_info = get_arbitrage_push_count()
+        arbitrage_count = get_arbitrage_push_count()
+        discount_count = get_discount_push_count()
+        premium_count = get_premium_push_count()
         
         # 获取历史推送记录
-        history = get_arbitrage_push_history(days=7)
+        arbitrage_history = get_arbitrage_push_history(days=7)
+        discount_history = get_discount_push_history(days=7)
+        premium_history = get_premium_push_history(days=7)
         
         # 计算总推送量
-        total_pushed = sum(history.values())
+        total_arbitrage = sum(arbitrage_history.values())
+        total_discount = sum(discount_history.values())
+        total_premium = sum(premium_history.values())
         
         # 计算日均推送量
-        daily_avg = total_pushed / len(history) if history else 0
+        daily_avg_arbitrage = total_arbitrage / len(arbitrage_history) if arbitrage_history else 0
+        daily_avg_discount = total_discount / len(discount_history) if discount_history else 0
+        daily_avg_premium = total_premium / len(premium_history) if premium_history else 0
         
         # 获取最新推送日期
-        latest_date = max(history.keys()) if history else "N/A"
+        latest_arbitrage_date = max(arbitrage_history.keys()) if arbitrage_history else "N/A"
+        latest_discount_date = max(discount_history.keys()) if discount_history else "N/A"
+        latest_premium_date = max(premium_history.keys()) if premium_history else "N/A"
         
         return {
-            "total_pushed": count_info["total"],
-            "today_pushed": count_info["today"],
-            "total_history": total_pushed,
-            "daily_avg": round(daily_avg, 2),
-            "latest_date": latest_date,
-            "history": history
+            "arbitrage": {
+                "total_pushed": arbitrage_count["total"],
+                "today_pushed": arbitrage_count["today"],
+                "total_history": total_arbitrage,
+                "daily_avg": round(daily_avg_arbitrage, 2),
+                "latest_date": latest_arbitrage_date,
+                "history": arbitrage_history
+            },
+            "discount": {
+                "total_pushed": discount_count["total"],
+                "today_pushed": discount_count["today"],
+                "total_history": total_discount,
+                "daily_avg": round(daily_avg_discount, 2),
+                "latest_date": latest_discount_date,
+                "history": discount_history
+            },
+            "premium": {
+                "total_pushed": premium_count["total"],
+                "today_pushed": premium_count["today"],
+                "total_history": total_premium,
+                "daily_avg": round(daily_avg_premium, 2),
+                "latest_date": latest_premium_date,
+                "history": premium_history
+            }
         }
     
     except Exception as e:
         logger.error(f"获取套利推送统计信息失败: {str(e)}", exc_info=True)
         return {
-            "total_pushed": 0,
-            "today_pushed": 0,
-            "total_history": 0,
-            "daily_avg": 0,
-            "latest_date": "N/A",
-            "history": {}
+            "arbitrage": {
+                "total_pushed": 0,
+                "today_pushed": 0,
+                "total_history": 0,
+                "daily_avg": 0,
+                "latest_date": "N/A",
+                "history": {}
+            },
+            "discount": {
+                "total_pushed": 0,
+                "today_pushed": 0,
+                "total_history": 0,
+                "daily_avg": 0,
+                "latest_date": "N/A",
+                "history": {}
+            },
+            "premium": {
+                "total_pushed": 0,
+                "today_pushed": 0,
+                "total_history": 0,
+                "daily_avg": 0,
+                "latest_date": "N/A",
+                "history": {}
+            }
         }
 
 # 模块初始化
@@ -630,8 +825,14 @@ try:
     
     # 清理过期的套利状态记录
     try:
-        from utils.file_utils import clear_expired_arbitrage_status
+        from utils.file_utils import (
+            clear_expired_arbitrage_status,
+            clear_expired_discount_status,
+            clear_expired_premium_status
+        )
         clear_expired_arbitrage_status()
+        clear_expired_discount_status()
+        clear_expired_premium_status()
         logger.info("已清理过期的套利状态记录")
     except Exception as e:
         logger.error(f"清理过期套利状态记录失败: {str(e)}", exc_info=True)

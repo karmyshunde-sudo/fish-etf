@@ -1,4 +1,4 @@
-name: ETF数据爬取与策略推送
+name: ETF仓位折溢套利
 
 on:
   schedule:

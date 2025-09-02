@@ -131,6 +131,9 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
                     logger.debug(f"ETF {etf_code} 无日线数据，跳过评分")
                     continue
                 
+                # 确保ETF代码格式一致（6位数字）
+                etf_code = str(etf_code).strip().zfill(6)
+                
                 # 计算ETF评分
                 score = calculate_etf_score(etf_code, df)
                 if score < min_score:
@@ -224,7 +227,8 @@ def rebuild_etf_metadata():
         
         # 遍历所有ETF，从本地日线数据计算元数据
         for _, etf in etf_list.iterrows():
-            etf_code = etf[ETF_CODE_COL]
+            # 确保ETF代码格式一致（6位数字）
+            etf_code = str(etf[ETF_CODE_COL]).strip().zfill(6)
             
             # 获取ETF日线数据（从本地文件加载）
             df = load_etf_daily_data(etf_code)
@@ -339,8 +343,11 @@ def create_basic_metadata_from_list() -> pd.DataFrame:
                 elif isinstance(size_str, (int, float)):
                     size = size_str
             
+            # 确保ETF代码格式一致（6位数字）
+            etf_code = str(etf[ETF_CODE_COL]).strip().zfill(6)
+            
             metadata_list.append({
-                "etf_code": etf[ETF_CODE_COL],
+                "etf_code": etf_code,
                 "etf_name": etf[ETF_NAME_COL],
                 "volatility": 0.1,  # 默认波动率
                 "size": size,
@@ -524,10 +531,15 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 优先使用"收盘"列，如果没有则使用"市场价格"列
-        price_col = "收盘" if "收盘" in df.columns else "市场价格"
-        if price_col not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {price_col}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
+        if CLOSE_COL in df.columns:
+            price_col = CLOSE_COL
+        elif "市场价格" in df.columns:
+            price_col = "市场价格"
+        elif "最新价" in df.columns:
+            price_col = "最新价"
+        else:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
             return 0.0
         
         if DATE_COL in df.columns:
@@ -601,13 +613,13 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
         # 从ETF列表获取规模和成立日期
         etf_list = load_all_etf_list()
         
+        # 确保ETF代码格式一致（6位数字）
+        etf_code = str(etf_code).strip().zfill(6)
+        
         # 检查ETF列表是否有效
         if etf_list is None or etf_list.empty:
             logger.warning("ETF列表为空或无效，使用默认值")
             return 0.0, ""
-        
-        # 确保ETF代码格式一致（6位数字）
-        etf_code = str(etf_code).strip().zfill(6)
         
         # 确保ETF列表包含必要的列
         required_columns = [ETF_CODE_COL, FUND_SIZE_COL]
@@ -724,10 +736,15 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 优先使用"收盘"列，如果没有则使用"市场价格"列
-        price_col = "收盘" if "收盘" in df.columns else "市场价格"
-        if price_col not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {price_col}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
+        if CLOSE_COL in df.columns:
+            price_col = CLOSE_COL
+        elif "市场价格" in df.columns:
+            price_col = "市场价格"
+        elif "最新价" in df.columns:
+            price_col = "最新价"
+        else:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
             return 0.0
         
         # 计算日收益率
@@ -759,10 +776,15 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 优先使用"收盘"列，如果没有则使用"市场价格"列
-        price_col = "收盘" if "收盘" in df.columns else "市场价格"
-        if price_col not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {price_col}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
+        if CLOSE_COL in df.columns:
+            price_col = CLOSE_COL
+        elif "市场价格" in df.columns:
+            price_col = "市场价格"
+        elif "最新价" in df.columns:
+            price_col = "最新价"
+        else:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
             return 0.0
         
         # 计算日收益率
@@ -810,10 +832,15 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 优先使用"收盘"列，如果没有则使用"市场价格"列
-        price_col = "收盘" if "收盘" in df.columns else "市场价格"
-        if price_col not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {price_col}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
+        if CLOSE_COL in df.columns:
+            price_col = CLOSE_COL
+        elif "市场价格" in df.columns:
+            price_col = "市场价格"
+        elif "最新价" in df.columns:
+            price_col = "最新价"
+        else:
+            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
             return 0.0
         
         # 计算累计收益率

@@ -19,7 +19,14 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-from utils.file_utils import load_etf_daily_data, ensure_chinese_columns
+from utils.file_utils import (
+    load_etf_daily_data, 
+    ensure_chinese_columns,
+    load_arbitrage_status,
+    save_arbitrage_status,
+    should_push_arbitrage,
+    mark_arbitrage_pushed
+)
 from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 使用新数据源
 from .etf_scoring import get_etf_basic_info, get_etf_name
 
@@ -53,13 +60,49 @@ def calculate_arbitrage_opportunity() -> pd.DataFrame:
         opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
         opportunities = opportunities.drop(columns=["abs_premium_discount"])
         
-        logger.info(f"发现 {len(opportunities)} 个套利机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
+        # 筛选今天尚未推送的套利机会（增量推送功能）
+        opportunities = filter_new_arbitrage_opportunities(opportunities)
+        
+        logger.info(f"发现 {len(opportunities)} 个新的套利机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
         return opportunities
     
     except Exception as e:
         error_msg = f"套利机会计算失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return pd.DataFrame()  # 确保始终返回DataFrame
+
+def filter_new_arbitrage_opportunities(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    过滤掉今天已经推送过的套利机会
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 仅包含新发现的套利机会的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 创建一个列表，包含应该推送的ETF代码
+        etfs_to_push = []
+        
+        for _, row in df.iterrows():
+            etf_code = row["ETF代码"]
+            if should_push_arbitrage(etf_code):
+                etfs_to_push.append(etf_code)
+        
+        # 过滤DataFrame
+        new_opportunities = df[df["ETF代码"].isin(etfs_to_push)].copy()
+        
+        logger.info(f"从 {len(df)} 个机会中筛选出 {len(new_opportunities)} 个新机会（增量推送）")
+        return new_opportunities
+    
+    except Exception as e:
+        logger.error(f"过滤新套利机会失败: {str(e)}", exc_info=True)
+        # 出错时返回原始DataFrame，确保至少能推送新发现的机会
+        return df
 
 def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -434,6 +477,81 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def mark_arbitrage_opportunities_pushed(opportunities: pd.DataFrame) -> bool:
+    """
+    标记套利机会已推送
+    
+    Args:
+        opportunities: 套利机会DataFrame
+    
+    Returns:
+        bool: 是否成功标记
+    """
+    if opportunities.empty:
+        logger.info("无套利机会需要标记为已推送")
+        return True
+    
+    try:
+        success = True
+        for _, row in opportunities.iterrows():
+            etf_code = row["ETF代码"]
+            if not mark_arbitrage_pushed(etf_code):
+                logger.error(f"标记ETF {etf_code} 套利机会已推送失败")
+                success = False
+        
+        if success:
+            logger.info(f"成功标记 {len(opportunities)} 个ETF套利机会为已推送")
+        return success
+    
+    except Exception as e:
+        logger.error(f"标记套利机会已推送失败: {str(e)}", exc_info=True)
+        return False
+
+def get_arbitrage_push_statistics() -> Dict[str, Any]:
+    """
+    获取套利推送统计信息
+    
+    Returns:
+        Dict[str, Any]: 套利推送统计信息
+    """
+    try:
+        from utils.file_utils import get_arbitrage_push_count, get_arbitrage_push_history
+        
+        # 获取总推送量和今日推送量
+        count_info = get_arbitrage_push_count()
+        
+        # 获取历史推送记录
+        history = get_arbitrage_push_history(days=7)
+        
+        # 计算总推送量
+        total_pushed = sum(history.values())
+        
+        # 计算日均推送量
+        daily_avg = total_pushed / len(history) if history else 0
+        
+        # 获取最新推送日期
+        latest_date = max(history.keys()) if history else "N/A"
+        
+        return {
+            "total_pushed": count_info["total"],
+            "today_pushed": count_info["today"],
+            "total_history": total_pushed,
+            "daily_avg": round(daily_avg, 2),
+            "latest_date": latest_date,
+            "history": history
+        }
+    
+    except Exception as e:
+        logger.error(f"获取套利推送统计信息失败: {str(e)}", exc_info=True)
+        return {
+            "total_pushed": 0,
+            "today_pushed": 0,
+            "total_history": 0,
+            "daily_avg": 0,
+            "latest_date": "N/A",
+            "history": {}
+        }
+
 # 模块初始化
 try:
     # 确保必要的目录存在
@@ -441,6 +559,14 @@ try:
     
     # 初始化日志
     logger.info("套利策略模块初始化完成")
+    
+    # 清理过期的套利状态记录
+    try:
+        from utils.file_utils import clear_expired_arbitrage_status
+        clear_expired_arbitrage_status()
+        logger.info("已清理过期的套利状态记录")
+    except Exception as e:
+        logger.error(f"清理过期套利状态记录失败: {str(e)}", exc_info=True)
     
 except Exception as e:
     error_msg = f"套利策略模块初始化失败: {str(e)}"

@@ -73,6 +73,8 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df["振幅"] = ((df["最高"] - df["最低"]) / df["前收盘"]) * 100
             # 其他列的推导逻辑...
             else:
+                # 创建安全副本以避免SettingWithCopyWarning
+                df = df.copy(deep=True)
                 df[chn_col] = None  # 填充缺失列
     
     # 只保留标准中文列
@@ -1193,105 +1195,36 @@ def mark_premium_pushed(etf_code: str) -> bool:
 
 def clear_expired_arbitrage_status() -> bool:
     """
-    清理过期的套利状态记录（保留最近7天的记录）
+    【已修复】不再清理套利状态记录
+    套利状态记录是交易流水，必须永久保存
     
     Returns:
-        bool: 是否成功清理
+        bool: 始终返回True（不再执行清理操作）
     """
-    try:
-        # 加载套利状态
-        status = load_arbitrage_status()
-        if not status:
-            return True
-        
-        # 获取当前日期
-        from utils.date_utils import get_beijing_time
-        current_date = get_beijing_time()
-        
-        # 计算7天前的日期
-        seven_days_ago = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        # 过滤掉过期的记录
-        updated_status = {etf: date for etf, date in status.items() if date >= seven_days_ago}
-        
-        # 如果有记录被删除，保存更新后的状态
-        if len(updated_status) < len(status):
-            logger.info(f"清理过期套利状态记录：移除了 {len(status) - len(updated_status)} 条记录")
-            return save_arbitrage_status(updated_status)
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"清理套利状态记录失败: {str(e)}", exc_info=True)
-        return False
+    logger.info("跳过套利状态记录清理 - 交易流水必须永久保存")
+    return True
 
 def clear_expired_discount_status() -> bool:
     """
-    清理过期的折价状态记录（保留最近7天的记录）
+    【已修复】不再清理折价状态记录
+    折价状态记录是交易流水，必须永久保存
     
     Returns:
-        bool: 是否成功清理
+        bool: 始终返回True（不再执行清理操作）
     """
-    try:
-        # 加载折价状态
-        status = load_discount_status()
-        if not status:
-            return True
-        
-        # 获取当前日期
-        from utils.date_utils import get_beijing_time
-        current_date = get_beijing_time()
-        
-        # 计算7天前的日期
-        seven_days_ago = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        # 过滤掉过期的记录
-        updated_status = {etf: date for etf, date in status.items() if date >= seven_days_ago}
-        
-        # 如果有记录被删除，保存更新后的状态
-        if len(updated_status) < len(status):
-            logger.info(f"清理过期折价状态记录：移除了 {len(status) - len(updated_status)} 条记录")
-            return save_discount_status(updated_status)
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"清理折价状态记录失败: {str(e)}", exc_info=True)
-        return False
+    logger.info("跳过折价状态记录清理 - 交易流水必须永久保存")
+    return True
 
 def clear_expired_premium_status() -> bool:
     """
-    清理过期的溢价状态记录（保留最近7天的记录）
+    【已修复】不再清理溢价状态记录
+    溢价状态记录是交易流水，必须永久保存
     
     Returns:
-        bool: 是否成功清理
+        bool: 始终返回True（不再执行清理操作）
     """
-    try:
-        # 加载溢价状态
-        status = load_premium_status()
-        if not status:
-            return True
-        
-        # 获取当前日期
-        from utils.date_utils import get_beijing_time
-        current_date = get_beijing_time()
-        
-        # 计算7天前的日期
-        seven_days_ago = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        # 过滤掉过期的记录
-        updated_status = {etf: date for etf, date in status.items() if date >= seven_days_ago}
-        
-        # 如果有记录被删除，保存更新后的状态
-        if len(updated_status) < len(status):
-            logger.info(f"清理过期溢价状态记录：移除了 {len(status) - len(updated_status)} 条记录")
-            return save_premium_status(updated_status)
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"清理溢价状态记录失败: {str(e)}", exc_info=True)
-        return False
+    logger.info("跳过溢价状态记录清理 - 交易流水必须永久保存")
+    return True
 
 def get_arbitrage_push_count() -> Dict[str, int]:
     """
@@ -1389,12 +1322,12 @@ def get_premium_push_count() -> Dict[str, int]:
             "today": 0
         }
 
-def get_arbitrage_push_history(days: int = 7) -> Dict[str, int]:
+def get_arbitrage_push_history(days: int = 3650) -> Dict[str, int]:
     """
-    获取套利推送历史记录
+    获取套利推送历史记录（默认查询10年数据）
     
     Args:
-        days: 查询天数
+        days: 查询天数（默认10年，约3650天）
     
     Returns:
         Dict[str, int]: {日期: 推送数量} 的字典
@@ -1420,6 +1353,9 @@ def get_arbitrage_push_history(days: int = 7) -> Dict[str, int]:
             if date in history:
                 history[date] += 1
         
+        # 过滤掉0值记录
+        history = {k: v for k, v in history.items() if v > 0}
+        
         logger.debug(f"获取套利推送历史记录成功，共 {len(history)} 天")
         return history
     
@@ -1427,12 +1363,12 @@ def get_arbitrage_push_history(days: int = 7) -> Dict[str, int]:
         logger.error(f"获取套利推送历史记录失败: {str(e)}", exc_info=True)
         return {}
 
-def get_discount_push_history(days: int = 7) -> Dict[str, int]:
+def get_discount_push_history(days: int = 3650) -> Dict[str, int]:
     """
-    获取折价推送历史记录
+    获取折价推送历史记录（默认查询10年数据）
     
     Args:
-        days: 查询天数
+        days: 查询天数（默认10年，约3650天）
     
     Returns:
         Dict[str, int]: {日期: 推送数量} 的字典
@@ -1458,6 +1394,9 @@ def get_discount_push_history(days: int = 7) -> Dict[str, int]:
             if date in history:
                 history[date] += 1
         
+        # 过滤掉0值记录
+        history = {k: v for k, v in history.items() if v > 0}
+        
         logger.debug(f"获取折价推送历史记录成功，共 {len(history)} 天")
         return history
     
@@ -1465,12 +1404,12 @@ def get_discount_push_history(days: int = 7) -> Dict[str, int]:
         logger.error(f"获取折价推送历史记录失败: {str(e)}", exc_info=True)
         return {}
 
-def get_premium_push_history(days: int = 7) -> Dict[str, int]:
+def get_premium_push_history(days: int = 3650) -> Dict[str, int]:
     """
-    获取溢价推送历史记录
+    获取溢价推送历史记录（默认查询10年数据）
     
     Args:
-        days: 查询天数
+        days: 查询天数（默认10年，约3650天）
     
     Returns:
         Dict[str, int]: {日期: 推送数量} 的字典
@@ -1496,6 +1435,9 @@ def get_premium_push_history(days: int = 7) -> Dict[str, int]:
             if date in history:
                 history[date] += 1
         
+        # 过滤掉0值记录
+        history = {k: v for k, v in history.items() if v > 0}
+        
         logger.debug(f"获取溢价推送历史记录成功，共 {len(history)} 天")
         return history
     
@@ -1514,17 +1456,14 @@ try:
         os.makedirs(Config.FLAG_DIR, exist_ok=True)
         logger.info(f"创建FLAG_DIR目录: {Config.FLAG_DIR}")
     
-    # 清理过期的套利状态记录
-    if os.path.exists(Config.ARBITRAGE_STATUS_FILE):
-        clear_expired_arbitrage_status()
+    # 【已修复】不再清理套利状态记录
+    logger.info("跳过套利状态记录清理 - 交易流水必须永久保存")
     
-    # 清理过期的折价状态记录
-    if os.path.exists(Config.DISCOUNT_STATUS_FILE):
-        clear_expired_discount_status()
+    # 【已修复】不再清理折价状态记录
+    logger.info("跳过折价状态记录清理 - 交易流水必须永久保存")
     
-    # 清理过期的溢价状态记录
-    if os.path.exists(Config.PREMIUM_STATUS_FILE):
-        clear_expired_premium_status()
+    # 【已修复】不再清理溢价状态记录
+    logger.info("跳过溢价状态记录清理 - 交易流水必须永久保存")
     
     # 初始化日志
     logger.info("文件工具模块初始化完成")

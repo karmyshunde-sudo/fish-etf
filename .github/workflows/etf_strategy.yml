@@ -4,7 +4,7 @@ on:
   schedule:
     # GitHub Actions使用UTC时区，注释中表示对应的北京时间
     - cron: '0 8 * * 1-5'   # UTC 08:00 = 北京时间 16:00 (日线爬取)
-    - cron: '40 1-6 * * 1-5' # UTC 01:40-06:40 = 北京时间 09:40-14:40 (套利数据爬取和计算)
+    - cron: '40 1-6 * * 1-5' # UTC 01:40-06:40 = 北京时间 09:40-14:40 (套利计算)
     - cron: '0 6 * * 1-5'   # UTC 06:00 = 北京时间 14:00 (仓位策略)
     - cron: '0 12 * * 0'    # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
   workflow_dispatch:
@@ -15,7 +15,6 @@ on:
         type: choice
         options:
           - 'crawl_etf_daily'
-          - 'crawl_arbitrage_data'  # 新增任务类型
           - 'calculate_arbitrage'
           - 'calculate_position'
           - 'update_etf_list'
@@ -93,18 +92,12 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
               echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
+            elif [[ "${{ github.event.schedule }}" == "40 1-6 * * 1-5" ]]; then
+              echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "0 6 * * 1-5" ]]; then
               echo "TASK=calculate_position" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "0 12 * * 0" ]]; then
               echo "TASK=update_etf_list" >> $GITHUB_ENV
-            elif [[ "${{ github.event.schedule }}" == "40 1-6 * * 1-5" ]]; then
-              # 根据小时判断是数据爬取还是计算
-              HOUR=$(date -u '+%H')
-              if [[ $HOUR -ge 1 && $HOUR -le 5 ]]; then
-                echo "TASK=crawl_arbitrage_data" >> $GITHUB_ENV
-              else
-                echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
-              fi
             else
               echo "未知的定时任务: ${{ github.event.schedule }}"
               echo "TASK=unknown" >> $GITHUB_ENV
@@ -206,7 +199,7 @@ jobs:
         if: >-
           env.skip_execution != 'true' && 
           steps.execute_task.outputs.task_status == 'success' &&
-          (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list' || env.TASK == 'crawl_arbitrage_data')
+          (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list')
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
@@ -245,19 +238,6 @@ jobs:
               echo "ETF列表提交成功"
             else
               echo "ETF列表无变化，无需提交"
-            fi
-          fi
-          
-          # 3. 提交套利数据文件
-          if [[ "$TASK" == "crawl_arbitrage_data" ]]; then
-            echo "【断点续传】提交套利数据文件..."
-            git add data/arbitrage/
-            if ! git diff --quiet HEAD -- data/arbitrage/; then
-              git commit -m "【断点续传】自动更新套利数据 [${TRIGGER_TYPE}]"
-              git push origin main || echo "套利数据推送失败"
-              echo "套利数据提交成功"
-            else
-              echo "套利数据无变化，无需提交"
             fi
           fi
           

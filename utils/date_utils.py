@@ -73,6 +73,26 @@ def get_utc_time() -> datetime:
         from config import Config
         return datetime.utcnow().replace(tzinfo=Config.UTC_TIMEZONE)
 
+def is_trading_time() -> bool:
+    """
+    检查当前是否在交易时间（不依赖其他可能引起循环导入的模块）
+    
+    Returns:
+        bool: 是否在交易时间
+    """
+    from datetime import datetime
+    from config import Config
+    
+    # 获取当前系统时间（假设系统时区已设置为北京时间）
+    current_time = datetime.now().time()
+    
+    # 将配置中的交易时间字符串转换为time对象
+    trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+    trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
+    
+    # 检查是否在交易时间内
+    return trading_start <= current_time <= trading_end
+
 def is_same_day(date1: datetime, date2: datetime) -> bool:
     """
     判断两个时间是否是同一天

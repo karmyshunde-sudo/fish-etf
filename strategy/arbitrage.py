@@ -13,12 +13,15 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from config import Config
+
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
     is_file_outdated
+    is_trading_time  # 确保这里导入
 )
+
 from utils.file_utils import (
     load_etf_daily_data, 
     ensure_chinese_columns,
@@ -32,7 +35,9 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
+
 from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities
+
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -56,20 +61,6 @@ def is_manual_trigger() -> bool:
     except Exception as e:
         logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
         return False
-
-def is_trading_time() -> bool:
-    """
-    检查当前是否在交易时间
-    
-    Returns:
-        bool: 是否在交易时间
-    """
-    beijing_time = get_beijing_time()
-    current_time = beijing_time.time()
-    trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
-    trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
-    
-    return trading_start <= current_time <= trading_end
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
     """

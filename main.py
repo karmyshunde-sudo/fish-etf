@@ -101,7 +101,6 @@ def should_execute_calculate_arbitrage() -> bool:
         logger.info(f"当前时间 {current_time_str} 不在交易时间范围内 ({Config.TRADING_START_TIME}-{Config.TRADING_END_TIME})，跳过套利计算")
         return False
     
-    # 增量推送功能：不需要检查是否已推送，因为要持续检查新机会
     logger.info("交易时间内，执行套利机会计算任务")
     return True
 
@@ -310,33 +309,47 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         
         # 计算套利机会
         logger.info("开始计算套利机会")
-        arbitrage_df = calculate_arbitrage_opportunity()
+        discount_df, premium_df = calculate_arbitrage_opportunity()
         
         # 检查是否有新的套利机会
-        if arbitrage_df.empty:
+        new_opportunities = False
+        if not discount_df.empty:
+            logger.info(f"发现 {len(discount_df)} 个新的折价机会")
+            # 推送折价消息
+            send_success = send_wechat_message(discount_df, message_type="discount")
+            if send_success:
+                new_opportunities = True
+                logger.info("折价机会消息发送成功")
+            else:
+                logger.error("折价机会消息发送失败")
+        
+        if not premium_df.empty:
+            logger.info(f"发现 {len(premium_df)} 个新的溢价机会")
+            # 推送溢价消息
+            send_success = send_wechat_message(premium_df, message_type="premium")
+            if send_success:
+                new_opportunities = True
+                logger.info("溢价机会消息发送成功")
+            else:
+                logger.error("溢价机会消息发送失败")
+        
+        # 标记所有推送的ETF为已推送
+        if mark_arbitrage_opportunities_pushed(discount_df, premium_df):
+            logger.info("成功标记所有推送的ETF为已推送")
+        
+        if new_opportunities:
+            return {
+                "status": "success", 
+                "message": f"Arbitrage strategy pushed successfully (Discount: {len(discount_df)}, Premium: {len(premium_df)})",
+                "calculation_time_utc": utc_now.strftime("%Y-%m-%d %H:%M"),
+                "calculation_time_beijing": beijing_now.strftime("%Y-%m-%d %H:%M")
+            }
+        else:
             logger.info("未发现需要推送的新套利机会")
             return {
                 "status": "skipped", 
                 "message": "No new arbitrage opportunities to push"
             }
-        
-        # 推送消息（直接传递DataFrame，由push.py负责格式化）
-        send_success = send_wechat_message(arbitrage_df, message_type="arbitrage")
-        
-        if send_success:
-            # 标记所有推送的ETF为已推送（增量推送功能）
-            mark_arbitrage_opportunities_pushed(arbitrage_df)
-            
-            return {
-                "status": "success", 
-                "message": f"Arbitrage strategy pushed successfully ({len(arbitrage_df)} ETFs)",
-                "calculation_time_utc": utc_now.strftime("%Y-%m-%d %H:%M"),
-                "calculation_time_beijing": beijing_now.strftime("%Y-%m-%d %H:%M")
-            }
-        else:
-            error_msg = "套利策略推送失败"
-            logger.error(error_msg)
-            return {"status": "failed", "message": error_msg}
             
     except Exception as e:
         error_msg = f"套利机会计算失败: {str(e)}"

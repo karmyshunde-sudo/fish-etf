@@ -4,8 +4,7 @@
 套利策略专用数据源模块
 负责爬取ETF实时市场价格和IOPV(基金份额参考净值)
 数据保存格式: data/arbitrage/YYYYMMDD.csv
-特别设计了断点续爬机制和数据验证逻辑，确保数据质量
-增强功能：支持手动测试模式，使用最近有效数据作为测试数据
+增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
 """
 
 import pandas as pd
@@ -18,26 +17,103 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from config import Config
 from utils.date_utils import get_beijing_time, is_trading_day, is_trading_time
-from utils.file_utils import ensure_dir_exists
+from utils.file_utils import ensure_dir_exists, get_file_creation_time
 from data_crawler.etf_list_manager import get_filtered_etf_codes, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-def is_manual_trigger() -> bool:
+def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     """
-    判断是否是手动触发的任务
+    清理超过指定天数的套利数据文件
     
-    Returns:
-        bool: 如果是手动触发返回True，否则返回False
+    Args:
+        days_to_keep: 保留天数
     """
     try:
-        # 检查环境变量，GitHub Actions中手动触发会有特殊环境变量
-        return os.environ.get('GITHUB_EVENT_NAME', '') == 'workflow_dispatch'
+        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
+        if not os.path.exists(arbitrage_dir):
+            return
+        
+        # 获取当前日期
+        current_date = get_beijing_time()
+        logger.info(f"清理旧套利数据：保留最近 {days_to_keep} 天的数据")
+        
+        # 遍历目录中的所有文件
+        for file_name in os.listdir(arbitrage_dir):
+            if not file_name.endswith(".csv"):
+                continue
+                
+            # 提取文件日期
+            try:
+                file_date_str = file_name.split(".")[0]
+                file_date = datetime.strptime(file_date_str, "%Y%m%d")
+            except (ValueError, TypeError):
+                continue
+                
+            # 计算日期差
+            days_diff = (current_date - file_date).days
+            
+            # 删除超过保留天数的文件
+            if days_diff > days_to_keep:
+                file_path = os.path.join(arbitrage_dir, file_name)
+                os.remove(file_path)
+                logger.info(f"已删除旧套利数据文件: {file_path}")
+    
     except Exception as e:
-        logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
-        return False
+        logger.error(f"清理旧套利数据失败: {str(e)}", exc_info=True)
 
+def append_arbitrage_data(df: pd.DataFrame) -> str:
+    """
+    增量保存套利数据到CSV文件
+    
+    Args:
+        df: 套利数据DataFrame
+    
+    Returns:
+        str: 保存的文件路径
+    """
+    try:
+        if df.empty:
+            logger.warning("套利数据为空，跳过保存")
+            return ""
+        
+        # 添加时间戳列
+        if "timestamp" not in df.columns:
+            df["timestamp"] = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 创建数据目录
+        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
+        ensure_dir_exists(arbitrage_dir)
+        
+        # 生成文件名 (YYYYMMDD.csv)
+        beijing_time = get_beijing_time()
+        file_date = beijing_time.strftime("%Y%m%d")
+        file_path = os.path.join(arbitrage_dir, f"{file_date}.csv")
+        
+        # 保存数据 - 增量追加模式
+        if os.path.exists(file_path):
+            # 读取现有数据
+            existing_df = pd.read_csv(file_path, encoding="utf-8-sig")
+            # 合并数据
+            combined_df = pd.concat([existing_df, df], ignore_index=True)
+            # 去重（基于ETF代码和时间戳）
+            combined_df = combined_df.drop_duplicates(
+                subset=["ETF代码", "timestamp"], 
+                keep="last"
+            )
+            # 保存合并后的数据
+            combined_df.to_csv(file_path, index=False, encoding="utf-8-sig")
+        else:
+            # 创建新文件
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+        
+        logger.info(f"套利数据已增量保存至: {file_path} (新增{len(df)}条记录)")
+        return file_path
+    
+    except Exception as e:
+        logger.error(f"增量保存套利数据失败: {str(e)}", exc_info=True)
+        return ""
 
 def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     """
@@ -51,15 +127,17 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # 检查是否为交易日和交易时间
+        # 检查是否为交易日
         if not is_trading_day():
-            logger.warning("当前不是交易日，跳过套利数据爬取")
-            return pd.DataFrame()
+            logger.warning("当前不是交易日")
         
         # 检查是否为交易时间
-        if not is_trading_time():
-            logger.warning(f"当前不是交易时间 ({Config.TRADING_START_TIME} - {Config.TRADING_END_TIME})，跳过套利数据爬取")
-            return pd.DataFrame()
+        current_time = beijing_time.time()
+        trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+        trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
+        
+        if not (trading_start <= current_time <= trading_end):
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})")
         
         # 获取需要监控的ETF列表
         etf_codes = get_filtered_etf_codes()
@@ -117,49 +195,6 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def get_etf_realtime_data(etf_code: str) -> Optional[Dict[str, Any]]:
-    """
-    获取ETF实时行情数据（已不再需要，但保留以防其他模块调用）
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        Optional[Dict[str, Any]]: 实时行情数据
-    """
-    try:
-        # 尝试使用AkShare获取实时数据
-        df = ak.fund_etf_spot_em()
-        
-        # 过滤出特定ETF
-        df = df[df['代码'] == etf_code]
-        
-        if df.empty:
-            logger.warning(f"AkShare未返回ETF {etf_code} 的实时行情")
-            return None
-        
-        # 提取最新行情
-        latest = df.iloc[0]
-        
-        # 提取必要字段
-        realtime_data = {
-            "最新价": float(latest["最新价"]),
-            "成交量": float(latest["成交量"]),
-            "涨跌幅": float(latest["涨跌幅"]),
-            "涨跌额": float(latest["涨跌额"]),
-            "开盘价": float(latest["开盘价"]),
-            "最高价": float(latest["最高价"]),
-            "最低价": float(latest["最低价"]),
-            "总市值": float(latest["总市值"]) if "总市值" in latest else 0.0
-        }
-        
-        logger.debug(f"获取ETF {etf_code} 实时行情成功")
-        return realtime_data
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 实时行情失败: {str(e)}", exc_info=True)
-        return None
-
 def calculate_premium_discount(market_price: float, iopv: float) -> float:
     """
     计算折溢价率
@@ -177,57 +212,6 @@ def calculate_premium_discount(market_price: float, iopv: float) -> float:
     
     premium_discount = ((market_price - iopv) / iopv) * 100
     return round(premium_discount, 2)
-
-def save_arbitrage_data(df: pd.DataFrame) -> str:
-    """
-    保存套利数据到CSV文件
-    
-    Args:
-        df: 套利数据DataFrame
-    
-    Returns:
-        str: 保存的文件路径
-    """
-    try:
-        if df.empty:
-            logger.warning("套利数据为空，跳过保存")
-            return ""
-        
-        # 创建数据目录
-        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
-        ensure_dir_exists(arbitrage_dir)
-        
-        # 添加目录权限检查
-        if not os.access(arbitrage_dir, os.W_OK):
-            logger.warning(f"目录 {arbitrage_dir} 没有写入权限，尝试修复...")
-            try:
-                os.chmod(arbitrage_dir, 0o777)
-                logger.info(f"已修复目录权限: {arbitrage_dir}")
-            except Exception as e:
-                logger.error(f"修复目录权限失败: {str(e)}")
-        
-        # 生成文件名 (YYYYMMDD.csv)
-        beijing_time = get_beijing_time()
-        file_date = beijing_time.strftime("%Y%m%d")
-        file_path = os.path.join(arbitrage_dir, f"{file_date}.csv")
-        
-        # 保存数据前检查
-        logger.debug(f"准备保存套利数据到: {file_path}")
-        
-        # 保存数据
-        df.to_csv(file_path, index=False, encoding="utf-8-sig")
-        
-        # 验证文件是否成功创建
-        if os.path.exists(file_path):
-            logger.info(f"套利数据已成功保存至: {file_path} (共{len(df)}条记录)")
-            return file_path
-        else:
-            logger.error(f"文件保存失败，但无异常: {file_path}")
-            return ""
-    
-    except Exception as e:
-        logger.error(f"保存套利数据失败: {str(e)}", exc_info=True)
-        return ""
 
 def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
     """
@@ -250,24 +234,21 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
         
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            logger.warning(f"套利数据文件不存在: {file_path}")
+            logger.debug(f"套利数据文件不存在: {file_path}")
             return pd.DataFrame()
         
         # 读取数据
         df = pd.read_csv(file_path, encoding="utf-8-sig")
-        logger.info(f"成功加载套利数据: {file_path} (共{len(df)}条记录)")
+        logger.debug(f"成功加载套利数据: {file_path} (共{len(df)}条记录)")
         return df
     
     except Exception as e:
         logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def crawl_arbitrage_data(is_manual: bool = False) -> str:
+def crawl_arbitrage_data() -> str:
     """
     执行套利数据爬取并保存
-    
-    Args:
-        is_manual: 是否是手动测试
     
     Returns:
         str: 保存的文件路径
@@ -282,83 +263,34 @@ def crawl_arbitrage_data(is_manual: bool = False) -> str:
         
         # 详细检查爬取结果
         if df.empty:
-            logger.warning("未获取到套利数据")
-            # 如果是手动测试，尝试加载最近有效数据
-            if is_manual:
-                logger.info("【测试模式】爬取失败，尝试加载最近有效套利数据")
-                df = load_latest_valid_arbitrage_data()
-                if not df.empty:
-                    # 添加测试标记
-                    if "备注" not in df.columns:
-                        df["备注"] = "【测试数据】使用历史数据"
-                    else:
-                        df["备注"] = df["备注"].fillna("【测试数据】使用历史数据")
-                    logger.info(f"【测试模式】成功加载最近有效套利数据，共 {len(df)} 个机会")
-        
-        # 检查数据完整性
-        if df.empty:
             logger.error("未获取到有效的套利数据，爬取结果为空")
             return ""
+        else:
+            logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
         
-        # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"数据中缺少必要列: {col}")
-                return ""
-        
-        # 保存数据
-        return save_arbitrage_data(df)
+        # 增量保存数据
+        return append_arbitrage_data(df)
     
     except Exception as e:
         logger.error(f"套利数据爬取任务执行失败: {str(e)}", exc_info=True)
         return ""
 
-def get_latest_arbitrage_opportunities(is_manual: Optional[bool] = None) -> pd.DataFrame:
+def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     """
     获取最新的套利机会
-    
-    Args:
-        is_manual: 是否是手动测试模式（可选，如果不提供则自动检测）
     
     Returns:
         pd.DataFrame: 套利机会DataFrame
     """
     try:
-        # 自动检测是否是手动触发
-        if is_manual is None:
-            is_manual = is_manual_trigger()
-        
-        # 获取当前日期
-        today = get_beijing_time().strftime("%Y%m%d")
-        
         # 尝试加载今天的套利数据
+        today = get_beijing_time().strftime("%Y%m%d")
         df = load_arbitrage_data(today)
         
-        # 检查是否在交易时间
-        if not is_trading_time():
-            if is_manual:
-                logger.warning("【测试模式】当前不是交易时间，尝试使用最近有效数据")
-                # 尝试加载最近一天的有效数据
-                df = load_latest_valid_arbitrage_data()
-                
-                if not df.empty:
-                    # 添加测试标记
-                    if "备注" not in df.columns:
-                        df["备注"] = "【测试数据】使用" + df["日期"].max() + "的数据"
-                    else:
-                        df["备注"] = df["备注"].fillna("【测试数据】使用" + df["日期"].max() + "的数据")
-                    logger.info(f"【测试模式】成功加载最近有效套利数据（{df['日期'].max()}），共 {len(df)} 个机会")
-                else:
-                    logger.error("【测试模式】未找到有效的历史套利数据")
-            else:
-                logger.warning(f"当前不是交易时间 ({Config.TRADING_START_TIME} - {Config.TRADING_END_TIME})，跳过套利数据爬取")
-                return pd.DataFrame()
-        
-        # 如果数据为空，尝试重新爬取（仅在交易时间或手动测试模式下）
-        if df.empty and (is_trading_time() or is_manual):
+        # 如果数据为空，尝试重新爬取
+        if df.empty:
             logger.warning("无今日套利数据，尝试重新爬取")
-            file_path = crawl_arbitrage_data(is_manual=is_manual)
+            file_path = crawl_arbitrage_data()
             
             # 详细检查爬取结果
             if file_path and os.path.exists(file_path):
@@ -366,21 +298,15 @@ def get_latest_arbitrage_opportunities(is_manual: Optional[bool] = None) -> pd.D
                 df = load_arbitrage_data(today)
             else:
                 logger.warning("重新爬取后仍无套利数据")
-                # 如果是手动测试，尝试加载最近有效数据
-                if is_manual:
-                    logger.info("【测试模式】尝试加载最近有效套利数据")
-                    df = load_latest_valid_arbitrage_data()
-                    if not df.empty:
-                        # 添加测试标记
-                        if "备注" not in df.columns:
-                            df["备注"] = "【测试数据】使用历史数据"
-                        else:
-                            df["备注"] = df["备注"].fillna("【测试数据】使用历史数据")
-                        logger.info(f"【测试模式】成功加载最近有效套利数据，共 {len(df)} 个机会")
         
         # 检查数据完整性
         if df.empty:
-            logger.error("加载的套利数据为空")
+            logger.warning("加载的套利数据为空，将尝试加载最近有效数据")
+            df = load_latest_valid_arbitrage_data()
+        
+        # 检查数据完整性
+        if df.empty:
+            logger.error("无法获取任何有效的套利数据")
             return pd.DataFrame()
         
         # 确保包含必要列
@@ -389,18 +315,6 @@ def get_latest_arbitrage_opportunities(is_manual: Optional[bool] = None) -> pd.D
             if col not in df.columns:
                 logger.error(f"数据中缺少必要列: {col}")
                 return pd.DataFrame()
-        
-        # 添加数据来源标记
-        if is_manual:
-            if "数据来源" not in df.columns:
-                df["数据来源"] = "【测试数据】历史数据"
-            else:
-                df["数据来源"] = df["数据来源"].fillna("【测试数据】历史数据")
-        else:
-            if "数据来源" not in df.columns:
-                df["数据来源"] = "实时数据"
-            else:
-                df["数据来源"] = df["数据来源"].fillna("实时数据")
         
         # 筛选有套利机会的数据
         opportunities = df[
@@ -418,3 +332,68 @@ def get_latest_arbitrage_opportunities(is_manual: Optional[bool] = None) -> pd.D
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
+def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
+    """
+    加载最近有效的套利数据
+    
+    Args:
+        days_back: 向前查找的天数
+    
+    Returns:
+        pd.DataFrame: 最近有效的套利数据
+    """
+    try:
+        beijing_now = get_beijing_time()
+        
+        # 从今天开始向前查找
+        for i in range(days_back):
+            date = (beijing_now - timedelta(days=i)).strftime("%Y%m%d")
+            df = load_arbitrage_data(date)
+            
+            # 检查数据是否有效
+            if not df.empty:
+                # 检查是否包含必要列
+                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
+                if all(col in df.columns for col in required_columns) and len(df) > 0:
+                    logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
+                    return df
+        
+        logger.warning(f"在最近 {days_back} 天内未找到有效的套利数据")
+        return pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"加载最近有效套利数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+# 模块初始化
+try:
+    # 确保必要的目录存在
+    Config.init_dirs()
+    
+    # 初始化日志
+    logger.info("套利数据源模块初始化完成")
+    
+    # 清理过期的套利数据
+    try:
+        clean_old_arbitrage_data(days_to_keep=7)
+        logger.info("已清理超过7天的套利数据文件")
+    except Exception as e:
+        logger.error(f"清理旧套利数据文件失败: {str(e)}", exc_info=True)
+    
+except Exception as e:
+    error_msg = f"套利数据源模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)

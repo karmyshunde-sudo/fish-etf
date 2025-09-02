@@ -32,7 +32,7 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
-from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 恢复为原始导入语句
+from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -620,7 +620,8 @@ def crawl_arbitrage_data() -> Optional[str]:
         # 构建文件路径
         file_path = os.path.join(arbitrage_dir, f"{today}.csv")
         
-        # 获取套利数据 - 恢复为原始导入语句
+        # 获取套利数据 - 直接从数据源获取，避免递归调用
+        from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities
         df = get_latest_arbitrage_opportunities()
         
         if df.empty:

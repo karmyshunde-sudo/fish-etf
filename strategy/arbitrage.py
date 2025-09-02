@@ -420,6 +420,74 @@ def check_arbitrage_exit_signals() -> List[Dict[str, Any]]:
         logger.error(error_msg, exc_info=True)
         return []
 
+def load_arbitrage_data(date_str: str) -> pd.DataFrame:
+    """
+    加载指定日期的套利数据
+    
+    Args:
+        date_str: 日期字符串，格式为YYYYMMDD
+    
+    Returns:
+        pd.DataFrame: 套利数据DataFrame
+    """
+    try:
+        # 构建套利数据目录
+        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
+        os.makedirs(arbitrage_dir, exist_ok=True)
+        
+        # 构建文件路径
+        file_path = os.path.join(arbitrage_dir, f"{date_str}.csv")
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.warning(f"套利数据文件不存在: {file_path}")
+            return pd.DataFrame()
+        
+        # 读取CSV文件
+        df = pd.read_csv(file_path)
+        
+        logger.debug(f"成功加载套利数据: {file_path}，共{len(df)}条")
+        return df
+    
+    except Exception as e:
+        logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def crawl_arbitrage_data() -> Optional[str]:
+    """
+    爬取套利数据并保存
+    
+    Returns:
+        Optional[str]: 保存的文件路径，如果爬取失败则返回None
+    """
+    try:
+        # 获取当前日期
+        today = get_beijing_time().strftime("%Y%m%d")
+        
+        # 构建套利数据目录
+        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
+        os.makedirs(arbitrage_dir, exist_ok=True)
+        
+        # 构建文件路径
+        file_path = os.path.join(arbitrage_dir, f"{today}.csv")
+        
+        # 获取套利数据
+        df = get_latest_arbitrage_opportunities()
+        
+        if df.empty:
+            logger.warning("未获取到套利数据，无法保存")
+            return None
+        
+        # 保存到CSV文件
+        df.to_csv(file_path, index=False, encoding="utf-8-sig")
+        logger.info(f"成功保存套利数据到: {file_path}")
+        
+        return file_path
+    
+    except Exception as e:
+        logger.error(f"爬取套利数据失败: {str(e)}", exc_info=True)
+        return None
+
 def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     """
     获取最新的套利机会

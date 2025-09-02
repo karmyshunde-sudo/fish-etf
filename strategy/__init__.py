@@ -13,7 +13,10 @@ from utils.date_utils import get_current_times, get_beijing_time, get_utc_time
 logger = logging.getLogger(__name__)
 
 # 直接导出策略函数，以便 main.py 可以导入
-from .arbitrage import calculate_arbitrage_opportunity
+from .arbitrage import (
+    calculate_arbitrage_opportunity,
+    mark_arbitrage_opportunities_pushed  # 修复：添加增量推送标记函数的导出
+)
 from .position import calculate_position_strategy
 from .etf_scoring import get_etf_basic_info, get_etf_name
 

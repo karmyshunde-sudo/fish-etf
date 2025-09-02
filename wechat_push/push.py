@@ -20,6 +20,7 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time
 )
+from utils.file_utils import mark_arbitrage_pushed  # 新增：导入增量推送标记函数
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -359,11 +360,40 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
                 logger.error(f"消息分片 {i+1} 发送失败，已达最大重试次数")
                 all_success = False
                 
+        # 增量推送功能：如果消息是套利消息且发送成功，标记ETF为已推送
+        if all_success and message_type == "arbitrage" and isinstance(message, pd.DataFrame):
+            _mark_arbitrage_opportunities_pushed(message)
+                
         return all_success
         
     except Exception as e:
         logger.error(f"发送微信消息时发生未预期错误: {str(e)}", exc_info=True)
         return False
+
+def _mark_arbitrage_opportunities_pushed(opportunities: pd.DataFrame) -> None:
+    """
+    标记套利机会为已推送
+    
+    Args:
+        opportunities: 套利机会DataFrame
+    """
+    try:
+        if opportunities.empty:
+            logger.debug("无套利机会需要标记为已推送")
+            return
+        
+        success_count = 0
+        for _, row in opportunities.iterrows():
+            etf_code = row["ETF代码"]
+            if mark_arbitrage_pushed(etf_code):
+                success_count += 1
+            else:
+                logger.warning(f"标记ETF {etf_code} 为已推送失败")
+        
+        logger.info(f"成功标记 {success_count}/{len(opportunities)} 个ETF套利机会为已推送")
+        
+    except Exception as e:
+        logger.error(f"标记套利机会为已推送时发生错误: {str(e)}", exc_info=True)
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

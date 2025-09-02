@@ -169,13 +169,11 @@ def _format_arbitrage_message(df: pd.DataFrame) -> str:
             return "【套利机会】\n未发现有效套利机会"
         
         # 生成消息内容
-        content = "【ETF套利机会】\n\n"
-        content += "💡 套利原理：\n"
-        content += "• 当ETF市场价格高于IOPV时（溢价），可申购ETF份额并卖出获利\n"
-        content += "• 当ETF市场价格低于IOPV时（折价），可买入ETF份额并赎回获利\n"
+        content = "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
+        content += "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
         content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
         content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
-        content += f"🎯 套利阈值：收益率超过{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%\n\n"
+        content += f"🎯 折价阈值：折价率超过{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%\n\n"
         
         # 添加套利机会
         for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
@@ -196,13 +194,13 @@ def _format_arbitrage_message(df: pd.DataFrame) -> str:
         
         # 添加其他机会数量
         if len(df) > 3:
-            content += f"• 还有 {len(df) - 3} 个套利机会...\n"
+            content += f"• 还有 {len(df) - 3} 个折价机会...\n"
         
         # 添加风险提示
         content += (
             "\n⚠️ 风险提示：\n"
-            "1. 套利机会转瞬即逝，请及时操作\n"
-            "2. 实际交易中可能因价格变动导致套利失败\n"
+            "1. 市场价格低于净值是短期现象，不一定能立即获利\n"
+            "2. 实际交易中可能因价格变动导致机会消失\n"
             "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
             "4. 本策略仅供参考，不构成投资建议\n"
         )

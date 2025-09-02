@@ -602,9 +602,12 @@ def load_arbitrage_data(date_str: str) -> pd.DataFrame:
         logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def crawl_arbitrage_data() -> Optional[str]:
+def crawl_arbitrage_data(is_manual: bool = False) -> Optional[str]:
     """
     爬取套利数据并保存
+    
+    Args:
+        is_manual: 是否是手动测试
     
     Returns:
         Optional[str]: 保存的文件路径，如果爬取失败则返回None
@@ -622,7 +625,7 @@ def crawl_arbitrage_data() -> Optional[str]:
         
         # 获取套利数据 - 直接从数据源获取，避免递归调用
         from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities
-        df = get_latest_arbitrage_opportunities()
+        df = get_latest_arbitrage_opportunities(is_manual=is_manual)
         
         if df.empty:
             logger.warning("未获取到套利数据，无法保存")
@@ -646,6 +649,9 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         pd.DataFrame: 套利机会DataFrame
     """
     try:
+        # 自动检测是否是手动触发
+        is_manual = is_manual_trigger()
+        
         # 获取当前日期
         today = get_beijing_time().strftime("%Y%m%d")
         
@@ -654,14 +660,26 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         
         if df.empty:
             logger.warning("无今日套利数据，尝试重新爬取")
-            file_path = crawl_arbitrage_data()
+            file_path = crawl_arbitrage_data(is_manual=is_manual)
             
-            # 检查爬取结果
+            # 详细检查爬取结果
             if file_path and os.path.exists(file_path):
                 logger.info(f"成功爬取并保存套利数据到: {file_path}")
                 df = load_arbitrage_data(today)
             else:
-                logger.error("重新爬取后仍无套利数据")
+                logger.warning("重新爬取后仍无套利数据")
+                # 如果是手动测试，尝试加载最近一天的数据
+                if is_manual:
+                    logger.info("【测试模式】尝试加载最近有效套利数据")
+                    df = load_latest_valid_arbitrage_data()
+                    if not df.empty:
+                        logger.info(f"【测试模式】成功加载最近有效套利数据，共 {len(df)} 条")
+                        # 添加测试标记
+                        if "备注" not in df.columns:
+                            df["备注"] = "【测试数据】使用历史数据"
+                        else:
+                            df["备注"] = df["备注"].fillna("【测试数据】使用历史数据")
+                        return df
                 return pd.DataFrame()
         
         # 检查数据完整性

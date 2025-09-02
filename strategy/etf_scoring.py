@@ -127,7 +127,7 @@ def get_top_rated_etfs(top_n: Optional[int] = None, min_score: float = 60, posit
             try:
                 # 获取ETF日线数据（从本地文件加载）
                 df = load_etf_daily_data(etf_code)
-                if df.empty:
+                if df is None or df.empty:
                     logger.debug(f"ETF {etf_code} 无日线数据，跳过评分")
                     continue
                 
@@ -524,13 +524,19 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        if CLOSE_COL in df.columns and DATE_COL in df.columns:
-            return_30d = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0] - 1) * 100
+        # 优先使用"收盘"列，如果没有则使用"市场价格"列
+        price_col = "收盘" if "收盘" in df.columns else "市场价格"
+        if price_col not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {price_col}")
+            return 0.0
+        
+        if DATE_COL in df.columns:
+            return_30d = (df[price_col].iloc[-1] / df[price_col].iloc[0] - 1) * 100
             # 线性映射到0-100分，-5%=-50分，+5%=100分
             return_score = min(max(return_30d * 10 + 100, 0), 100)
             return round(return_score, 2)
         else:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL} 或 {DATE_COL}")
+            logger.warning(f"DataFrame缺少必要列: {DATE_COL}")
             return 0.0
     
     except Exception as e:
@@ -600,12 +606,18 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, str]:
             logger.warning("ETF列表为空或无效，使用默认值")
             return 0.0, ""
         
+        # 确保ETF代码格式一致（6位数字）
+        etf_code = str(etf_code).strip().zfill(6)
+        
         # 确保ETF列表包含必要的列
         required_columns = [ETF_CODE_COL, FUND_SIZE_COL]
         for col in required_columns:
             if col not in etf_list.columns:
                 logger.warning(f"ETF列表缺少必要列: {col}")
                 return 0.0, ""
+        
+        # 确保ETF列表中的ETF代码也是6位数字
+        etf_list[ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).str.strip().str.zfill(6)
         
         etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         
@@ -712,12 +724,14 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        if CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"列
+        price_col = "收盘" if "收盘" in df.columns else "市场价格"
+        if price_col not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {price_col}")
             return 0.0
         
         # 计算日收益率
-        df["daily_return"] = df[CLOSE_COL].pct_change()
+        df["daily_return"] = df[price_col].pct_change()
         
         # 计算年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -745,16 +759,18 @@ def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        if CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"列
+        price_col = "收盘" if "收盘" in df.columns else "市场价格"
+        if price_col not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {price_col}")
             return 0.0
         
         # 计算日收益率
-        df["daily_return"] = df[CLOSE_COL].pct_change()
+        df["daily_return"] = df[price_col].pct_change()
         
         # 年化收益率
         if len(df) > 1:
-            annual_return = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0]) ** (252 / len(df)) - 1
+            annual_return = (df[price_col].iloc[-1] / df[price_col].iloc[0]) ** (252 / len(df)) - 1
         else:
             annual_return = 0.0
         
@@ -794,12 +810,14 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        if CLOSE_COL not in df.columns:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}")
+        # 优先使用"收盘"列，如果没有则使用"市场价格"列
+        price_col = "收盘" if "收盘" in df.columns else "市场价格"
+        if price_col not in df.columns:
+            logger.warning(f"DataFrame缺少必要列: {price_col}")
             return 0.0
         
         # 计算累计收益率
-        df["cum_return"] = (1 + df[CLOSE_COL].pct_change()).cumprod()
+        df["cum_return"] = (1 + df[price_col].pct_change()).cumprod()
         
         # 计算回撤
         df["drawdown"] = 1 - df["cum_return"] / df["cum_return"].cummax()
@@ -824,7 +842,7 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
 # 新增：套利专用评分函数
 # ========================
 
-def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount: float, metadata: Optional[Dict] = None) -> float:
+def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount: float, meta: Optional[Dict] = None) -> float:
     """
     计算ETF套利综合评分
     
@@ -832,7 +850,7 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         etf_code: ETF代码
         df: ETF日线数据
         premium_discount: 折溢价率
-        metadata: ETF元数据（可选）
+        meta: ETF元数据（可选）
     
     Returns:
         float: 综合评分 (0-100)

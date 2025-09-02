@@ -221,20 +221,34 @@ jobs:
             fi
           fi
           
-          # 提交套利状态文件（增量推送功能）- 修复：检查文件是否存在
+          # 提交折价状态文件（增量推送功能）- 修复：检查文件是否存在
           if [[ "$TASK" == "calculate_arbitrage" ]]; then
-            echo "【增量推送】提交套利状态文件..."
-            if [ -f "data/flags/arbitrage_status.json" ]; then
-              git add data/flags/arbitrage_status.json
-              if ! git diff --quiet HEAD -- data/flags/arbitrage_status.json; then
-                git commit -m "【增量推送】自动更新套利状态记录 [${TRIGGER_TYPE}]"
-                git push origin main || echo "套利状态记录推送失败"
-                echo "套利状态记录提交成功"
+            echo "【增量推送】提交折价状态文件..."
+            if [ -f "data/flags/discount_status.json" ]; then
+              git add data/flags/discount_status.json
+              if ! git diff --quiet HEAD -- data/flags/discount_status.json; then
+                git commit -m "【增量推送】自动更新折价状态记录 [${TRIGGER_TYPE}]"
+                git push origin main || echo "折价状态记录推送失败"
+                echo "折价状态记录提交成功"
               else
-                echo "套利状态记录无变化，无需提交"
+                echo "折价状态记录无变化，无需提交"
               fi
             else
-              echo "套利状态记录文件不存在，跳过提交"
+              echo "折价状态记录文件不存在，跳过提交"
+            fi
+            
+            echo "【增量推送】提交溢价状态文件..."
+            if [ -f "data/flags/premium_status.json" ]; then
+              git add data/flags/premium_status.json
+              if ! git diff --quiet HEAD -- data/flags/premium_status.json; then
+                git commit -m "【增量推送】自动更新溢价状态记录 [${TRIGGER_TYPE}]"
+                git push origin main || echo "溢价状态记录推送失败"
+                echo "溢价状态记录提交成功"
+              else
+                echo "溢价状态记录无变化，无需提交"
+              fi
+            else
+              echo "溢价状态记录文件不存在，跳过提交"
             fi
           fi
           

@@ -416,17 +416,18 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
                 logger.error(f"数据中缺少必要列: {col}")
                 return pd.DataFrame()
         
-        # 筛选有套利机会的数据 - 只保留折溢价率绝对值≥3.0%的机会
+        # 筛选有套利机会的数据 - 只保留折价率≥3.0%的机会（市场价格低于IOPV）
+        # 注意：折价率是负数，所以使用 <= -阈值
         opportunities = df[
-            (df["折溢价率"].abs() >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD)
+            (df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD)
         ].copy()
         
-        # 按溢价率绝对值排序
+        # 按折价率绝对值排序（从大到小）
         opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
         opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
         opportunities = opportunities.drop(columns=["abs_premium_discount"])
         
-        logger.info(f"发现 {len(opportunities)} 个套利机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
+        logger.info(f"发现 {len(opportunities)} 个折价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
         return opportunities
     
     except Exception as e:

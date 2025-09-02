@@ -922,3 +922,252 @@ def write_excel(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool
     except Exception as e:
         logger.error(f"写入Excel文件失败 {file_path}: {str(e)}")
         return False
+
+# ==========================
+# 新增：套利增量推送功能
+# ==========================
+
+def load_arbitrage_status() -> Dict[str, str]:
+    """
+    加载套利推送状态
+    
+    Returns:
+        Dict[str, str]: {ETF代码: 最后推送日期} 的字典
+    """
+    try:
+        # 检查套利状态文件是否存在
+        status_file = Path(Config.ARBITRAGE_STATUS_FILE)
+        if not status_file.exists():
+            logger.info("套利状态文件不存在，将创建新的状态文件")
+            return {}
+        
+        # 读取套利状态文件
+        with open(status_file, 'r', encoding='utf-8') as f:
+            status = json.load(f)
+        
+        logger.debug(f"成功加载套利状态，共 {len(status)} 条记录")
+        return status
+    
+    except Exception as e:
+        logger.error(f"加载套利状态失败: {str(e)}", exc_info=True)
+        return {}
+
+def save_arbitrage_status(status: Dict[str, str]) -> bool:
+    """
+    保存套利推送状态
+    
+    Args:
+        status: 套利推送状态字典
+    
+    Returns:
+        bool: 是否成功保存
+    """
+    try:
+        # 确保目录存在
+        status_dir = Path(Config.ARBITRAGE_STATUS_FILE).parent
+        if not status_dir.exists():
+            os.makedirs(status_dir, exist_ok=True)
+        
+        # 保存套利状态
+        with open(Config.ARBITRAGE_STATUS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(status, f, indent=2, ensure_ascii=False)
+        
+        logger.debug(f"套利状态保存成功，共 {len(status)} 条记录")
+        return True
+    
+    except Exception as e:
+        logger.error(f"保存套利状态失败: {str(e)}", exc_info=True)
+        return False
+
+def should_push_arbitrage(etf_code: str) -> bool:
+    """
+    检查是否应该推送该ETF的套利机会
+    
+    Args:
+        etf_code: ETF代码
+    
+    Returns:
+        bool: 是否应该推送
+    """
+    try:
+        # 获取当前北京时间
+        from utils.date_utils import get_beijing_time
+        today = get_beijing_time().strftime("%Y-%m-%d")
+        
+        # 加载套利状态
+        status = load_arbitrage_status()
+        
+        # 如果ETF从未推送过，或者上次推送不是今天，则应该推送
+        return etf_code not in status or status[etf_code] != today
+    
+    except Exception as e:
+        logger.error(f"检查是否应该推送套利机会失败: {str(e)}", exc_info=True)
+        # 出错时保守策略：允许推送
+        return True
+
+def mark_arbitrage_pushed(etf_code: str) -> bool:
+    """
+    标记ETF套利机会已推送
+    
+    Args:
+        etf_code: ETF代码
+    
+    Returns:
+        bool: 是否成功标记
+    """
+    try:
+        # 获取当前北京时间
+        from utils.date_utils import get_beijing_time
+        today = get_beijing_time().strftime("%Y-%m-%d")
+        
+        # 加载套利状态
+        status = load_arbitrage_status()
+        
+        # 更新状态
+        status[etf_code] = today
+        
+        # 保存更新后的状态
+        return save_arbitrage_status(status)
+    
+    except Exception as e:
+        logger.error(f"标记ETF套利机会已推送失败: {str(e)}", exc_info=True)
+        return False
+
+def clear_expired_arbitrage_status() -> bool:
+    """
+    清理过期的套利状态记录（保留最近7天的记录）
+    
+    Returns:
+        bool: 是否成功清理
+    """
+    try:
+        # 加载套利状态
+        status = load_arbitrage_status()
+        if not status:
+            return True
+        
+        # 获取当前日期
+        from utils.date_utils import get_beijing_time
+        current_date = get_beijing_time()
+        
+        # 计算7天前的日期
+        seven_days_ago = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        # 过滤掉过期的记录
+        updated_status = {etf: date for etf, date in status.items() if date >= seven_days_ago}
+        
+        # 如果有记录被删除，保存更新后的状态
+        if len(updated_status) < len(status):
+            logger.info(f"清理过期套利状态记录：移除了 {len(status) - len(updated_status)} 条记录")
+            return save_arbitrage_status(updated_status)
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"清理套利状态记录失败: {str(e)}", exc_info=True)
+        return False
+
+def get_arbitrage_push_count() -> Dict[str, int]:
+    """
+    获取套利推送统计信息
+    
+    Returns:
+        Dict[str, int]: 包含总推送量和今日推送量的字典
+    """
+    try:
+        # 加载套利状态
+        status = load_arbitrage_status()
+        
+        # 获取当前日期
+        from utils.date_utils import get_beijing_time
+        today = get_beijing_time().strftime("%Y-%m-%d")
+        
+        # 统计总推送量和今日推送量
+        total_count = len(status)
+        today_count = sum(1 for date in status.values() if date == today)
+        
+        logger.debug(f"套利推送统计: 总推送量={total_count}, 今日推送量={today_count}")
+        return {
+            "total": total_count,
+            "today": today_count
+        }
+    
+    except Exception as e:
+        logger.error(f"获取套利推送统计失败: {str(e)}", exc_info=True)
+        return {
+            "total": 0,
+            "today": 0
+        }
+
+def get_arbitrage_push_history(days: int = 7) -> Dict[str, int]:
+    """
+    获取套利推送历史记录
+    
+    Args:
+        days: 查询天数
+    
+    Returns:
+        Dict[str, int]: {日期: 推送数量} 的字典
+    """
+    try:
+        # 加载套利状态
+        status = load_arbitrage_status()
+        
+        # 初始化历史记录
+        history = {}
+        
+        # 获取当前日期
+        from utils.date_utils import get_beijing_time
+        current_date = get_beijing_time()
+        
+        # 生成过去days天的日期列表
+        for i in range(days):
+            date = (current_date - timedelta(days=i)).strftime("%Y-%m-%d")
+            history[date] = 0
+        
+        # 统计每天的推送数量
+        for date in status.values():
+            if date in history:
+                history[date] += 1
+        
+        logger.debug(f"获取套利推送历史记录成功，共 {len(history)} 天")
+        return history
+    
+    except Exception as e:
+        logger.error(f"获取套利推送历史记录失败: {str(e)}", exc_info=True)
+        return {}
+
+# ==========================
+# 模块初始化
+# ==========================
+
+# 在模块加载时，确保必要的目录存在并清理过期的套利状态
+try:
+    # 确保FLAG_DIR存在
+    if not os.path.exists(Config.FLAG_DIR):
+        os.makedirs(Config.FLAG_DIR, exist_ok=True)
+        logger.info(f"创建FLAG_DIR目录: {Config.FLAG_DIR}")
+    
+    # 清理过期的套利状态记录
+    if os.path.exists(Config.ARBITRAGE_STATUS_FILE):
+        clear_expired_arbitrage_status()
+    
+    # 初始化日志
+    logger.info("文件工具模块初始化完成")
+    
+except Exception as e:
+    error_msg = f"文件工具模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)

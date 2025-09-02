@@ -17,8 +17,7 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated,
-    is_trading_time
+    is_file_outdated
 )
 from utils.file_utils import (
     load_etf_daily_data, 
@@ -57,6 +56,20 @@ def is_manual_trigger() -> bool:
     except Exception as e:
         logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
         return False
+
+def is_trading_time() -> bool:
+    """
+    检查当前是否在交易时间
+    
+    Returns:
+        bool: 是否在交易时间
+    """
+    beijing_time = get_beijing_time()
+    current_time = beijing_time.time()
+    trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+    trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
+    
+    return trading_start <= current_time <= trading_end
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
     """

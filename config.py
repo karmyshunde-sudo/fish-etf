@@ -95,7 +95,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/    {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -164,7 +164,10 @@ class Config:
     # 策略结果标记（避免单日重复推送）
     FLAG_DIR: str = os.path.join(DATA_DIR, "flags")
     
-    # 套利结果标记文件
+    # 套利状态文件 - 用于记录每个ETF的推送状态（增量推送功能）
+    ARBITRAGE_STATUS_FILE: str = os.path.join(FLAG_DIR, "arbitrage_status.json")
+    
+    # 套利结果标记文件（保留用于兼容性）
     @staticmethod
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
         """获取套利标记文件路径"""
@@ -421,6 +424,9 @@ try:
     Config.LOG_DIR = os.path.join(base_dir, "logs")
     Config.LOG_FILE = os.path.join(Config.LOG_DIR, "etf_strategy.log")
     
+    # 确保ARBITRAGE_STATUS_FILE路径正确
+    Config.ARBITRAGE_STATUS_FILE = os.path.join(Config.FLAG_DIR, "arbitrage_status.json")
+    
     # 设置基础日志配置
     logging.basicConfig(
         level=Config.LOG_LEVEL,
@@ -469,7 +475,8 @@ def _validate_critical_config():
             "UTC_TIMEZONE",  # 新增验证项
             "BEIJING_TIMEZONE",  # 新增验证项
             "STANDARD_COLUMNS",  # 新增验证项
-            "MIN_ARBITRAGE_DISPLAY_THRESHOLD"  # 新增验证项
+            "MIN_ARBITRAGE_DISPLAY_THRESHOLD",  # 新增验证项
+            "ARBITRAGE_STATUS_FILE"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -497,6 +504,9 @@ def _validate_critical_config():
                 elif config_name == "MIN_ARBITRAGE_DISPLAY_THRESHOLD":
                     setattr(Config, "MIN_ARBITRAGE_DISPLAY_THRESHOLD", 3.0)
                     logging.warning("已添加缺失的MIN_ARBITRAGE_DISPLAY_THRESHOLD配置项")
+                elif config_name == "ARBITRAGE_STATUS_FILE":
+                    setattr(Config, "ARBITRAGE_STATUS_FILE", os.path.join(Config.FLAG_DIR, "arbitrage_status.json"))
+                    logging.warning("已添加缺失的ARBITRAGE_STATUS_FILE配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

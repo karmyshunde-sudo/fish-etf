@@ -18,7 +18,7 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated
+    is_file_outdated,
     is_trading_time
 )
 

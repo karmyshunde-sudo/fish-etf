@@ -15,10 +15,17 @@ logger = logging.getLogger(__name__)
 # 直接导出策略函数，以便 main.py 可以导入
 from .arbitrage import (
     calculate_arbitrage_opportunity,
-    mark_arbitrage_opportunities_pushed  # 修复：添加增量推送标记函数的导出
+    mark_arbitrage_opportunities_pushed,  # 修复：添加增量推送标记函数的导出
+    calculate_arbitrage_scores,
+    filter_valid_arbitrage_opportunities
 )
 from .position import calculate_position_strategy
-from .etf_scoring import get_etf_basic_info, get_etf_name
+from .etf_scoring import (
+    get_etf_basic_info, 
+    get_etf_name,
+    calculate_arbitrage_score,
+    calculate_component_stability_score
+)
 
 def run_all_strategies() -> Dict[str, Any]:
     """运行所有策略并返回结果
@@ -27,7 +34,8 @@ def run_all_strategies() -> Dict[str, Any]:
     try:
         logger.info("开始运行所有ETF策略...")
         results = {
-            "arbitrage_df": pd.DataFrame(),
+            "discount_df": pd.DataFrame(),
+            "premium_df": pd.DataFrame(),
             "position_msg": "",
             "success": False,
             "error": None
@@ -38,9 +46,10 @@ def run_all_strategies() -> Dict[str, Any]:
         logger.info("运行套利策略")
         logger.info("="*50)
         try:
-            arbitrage_df = calculate_arbitrage_opportunity()
-            results["arbitrage_df"] = arbitrage_df
-            logger.info(f"套利策略执行完成，发现 {len(arbitrage_df)} 个机会")
+            discount_df, premium_df = calculate_arbitrage_opportunity()
+            results["discount_df"] = discount_df
+            results["premium_df"] = premium_df
+            logger.info(f"套利策略执行完成，发现 {len(discount_df)} 个折价机会和 {len(premium_df)} 个溢价机会")
         except Exception as e:
             error_msg = f"套利策略执行失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -68,7 +77,8 @@ def run_all_strategies() -> Dict[str, Any]:
         error_msg = f"运行所有策略时发生未预期错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return {
-            "arbitrage_df": pd.DataFrame(),
+            "discount_df": pd.DataFrame(),
+            "premium_df": pd.DataFrame(),
             "position_msg": "",
             "success": False,
             "error": error_msg
@@ -90,14 +100,21 @@ def get_daily_report() -> str:
         report += f"📅 报告时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
         report += f"🌍 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         
-        # 格式化套利消息
-        report += "📊 套利机会分析：\n"
-        if not strategies["arbitrage_df"].empty:
-            report += _format_arbitrage_message(strategies["arbitrage_df"]) + "\n"
+        # 格式化折价消息
+        report += "📊 折价机会分析：\n"
+        if not strategies["discount_df"].empty:
+            report += _format_discount_message(strategies["discount_df"]) + "\n"
         else:
-            report += "【套利机会】\n未发现有效套利机会\n\n"
+            report += "【折价机会】\n未发现有效折价套利机会\n\n"
         
-        report += "\n📈 仓位操作建议：\n"
+        # 格式化溢价消息
+        report += "📈 溢价机会分析：\n"
+        if not strategies["premium_df"].empty:
+            report += _format_premium_message(strategies["premium_df"]) + "\n"
+        else:
+            report += "【溢价机会】\n未发现有效溢价套利机会\n\n"
+        
+        report += "\n📉 仓位操作建议：\n"
         report += strategies["position_msg"] + "\n"
         
         if strategies["error"]:

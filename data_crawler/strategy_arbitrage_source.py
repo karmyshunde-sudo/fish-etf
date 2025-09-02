@@ -38,39 +38,6 @@ def is_manual_trigger() -> bool:
         logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
         return False
 
-def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
-    """
-    加载最近有效的套利数据
-    
-    Args:
-        days_back: 向前查找的天数
-    
-    Returns:
-        pd.DataFrame: 最近有效的套利数据
-    """
-    try:
-        beijing_now = get_beijing_time()
-        
-        # 从今天开始向前查找
-        for i in range(days_back):
-            date = (beijing_now - timedelta(days=i)).strftime("%Y%m%d")
-            df = load_arbitrage_data(date)
-            
-            # 检查数据是否有效
-            if not df.empty:
-                # 检查是否包含必要列
-                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
-                if all(col in df.columns for col in required_columns) and len(df) > 0:
-                    logger.info(f"【测试模式】找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
-                    df["日期"] = date
-                    return df
-        
-        logger.warning(f"【测试模式】在最近 {days_back} 天内未找到有效的套利数据")
-        return pd.DataFrame()
-    
-    except Exception as e:
-        logger.error(f"【测试模式】加载最近有效套利数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
 
 def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     """

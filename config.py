@@ -143,6 +143,25 @@ class Config:
     SWITCH_THRESHOLD: float = 0.3  # 新ETF比原ETF综合评分高出30%则换股
 
     # -------------------------
+    # 2.1 新增：套利综合评分配置
+    # -------------------------
+    # 套利综合评分权重配置
+    ARBITRAGE_SCORE_WEIGHTS: Dict[str, float] = {
+        'premium_discount': 0.35,  # 折溢价率权重
+        'liquidity': 0.25,         # 流动性权重
+        'volatility': 0.15,        # 波动率权重
+        'component_stability': 0.15,  # 成分股稳定性权重
+        'market_sentiment': 0.10   # 市场情绪权重
+    }
+    
+    # 折价/溢价阈值配置
+    DISCOUNT_THRESHOLD: float = 0.03  # 折价阈值（3%）
+    PREMIUM_THRESHOLD: float = 0.05   # 溢价阈值（5%）
+    
+    # 综合评分阈值配置
+    ARBITRAGE_SCORE_THRESHOLD: float = 70.0  # 综合评分阈值
+    
+    # -------------------------
     # 3. 文件路径配置 - 基于仓库根目录的路径
     # -------------------------
     # 获取仓库根目录（优先使用GITHUB_WORKSPACE环境变量）
@@ -167,6 +186,12 @@ class Config:
     # 套利状态文件 - 用于记录每个ETF的推送状态（增量推送功能）
     ARBITRAGE_STATUS_FILE: str = os.path.join(FLAG_DIR, "arbitrage_status.json")
     
+    # 折价状态文件
+    DISCOUNT_STATUS_FILE: str = os.path.join(FLAG_DIR, "discount_status.json")
+    
+    # 溢价状态文件
+    PREMIUM_STATUS_FILE: str = os.path.join(FLAG_DIR, "premium_status.json")
+    
     # 套利结果标记文件（保留用于兼容性）
     @staticmethod
     def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
@@ -183,6 +208,40 @@ class Config:
         except Exception as e:
             logging.error(f"获取套利标记文件路径失败: {str(e)}", exc_info=True)
             return os.path.join(Config.FLAG_DIR, "arbitrage_pushed_error.txt")
+    
+    # 折价标记文件
+    @staticmethod
+    def get_discount_flag_file(date_str: Optional[str] = None) -> str:
+        """获取折价标记文件路径"""
+        try:
+            # 尝试使用北京时间
+            from utils.date_utils import get_beijing_time
+            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"discount_pushed_{date}.txt")
+        except ImportError:
+            # 回退到简单实现（仅用于初始化阶段）
+            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"discount_pushed_{date}.txt")
+        except Exception as e:
+            logging.error(f"获取折价标记文件路径失败: {str(e)}", exc_info=True)
+            return os.path.join(Config.FLAG_DIR, "discount_pushed_error.txt")
+    
+    # 溢价标记文件
+    @staticmethod
+    def get_premium_flag_file(date_str: Optional[str] = None) -> str:
+        """获取溢价标记文件路径"""
+        try:
+            # 尝试使用北京时间
+            from utils.date_utils import get_beijing_time
+            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"premium_pushed_{date}.txt")
+        except ImportError:
+            # 回退到简单实现（仅用于初始化阶段）
+            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            return os.path.join(Config.FLAG_DIR, f"premium_pushed_{date}.txt")
+        except Exception as e:
+            logging.error(f"获取溢价标记文件路径失败: {str(e)}", exc_info=True)
+            return os.path.join(Config.FLAG_DIR, "premium_pushed_error.txt")
     
     # 仓位策略结果标记文件
     @staticmethod
@@ -426,6 +485,8 @@ try:
     
     # 确保ARBITRAGE_STATUS_FILE路径正确
     Config.ARBITRAGE_STATUS_FILE = os.path.join(Config.FLAG_DIR, "arbitrage_status.json")
+    Config.DISCOUNT_STATUS_FILE = os.path.join(Config.FLAG_DIR, "discount_status.json")
+    Config.PREMIUM_STATUS_FILE = os.path.join(Config.FLAG_DIR, "premium_status.json")
     
     # 设置基础日志配置
     logging.basicConfig(
@@ -476,7 +537,13 @@ def _validate_critical_config():
             "BEIJING_TIMEZONE",  # 新增验证项
             "STANDARD_COLUMNS",  # 新增验证项
             "MIN_ARBITRAGE_DISPLAY_THRESHOLD",  # 新增验证项
-            "ARBITRAGE_STATUS_FILE"  # 新增验证项
+            "ARBITRAGE_STATUS_FILE",  # 新增验证项
+            "DISCOUNT_STATUS_FILE",  # 新增验证项
+            "PREMIUM_STATUS_FILE",  # 新增验证项
+            "ARBITRAGE_SCORE_WEIGHTS",  # 新增验证项
+            "DISCOUNT_THRESHOLD",  # 新增验证项
+            "PREMIUM_THRESHOLD",  # 新增验证项
+            "ARBITRAGE_SCORE_THRESHOLD"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -507,6 +574,30 @@ def _validate_critical_config():
                 elif config_name == "ARBITRAGE_STATUS_FILE":
                     setattr(Config, "ARBITRAGE_STATUS_FILE", os.path.join(Config.FLAG_DIR, "arbitrage_status.json"))
                     logging.warning("已添加缺失的ARBITRAGE_STATUS_FILE配置项")
+                elif config_name == "DISCOUNT_STATUS_FILE":
+                    setattr(Config, "DISCOUNT_STATUS_FILE", os.path.join(Config.FLAG_DIR, "discount_status.json"))
+                    logging.warning("已添加缺失的DISCOUNT_STATUS_FILE配置项")
+                elif config_name == "PREMIUM_STATUS_FILE":
+                    setattr(Config, "PREMIUM_STATUS_FILE", os.path.join(Config.FLAG_DIR, "premium_status.json"))
+                    logging.warning("已添加缺失的PREMIUM_STATUS_FILE配置项")
+                elif config_name == "ARBITRAGE_SCORE_WEIGHTS":
+                    setattr(Config, "ARBITRAGE_SCORE_WEIGHTS", {
+                        'premium_discount': 0.35,
+                        'liquidity': 0.25,
+                        'volatility': 0.15,
+                        'component_stability': 0.15,
+                        'market_sentiment': 0.10
+                    })
+                    logging.warning("已添加缺失的ARBITRAGE_SCORE_WEIGHTS配置项")
+                elif config_name == "DISCOUNT_THRESHOLD":
+                    setattr(Config, "DISCOUNT_THRESHOLD", 0.03)
+                    logging.warning("已添加缺失的DISCOUNT_THRESHOLD配置项")
+                elif config_name == "PREMIUM_THRESHOLD":
+                    setattr(Config, "PREMIUM_THRESHOLD", 0.05)
+                    logging.warning("已添加缺失的PREMIUM_THRESHOLD配置项")
+                elif config_name == "ARBITRAGE_SCORE_THRESHOLD":
+                    setattr(Config, "ARBITRAGE_SCORE_THRESHOLD", 70.0)
+                    logging.warning("已添加缺失的ARBITRAGE_SCORE_THRESHOLD配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

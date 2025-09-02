@@ -22,13 +22,13 @@ from utils.date_utils import (
 from utils.file_utils import (
     load_etf_daily_data, 
     ensure_chinese_columns,
-    load_arbitrage_status,
-    save_arbitrage_status,
-    should_push_arbitrage,
-    mark_arbitrage_pushed,
+    load_discount_status,
+    save_discount_status,
     should_push_discount,
-    should_push_premium,
     mark_discount_pushed,
+    load_premium_status,
+    save_premium_status,
+    should_push_premium,
     mark_premium_pushed,
     load_etf_metadata
 )

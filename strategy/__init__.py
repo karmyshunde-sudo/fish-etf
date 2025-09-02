@@ -6,7 +6,8 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from config import Config
-from wechat_push.push import _format_arbitrage_message, send_wechat_message
+# 修复：更新导入语句，使用新的格式化函数
+from wechat_push.push import _format_discount_message, _format_premium_message, send_wechat_message
 from utils.date_utils import get_current_times, get_beijing_time, get_utc_time
 
 # 初始化日志
@@ -103,6 +104,7 @@ def get_daily_report() -> str:
         # 格式化折价消息
         report += "📊 折价机会分析：\n"
         if not strategies["discount_df"].empty:
+            # 修复：这里直接使用导入的_format_discount_message函数
             report += _format_discount_message(strategies["discount_df"]) + "\n"
         else:
             report += "【折价机会】\n未发现有效折价套利机会\n\n"
@@ -110,6 +112,7 @@ def get_daily_report() -> str:
         # 格式化溢价消息
         report += "📈 溢价机会分析：\n"
         if not strategies["premium_df"].empty:
+            # 修复：这里直接使用导入的_format_premium_message函数
             report += _format_premium_message(strategies["premium_df"]) + "\n"
         else:
             report += "【溢价机会】\n未发现有效溢价套利机会\n\n"

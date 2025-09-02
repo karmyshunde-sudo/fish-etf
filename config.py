@@ -95,7 +95,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -108,6 +108,9 @@ class Config:
     
     # 套利阈值（收益率超过该值才推送）
     ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 0.5%
+    
+    # 显示阈值（折溢价率超过该值才在消息中显示）
+    MIN_ARBITRAGE_DISPLAY_THRESHOLD: float = 3.0  # 3.0% - 仅显示显著的套利机会
     
     # 综合评分筛选阈值（仅保留评分前N%的ETF）
     SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF
@@ -465,7 +468,8 @@ def _validate_critical_config():
             "BACKUP_ETFS_PATH",
             "UTC_TIMEZONE",  # 新增验证项
             "BEIJING_TIMEZONE",  # 新增验证项
-            "STANDARD_COLUMNS"  # 新增验证项
+            "STANDARD_COLUMNS",  # 新增验证项
+            "MIN_ARBITRAGE_DISPLAY_THRESHOLD"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -490,6 +494,9 @@ def _validate_critical_config():
                 elif config_name == "STANDARD_COLUMNS":
                     setattr(Config, "STANDARD_COLUMNS", list(Config.COLUMN_NAME_MAPPING.values()))
                     logging.warning("已添加缺失的STANDARD_COLUMNS配置项")
+                elif config_name == "MIN_ARBITRAGE_DISPLAY_THRESHOLD":
+                    setattr(Config, "MIN_ARBITRAGE_DISPLAY_THRESHOLD", 3.0)
+                    logging.warning("已添加缺失的MIN_ARBITRAGE_DISPLAY_THRESHOLD配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

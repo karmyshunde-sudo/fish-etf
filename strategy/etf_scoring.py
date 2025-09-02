@@ -723,6 +723,105 @@ def calculate_max_drawdown(df: pd.DataFrame) -> float:
         
         return 0.0
 
+# ========================
+# 新增：套利专用评分函数
+# ========================
+
+def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount: float, metadata: Optional[Dict] = None) -> float:
+    """
+    计算ETF套利综合评分
+    
+    Args:
+        etf_code: ETF代码
+        df: ETF日线数据
+        premium_discount: 折溢价率
+        metadata: ETF元数据（可选）
+    
+    Returns:
+        float: 综合评分 (0-100)
+    """
+    try:
+        # 计算基础ETF评分
+        base_score = calculate_etf_score(etf_code, df)
+        
+        # 计算成分股稳定性评分
+        component_score = calculate_component_stability_score(etf_code, df)
+        
+        # 计算折溢价率评分
+        if premium_discount < 0:
+            # 折价情况：折价率绝对值越大，评分越高
+            abs_premium = abs(premium_discount)
+            if abs_premium >= Config.DISCOUNT_THRESHOLD * 1.5:
+                premium_score = 100.0
+            elif abs_premium >= Config.DISCOUNT_THRESHOLD:
+                premium_score = 80.0 + (abs_premium - Config.DISCOUNT_THRESHOLD) * 20.0 / (Config.DISCOUNT_THRESHOLD * 0.5)
+            else:
+                premium_score = 50.0 + (abs_premium * 30.0 / Config.DISCOUNT_THRESHOLD)
+        else:
+            # 溢价情况：溢价率越小，评分越高
+            if premium_discount <= Config.PREMIUM_THRESHOLD * 0.5:
+                premium_score = 100.0
+            elif premium_discount <= Config.PREMIUM_THRESHOLD:
+                premium_score = 80.0 - (premium_discount - Config.PREMIUM_THRESHOLD * 0.5) * 40.0 / (Config.PREMIUM_THRESHOLD * 0.5)
+            else:
+                premium_score = 50.0 - (premium_discount - Config.PREMIUM_THRESHOLD) * 20.0 / (Config.PREMIUM_THRESHOLD * 1.0)
+        
+        # 获取评分权重
+        weights = Config.ARBITRAGE_SCORE_WEIGHTS
+        
+        # 综合评分（加权平均）
+        total_score = (
+            base_score * (weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']) +
+            component_score * weights['component_stability'] +
+            premium_score * weights['premium_discount']
+        )
+        
+        logger.debug(f"ETF {etf_code} 套利综合评分: {total_score:.2f} "
+                     f"(基础评分: {base_score:.2f}, 成分股稳定性: {component_score:.2f}, "
+                     f"折溢价评分: {premium_score:.2f})")
+        
+        return min(max(total_score, 0), 100)  # 限制在0-100范围内
+    
+    except Exception as e:
+        logger.error(f"计算ETF {etf_code} 套利综合评分失败: {str(e)}", exc_info=True)
+        return 0.0
+
+def calculate_component_stability_score(etf_code: str, df: pd.DataFrame) -> float:
+    """
+    计算成分股稳定性评分
+    
+    Args:
+        etf_code: ETF代码
+        df: ETF日线数据
+    
+    Returns:
+        float: 成分股稳定性评分 (0-100)
+    """
+    try:
+        if df.empty:
+            logger.warning(f"ETF {etf_code} 无日线数据，无法计算成分股稳定性评分")
+            return 70.0  # 默认中等偏高评分
+        
+        # 计算波动率
+        volatility = calculate_volatility(df)
+        
+        # 波动率评分（越低越好）：波动率≤0.1=100分，0.3=50分，≥0.5=0分
+        component_score = max(0, 100 - (volatility * 200))
+        
+        # 考虑ETF规模（规模越大，成分股稳定性通常越高）
+        size, _ = get_etf_basic_info(etf_code)
+        size_score = min(max(size * 0.5, 0), 100)
+        
+        # 综合评分（波动率占70%，规模占30%）
+        total_score = component_score * 0.7 + size_score * 0.3
+        
+        logger.debug(f"ETF {etf_code} 成分股稳定性评分: {total_score:.2f} (波动率: {volatility:.4f}, 规模: {size}亿元)")
+        return total_score
+    
+    except Exception as e:
+        logger.error(f"计算成分股稳定性评分失败: {str(e)}", exc_info=True)
+        return 70.0  # 默认中等偏高评分
+
 # 模块初始化
 try:
     # 确保必要的目录存在

@@ -169,17 +169,26 @@ def _format_arbitrage_message(df: pd.DataFrame) -> str:
             return "【套利机会】\n未发现有效套利机会"
         
         # 生成消息内容
-        content = "【ETF溢价套利机会】\n\n"
-        content += "💡 套利原理：当ETF市场价格高于IOPV（基金份额参考净值）时，可申购ETF份额并卖出获利\n"
+        content = "【ETF套利机会】\n\n"
+        content += "💡 套利原理：\n"
+        content += "• 当ETF市场价格高于IOPV时（溢价），可申购ETF份额并卖出获利\n"
+        content += "• 当ETF市场价格低于IOPV时（折价），可买入ETF份额并赎回获利\n"
         content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
         content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
-        content += f"🎯 套利阈值：收益率超过{Config.ARBITRAGE_THRESHOLD*100:.2f}%\n\n"
+        content += f"🎯 套利阈值：收益率超过{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%\n\n"
         
         # 添加套利机会
         for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
-            direction = "溢价" if row["折溢价率"] > 0 else "折价"
+            # 根据折溢价率正负判断是溢价还是折价
+            if row["折溢价率"] > 0:
+                direction = "溢价"
+                rate = row["折溢价率"]
+            else:
+                direction = "折价"
+                rate = -row["折溢价率"]  # 取正值
+            
             content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-            content += f"   💹 {direction}率: {abs(row['折溢价率']):.2f}%\n"
+            content += f"   💹 {direction}率: {rate:.2f}%\n"
             content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
             content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
             content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
@@ -194,7 +203,8 @@ def _format_arbitrage_message(df: pd.DataFrame) -> str:
             "\n⚠️ 风险提示：\n"
             "1. 套利机会转瞬即逝，请及时操作\n"
             "2. 实际交易中可能因价格变动导致套利失败\n"
-            "3. 本策略仅供参考，不构成投资建议\n"
+            "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
+            "4. 本策略仅供参考，不构成投资建议\n"
         )
         
         return content

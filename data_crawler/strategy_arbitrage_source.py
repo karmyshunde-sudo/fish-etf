@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     """
-    清理超过指定天数的套利数据文件
+    清理超过指定天数的套利数据文件（仅清理实时行情数据，不清理交易流水）
     
     Args:
         days_to_keep: 保留天数
@@ -34,13 +34,18 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     try:
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
         if not os.path.exists(arbitrage_dir):
+            logger.info("套利数据目录不存在，无需清理")
             return
         
-        # 获取当前日期
-        current_date = get_beijing_time()
+        # 获取当前日期（仅日期部分，不包含时间）
+        current_date = get_beijing_time().date()
         logger.info(f"清理旧套利数据：保留最近 {days_to_keep} 天的数据")
+        logger.info(f"当前日期: {current_date}")
         
         # 遍历目录中的所有文件
+        files_to_keep = []
+        files_to_delete = []
+        
         for file_name in os.listdir(arbitrage_dir):
             if not file_name.endswith(".csv"):
                 continue
@@ -48,18 +53,45 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             # 提取文件日期
             try:
                 file_date_str = file_name.split(".")[0]
-                file_date = datetime.strptime(file_date_str, "%Y%m%d")
-            except (ValueError, TypeError):
-                continue
+                file_date = datetime.strptime(file_date_str, "%Y%m%d").date()
                 
-            # 计算日期差
-            days_diff = (current_date - file_date).days
-            
-            # 删除超过保留天数的文件
-            if days_diff > days_to_keep:
-                file_path = os.path.join(arbitrage_dir, file_name)
+                # 计算日期差（仅比较日期，不考虑时间）
+                days_diff = (current_date - file_date).days
+                
+                # 记录详细信息
+                logger.debug(f"检查文件: {file_name}, 文件日期: {file_date}, 日期差: {days_diff}天")
+                
+                # 判断是否删除
+                if days_diff > days_to_keep:
+                    files_to_delete.append((file_name, file_date, days_diff))
+                else:
+                    files_to_keep.append((file_name, file_date, days_diff))
+            except (ValueError, TypeError) as e:
+                logger.warning(f"解析文件日期失败: {file_name}, 错误: {str(e)}")
+                continue
+        
+        # 删除超过保留天数的文件
+        for file_name, file_date, days_diff in files_to_delete:
+            file_path = os.path.join(arbitrage_dir, file_name)
+            try:
                 os.remove(file_path)
-                logger.info(f"已删除旧套利数据文件: {file_path}")
+                logger.info(f"已删除旧套利数据文件: {file_name} (文件日期: {file_date}, 超期: {days_diff - days_to_keep}天)")
+            except Exception as e:
+                logger.error(f"删除文件失败: {file_path}, 错误: {str(e)}")
+        
+        # 记录保留的文件
+        logger.info(f"保留套利数据文件: {len(files_to_keep)} 个")
+        if files_to_keep:
+            logger.debug("保留的文件列表:")
+            for file_name, file_date, days_diff in files_to_keep:
+                logger.debug(f"  - {file_name} (文件日期: {file_date}, 剩余保留天数: {days_to_keep - days_diff}天)")
+        
+        # 记录删除的文件
+        logger.info(f"已删除套利数据文件: {len(files_to_delete)} 个")
+        if files_to_delete:
+            logger.debug("已删除的文件列表:")
+            for file_name, file_date, days_diff in files_to_delete:
+                logger.debug(f"  - {file_name} (文件日期: {file_date}, 超期: {days_diff - days_to_keep}天)")
     
     except Exception as e:
         logger.error(f"清理旧套利数据失败: {str(e)}", exc_info=True)

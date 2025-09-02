@@ -32,7 +32,7 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
-from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities  # 使用新数据源
+from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities_from_source  # 修复：使用专门的数据源函数
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -55,7 +55,7 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 获取最新的套利机会
+        # 获取最新的套利机会（直接从数据源获取，不经过缓存）
         opportunities = get_latest_arbitrage_opportunities()
         
         if opportunities.empty:
@@ -620,8 +620,8 @@ def crawl_arbitrage_data() -> Optional[str]:
         # 构建文件路径
         file_path = os.path.join(arbitrage_dir, f"{today}.csv")
         
-        # 获取套利数据
-        df = get_latest_arbitrage_opportunities()
+        # 获取套利数据 - 修复：直接从数据源获取，避免递归调用
+        df = get_latest_arbitrage_opportunities_from_source()
         
         if df.empty:
             logger.warning("未获取到套利数据，无法保存")
@@ -645,23 +645,22 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         pd.DataFrame: 套利机会DataFrame
     """
     try:
-        # 尝试加载今天的套利数据
+        # 获取当前日期
         today = get_beijing_time().strftime("%Y%m%d")
+        
+        # 尝试加载今天的套利数据
         df = load_arbitrage_data(today)
         
         if df.empty:
             logger.warning("无今日套利数据，尝试重新爬取")
             file_path = crawl_arbitrage_data()
             
-            # 详细检查爬取结果
+            # 检查爬取结果
             if file_path and os.path.exists(file_path):
                 logger.info(f"成功爬取并保存套利数据到: {file_path}")
                 df = load_arbitrage_data(today)
             else:
-                logger.error("重新爬取后仍无套利数据，文件路径无效或为空")
-                if 'file_path' in locals():
-                    logger.error(f"文件路径: {file_path}")
-                    logger.error(f"文件是否存在: {os.path.exists(file_path)}")
+                logger.error("重新爬取后仍无套利数据")
                 return pd.DataFrame()
         
         # 检查数据完整性

@@ -19,7 +19,7 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time,
     is_file_outdated
-    is_trading_time  # 确保这里导入
+    is_trading_time
 )
 
 from utils.file_utils import (

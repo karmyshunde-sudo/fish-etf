@@ -20,7 +20,6 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time
 )
-from utils.file_utils import mark_arbitrage_pushed  # 新增：导入增量推送标记函数
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -155,43 +154,37 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
-def _format_arbitrage_message(df: pd.DataFrame) -> str:
+def _format_discount_message(df: pd.DataFrame) -> str:
     """
-    格式化套利机会消息
+    格式化折价机会消息
     
     Args:
-        df: 套利机会DataFrame
+        df: 折价机会DataFrame
     
     Returns:
         str: 格式化后的消息
     """
     try:
         if df.empty:
-            return "【套利机会】\n未发现有效套利机会"
+            return "【折价机会】\n未发现有效折价套利机会"
         
         # 生成消息内容
         content = "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
         content += "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
         content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
         content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
-        content += f"🎯 折价阈值：折价率超过{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%\n\n"
+        content += f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
+        content += f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
         
-        # 添加套利机会
+        # 添加折价机会
         for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
-            # 根据折溢价率正负判断是溢价还是折价
-            if row["折溢价率"] > 0:
-                direction = "溢价"
-                rate = row["折溢价率"]
-            else:
-                direction = "折价"
-                rate = -row["折溢价率"]  # 取正值
-            
             content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-            content += f"   💹 {direction}率: {rate:.2f}%\n"
+            content += f"   💹 折价率: {abs(row['折溢价率']):.2f}%\n"
             content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
             content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
             content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
-            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n\n"
+            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
+            content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
         
         # 添加其他机会数量
         if len(df) > 3:
@@ -203,15 +196,71 @@ def _format_arbitrage_message(df: pd.DataFrame) -> str:
             "1. 市场价格低于净值是短期现象，不一定能立即获利\n"
             "2. 实际交易中可能因价格变动导致机会消失\n"
             "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
-            "4. 本策略仅供参考，不构成投资建议\n"
+            "4. 本策略综合评分考虑了折溢价率、流动性、波动率、成分股稳定性等因素\n"
+            "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
+            "6. 本策略仅供参考，不构成投资建议\n"
         )
         
         return content
     
     except Exception as e:
-        error_msg = f"生成套利消息内容失败: {str(e)}"
+        error_msg = f"生成折价消息内容失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return f"【套利策略】生成消息内容时发生错误，请检查日志"
+        return f"【折价策略】生成消息内容时发生错误，请检查日志"
+
+def _format_premium_message(df: pd.DataFrame) -> str:
+    """
+    格式化溢价机会消息
+    
+    Args:
+        df: 溢价机会DataFrame
+    
+    Returns:
+        str: 格式化后的消息
+    """
+    try:
+        if df.empty:
+            return "【溢价机会】\n未发现有效溢价套利机会"
+        
+        # 生成消息内容
+        content = "【以下ETF市场价格高于净值，若你只在二级市场交易注意规避风险】\n\n"
+        content += "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
+        content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
+        content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
+        content += f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
+        content += f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
+        
+        # 添加溢价机会
+        for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
+            content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
+            content += f"   💹 溢价率: {row['折溢价率']:.2f}%\n"
+            content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+            content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
+            content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
+            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
+            content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+        
+        # 添加其他机会数量
+        if len(df) > 3:
+            content += f"• 还有 {len(df) - 3} 个溢价机会...\n"
+        
+        # 添加风险提示
+        content += (
+            "\n⚠️ 风险提示：\n"
+            "1. 市场价格高于净值是短期现象，不一定能立即获利\n"
+            "2. 实际交易中可能因价格变动导致机会消失\n"
+            "3. 二级市场交易者应避免在溢价过高时买入，可能导致亏损\n"
+            "4. 本策略综合评分考虑了溢价率、流动性、波动率、成分股稳定性等因素\n"
+            "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
+            "6. 本策略仅供参考，不构成投资建议\n"
+        )
+        
+        return content
+    
+    except Exception as e:
+        error_msg = f"生成溢价消息内容失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"【溢价策略】生成消息内容时发生错误，请检查日志"
 
 def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> str:
     """
@@ -230,8 +279,10 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
         log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
         
         # 特殊处理套利消息
-        if message_type == "arbitrage" and isinstance(message, pd.DataFrame):
-            message = _format_arbitrage_message(message)
+        if message_type == "discount" and isinstance(message, pd.DataFrame):
+            message = _format_discount_message(message)
+        elif message_type == "premium" and isinstance(message, pd.DataFrame):
+            message = _format_premium_message(message)
         
         # 确保message是字符串
         if not isinstance(message, str):
@@ -248,7 +299,17 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
                 f"🔗 日志链接: {log_url}\n"
                 "📊 数据来源：AkShare | 环境：生产"
             )
-        elif message_type == "arbitrage":
+        elif message_type == "discount":
+            return (
+                f"{message}\n\n"
+                "──────────────────\n"
+                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                "──────────────────\n"
+                f"🔗 数据来源: {log_url}\n"
+                "📊 环境：生产"
+            )
+        elif message_type == "premium":
             return (
                 f"{message}\n\n"
                 "──────────────────\n"
@@ -317,7 +378,7 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
     
     Args:
         message: 消息内容（纯业务内容，可以是字符串或DataFrame）
-        message_type: 消息类型（task, arbitrage, position, error, daily_report等）
+        message_type: 消息类型（task, discount, premium, position, error, daily_report等）
         webhook: 企业微信Webhook地址
         
     Returns:
@@ -360,40 +421,11 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
                 logger.error(f"消息分片 {i+1} 发送失败，已达最大重试次数")
                 all_success = False
                 
-        # 增量推送功能：如果消息是套利消息且发送成功，标记ETF为已推送
-        if all_success and message_type == "arbitrage" and isinstance(message, pd.DataFrame):
-            _mark_arbitrage_opportunities_pushed(message)
-                
         return all_success
         
     except Exception as e:
         logger.error(f"发送微信消息时发生未预期错误: {str(e)}", exc_info=True)
         return False
-
-def _mark_arbitrage_opportunities_pushed(opportunities: pd.DataFrame) -> None:
-    """
-    标记套利机会为已推送
-    
-    Args:
-        opportunities: 套利机会DataFrame
-    """
-    try:
-        if opportunities.empty:
-            logger.debug("无套利机会需要标记为已推送")
-            return
-        
-        success_count = 0
-        for _, row in opportunities.iterrows():
-            etf_code = row["ETF代码"]
-            if mark_arbitrage_pushed(etf_code):
-                success_count += 1
-            else:
-                logger.warning(f"标记ETF {etf_code} 为已推送失败")
-        
-        logger.info(f"成功标记 {success_count}/{len(opportunities)} 个ETF套利机会为已推送")
-        
-    except Exception as e:
-        logger.error(f"标记套利机会为已推送时发生错误: {str(e)}", exc_info=True)
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

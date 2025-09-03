@@ -1152,31 +1152,50 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
     """
     try:
         # === 关键修复：确保premium_discount是标量值 ===
-        # 如果是pandas Series或DataFrame，提取第一个有效值
+        # 1. 检查并提取标量值
         if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
-            # 处理多维情况：获取第一个值
-            if premium_discount.size > 0:
-                # 使用.values.flatten()[0]确保获取标量值
+            logger.warning(f"ETF {etf_code} 折溢价率传入了pandas对象，正在提取标量值")
+            
+            # 方法1：尝试使用.values.flatten()[0]获取标量值（最可靠）
+            try:
                 premium_discount = premium_discount.values.flatten()[0]
-                logger.debug(f"从pandas对象提取标量值: {premium_discount}")
-            else:
-                logger.warning(f"ETF {etf_code} 折溢价率Series为空，使用默认值0.0")
-                premium_discount = 0.0
+                logger.debug(f"ETF {etf_code} 通过.values.flatten()[0]提取标量值: {premium_discount}")
+            except Exception as e:
+                # 方法2：尝试使用.item()
+                try:
+                    premium_discount = premium_discount.item()
+                    logger.debug(f"ETF {etf_code} 通过.item()提取标量值: {premium_discount}")
+                except Exception as e2:
+                    # 方法3：取第一个有效值
+                    try:
+                        valid_values = premium_discount[~pd.isna(premium_discount)]
+                        if not valid_values.empty:
+                            premium_discount = valid_values.iloc[0]
+                            logger.debug(f"ETF {etf_code} 通过.iloc[0]提取标量值: {premium_discount}")
+                        else:
+                            logger.error(f"ETF {etf_code} 折溢价率Series为空，使用默认值0.0")
+                            premium_discount = 0.0
+                    except Exception as e3:
+                        logger.error(f"ETF {etf_code} 无法从pandas对象提取值: {str(e3)}，使用默认值0.0")
+                        premium_discount = 0.0
         
-        # 确保是数值类型
+        # 2. 确保是数值类型
         if not isinstance(premium_discount, (int, float)):
             try:
                 # 尝试转换为浮点数
                 premium_discount = float(premium_discount)
-                logger.debug(f"将非数值类型转换为浮点数: {premium_discount}")
+                logger.debug(f"ETF {etf_code} 将非数值类型转换为浮点数: {premium_discount}")
             except (ValueError, TypeError) as e:
-                logger.error(f"无法将类型 {type(premium_discount)} 转换为浮点数: {str(e)}，使用默认值0.0")
+                logger.error(f"ETF {etf_code} 无法将类型 {type(premium_discount)} 转换为浮点数: {str(e)}，使用默认值0.0")
                 premium_discount = 0.0
         
-        # 限制premium_discount在合理范围内
+        # 3. 限制在合理范围内
         MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
         MAX_PREMIUM = 20.0    # 最大溢价率（20%）
         premium_discount = max(min(premium_discount, MAX_PREMIUM), MAX_DISCOUNT)
+        
+        # 4. 记录实际使用的值（用于调试）
+        logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")
         
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         if df is None or df.empty:
@@ -1202,12 +1221,11 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
             component_score = max(0, min(100, component_score))
         
         # 记录折溢价率参数，用于调试
-        logger.debug(f"ETF {etf_code} 套利评分参数: premium_discount={premium_discount}, "
-                     f"DISCOUNT_THRESHOLD={Config.DISCOUNT_THRESHOLD}, "
-                     f"PREMIUM_THRESHOLD={Config.PREMIUM_THRESHOLD}")
+        logger.debug(f"ETF {etf_code} 套利评分参数: premium_discount={premium_discount:.2f}%, "
+                     f"DISCOUNT_THRESHOLD={Config.DISCOUNT_THRESHOLD:.2f}%, "
+                     f"PREMIUM_THRESHOLD={Config.PREMIUM_THRESHOLD:.2f}%")
         
-        # === 关键修复：计算折溢价率评分 ===
-        # 确保使用标量值进行比较
+        # 计算折溢价率评分
         if premium_discount < 0:
             # 折价情况：折价率绝对值越大，评分越高
             abs_premium = abs(premium_discount)
@@ -1279,7 +1297,7 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         
         # 双重验证：确保评分在0-100范围内
         if total_score < 0 or total_score > 100:
-            logger.error(f"ETF {etf_code} 套利综合评分超出范围({total_score})，强制限制在0-100")
+            logger.error(f"ETF {etf_code} 套利综合评分超出范围({total_score:.2f})，强制限制在0-100")
             total_score = max(0, min(100, total_score))
         
         # 添加详细日志，便于问题排查

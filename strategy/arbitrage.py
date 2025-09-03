@@ -179,8 +179,8 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         premium_opportunities = filter_valid_premium_opportunities(premium_opportunities)
         
         # 筛选今天尚未推送的套利机会（增量推送功能）
-        discount_opportunities = filter_new_arbitrage_opportunities(discount_opportunities)
-        premium_opportunities = filter_new_arbitrage_opportunities(premium_opportunities)
+        discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
+        premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
         logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会")
         logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会")
@@ -348,6 +348,13 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 log_prefix=f"ETF {etf_code} 折溢价率: "
             )
             
+            # 从DataFrame行中提取所有必需参数
+            etf_name = extract_scalar_value(row["ETF名称"], log_prefix=f"ETF {etf_code} 名称: ")
+            market_price = extract_scalar_value(row["市场价格"], log_prefix=f"ETF {etf_code} 市场价格: ")
+            iopv = extract_scalar_value(row["IOPV"], log_prefix=f"ETF {etf_code} IOPV: ")
+            fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")
+            avg_volume = extract_scalar_value(row["日均成交额"], log_prefix=f"ETF {etf_code} 日均成交额: ")
+            
             # 限制在合理范围内
             MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
             MAX_PREMIUM = 20.0    # 最大溢价率（20%）
@@ -357,7 +364,16 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")
             
             # 计算综合评分
-            score = calculate_arbitrage_score(etf_code, etf_df, premium_discount)
+            score = calculate_arbitrage_score(
+                etf_code,
+                etf_name,
+                premium_discount,
+                market_price,
+                iopv,
+                fund_size,
+                avg_volume,
+                etf_df
+            )
             scores.append(score)
         
         # 添加评分列

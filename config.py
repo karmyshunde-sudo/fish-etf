@@ -99,7 +99,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/    {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/      {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -153,17 +153,24 @@ class Config:
     ARBITRAGE_SCORE_WEIGHTS: Dict[str, float] = {
         'premium_discount': 0.35,      # 折溢价率权重
         'liquidity': 0.25,             # 流动性权重
-        'volatility': 0.15,            # 波动率权重
-        'component_stability': 0.15,   # 成分股稳定性权重
+        'risk': 0.10,                  # 风险控制权重
+        'return': 0.10,                # 收益能力权重
         'market_sentiment': 0.10,      # 市场情绪权重
-        'fundamental': 0.2,            # 基本面权重
-        'return': 0.25,                # 收益能力权重
-        'risk': 0.2                    # 风险控制权重
+        'fundamental': 0.05,           # 基本面权重
+        'component_stability': 0.05    # 成分股稳定性权重
     }
-        
-    # 折价/溢价阈值配置
-    DISCOUNT_THRESHOLD: float = 0.03  # 折价阈值（3%）
-    PREMIUM_THRESHOLD: float = 0.05   # 溢价阈值（5%）
+    
+    # 明确区分折价和溢价阈值
+    DISCOUNT_THRESHOLD: float = 0.5   # 折价阈值（0.5%）
+    PREMIUM_THRESHOLD: float = 0.5    # 溢价阈值（0.5%）
+    
+    # 显示阈值（用于消息中）
+    MIN_DISCOUNT_DISPLAY_THRESHOLD: float = 0.3  # 显示折价机会的最小阈值（0.3%）
+    MIN_PREMIUM_DISPLAY_THRESHOLD: float = 0.3   # 显示溢价机会的最小阈值（0.3%）
+    
+    # 基本筛选条件（用于消息中）
+    MIN_FUND_SIZE: float = 10.0      # 基金规模阈值(亿元)
+    MIN_AVG_VOLUME: float = 5000.0   # 日均成交额阈值(万元)
     
     # 综合评分阈值配置
     ARBITRAGE_SCORE_THRESHOLD: float = 70.0  # 综合评分阈值
@@ -413,11 +420,26 @@ class Config:
                 "total": total_weight,
                 "expected": 1.0
             }
-
+            
+            # 检查套利评分权重配置
+            arbitrage_total_weight = sum(Config.ARBITRAGE_SCORE_WEIGHTS.values())
+            results["arbitrage_weights"] = {
+                "status": "OK" if abs(arbitrage_total_weight - 1.0) < 0.001 else "WARNING",
+                "total": arbitrage_total_weight,
+                "expected": 1.0
+            }
+            
             # 检查微信配置
             results["wechat"] = {
                 "status": "OK" if Config.WECOM_WEBHOOK else "WARNING",
                 "webhook_configured": bool(Config.WECOM_WEBHOOK)
+            }
+            
+            # 检查折价/溢价阈值配置
+            results["thresholds"] = {
+                "status": "OK" if Config.DISCOUNT_THRESHOLD > 0 and Config.PREMIUM_THRESHOLD > 0 else "WARNING",
+                "discount_threshold": Config.DISCOUNT_THRESHOLD,
+                "premium_threshold": Config.PREMIUM_THRESHOLD
             }
             
             return results
@@ -550,7 +572,11 @@ def _validate_critical_config():
             "ARBITRAGE_SCORE_WEIGHTS",  # 新增验证项
             "DISCOUNT_THRESHOLD",  # 新增验证项
             "PREMIUM_THRESHOLD",  # 新增验证项
-            "ARBITRAGE_SCORE_THRESHOLD"  # 新增验证项
+            "ARBITRAGE_SCORE_THRESHOLD",  # 新增验证项
+            "MIN_DISCOUNT_DISPLAY_THRESHOLD",  # 新增验证项
+            "MIN_PREMIUM_DISPLAY_THRESHOLD",  # 新增验证项
+            "MIN_FUND_SIZE",  # 新增验证项
+            "MIN_AVG_VOLUME"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -591,20 +617,34 @@ def _validate_critical_config():
                     setattr(Config, "ARBITRAGE_SCORE_WEIGHTS", {
                         'premium_discount': 0.35,
                         'liquidity': 0.25,
-                        'volatility': 0.15,
-                        'component_stability': 0.15,
-                        'market_sentiment': 0.10
+                        'risk': 0.10,
+                        'return': 0.10,
+                        'market_sentiment': 0.10,
+                        'fundamental': 0.05,
+                        'component_stability': 0.05
                     })
                     logging.warning("已添加缺失的ARBITRAGE_SCORE_WEIGHTS配置项")
                 elif config_name == "DISCOUNT_THRESHOLD":
-                    setattr(Config, "DISCOUNT_THRESHOLD", 0.03)
+                    setattr(Config, "DISCOUNT_THRESHOLD", 0.5)
                     logging.warning("已添加缺失的DISCOUNT_THRESHOLD配置项")
                 elif config_name == "PREMIUM_THRESHOLD":
-                    setattr(Config, "PREMIUM_THRESHOLD", 0.05)
+                    setattr(Config, "PREMIUM_THRESHOLD", 0.5)
                     logging.warning("已添加缺失的PREMIUM_THRESHOLD配置项")
                 elif config_name == "ARBITRAGE_SCORE_THRESHOLD":
                     setattr(Config, "ARBITRAGE_SCORE_THRESHOLD", 70.0)
                     logging.warning("已添加缺失的ARBITRAGE_SCORE_THRESHOLD配置项")
+                elif config_name == "MIN_DISCOUNT_DISPLAY_THRESHOLD":
+                    setattr(Config, "MIN_DISCOUNT_DISPLAY_THRESHOLD", 0.3)
+                    logging.warning("已添加缺失的MIN_DISCOUNT_DISPLAY_THRESHOLD配置项")
+                elif config_name == "MIN_PREMIUM_DISPLAY_THRESHOLD":
+                    setattr(Config, "MIN_PREMIUM_DISPLAY_THRESHOLD", 0.3)
+                    logging.warning("已添加缺失的MIN_PREMIUM_DISPLAY_THRESHOLD配置项")
+                elif config_name == "MIN_FUND_SIZE":
+                    setattr(Config, "MIN_FUND_SIZE", 10.0)
+                    logging.warning("已添加缺失的MIN_FUND_SIZE配置项")
+                elif config_name == "MIN_AVG_VOLUME":
+                    setattr(Config, "MIN_AVG_VOLUME", 5000.0)
+                    logging.warning("已添加缺失的MIN_AVG_VOLUME配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

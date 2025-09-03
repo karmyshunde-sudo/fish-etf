@@ -751,6 +751,10 @@ def get_price_column(df: pd.DataFrame) -> Optional[str]:
     # 记录DataFrame实际包含的列名，用于诊断问题
     logger.debug(f"DataFrame实际包含的列名: {list(df.columns)}")
     
+    # 优先检查套利专用列
+    if "市场价格" in df.columns:
+        return "市场价格"
+    
     # 定义可能的价格列名（按优先级排序）
     price_columns = [
         "收盘", "close", "市场价格", "最新价", "price", 
@@ -768,12 +772,6 @@ def get_price_column(df: pd.DataFrame) -> Optional[str]:
         for col in df.columns:
             if any(keyword in col for keyword in ["收", "价", "最新", "price"]):
                 logger.info(f"通过模糊匹配找到价格列: {col}")
-                return col
-        
-        # 特殊情况处理：检查是否有"最新价"的变体
-        for col in df.columns:
-            if "最新" in col and ("价" in col or "Price" in col):
-                logger.info(f"通过特殊规则找到价格列: {col}")
                 return col
         
         logger.warning("未找到价格列，DataFrame实际列名: " + ", ".join(df.columns))

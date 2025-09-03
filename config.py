@@ -82,9 +82,13 @@ class Config:
         "turnover": "换手率",
         "etf_code": "ETF代码",
         "etf_name": "ETF名称",
-        "crawl_time": "爬取时间"
+        "crawl_time": "爬取时间",
+        "market_price": "市场价格",
+        "iopv": "IOPV",
+        "premium_discount": "折溢价率",
+        "net_value_time": "净值时间"
     }
-    
+
     # 标准列名（中文）- 修复：添加STANDARD_COLUMNS属性
     STANDARD_COLUMNS: list = list(COLUMN_NAME_MAPPING.values())
     

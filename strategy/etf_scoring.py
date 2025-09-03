@@ -219,7 +219,14 @@ def rebuild_etf_metadata():
         # 获取所有ETF代码
         etf_list = load_all_etf_list()
         if etf_list is None or etf_list.empty:
-            logger.warning("ETF列表为空，无法重建元数据")
+            error_msg = "ETF列表为空，无法重建元数据"
+            logger.error(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
             return False
         
         # 初始化元数据列表
@@ -254,7 +261,14 @@ def rebuild_etf_metadata():
             })
         
         if not metadata_list:
-            logger.warning("没有有效的ETF元数据可重建")
+            error_msg = "没有有效的ETF元数据可重建"
+            logger.error(error_msg)
+            
+            # 发送错误通知
+            send_wechat_message(
+                message=error_msg,
+                message_type="error"
+            )
             return False
         
         # 创建DataFrame
@@ -269,6 +283,7 @@ def rebuild_etf_metadata():
     except Exception as e:
         error_msg = f"重建ETF元数据失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
         # 发送错误通知
         send_wechat_message(
             message=error_msg,

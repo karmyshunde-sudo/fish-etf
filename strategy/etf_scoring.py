@@ -575,22 +575,65 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
             return 50.0  # 返回中性评分
         
         # 确保使用中文列名
-        df = ensure_chinese_columns(df)
+        try:
+            # 尝试导入ensure_chinese_columns（如果尚未导入）
+            from utils.file_utils import ensure_chinese_columns
+            df = ensure_chinese_columns(df)
+        except ImportError:
+            # 如果导入失败，尝试使用内置的列名映射
+            logger.warning("无法导入ensure_chinese_columns，尝试使用内置列名映射")
+            # 这里可以添加内置的列名映射逻辑
+            pass
         
         # 检查是否包含必要列
-        if "收盘" not in df.columns:
-            logger.error("ETF日线数据缺少'收盘'列，无法计算风险评分")
+        if "收盘" not in df.columns and "close" not in df.columns:
+            logger.error("ETF日线数据缺少价格列，无法计算风险评分")
             return 50.0
         
+        # 选择合适的价格列
+        price_col = "收盘" if "收盘" in df.columns else "close"
+        
+        # 确保价格列是数值类型
+        if not pd.api.types.is_numeric_dtype(df[price_col]):
+            try:
+                df[price_col] = pd.to_numeric(df[price_col], errors='coerce')
+                df = df.dropna(subset=[price_col])
+            except:
+                logger.error(f"价格列 {price_col} 无法转换为数值类型")
+                return 50.0
+        
+        # 计算收益率
+        df["daily_return"] = df[price_col].pct_change().dropna()
+        
+        # 确保收益率列是数值类型
+        if not pd.api.types.is_numeric_dtype(df["daily_return"]):
+            try:
+                df["daily_return"] = pd.to_numeric(df["daily_return"], errors='coerce')
+                df = df.dropna(subset=["daily_return"])
+            except:
+                logger.error("收益率列无法转换为数值类型")
+                return 50.0
+        
         # 计算波动率（年化波动率）
-        df["daily_return"] = df["收盘"].pct_change()
+        if len(df["daily_return"]) < 2:
+            logger.warning("收益率数据不足，无法计算波动率")
+            return 50.0
+        
         volatility = df["daily_return"].std() * np.sqrt(252)  # 年化波动率
         
         # 计算折溢价率稳定性
+        premium_discount_std = 0.5  # 默认值
         if "折溢价率" in df.columns:
-            premium_discount_std = df["折溢价率"].std()
-        else:
-            premium_discount_std = 0.5  # 默认中等波动
+            # 确保折溢价率列是数值类型
+            if not pd.api.types.is_numeric_dtype(df["折溢价率"]):
+                try:
+                    df["折溢价率"] = pd.to_numeric(df["折溢价率"], errors='coerce')
+                    df = df.dropna(subset=["折溢价率"])
+                except:
+                    logger.warning("折溢价率列无法转换为数值类型")
+            
+            if not df["折溢价率"].empty:
+                premium_discount_std = df["折溢价率"].std()
         
         # 综合风险指标（标准化到0-1）
         risk_factor = (volatility * 0.6 + premium_discount_std * 0.4)
@@ -609,7 +652,7 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
         logger.error(f"计算风险评分失败: {str(e)}", exc_info=True)
         return 50.0  # 出错时返回中性评分
 
-def calculate_return_score(premium_discount: float) -> float:
+def calculate_return_score(premium_discount: Union[float, str]) -> float:
     """
     计算收益评分（0-100分，分数越高表示潜在收益越大）
     
@@ -620,6 +663,15 @@ def calculate_return_score(premium_discount: float) -> float:
         float: 收益评分（0-100分）
     """
     try:
+        # 确保premium_discount是浮点数
+        if isinstance(premium_discount, str):
+            try:
+                premium_discount = float(premium_discount)
+                logger.debug(f"将折溢价率字符串 '{premium_discount}' 转换为浮点数")
+            except ValueError:
+                logger.error(f"无法将折溢价率 '{premium_discount}' 转换为浮点数，使用默认值0.0")
+                premium_discount = 0.0
+        
         # 定义合理的折溢价率范围
         MAX_DISCOUNT = -5.0  # 最大折价率（-5%）
         MIN_PREMIUM = 0.5    # 最小溢价率（0.5%）

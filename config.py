@@ -152,8 +152,11 @@ class Config:
         'volatility': 0.15,        # 波动率权重
         'component_stability': 0.15,  # 成分股稳定性权重
         'market_sentiment': 0.10   # 市场情绪权重
+        'fundamental': 0.2,     # 基本面权重
+        'return': 0.25,         # 收益能力权重
+        'risk': 0.2,            # 风险控制权重
     }
-    
+        
     # 折价/溢价阈值配置
     DISCOUNT_THRESHOLD: float = 0.03  # 折价阈值（3%）
     PREMIUM_THRESHOLD: float = 0.05   # 溢价阈值（5%）

@@ -214,37 +214,15 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         # 添加计算时间
         df['计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         
-        # 如果没有直接提供折溢价率，我们自己计算
-        if '折溢价率' not in df.columns and 'IOPV' in df.columns and '市场价格' in df.columns:
-            df['折溢价率'] = df.apply(
-                lambda row: calculate_premium_discount(row['市场价格'], row['IOPV']), 
-                axis=1
-            )
+        # 修复：移除所有计算逻辑，只返回原始数据
+        # 不再计算折溢价率，这部分逻辑应该在策略层处理
         
-        logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
+        logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
         return df
     
     except Exception as e:
         logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
-def calculate_premium_discount(market_price: float, iopv: float) -> float:
-    """
-    计算折溢价率
-    
-    Args:
-        market_price: 市场价格
-        iopv: IOPV(基金份额参考净值)
-    
-    Returns:
-        float: 折溢价率（百分比）
-    """
-    if iopv <= 0:
-        logger.warning(f"无效的IOPV: {iopv}")
-        return 0.0
-    
-    premium_discount = ((market_price - iopv) / iopv) * 100
-    return round(premium_discount, 2)
 
 def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
     """
@@ -299,7 +277,7 @@ def crawl_arbitrage_data() -> str:
             logger.error("未获取到有效的套利数据，爬取结果为空")
             return ""
         else:
-            logger.info(f"成功获取 {len(df)} 只ETF的套利数据")
+            logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
         
         # 增量保存数据
         return append_arbitrage_data(df)
@@ -310,10 +288,10 @@ def crawl_arbitrage_data() -> str:
 
 def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     """
-    获取最新的套利机会
+    获取最新的套利机会数据（原始数据）
     
     Returns:
-        pd.DataFrame: 套利机会DataFrame
+        pd.DataFrame: 原始套利数据，不做任何筛选和排序
     """
     try:
         # 尝试加载今天的套利数据
@@ -342,28 +320,23 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.error("无法获取任何有效的套利数据")
             return pd.DataFrame()
         
-        # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"数据中缺少必要列: {col}")
-                return pd.DataFrame()
+        # 修复：不再检查"折溢价率"列，因为数据源可能不提供该列
+        # 只检查必要列是否存在
+        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
         
-        # 筛选有套利机会的数据
-        opportunities = df[
-            (df["折溢价率"].abs() >= Config.ARBITRAGE_THRESHOLD)
-        ].copy()
+        if missing_columns:
+            logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
+            # 记录实际存在的列
+            logger.debug(f"实际列名: {list(df.columns)}")
+            return pd.DataFrame()
         
-        # 按溢价率绝对值排序
-        opportunities["abs_premium_discount"] = opportunities["折溢价率"].abs()
-        opportunities = opportunities.sort_values("abs_premium_discount", ascending=False)
-        opportunities = opportunities.drop(columns=["abs_premium_discount"])
-        
-        logger.info(f"发现 {len(opportunities)} 个套利机会")
-        return opportunities
+        # 修复：不再进行筛选和排序，只返回原始数据
+        logger.info(f"成功加载 {len(df)} 条原始套利数据")
+        return df
     
     except Exception as e:
-        logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
+        logger.error(f"获取最新套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
@@ -387,7 +360,7 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
             # 检查数据是否有效
             if not df.empty:
                 # 检查是否包含必要列
-                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
+                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if all(col in df.columns for col in required_columns) and len(df) > 0:
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
                     return df

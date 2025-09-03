@@ -71,14 +71,15 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df["涨跌额"] = df["收盘"] - df["前收盘"]
             elif chn_col == "振幅" and "最高" in df.columns and "最低" in df.columns and "前收盘" in df.columns:
                 df["振幅"] = ((df["最高"] - df["最低"]) / df["前收盘"]) * 100
-            # 其他列的推导逻辑...
             else:
                 # 创建安全副本以避免SettingWithCopyWarning
                 df = df.copy(deep=True)
                 df[chn_col] = None  # 填充缺失列
     
-    # 只保留标准中文列
-    df = df[Config.CHINESE_COLUMNS]
+    # 关键修复：不要删除非标准列，只确保标准列存在
+    # 原有问题代码：df = df[Config.CHINESE_COLUMNS]
+    # 修复后：保留所有列，只确保标准列存在
+    logger.debug(f"确保中文列名完成，当前列名: {list(df.columns)}")
     return df
 
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:

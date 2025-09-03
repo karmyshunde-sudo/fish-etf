@@ -40,8 +40,7 @@ from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
     calculate_arbitrage_score,
-    calculate_component_stability_score,
-    calculate_premium_discount as scoring_calculate_premium_discount
+    calculate_component_stability_score
 )
 from utils.alert_utils import send_urgent_alert
 
@@ -113,6 +112,26 @@ def extract_scalar_value(value, default=0.0, log_prefix=""):
     except Exception as e:
         logger.error(f"{log_prefix}无法从类型 {type(value)} 中提取标量值: {str(e)}，使用默认值{default}")
         return default
+
+def calculate_premium_discount(market_price: float, iopv: float) -> float:
+    """
+    计算折溢价率
+    Args:
+        market_price: 市场价格
+        iopv: IOPV(基金份额参考净值)
+    
+    Returns:
+        float: 折溢价率（百分比），正数表示溢价，负数表示折价
+    """
+    if iopv <= 0:
+        logger.warning(f"无效的IOPV: {iopv}")
+        return 0.0
+    
+    # 正确计算折溢价率：(市场价格 - IOPV) / IOPV * 100
+    # 结果为正：溢价（市场价格 > IOPV）
+    # 结果为负：折价（市场价格 < IOPV）
+    premium_discount = ((market_price - iopv) / iopv) * 100
+    return round(premium_discount, 2)
 
 # 保留原有的 is_manual_trigger 函数定义
 def is_manual_trigger() -> bool:

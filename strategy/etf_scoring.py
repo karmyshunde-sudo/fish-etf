@@ -559,84 +559,100 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
         return 0.0
 
 def calculate_risk_score(df: pd.DataFrame) -> float:
-    """计算风险控制得分"""
+    """
+    计算风险评分（0-100分，分数越高风险越大）
+    
+    Args:
+        df: ETF日线数据
+        
+    Returns:
+        float: 风险评分（0-100分）
+    """
     try:
-        if df is None or df.empty:
-            logger.warning("传入的DataFrame为空，风险得分设为0")
-            return 0.0
+        # 确保有足够数据
+        if len(df) < 30:
+            logger.warning("ETF日线数据不足30天，无法准确计算风险评分")
+            return 50.0  # 返回中性评分
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
         
-        # 1. 波动率得分
-        volatility = calculate_volatility(df)
-        volatility_score = max(0, 100 - (volatility * 100))
+        # 检查是否包含必要列
+        if "收盘" not in df.columns:
+            logger.error("ETF日线数据缺少'收盘'列，无法计算风险评分")
+            return 50.0
         
-        # 2. 夏普比率得分
-        sharpe_ratio = calculate_sharpe_ratio(df)
-        sharpe_score = min(max(sharpe_ratio * 50, 0), 100)
+        # 计算波动率（年化波动率）
+        df["daily_return"] = df["收盘"].pct_change()
+        volatility = df["daily_return"].std() * np.sqrt(252)  # 年化波动率
         
-        # 3. 最大回撤得分
-        max_drawdown = calculate_max_drawdown(df)
-        drawdown_score = max(0, 100 - (max_drawdown * 500))
+        # 计算折溢价率稳定性
+        if "折溢价率" in df.columns:
+            premium_discount_std = df["折溢价率"].std()
+        else:
+            premium_discount_std = 0.5  # 默认中等波动
         
-        # 综合风险得分
-        risk_score = (volatility_score * 0.4 + sharpe_score * 0.4 + drawdown_score * 0.2)
-        return round(risk_score, 2)
+        # 综合风险指标（标准化到0-1）
+        risk_factor = (volatility * 0.6 + premium_discount_std * 0.4)
+        
+        # 将风险指标转换为0-100分的评分（分数越高风险越大）
+        # 使用S型曲线，使极端值变化更平滑
+        risk_score = 100 / (1 + np.exp(-5 * (risk_factor - 0.2)))
+        
+        # 确保评分在0-100范围内
+        risk_score = max(0, min(100, risk_score))
+        
+        logger.debug(f"ETF风险评分计算: 波动率={volatility:.4f}, 折溢价标准差={premium_discount_std:.4f}, 风险评分={risk_score:.2f}")
+        return risk_score
     
     except Exception as e:
-        error_msg = f"计算风险得分失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return 0.0
+        logger.error(f"计算风险评分失败: {str(e)}", exc_info=True)
+        return 50.0  # 出错时返回中性评分
 
-def calculate_return_score(df: pd.DataFrame) -> float:
-    """计算收益能力得分"""
+def calculate_return_score(premium_discount: float) -> float:
+    """
+    计算收益评分（0-100分，分数越高表示潜在收益越大）
+    
+    Args:
+        premium_discount: 折溢价率（百分比）
+        
+    Returns:
+        float: 收益评分（0-100分）
+    """
     try:
-        if df is None or df.empty:
-            logger.warning("传入的DataFrame为空，收益得分设为0")
-            return 0.0
+        # 定义合理的折溢价率范围
+        MAX_DISCOUNT = -5.0  # 最大折价率（-5%）
+        MIN_PREMIUM = 0.5    # 最小溢价率（0.5%）
+        MAX_PREMIUM = 3.0    # 最大溢价率（3.0%），超过此值风险急剧增加
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
-        if CLOSE_COL in df.columns:
-            price_col = CLOSE_COL
-        elif "市场价格" in df.columns:
-            price_col = "市场价格"
-        elif "最新价" in df.columns:
-            price_col = "最新价"
+        # 处理折价情况
+        if premium_discount < 0:
+            # 折价率越大（负值越小），评分越高，但有上限
+            discount_rate = min(abs(premium_discount), abs(MAX_DISCOUNT))
+            # 使用非线性函数，使评分增长更平缓
+            return_score = 80 * (1 - np.exp(-2 * discount_rate))
+        # 处理溢价情况
         else:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
-            return 0.0
+            # 溢价率在合理范围内时，评分随溢价率增加而增加
+            if premium_discount <= MAX_PREMIUM:
+                # 小幅溢价有正收益评分
+                if premium_discount >= MIN_PREMIUM:
+                    return_score = 50 * (premium_discount / MAX_PREMIUM)
+                else:
+                    return_score = 0
+            else:
+                # 过度溢价视为高风险，评分直接为0
+                return_score = 0
         
-        if DATE_COL in df.columns:
-            return_30d = (df[price_col].iloc[-1] / df[price_col].iloc[0] - 1) * 100
-            # 线性映射到0-100分，-5%=-50分，+5%=100分
-            return_score = min(max(return_30d * 10 + 100, 0), 100)
-            return round(return_score, 2)
-        else:
-            logger.warning(f"DataFrame缺少必要列: {DATE_COL}")
-            return 0.0
+        # 确保评分在0-100范围内
+        return_score = max(0, min(100, return_score))
+        
+        logger.debug(f"折溢价率={premium_discount:.2f}%，收益评分={return_score:.2f}")
+        return return_score
     
     except Exception as e:
-        error_msg = f"计算收益得分失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return 0.0
+        logger.error(f"计算收益评分失败: {str(e)}", exc_info=True)
+        return 50.0  # 出错时返回中性评分
 
 def calculate_sentiment_score(df: pd.DataFrame) -> float:
     """计算情绪指标得分（成交量变化率）"""
@@ -1057,8 +1073,18 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         # 计算基础ETF评分
         base_score = calculate_etf_score(etf_code, df)
         
+        # 确保基础评分在0-100范围内
+        if base_score < 0 or base_score > 100:
+            logger.warning(f"ETF {etf_code} 基础评分超出范围({base_score:.2f})，强制限制在0-100")
+            base_score = max(0, min(100, base_score))
+        
         # 计算成分股稳定性评分
         component_score = calculate_component_stability_score(etf_code, df)
+        
+        # 确保成分股稳定性评分在0-100范围内
+        if component_score < 0 or component_score > 100:
+            logger.warning(f"ETF {etf_code} 成分股稳定性评分超出范围({component_score:.2f})，强制限制在0-100")
+            component_score = max(0, min(100, component_score))
         
         # 记录折溢价率参数，用于调试
         logger.debug(f"ETF {etf_code} 套利评分参数: premium_discount={premium_discount}, "
@@ -1100,6 +1126,11 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
                 else:
                     premium_score = 50.0 - (premium_discount * 20.0)
         
+        # 确保折溢价率评分在0-100范围内
+        if premium_score < 0 or premium_score > 100:
+            logger.warning(f"ETF {etf_code} 折溢价率评分超出范围({premium_score:.2f})，强制限制在0-100")
+            premium_score = max(0, min(100, premium_score))
+        
         # 获取评分权重
         weights = Config.ARBITRAGE_SCORE_WEIGHTS.copy()
         
@@ -1117,6 +1148,12 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
             for key in weights:
                 weights[key] /= total_weight
         
+        # 验证每个权重是否在合理范围内
+        for key, weight in weights.items():
+            if weight < 0 or weight > 1:
+                logger.error(f"权重 {key} 超出范围({weight:.2f})，强制限制在0-1")
+                weights[key] = max(0, min(1, weight))
+        
         # 综合评分（加权平均）
         total_score = (
             base_score * (weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']) +
@@ -1129,9 +1166,12 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
             logger.error(f"ETF {etf_code} 套利综合评分超出范围({total_score})，强制限制在0-100")
             total_score = max(0, min(100, total_score))
         
-        logger.debug(f"ETF {etf_code} 套利综合评分: {total_score:.2f} "
-                     f"(基础评分: {base_score:.2f}, 成分股稳定性: {component_score:.2f}, "
-                     f"折溢价评分: {premium_score:.2f})")
+        # 添加详细日志，便于问题排查
+        logger.debug(f"ETF {etf_code} 套利综合评分详情: "
+                     f"基础评分={base_score:.2f}(权重{weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']:.2f}), "
+                     f"成分股稳定性={component_score:.2f}(权重{weights['component_stability']:.2f}), "
+                     f"折溢价率={premium_score:.2f}(权重{weights['premium_discount']:.2f}), "
+                     f"最终评分={total_score:.2f}")
         
         return total_score
     

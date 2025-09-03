@@ -99,7 +99,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/      {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -132,12 +132,28 @@ class Config:
     STOP_LOSS_THRESHOLD: float = -0.05    # 止损阈值（跌幅超5%")
     
     # 评分维度权重
+    SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF
+    
+    # 稳健仓、激进仓ETF综合评分维度权重
+    # 用于评估ETF本身的投资价值，不涉及具体交易策略
     SCORE_WEIGHTS: Dict[str, float] = {
-        'liquidity': 0.20,  # 流动性评分权重
-        'risk': 0.25,       # 风险控制评分权重
-        'return': 0.25,     # 收益能力评分权重
-        'premium': 0.15,    # 溢价率评分权重
-        'sentiment': 0.15   # 情绪指标评分权重
+        'liquidity': 0.20,    # 流动性评分权重（日均成交额）
+        'risk': 0.25,         # 风险控制评分权重（波动率、夏普比率、最大回撤）
+        'return': 0.25,       # 收益能力评分权重（30天收益率）
+        'sentiment': 0.15,    # 情绪指标评分权重（成交量变化率）
+        'fundamental': 0.15   # 基本面评分权重（规模、成立时间）
+    }
+    
+    # 套利机会综合评分维度权重
+    # 用于评估套利交易机会的质量，包含折溢价率等套利特有指标
+    ARBITRAGE_SCORE_WEIGHTS: Dict[str, float] = {
+        'premium_discount': 0.30,       # 折溢价率评分权重（核心指标）
+        'liquidity': 0.15,              # 流动性评分权重（日均成交额）
+        'risk': 0.15,                   # 风险控制评分权重（波动率、夏普比率、最大回撤）
+        'return': 0.10,                 # 收益能力评分权重（30天收益率）
+        'market_sentiment': 0.10,       # 市场情绪评分权重（成交量变化率）
+        'fundamental': 0.10,            # 基本面评分权重（规模、成立时间）
+        'component_stability': 0.10     # 成分股稳定性评分权重（波动率、规模）
     }
     
     # 买入信号条件
@@ -149,17 +165,6 @@ class Config:
     # -------------------------
     # 2.1 新增：套利综合评分配置
     # -------------------------
-    # 套利综合评分权重配置
-    ARBITRAGE_SCORE_WEIGHTS: Dict[str, float] = {
-        'premium_discount': 0.35,      # 折溢价率权重
-        'liquidity': 0.25,             # 流动性权重
-        'risk': 0.10,                  # 风险控制权重
-        'return': 0.10,                # 收益能力权重
-        'market_sentiment': 0.10,      # 市场情绪权重
-        'fundamental': 0.05,           # 基本面权重
-        'component_stability': 0.05    # 成分股稳定性权重
-    }
-    
     # 明确区分折价和溢价阈值
     DISCOUNT_THRESHOLD: float = 0.5   # 折价阈值（0.5%）
     PREMIUM_THRESHOLD: float = 0.5    # 溢价阈值（0.5%）
@@ -413,21 +418,28 @@ class Config:
                         "error": str(e)
                     }
             
-            # 检查权重配置是否合理
-            total_weight = sum(Config.SCORE_WEIGHTS.values())
-            results["weights"] = {
-                "status": "OK" if abs(total_weight - 1.0) < 0.001 else "WARNING",
-                "total": total_weight,
-                "expected": 1.0
-            }
+            # 验证基础评分权重
+            required_score_weights = ['liquidity', 'risk', 'return', 'sentiment', 'fundamental']
+            for key in required_score_weights:
+                if key not in Config.SCORE_WEIGHTS:
+                    results.setdefault("score_weights", []).append(f"缺少必要键: {key}")
             
-            # 检查套利评分权重配置
-            arbitrage_total_weight = sum(Config.ARBITRAGE_SCORE_WEIGHTS.values())
-            results["arbitrage_weights"] = {
-                "status": "OK" if abs(arbitrage_total_weight - 1.0) < 0.001 else "WARNING",
-                "total": arbitrage_total_weight,
-                "expected": 1.0
-            }
+            score_sum = sum(Config.SCORE_WEIGHTS.values())
+            if abs(score_sum - 1.0) > 0.001:
+                results["score_weights"] = results.get("score_weights", []) + [f"总和应为1.0，实际为{score_sum:.4f}"]
+            
+            # 验证套利评分权重
+            required_arbitrage_weights = [
+                'premium_discount', 'liquidity', 'risk', 'return', 
+                'market_sentiment', 'fundamental', 'component_stability'
+            ]
+            for key in required_arbitrage_weights:
+                if key not in Config.ARBITRAGE_SCORE_WEIGHTS:
+                    results.setdefault("arbitrage_weights", []).append(f"缺少必要键: {key}")
+            
+            arbitrage_sum = sum(Config.ARBITRAGE_SCORE_WEIGHTS.values())
+            if abs(arbitrage_sum - 1.0) > 0.001:
+                results["arbitrage_weights"] = results.get("arbitrage_weights", []) + [f"总和应为1.0，实际为{arbitrage_sum:.4f}"]
             
             # 检查微信配置
             results["wechat"] = {
@@ -441,6 +453,18 @@ class Config:
                 "discount_threshold": Config.DISCOUNT_THRESHOLD,
                 "premium_threshold": Config.PREMIUM_THRESHOLD
             }
+            
+            # 检查是否存在未使用的配置项
+            unused_keys = []
+            if 'premium' in Config.SCORE_WEIGHTS:
+                unused_keys.append("'premium' (基础评分中不应包含溢价率)")
+            
+            if unused_keys:
+                results["unused_keys"] = {
+                    "status": "WARNING",
+                    "keys": unused_keys,
+                    "message": "以下配置项未被使用"
+                }
             
             return results
         except Exception as e:
@@ -526,6 +550,9 @@ try:
         ]
     )
     
+    # 系统启动时立即验证配置
+    Config.validate_config()
+    
     # 初始化目录
     if Config.init_dirs():
         logging.info("配置初始化完成")
@@ -576,7 +603,8 @@ def _validate_critical_config():
             "MIN_DISCOUNT_DISPLAY_THRESHOLD",  # 新增验证项
             "MIN_PREMIUM_DISPLAY_THRESHOLD",  # 新增验证项
             "MIN_FUND_SIZE",  # 新增验证项
-            "MIN_AVG_VOLUME"  # 新增验证项
+            "MIN_AVG_VOLUME",  # 新增验证项
+            "SCORE_WEIGHTS"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -615,13 +643,13 @@ def _validate_critical_config():
                     logging.warning("已添加缺失的PREMIUM_STATUS_FILE配置项")
                 elif config_name == "ARBITRAGE_SCORE_WEIGHTS":
                     setattr(Config, "ARBITRAGE_SCORE_WEIGHTS", {
-                        'premium_discount': 0.35,
-                        'liquidity': 0.25,
-                        'risk': 0.10,
+                        'premium_discount': 0.30,
+                        'liquidity': 0.15,
+                        'risk': 0.15,
                         'return': 0.10,
                         'market_sentiment': 0.10,
-                        'fundamental': 0.05,
-                        'component_stability': 0.05
+                        'fundamental': 0.10,
+                        'component_stability': 0.10
                     })
                     logging.warning("已添加缺失的ARBITRAGE_SCORE_WEIGHTS配置项")
                 elif config_name == "DISCOUNT_THRESHOLD":
@@ -645,6 +673,15 @@ def _validate_critical_config():
                 elif config_name == "MIN_AVG_VOLUME":
                     setattr(Config, "MIN_AVG_VOLUME", 5000.0)
                     logging.warning("已添加缺失的MIN_AVG_VOLUME配置项")
+                elif config_name == "SCORE_WEIGHTS":
+                    setattr(Config, "SCORE_WEIGHTS", {
+                        'liquidity': 0.20,
+                        'risk': 0.25,
+                        'return': 0.25,
+                        'sentiment': 0.15,
+                        'fundamental': 0.15
+                    })
+                    logging.warning("已添加缺失的SCORE_WEIGHTS配置项")
     except Exception as e:
         logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
 

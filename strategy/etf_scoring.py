@@ -31,6 +31,7 @@ CLOSE_COL = "收盘" if "收盘" in Config.STANDARD_COLUMNS else "close"
 AMOUNT_COL = "成交额" if "成交额" in Config.STANDARD_COLUMNS else "amount"
 ETF_CODE_COL = "ETF代码"
 FUND_SIZE_COL = "基金规模"
+LISTING_DATE_COL = "上市日期"  # 统一使用"上市日期"
 
 def extract_scalar_value(value, default=0.0, log_prefix=""):
     """
@@ -392,7 +393,7 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                     days_since_listing = (beijing_now - listing_date).days
                     is_new_etf = days_since_listing < 90
             except Exception as e:
-                logger.error(f"ETF {etf_code} 成立日期解析错误: {str(e)}")
+                logger.error(f"ETF {etf_code} 上市日期解析错误: {str(e)}")
         
         # 检查数据量
         min_required_data = 30  # 默认需要30天数据
@@ -419,7 +420,7 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         # 4. 情绪指标得分（成交量变化率）
         sentiment_score = calculate_sentiment_score(recent_data)
         
-        # 5. 基本面得分（规模、成立时间等）
+        # 5. 基本面得分（规模、上市时间等）
         fundamental_score = calculate_fundamental_score(etf_code)
         
         # 验证所有得分是否在有效范围内 [0, 100]
@@ -794,7 +795,7 @@ def calculate_sentiment_score(df: pd.DataFrame) -> float:
 
 def calculate_fundamental_score(etf_code: str) -> float:
     """
-    计算基本面得分（规模、成立时间等）
+    计算基本面得分（规模、上市时间等）
     
     Args:
         etf_code: ETF代码
@@ -808,7 +809,7 @@ def calculate_fundamental_score(etf_code: str) -> float:
         # 规模得分（10亿=60分，100亿=100分）
         size_score = min(max(size * 0.4 + 50, 0), 100)
         
-        # 成立时间得分（1年=50分，5年=100分）
+        # 上市时间得分（1年=50分，5年=100分）
         if not listing_date:
             age_score = 50.0
         else:
@@ -828,22 +829,22 @@ def calculate_fundamental_score(etf_code: str) -> float:
                         years_since_listing = (datetime.now() - listing_date_obj).days / 365
                         age_score = min(50 + years_since_listing * 10, 100)
                     else:
-                        logger.warning(f"ETF {etf_code} 成立日期格式无法解析: {listing_date}")
+                        logger.warning(f"ETF {etf_code} 上市日期格式无法解析: {listing_date}")
                         age_score = 50.0
                 elif isinstance(listing_date, datetime):
                     years_since_listing = (datetime.now() - listing_date).days / 365
                     age_score = min(50 + years_since_listing * 10, 100)
                 else:
-                    logger.warning(f"ETF {etf_code} 成立日期类型未知: {type(listing_date)}")
+                    logger.warning(f"ETF {etf_code} 上市日期类型未知: {type(listing_date)}")
                     age_score = 50.0
             except Exception as e:
-                logger.error(f"ETF {etf_code} 成立日期处理错误: {str(e)}")
+                logger.error(f"ETF {etf_code} 上市日期处理错误: {str(e)}")
                 age_score = 50.0
         
-        # 综合基本面评分（规模占70%，成立时间占30%）
+        # 综合基本面评分（规模占70%，上市时间占30%）
         fundamental_score = size_score * 0.7 + age_score * 0.3
         
-        logger.debug(f"ETF {etf_code} 基本面评分: {fundamental_score:.2f} (规模: {size}亿元, 成立时间: {listing_date})")
+        logger.debug(f"ETF {etf_code} 基本面评分: {fundamental_score:.2f} (规模: {size}亿元, 上市日期: {listing_date})")
         return fundamental_score
     
     except Exception as e:
@@ -871,7 +872,7 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, Optional[str]]:
             return 0.0, ""
         
         # 确保ETF列表包含必要的列
-        required_columns = [ETF_CODE_COL, FUND_SIZE_COL, "成立日期"]
+        required_columns = [ETF_CODE_COL, FUND_SIZE_COL, LISTING_DATE_COL]
         for col in required_columns:
             if col not in etf_list.columns:
                 logger.warning(f"ETF列表缺少必要列: {col}")
@@ -890,10 +891,10 @@ def get_etf_basic_info(etf_code: str) -> Tuple[float, Optional[str]]:
                     log_prefix=f"ETF {etf_code} 规模: "
                 )
             
-            # 处理成立日期
+            # 处理上市日期
             listing_date = ""
-            if "成立日期" in etf_row.iloc[0]:
-                listing_date = str(etf_row.iloc[0]["成立日期"])
+            if LISTING_DATE_COL in etf_row.iloc[0]:
+                listing_date = str(etf_row.iloc[0][LISTING_DATE_COL])
             
             return size, listing_date
         
@@ -976,7 +977,7 @@ def get_top_rated_etfs(top_n=None, min_score=60, min_fund_size=10.0, min_avg_vol
                         "评分": score,
                         "规模": size,
                         "日均成交额": avg_volume,
-                        "成立日期": listing_date
+                        "上市日期": listing_date
                     })
                     logger.debug(f"ETF {etf_code} 评分: {score}, 规模: {size}亿元, 日均成交额: {avg_volume}万元")
             except Exception as e:

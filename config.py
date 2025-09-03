@@ -147,14 +147,14 @@ class Config:
     # -------------------------
     # 套利综合评分权重配置
     ARBITRAGE_SCORE_WEIGHTS: Dict[str, float] = {
-        'premium_discount': 0.35,  # 折溢价率权重
-        'liquidity': 0.25,         # 流动性权重
-        'volatility': 0.15,        # 波动率权重
-        'component_stability': 0.15,  # 成分股稳定性权重
-        'market_sentiment': 0.10   # 市场情绪权重
-        'fundamental': 0.2,     # 基本面权重
-        'return': 0.25,         # 收益能力权重
-        'risk': 0.2            # 风险控制权重
+        'premium_discount': 0.35,      # 折溢价率权重
+        'liquidity': 0.25,             # 流动性权重
+        'volatility': 0.15,            # 波动率权重
+        'component_stability': 0.15,   # 成分股稳定性权重
+        'market_sentiment': 0.10,      # 市场情绪权重
+        'fundamental': 0.2,            # 基本面权重
+        'return': 0.25,                # 收益能力权重
+        'risk': 0.2                    # 风险控制权重
     }
         
     # 折价/溢价阈值配置

@@ -667,20 +667,17 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
         if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
             # 如果是pandas对象，尝试获取标量值
             try:
-                premium_discount = premium_discount.item()
-                logger.debug("从pandas对象获取标量值成功")
-            except (ValueError, AttributeError):
-                # 如果无法转换为标量，取第一个值
-                try:
-                    if not premium_discount.empty:
-                        premium_discount = premium_discount.iloc[0]
-                        logger.debug(f"从pandas对象获取第一个值成功: {premium_discount}")
-                    else:
-                        logger.warning("pandas对象为空，使用默认值0.0")
-                        premium_discount = 0.0
-                except (IndexError, AttributeError) as e:
-                    logger.error(f"无法从pandas对象获取第一个值: {str(e)}，使用默认值0.0")
-                    premium_discount = 0.0
+                # 尝试获取标量值
+                if premium_discount.size == 1:
+                    premium_discount = premium_discount.item()
+                    logger.debug(f"从pandas对象获取标量值成功: {premium_discount}")
+                else:
+                    # 如果有多值，取第一个
+                    premium_discount = premium_discount.iloc[0]
+                    logger.debug(f"从pandas对象获取第一个值成功: {premium_discount}")
+            except (ValueError, AttributeError, IndexError) as e:
+                logger.error(f"无法从pandas对象获取有效值: {str(e)}，使用默认值0.0")
+                premium_discount = 0.0
         
         # 处理字符串输入
         if isinstance(premium_discount, str):

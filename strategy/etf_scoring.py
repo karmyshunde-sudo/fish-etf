@@ -404,35 +404,42 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         if DATE_COL in df.columns:
             df = df.sort_values(DATE_COL)
         
+        # 检查ETF是否为新上市
+        size, listing_date = get_etf_basic_info(etf_code)
+        is_new_etf = False
+        min_required_data = 30  # 默认需要30天数据
+        
+        if listing_date:
+            try:
+                # 尝试解析成立日期
+                date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
+                parsed_date = None
+                for fmt in date_formats:
+                    try:
+                        parsed_date = datetime.strptime(listing_date, fmt)
+                        break
+                    except:
+                        continue
+                
+                if parsed_date:
+                    # 计算ETF上市天数
+                    days_since_listing = (beijing_now - parsed_date).days
+                    if days_since_listing < min_required_data:
+                        is_new_etf = True
+                        # 根据上市天数调整所需数据量
+                        min_required_data = max(5, days_since_listing)
+                        logger.info(f"ETF {etf_code} 上市时间较短({days_since_listing}天)，使用{min_required_data}天数据计算评分")
+            except Exception as e:
+                logger.warning(f"解析ETF {etf_code} 成立日期失败: {str(e)}")
+        
         # 检查数据量
-        min_required_data = 30
         if len(df) < min_required_data:
-            # 检查ETF是否为新上市
-            size, listing_date = get_etf_basic_info(etf_code)
-            if listing_date:
-                try:
-                    # 尝试解析成立日期
-                    date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
-                    parsed_date = None
-                    for fmt in date_formats:
-                        try:
-                            parsed_date = datetime.strptime(listing_date, fmt)
-                            break
-                        except:
-                            continue
-                    
-                    if parsed_date:
-                        # 计算ETF上市天数
-                        days_since_listing = (beijing_now - parsed_date).days
-                        if days_since_listing < min_required_data:
-                            logger.info(f"ETF {etf_code} 上市时间较短({days_since_listing}天)，使用现有数据计算评分")
-                            min_required_data = max(5, len(df))  # 至少需要5天数据
-                except Exception as e:
-                    logger.warning(f"解析ETF {etf_code} 成立日期失败: {str(e)}")
-            
-            if len(df) < min_required_data:
-                logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，评分设为0")
+            if len(df) < 5:
+                logger.warning(f"ETF {etf_code} 数据量严重不足({len(df)}天)，评分设为0")
                 return 0.0
+            else:
+                logger.info(f"ETF {etf_code} 数据量不足({len(df)}天)，使用现有数据计算评分")
+                min_required_data = len(df)
         
         # 取最近min_required_data天数据
         recent_data = df.tail(min_required_data)
@@ -468,29 +475,25 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                 scores[name] = max(0, min(100, score))
         
         # 获取评分权重
-        weights = Config.SCORE_WEIGHTS.copy()
-        
-        # 关键修复：确保权重字典包含所有必要的键
-        required_keys = ['liquidity', 'risk', 'return', 'sentiment', 'fundamental']
-        for key in required_keys:
-            if key not in weights:
-                logger.warning(f"权重配置中缺少 {key}，使用默认值 0.2")
-                weights[key] = 0.2
-        
-        # 确保权重和为1
-        total_weight = sum(weights.values())
-        if abs(total_weight - 1.0) > 0.001:
-            logger.warning(f"权重和不为1 ({total_weight})，正在归一化")
-            for key in weights:
-                weights[key] /= total_weight
+        weights = Config.SCORE_WEIGHTS
         
         # 计算综合评分（加权平均）
-        total_score = 0
-        for key in required_keys:
-            total_score += scores[key] * weights[key]
+        total_score = (
+            scores["liquidity"] * weights['liquidity'] +
+            scores["risk"] * weights['risk'] +
+            scores["return"] * weights['return'] +
+            scores["sentiment"] * weights['sentiment'] +
+            scores["fundamental"] * weights['fundamental']
+        )
         
         # 双重验证：确保最终评分在0-100范围内
         total_score = max(0, min(100, total_score))
+        
+        # 对新上市ETF应用惩罚因子
+        if is_new_etf and days_since_listing < 15:
+            penalty_factor = 0.8 - (days_since_listing * 0.02)
+            total_score = max(0, total_score * penalty_factor)
+            logger.info(f"ETF {etf_code} 为新上市ETF，应用惩罚因子，最终评分: {total_score:.2f}")
         
         logger.debug(
             f"ETF {etf_code} 评分详情: "

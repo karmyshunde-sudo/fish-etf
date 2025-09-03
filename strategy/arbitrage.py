@@ -20,8 +20,7 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time,
     is_file_outdated,
-    is_trading_time,
-    is_manual_trigger
+    is_trading_time
 )
 from utils.file_utils import (
     load_etf_daily_data, 
@@ -48,6 +47,21 @@ from utils.alert_utils import send_urgent_alert
 
 # 初始化日志
 logger = logging.getLogger(__name__)
+
+# 保留原有的 is_manual_trigger 函数定义
+def is_manual_trigger() -> bool:
+    """
+    判断是否是手动触发的任务
+    
+    Returns:
+        bool: 如果是手动触发返回True，否则返回False
+    """
+    try:
+        # 检查环境变量，GitHub Actions中手动触发会有特殊环境变量
+        return os.environ.get('GITHUB_EVENT_NAME', '') == 'workflow_dispatch'
+    except Exception as e:
+        logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
+        return False
 
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """

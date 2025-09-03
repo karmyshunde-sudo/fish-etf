@@ -467,17 +467,29 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                 logger.error(f"ETF {etf_code} {name}得分超出范围({score})，强制限制在0-100")
                 scores[name] = max(0, min(100, score))
         
-        # 计算综合评分（加权平均）
-        weights = Config.SCORE_WEIGHTS
-        total_score = (
-            scores["liquidity"] * weights['liquidity'] +
-            scores["risk"] * weights['risk'] +
-            scores["return"] * weights['return'] +
-            scores["sentiment"] * weights['sentiment'] +
-            scores["fundamental"] * weights['fundamental']
-        )
+        # 获取评分权重
+        weights = Config.SCORE_WEIGHTS.copy()
         
-        # 确保最终评分在0-100范围内
+        # 关键修复：确保权重字典包含所有必要的键
+        required_keys = ['liquidity', 'risk', 'return', 'sentiment', 'fundamental']
+        for key in required_keys:
+            if key not in weights:
+                logger.warning(f"权重配置中缺少 {key}，使用默认值 0.2")
+                weights[key] = 0.2
+        
+        # 确保权重和为1
+        total_weight = sum(weights.values())
+        if abs(total_weight - 1.0) > 0.001:
+            logger.warning(f"权重和不为1 ({total_weight})，正在归一化")
+            for key in weights:
+                weights[key] /= total_weight
+        
+        # 计算综合评分（加权平均）
+        total_score = 0
+        for key in required_keys:
+            total_score += scores[key] * weights[key]
+        
+        # 双重验证：确保最终评分在0-100范围内
         total_score = max(0, min(100, total_score))
         
         logger.debug(
@@ -1086,9 +1098,9 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
                     premium_score = 50.0 - (premium_discount * 20.0)
         
         # 获取评分权重
-        weights = Config.ARBITRAGE_SCORE_WEIGHTS
+        weights = Config.ARBITRAGE_SCORE_WEIGHTS.copy()
         
-        # 确保权重字典包含所有必要的键
+        # 关键修复：确保权重字典包含所有必要的键
         required_keys = ['premium_discount', 'liquidity', 'risk', 'return', 'market_sentiment', 'fundamental', 'component_stability']
         for key in required_keys:
             if key not in weights:

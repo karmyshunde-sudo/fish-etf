@@ -853,39 +853,51 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
         logger.error(f"加载最近有效套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def mark_arbitrage_opportunities_pushed(discount_opportunities: pd.DataFrame, premium_opportunities: pd.DataFrame) -> bool:
+def mark_arbitrage_opportunities_pushed(discount_df: pd.DataFrame, premium_df: pd.DataFrame) -> bool:
     """
-    标记套利机会已推送
+    标记套利机会为已推送
     
     Args:
-        discount_opportunities: 折价机会DataFrame
-        premium_opportunities: 溢价机会DataFrame
+        discount_df: 折价机会DataFrame
+        premium_df: 溢价机会DataFrame
     
     Returns:
         bool: 是否成功标记
     """
-    success = True
-    
-    # 标记折价机会
-    if not discount_opportunities.empty:
-        for _, row in discount_opportunities.iterrows():
+    try:
+        # 获取当前日期
+        current_date = get_beijing_time().strftime("%Y-%m-%d")
+        
+        # 加载现有状态
+        discount_status = load_status_file(Config.DISCOUNT_STATUS_FILE)
+        premium_status = load_status_file(Config.PREMIUM_STATUS_FILE)
+        
+        # 更新折价状态
+        for _, row in discount_df.iterrows():
             etf_code = row["ETF代码"]
-            if not mark_discount_pushed(etf_code):
-                logger.error(f"标记ETF {etf_code} 折价机会已推送失败")
-                success = False
-    
-    # 标记溢价机会
-    if not premium_opportunities.empty:
-        for _, row in premium_opportunities.iterrows():
+            discount_status[etf_code] = {
+                "last_pushed": current_date,
+                "score": row["综合评分"]
+            }
+        
+        # 更新溢价状态
+        for _, row in premium_df.iterrows():
             etf_code = row["ETF代码"]
-            if not mark_premium_pushed(etf_code):
-                logger.error(f"标记ETF {etf_code} 溢价机会已推送失败")
-                success = False
+            premium_status[etf_code] = {
+                "last_pushed": current_date,
+                "score": row["综合评分"]
+            }
+        
+        # 保存状态
+        save_status_file(Config.DISCOUNT_STATUS_FILE, discount_status)
+        save_status_file(Config.PREMIUM_STATUS_FILE, premium_status)
+        
+        logger.info(f"成功标记 {len(discount_df) + len(premium_df)} 个ETF套利机会为已推送")
+        return True
     
-    if success:
-        logger.info(f"成功标记 {len(discount_opportunities) + len(premium_opportunities)} 个ETF套利机会为已推送")
-    
-    return success
+    except Exception as e:
+        logger.error(f"标记套利机会为已推送失败: {str(e)}", exc_info=True)
+        return False
 
 def get_arbitrage_push_statistics() -> Dict[str, Any]:
     """

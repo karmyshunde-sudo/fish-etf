@@ -22,6 +22,7 @@ from utils.date_utils import (
 from utils.file_utils import load_etf_daily_data, load_etf_metadata
 from data_crawler.etf_list_manager import load_all_etf_list, get_etf_name
 from wechat_push.push import send_wechat_message
+from utils.alert_utils import send_urgent_alert
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -893,22 +894,25 @@ def calculate_premium_discount(market_price: float, iopv: float) -> float:
         
         # 验证计算结果
         if market_price > iopv and premium_discount <= 0:
-            logger.error(f"严重错误：市场价格({market_price}) > IOPV({iopv})，但计算出的折溢价率({premium_discount})≤0")
-            # 发送紧急警报
-            send_urgent_alert(f"折溢价率计算错误: 市场价格>{iopv}")
-            # 重新计算
+            error_msg = (f"严重错误：市场价格({market_price}) > IOPV({iopv})，"
+                         f"但计算出的折溢价率({premium_discount})≤0")
+            logger.error(error_msg)
+            send_urgent_alert(error_msg, priority=1)
+            # 修正计算结果
             premium_discount = abs((market_price - iopv) / iopv * 100)
         elif market_price < iopv and premium_discount >= 0:
-            logger.error(f"严重错误：市场价格({market_price}) < IOPV({iopv})，但计算出的折溢价率({premium_discount})≥0")
-            # 发送紧急警报
-            send_urgent_alert(f"折溢价率计算错误: 市场价格<{iopv}")
-            # 重新计算并取负值
+            error_msg = (f"严重错误：市场价格({market_price}) < IOPV({iopv})，"
+                         f"但计算出的折溢价率({premium_discount})≥0")
+            logger.error(error_msg)
+            send_urgent_alert(error_msg, priority=1)
+            # 修正计算结果
             premium_discount = -abs((market_price - iopv) / iopv * 100)
         
         return round(premium_discount, 2)
     
     except Exception as e:
-        logger.error(f"计算折溢价率失败: {str(e)}")
+        error_msg = f"计算折溢价率失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         return 0.0
 
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
@@ -1041,6 +1045,11 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         # 计算成分股稳定性评分
         component_score = calculate_component_stability_score(etf_code, df)
         
+        # 记录折溢价率参数，用于调试
+        logger.debug(f"ETF {etf_code} 套利评分参数: premium_discount={premium_discount}, "
+                     f"DISCOUNT_THRESHOLD={Config.DISCOUNT_THRESHOLD}, "
+                     f"PREMIUM_THRESHOLD={Config.PREMIUM_THRESHOLD}")
+        
         # 计算折溢价率评分
         if premium_discount < 0:
             # 折价情况：折价率绝对值越大，评分越高
@@ -1048,17 +1057,33 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
             if abs_premium >= Config.DISCOUNT_THRESHOLD * 1.5:
                 premium_score = 100.0
             elif abs_premium >= Config.DISCOUNT_THRESHOLD:
-                premium_score = 80.0 + (abs_premium - Config.DISCOUNT_THRESHOLD) * 20.0 / (Config.DISCOUNT_THRESHOLD * 0.5)
+                # 确保分母不为0
+                if Config.DISCOUNT_THRESHOLD * 0.5 > 0:
+                    premium_score = 80.0 + (abs_premium - Config.DISCOUNT_THRESHOLD) * 20.0 / (Config.DISCOUNT_THRESHOLD * 0.5)
+                else:
+                    premium_score = 100.0
             else:
-                premium_score = 50.0 + (abs_premium * 30.0 / Config.DISCOUNT_THRESHOLD)
+                # 确保分母不为0
+                if Config.DISCOUNT_THRESHOLD > 0:
+                    premium_score = 50.0 + (abs_premium * 30.0 / Config.DISCOUNT_THRESHOLD)
+                else:
+                    premium_score = 50.0 + (abs_premium * 30.0)
         else:
             # 溢价情况：溢价率越小，评分越高
             if premium_discount <= Config.PREMIUM_THRESHOLD * 0.5:
                 premium_score = 100.0
             elif premium_discount <= Config.PREMIUM_THRESHOLD:
-                premium_score = 80.0 - (premium_discount - Config.PREMIUM_THRESHOLD * 0.5) * 40.0 / (Config.PREMIUM_THRESHOLD * 0.5)
+                # 确保分母不为0
+                if Config.PREMIUM_THRESHOLD * 0.5 > 0:
+                    premium_score = 80.0 - (premium_discount - Config.PREMIUM_THRESHOLD * 0.5) * 40.0 / (Config.PREMIUM_THRESHOLD * 0.5)
+                else:
+                    premium_score = 100.0
             else:
-                premium_score = 50.0 - (premium_discount - Config.PREMIUM_THRESHOLD) * 20.0 / (Config.PREMIUM_THRESHOLD * 1.0)
+                # 确保分母不为0
+                if Config.PREMIUM_THRESHOLD > 0:
+                    premium_score = 50.0 - (premium_discount - Config.PREMIUM_THRESHOLD) * 20.0 / (Config.PREMIUM_THRESHOLD * 1.0)
+                else:
+                    premium_score = 50.0 - (premium_discount * 20.0)
         
         # 获取评分权重
         weights = Config.ARBITRAGE_SCORE_WEIGHTS

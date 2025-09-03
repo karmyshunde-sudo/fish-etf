@@ -582,26 +582,25 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
         return False
 
 def _format_dataframe_as_string(df: pd.DataFrame) -> str:
-    """
-    将DataFrame格式化为更友好的字符串
-    
-    Args:
-        df: 要格式化的DataFrame
-        
-    Returns:
-        str: 格式化后的字符串
-    """
     try:
-        # 使用Markdown格式（更易读）
-        return df.to_markdown(index=False)
+        # 选择关键列并重命名
+        cols = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率",
+                "基金规模", "日均成交额", "综合评分"]
+        df = df[cols].copy()
+        
+        # 格式化数值列
+        df["折溢价率"] = df["折溢价率"].apply(lambda x: f"{x:.2f}%")
+        df["基金规模"] = df["基金规模"].apply(lambda x: f"{x:.2f}")
+        df["日均成交额"] = df["日均成交额"].apply(lambda x: f"{x:,.0f}")
+        
+        # 使用Markdown表格并添加测试标记
+        if "测试数据" in df.columns:
+            return f"【ETF套利机会 - 测试数据】\n\n{df.to_markdown(index=False)}"
+        else:
+            return f"【ETF套利机会】\n\n{df.to_markdown(index=False)}"
     except Exception as e:
-        logger.warning(f"使用Markdown格式化DataFrame失败: {str(e)}，改用表格格式")
-        try:
-            # 使用表格格式
-            return df.to_string(index=False)
-        except Exception as e:
-            logger.warning(f"使用表格格式化DataFrame失败: {str(e)}，改用简单描述")
-            return f"数据表格（{len(df)}行，{len(df.columns)}列）"
+        # 添加错误处理逻辑
+        pass
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

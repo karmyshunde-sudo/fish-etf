@@ -665,19 +665,20 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
     try:
         # 确保premium_discount是标量值
         if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
-            # 如果是pandas对象，尝试获取标量值
-            try:
-                # 尝试获取标量值
-                if premium_discount.size == 1:
-                    premium_discount = premium_discount.item()
-                    logger.debug(f"从pandas对象获取标量值成功: {premium_discount}")
+            # 如果是pandas对象，强制获取标量值
+            if premium_discount.size == 1:
+                # 单元素Series/DF，直接取值
+                premium_discount = premium_discount.values.flatten()[0]
+                logger.debug(f"从pandas对象获取标量值成功: {premium_discount}")
+            else:
+                # 多元素Series/DF，取第一个有效值
+                valid_values = premium_discount[~pd.isna(premium_discount)]
+                if not valid_values.empty:
+                    premium_discount = valid_values.iloc[0]
+                    logger.debug(f"从pandas对象获取第一个有效值成功: {premium_discount}")
                 else:
-                    # 如果有多值，取第一个
-                    premium_discount = premium_discount.iloc[0]
-                    logger.debug(f"从pandas对象获取第一个值成功: {premium_discount}")
-            except (ValueError, AttributeError, IndexError) as e:
-                logger.error(f"无法从pandas对象获取有效值: {str(e)}，使用默认值0.0")
-                premium_discount = 0.0
+                    logger.error("pandas对象中无有效值，使用默认值0.0")
+                    premium_discount = 0.0
         
         # 处理字符串输入
         if isinstance(premium_discount, str):
@@ -696,8 +697,13 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
         
         # 确保是数值类型
         if not isinstance(premium_discount, (int, float)):
-            logger.error(f"折溢价率类型错误: {type(premium_discount)}，使用默认值0.0")
-            premium_discount = 0.0
+            try:
+                # 再次尝试转换为浮点数
+                premium_discount = float(premium_discount)
+                logger.debug(f"将非数值类型转换为浮点数: {premium_discount}")
+            except (ValueError, TypeError) as e:
+                logger.error(f"无法将类型 {type(premium_discount)} 转换为浮点数: {str(e)}，使用默认值0.0")
+                premium_discount = 0.0
         
         # 记录实际使用的折溢价率值
         logger.debug(f"实际使用的折溢价率值: {premium_discount:.2f}")

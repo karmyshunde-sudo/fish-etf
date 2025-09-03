@@ -586,6 +586,28 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
         logger.error(f"发送微信消息时发生未预期错误: {str(e)}", exc_info=True)
         return False
 
+def _format_dataframe_as_string(df: pd.DataFrame) -> str:
+    """
+    将DataFrame格式化为更友好的字符串
+    
+    Args:
+        df: 要格式化的DataFrame
+        
+    Returns:
+        str: 格式化后的字符串
+    """
+    try:
+        # 使用Markdown格式（更易读）
+        return df.to_markdown(index=False)
+    except Exception as e:
+        logger.warning(f"使用Markdown格式化DataFrame失败: {str(e)}，改用表格格式")
+        try:
+            # 使用表格格式
+            return df.to_string(index=False)
+        except Exception as e:
+            logger.warning(f"使用表格格式化DataFrame失败: {str(e)}，改用简单描述")
+            return f"数据表格（{len(df)}行，{len(df.columns)}列）"
+
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",
                         webhook: Optional[str] = None) -> bool:

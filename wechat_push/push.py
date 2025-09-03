@@ -281,120 +281,174 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
-def _format_discount_message(df: pd.DataFrame) -> str:
+def _format_discount_message(df: pd.DataFrame) -> List[str]:
     """
-    格式化折价机会消息
+    格式化折价机会消息，分页处理
     
     Args:
         df: 折价机会DataFrame
     
     Returns:
-        str: 格式化后的消息
+        List[str]: 分页后的消息列表
     """
     try:
         if df.empty:
-            return "【折价机会】\n未发现有效折价套利机会"
+            return ["【折价机会】\n未发现有效折价套利机会"]
         
-        # 生成消息内容
-        content = "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
-        content += "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
-        content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
-        content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
-        content += f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
-        content += f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
+        # 每页显示的ETF数量
+        ETFS_PER_PAGE = 5
+        total_etfs = len(df)
+        total_pages = (total_etfs + ETFS_PER_PAGE - 1) // ETFS_PER_PAGE  # 向上取整
         
-        # 添加折价机会
-        for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
-            content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-            content += f"   💹 折价率: {abs(row['折溢价率']):.2f}%\n"
-            content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
-            content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
-            content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
-            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
-            content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
         
-        # 添加其他机会数量
-        if len(df) > 3:
-            content += f"• 还有 {len(df) - 3} 个折价机会...\n"
+        # 生成GitHub日志链接
+        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
         
-        # 添加风险提示
-        content += (
-            "\n⚠️ 风险提示：\n"
-            "1. 市场价格低于净值是短期现象，不一定能立即获利\n"
-            "2. 实际交易中可能因价格变动导致机会消失\n"
-            "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
-            "4. 本策略综合评分考虑了折溢价率、流动性、波动率、成分股稳定性等因素\n"
-            "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
-            "6. 本策略仅供参考，不构成投资建议\n"
+        # 页脚模板
+        footer = (
+            "\n──────────────────\n"
+            f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "──────────────────\n"
+            f"🔗 数据来源: {log_url}\n"
+            "📊 环境：生产"
         )
         
-        return content
+        messages = []
+        
+        # 第1页：封面页
+        if total_pages > 0:
+            page1 = (
+                "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
+                "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
+                f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
+                f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
+                f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
+                + footer
+            )
+            messages.append(page1)
+        
+        # 后续页：ETF详情
+        for page in range(total_pages):
+            start_idx = page * ETFS_PER_PAGE
+            end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
+            
+            # 生成当前页的ETF详情
+            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
+            
+            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+                content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
+                content += f"   💹 折价率: {abs(row['折溢价率']):.2f}%\n"
+                content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+                content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
+                content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
+                content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
+                content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+            
+            # 添加页脚
+            content += footer
+            messages.append(content)
+        
+        return messages
     
     except Exception as e:
         error_msg = f"生成折价消息内容失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return f"【折价策略】生成消息内容时发生错误，请检查日志"
+        return [f"【折价策略】生成消息内容时发生错误，请检查日志"]
 
-def _format_premium_message(df: pd.DataFrame) -> str:
+def _format_premium_message(df: pd.DataFrame) -> List[str]:
     """
-    格式化溢价机会消息
+    格式化溢价机会消息，分页处理
     
     Args:
         df: 溢价机会DataFrame
     
     Returns:
-        str: 格式化后的消息
+        List[str]: 分页后的消息列表
     """
     try:
         if df.empty:
-            return "【溢价机会】\n未发现有效溢价套利机会"
+            return ["【溢价机会】\n未发现有效溢价套利机会"]
         
-        # 生成消息内容
-        content = "【以下ETF市场价格高于净值，若你只在二级市场交易注意规避风险】\n\n"
-        content += "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
-        content += f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
-        content += f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
-        content += f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
-        content += f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
+        # 每页显示的ETF数量
+        ETFS_PER_PAGE = 5
+        total_etfs = len(df)
+        total_pages = (total_etfs + ETFS_PER_PAGE - 1) // ETFS_PER_PAGE  # 向上取整
         
-        # 添加溢价机会
-        for i, (_, row) in enumerate(df.head(3).iterrows(), 1):
-            content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-            content += f"   💹 溢价率: {row['折溢价率']:.2f}%\n"
-            content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
-            content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
-            content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
-            content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
-            content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
         
-        # 添加其他机会数量
-        if len(df) > 3:
-            content += f"• 还有 {len(df) - 3} 个溢价机会...\n"
+        # 生成GitHub日志链接
+        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
         
-        # 添加风险提示
-        content += (
-            "\n⚠️ 风险提示：\n"
-            "1. 市场价格高于净值是短期现象，不一定能立即获利\n"
-            "2. 实际交易中可能因价格变动导致机会消失\n"
-            "3. 二级市场交易者应避免在溢价过高时买入，可能导致亏损\n"
-            "4. 本策略综合评分考虑了溢价率、流动性、波动率、成分股稳定性等因素\n"
-            "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
-            "6. 本策略仅供参考，不构成投资建议\n"
+        # 页脚模板
+        footer = (
+            "\n──────────────────\n"
+            f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "──────────────────\n"
+            f"🔗 数据来源: {log_url}\n"
+            "📊 环境：生产"
         )
         
-        return content
+        messages = []
+        
+        # 第1页：封面页
+        if total_pages > 0:
+            page1 = (
+                "【以下ETF市场价格高于净值，若你只在二级市场交易注意规避风险】\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
+                "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
+                f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
+                f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
+                f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
+                + footer
+            )
+            messages.append(page1)
+        
+        # 后续页：ETF详情
+        for page in range(total_pages):
+            start_idx = page * ETFS_PER_PAGE
+            end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
+            
+            # 生成当前页的ETF详情
+            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
+            
+            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+                content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
+                content += f"   💹 溢价率: {row['折溢价率']:.2f}%\n"
+                content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+                content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
+                content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
+                content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
+                content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+            
+            # 添加页脚
+            content += footer
+            messages.append(content)
+        
+        return messages
     
     except Exception as e:
         error_msg = f"生成溢价消息内容失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return f"【溢价策略】生成消息内容时发生错误，请检查日志"
+        return [f"【溢价策略】生成消息内容时发生错误，请检查日志"]
 
-def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> str:
+def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> Union[str, List[str]]:
     """
     应用对应类型的消息模板
     :param message: 原始消息内容（可以是字符串或DataFrame）
     :param message_type: 消息类型
-    :return: 格式化后的消息
+    :return: 格式化后的消息（字符串或消息列表）
     """
     try:
         # 获取当前双时区时间
@@ -407,84 +461,36 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
         
         # 特殊处理套利消息
         if message_type == "discount" and isinstance(message, pd.DataFrame):
-            message = _format_discount_message(message)
+            return _format_discount_message(message)
         elif message_type == "premium" and isinstance(message, pd.DataFrame):
-            message = _format_premium_message(message)
+            return _format_premium_message(message)
         
         # 确保message是字符串
         if not isinstance(message, str):
             message = str(message)
         
+        # 页脚模板
+        footer = (
+            "\n──────────────────\n"
+            f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "──────────────────\n"
+            f"🔗 数据来源: {log_url}\n"
+            "📊 环境：生产"
+        )
+        
         # 根据消息类型应用不同的模板
         if message_type == "task":
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 日志链接: {log_url}\n"
-                "📊 数据来源：AkShare | 环境：生产"
-            )
-        elif message_type == "discount":
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 数据来源: {log_url}\n"
-                "📊 环境：生产"
-            )
-        elif message_type == "premium":
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 数据来源: {log_url}\n"
-                "📊 环境：生产"
-            )
+            return f"{message}\n{footer}"
         elif message_type == "position":
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 数据来源: {log_url}\n"
-                "📊 环境：生产"
-            )
+            return f"{message}\n{footer}"
         elif message_type == "error":
-            return (
-                f"⚠️ {message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 日志链接: {log_url}\n"
-                "📊 数据来源：AkShare | 环境：生产"
-            )
+            return f"⚠️ {message}\n{footer}"
         elif message_type == "daily_report":
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                f"🔗 数据来源: {log_url}\n"
-                "📊 环境：生产"
-            )
+            return f"{message}\n{footer}"
         else:  # default
-            return (
-                f"{message}\n\n"
-                "──────────────────\n"
-                f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "──────────────────\n"
-                "📊 数据来源：AkShare | 环境：生产"
-            )
+            return f"{message}\n{footer}"
+    
     except Exception as e:
         logger.error(f"应用消息模板失败: {str(e)}", exc_info=True)
         # 返回一个基本格式的消息
@@ -540,7 +546,7 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
             
             # 检查是否在冷却期内
             if not _should_send_error(error_type):
-                logger.info(f"相同错误消息在冷却期内，跳过发送: {error_type}")
+                logger.info(f"错误消息在冷却期内，跳过发送: {error_type}")
                 return False
         
         # 从环境变量获取Webhook（优先于配置文件）
@@ -553,20 +559,24 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
         # 应用消息模板
         full_message = _apply_message_template(message, message_type)
         
-        # 检查消息长度并进行分片
-        message_chunks = _check_message_length(full_message)
+        # 检查full_message是否为消息列表
+        messages_to_send = []
+        if isinstance(full_message, list):
+            messages_to_send = full_message
+        else:
+            # 检查消息长度并进行分片
+            messages_to_send = _check_message_length(full_message)
         
-        # 发送所有消息分片
+        # 发送所有消息
         all_success = True
-        for i, chunk in enumerate(message_chunks):
-            # 对于分片消息，添加分片标识
-            if len(message_chunks) > 1:
-                logger.info(f"发送消息分片 {i+1}/{len(message_chunks)}")
-                
+        for i, msg in enumerate(messages_to_send):
+            # 速率限制
+            _rate_limit()
+            
             # 重试机制
             success = False
             for retry in range(_MAX_RETRIES):
-                if _send_single_message(webhook, chunk, retry):
+                if _send_single_message(webhook, msg, retry):
                     success = True
                     break
                 else:
@@ -586,25 +596,26 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
         return False
 
 def _format_dataframe_as_string(df: pd.DataFrame) -> str:
+    """
+    将DataFrame格式化为更友好的字符串
+    
+    Args:
+        df: 要格式化的DataFrame
+        
+    Returns:
+        str: 格式化后的字符串
+    """
     try:
-        # 选择关键列并重命名
-        cols = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率",
-                "基金规模", "日均成交额", "综合评分"]
-        df = df[cols].copy()
-        
-        # 格式化数值列
-        df["折溢价率"] = df["折溢价率"].apply(lambda x: f"{x:.2f}%")
-        df["基金规模"] = df["基金规模"].apply(lambda x: f"{x:.2f}")
-        df["日均成交额"] = df["日均成交额"].apply(lambda x: f"{x:,.0f}")
-        
-        # 使用Markdown表格并添加测试标记
-        if "测试数据" in df.columns:
-            return f"【ETF套利机会 - 测试数据】\n\n{df.to_markdown(index=False)}"
-        else:
-            return f"【ETF套利机会】\n\n{df.to_markdown(index=False)}"
+        # 使用Markdown格式（更易读）
+        return df.to_markdown(index=False)
     except Exception as e:
-        # 添加错误处理逻辑
-        pass
+        logger.warning(f"使用Markdown格式化DataFrame失败: {str(e)}，改用表格格式")
+        try:
+            # 使用表格格式
+            return df.to_string(index=False)
+        except Exception as e:
+            logger.warning(f"使用表格格式化DataFrame失败: {str(e)}，改用简单描述")
+            return f"数据表格（{len(df)}行，{len(df.columns)}列）"
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

@@ -313,29 +313,34 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         
         # 检查是否有新的套利机会
         new_opportunities = False
+        discount_success = False
         if not discount_df.empty:
             logger.info(f"发现 {len(discount_df)} 个新的折价机会")
             # 推送折价消息
-            send_success = send_wechat_message(discount_df, message_type="discount")
-            if send_success:
+            discount_success = send_wechat_message(discount_df, message_type="discount")
+            if discount_success:
                 new_opportunities = True
                 logger.info("折价机会消息发送成功")
             else:
                 logger.error("折价机会消息发送失败")
         
+        premium_success = False
         if not premium_df.empty:
             logger.info(f"发现 {len(premium_df)} 个新的溢价机会")
             # 推送溢价消息
-            send_success = send_wechat_message(premium_df, message_type="premium")
-            if send_success:
+            premium_success = send_wechat_message(premium_df, message_type="premium")
+            if premium_success:
                 new_opportunities = True
                 logger.info("溢价机会消息发送成功")
             else:
                 logger.error("溢价机会消息发送失败")
         
-        # 标记所有推送的ETF为已推送
-        if mark_arbitrage_opportunities_pushed(discount_df, premium_df):
-            logger.info("成功标记所有推送的ETF为已推送")
+        # 只有在消息成功发送后才标记为已推送
+        if discount_success or premium_success:
+            if mark_arbitrage_opportunities_pushed(discount_df, premium_df):
+                logger.info("成功标记所有推送的ETF为已推送")
+        else:
+            logger.warning("消息发送失败，未标记为已推送")
         
         if new_opportunities:
             return {

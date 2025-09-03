@@ -753,7 +753,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         logger.debug(f"成功加载套利数据，实际列名: {list(df.columns)}")
         
         # 检查数据完整性
-        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
+        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
@@ -761,6 +761,12 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
             # 记录实际存在的列
             logger.debug(f"实际列名: {list(df.columns)}")
             return pd.DataFrame(), pd.DataFrame()
+        
+        # 修复：在策略计算模块中计算正确的折溢价率
+        # 正确的计算公式：(市场价格 - IOPV) / IOPV * 100
+        # 结果为正：溢价（市场价格 > IOPV）
+        # 结果为负：折价（市场价格 < IOPV）
+        df["折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
         
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
@@ -839,8 +845,11 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
             # 检查数据是否有效
             if not df.empty:
                 # 检查是否包含必要列
-                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率"]
+                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if all(col in df.columns for col in required_columns):
+                    # 修复：在加载历史数据时也计算正确的折溢价率
+                    df["折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+                    
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
                     # 记录历史数据的折溢价率范围
                     logger.debug(f"历史数据折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")

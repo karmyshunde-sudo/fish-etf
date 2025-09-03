@@ -50,6 +50,72 @@ def get_github_actions_url() -> str:
     
     return f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
 
+def _extract_scalar_value(value, default=0.0, log_prefix=""):
+    """
+    安全地从各种类型中提取标量值
+    
+    Args:
+        value: 可能是标量、Series、DataFrame、字符串等
+        default: 默认值，如果无法提取标量值
+        log_prefix: 日志前缀，用于标识调用位置
+    
+    Returns:
+        float: 标量值
+    """
+    try:
+        # 如果已经是标量值，直接返回
+        if isinstance(value, (int, float)):
+            return float(value)
+        
+        # 如果是字符串，尝试转换为浮点数
+        if isinstance(value, str):
+            # 尝试移除非数字字符
+            cleaned_str = ''.join(c for c in value if c.isdigit() or c in ['.', '-'])
+            if cleaned_str:
+                result = float(cleaned_str)
+                logger.debug(f"{log_prefix}从字符串提取标量值: '{value}' -> {result}")
+                return result
+            logger.warning(f"{log_prefix}无法从字符串 '{value}' 提取有效数字，使用默认值{default}")
+            return default
+        
+        # 如果是pandas对象，尝试提取标量值
+        if isinstance(value, (pd.Series, pd.DataFrame)):
+            # 尝试获取第一个值
+            if value.size > 0:
+                # 尝试使用.values.flatten()[0]（最可靠）
+                try:
+                    result = float(value.values.flatten()[0])
+                    logger.debug(f"{log_prefix}通过.values.flatten()[0]提取标量值: {result}")
+                    return result
+                except Exception as e:
+                    # 尝试使用.item()
+                    try:
+                        result = float(value.item())
+                        logger.debug(f"{log_prefix}通过.item()提取标量值: {result}")
+                        return result
+                    except Exception as e2:
+                        # 尝试使用.iloc[0]
+                        try:
+                            valid_values = value[~pd.isna(value)]
+                            if not valid_values.empty:
+                                result = float(valid_values.iloc[0])
+                                logger.debug(f"{log_prefix}通过.iloc[0]提取标量值: {result}")
+                                return result
+                        except Exception as e3:
+                            pass
+            
+            logger.error(f"{log_prefix}无法从pandas对象提取标量值(size={value.size})，使用默认值{default}")
+            return default
+        
+        # 尝试直接转换为浮点数
+        result = float(value)
+        logger.debug(f"{log_prefix}直接转换为浮点数: {result}")
+        return result
+    
+    except Exception as e:
+        logger.error(f"{log_prefix}无法从类型 {type(value)} 中提取标量值: {str(e)}，使用默认值{default}")
+        return default
+
 def _extract_error_type(error_message: str) -> str:
     """
     从错误消息中提取错误类型
@@ -351,13 +417,23 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
-                content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-                content += f"   💹 折价率: {abs(row['折溢价率']):.2f}%\n"
-                content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
-                content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
-                content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
-                content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+                # 使用辅助函数安全提取标量值
+                etf_name = _extract_scalar_value(row['ETF名称'], log_prefix=f"ETF {row['ETF代码']} 名称: ")
+                etf_code = _extract_scalar_value(row['ETF代码'], log_prefix=f"ETF {row['ETF代码']} 代码: ")
+                premium_discount = _extract_scalar_value(row['折溢价率'], log_prefix=f"ETF {etf_code} 折溢价率: ")
+                market_price = _extract_scalar_value(row['市场价格'], log_prefix=f"ETF {etf_code} 市场价格: ")
+                iopv = _extract_scalar_value(row['IOPV'], log_prefix=f"ETF {etf_code} IOPV: ")
+                fund_size = _extract_scalar_value(row['规模'], log_prefix=f"ETF {etf_code} 规模: ")
+                avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
+                score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
+                
+                content += f"{i}. {etf_name} ({etf_code})\n"
+                content += f"   💹 折价率: {abs(premium_discount):.2f}%\n"
+                content += f"   📈 市场价格: {market_price:.3f}元\n"
+                content += f"   📊 IOPV: {iopv:.3f}元\n"
+                content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
+                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
             
             # 添加页脚
             content += footer
@@ -430,13 +506,23 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
-                content += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-                content += f"   💹 溢价率: {row['折溢价率']:.2f}%\n"
-                content += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
-                content += f"   📊 IOPV: {row['IOPV']:.3f}元\n"
-                content += f"   🏦 基金规模: {row['规模']:.2f}亿元\n"
-                content += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n\n"
+                # 使用辅助函数安全提取标量值
+                etf_name = _extract_scalar_value(row['ETF名称'], log_prefix=f"ETF {row['ETF代码']} 名称: ")
+                etf_code = _extract_scalar_value(row['ETF代码'], log_prefix=f"ETF {row['ETF代码']} 代码: ")
+                premium_discount = _extract_scalar_value(row['折溢价率'], log_prefix=f"ETF {etf_code} 折溢价率: ")
+                market_price = _extract_scalar_value(row['市场价格'], log_prefix=f"ETF {etf_code} 市场价格: ")
+                iopv = _extract_scalar_value(row['IOPV'], log_prefix=f"ETF {etf_code} IOPV: ")
+                fund_size = _extract_scalar_value(row['规模'], log_prefix=f"ETF {etf_code} 规模: ")
+                avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
+                score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
+                
+                content += f"{i}. {etf_name} ({etf_code})\n"
+                content += f"   💹 溢价率: {premium_discount:.2f}%\n"
+                content += f"   📈 市场价格: {market_price:.3f}元\n"
+                content += f"   📊 IOPV: {iopv:.3f}元\n"
+                content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
+                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
             
             # 添加页脚
             content += footer

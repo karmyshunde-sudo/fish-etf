@@ -281,6 +281,16 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
+def get_github_actions_url() -> str:
+    """获取GitHub Actions运行日志链接"""
+    github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+    github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+    
+    if github_run_id == "unknown" or not github_run_id:
+        return "无法获取日志链接"
+    
+    return f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
+
 def _format_discount_message(df: pd.DataFrame) -> List[str]:
     """
     格式化折价机会消息，分页处理
@@ -304,9 +314,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        log_url = get_github_actions_url()
         
         # 页脚模板
         footer = (
@@ -385,9 +393,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        log_url = get_github_actions_url()
         
         # 页脚模板
         footer = (
@@ -455,9 +461,7 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        log_url = get_github_actions_url()
         
         # 特殊处理套利消息
         if message_type == "discount" and isinstance(message, pd.DataFrame):
@@ -647,9 +651,7 @@ def send_wechat_markdown(message: str,
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        log_url = get_github_actions_url()
         
         # 添加统一的页脚
         footer = (

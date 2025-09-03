@@ -663,7 +663,7 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
         float: 收益评分（0-100分）
     """
     try:
-        # 确保premium_discount是浮点数
+        # 确保premium_discount是标量值
         if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
             # 如果是pandas对象，尝试获取标量值
             try:
@@ -672,12 +672,17 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
             except (ValueError, AttributeError):
                 # 如果无法转换为标量，取第一个值
                 try:
-                    premium_discount = premium_discount.iloc[0]
-                    logger.debug("从pandas对象获取第一个值成功")
-                except (IndexError, AttributeError):
-                    logger.error("无法从pandas对象获取有效值，使用默认值0.0")
+                    if not premium_discount.empty:
+                        premium_discount = premium_discount.iloc[0]
+                        logger.debug(f"从pandas对象获取第一个值成功: {premium_discount}")
+                    else:
+                        logger.warning("pandas对象为空，使用默认值0.0")
+                        premium_discount = 0.0
+                except (IndexError, AttributeError) as e:
+                    logger.error(f"无法从pandas对象获取第一个值: {str(e)}，使用默认值0.0")
                     premium_discount = 0.0
         
+        # 处理字符串输入
         if isinstance(premium_discount, str):
             try:
                 # 尝试移除百分号等非数字字符
@@ -688,8 +693,8 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
                 else:
                     logger.error(f"无法从字符串 '{premium_discount}' 提取有效数字，使用默认值0.0")
                     premium_discount = 0.0
-            except (ValueError, TypeError):
-                logger.error(f"无法将折溢价率 '{premium_discount}' 转换为浮点数，使用默认值0.0")
+            except (ValueError, TypeError) as e:
+                logger.error(f"无法将折溢价率 '{premium_discount}' 转换为浮点数: {str(e)}，使用默认值0.0")
                 premium_discount = 0.0
         
         # 确保是数值类型
@@ -698,7 +703,7 @@ def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.Dat
             premium_discount = 0.0
         
         # 记录实际使用的折溢价率值
-        logger.debug(f"实际使用的折溢价率值: {premium_discount}")
+        logger.debug(f"实际使用的折溢价率值: {premium_discount:.2f}")
         
         # 定义合理的折溢价率范围
         MAX_DISCOUNT = -5.0  # 最大折价率（-5%）

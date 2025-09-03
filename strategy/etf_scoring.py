@@ -741,6 +741,44 @@ def calculate_fundamental_score(etf_code: str) -> float:
         
         return 0.0
 
+def get_price_column(df: pd.DataFrame) -> Optional[str]:
+    """
+    获取价格列名
+    
+    Returns:
+        str: 价格列名，如果找不到返回None
+    """
+    # 记录DataFrame实际包含的列名，用于诊断问题
+    logger.debug(f"DataFrame实际包含的列名: {list(df.columns)}")
+    
+    # 定义可能的价格列名（按优先级排序）
+    price_columns = [
+        "收盘", "close", "市场价格", "最新价", "price", 
+        "最新价格", "市场价格(元)", "IOPV", "昨收", "前收盘"
+    ]
+    
+    # 检查哪些列存在于DataFrame中
+    available_price_columns = [col for col in price_columns if col in df.columns]
+    
+    if available_price_columns:
+        logger.info(f"找到价格列: {available_price_columns[0]} (可用价格列: {available_price_columns})")
+        return available_price_columns[0]
+    else:
+        # 尝试模糊匹配
+        for col in df.columns:
+            if any(keyword in col for keyword in ["收", "价", "最新", "price"]):
+                logger.info(f"通过模糊匹配找到价格列: {col}")
+                return col
+        
+        # 特殊情况处理：检查是否有"最新价"的变体
+        for col in df.columns:
+            if "最新" in col and ("价" in col or "Price" in col):
+                logger.info(f"通过特殊规则找到价格列: {col}")
+                return col
+        
+        logger.warning("未找到价格列，DataFrame实际列名: " + ", ".join(df.columns))
+        return None
+
 def calculate_volatility(df: pd.DataFrame) -> float:
     """计算波动率（年化）"""
     try:

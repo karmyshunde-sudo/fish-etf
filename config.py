@@ -154,7 +154,7 @@ class Config:
         'market_sentiment': 0.10   # 市场情绪权重
         'fundamental': 0.2,     # 基本面权重
         'return': 0.25,         # 收益能力权重
-        'risk': 0.2,            # 风险控制权重
+        'risk': 0.2            # 风险控制权重
     }
         
     # 折价/溢价阈值配置

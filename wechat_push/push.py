@@ -35,6 +35,125 @@ _MAX_RETRIES = 3
 _RETRY_DELAYS = [1, 2, 3]  # 重试延迟(秒) - 修改为更短的重试间隔
 _REQUEST_TIMEOUT = 5  # 新增：请求超时时间(秒)
 
+# 错误消息缓存，用于避免重复发送相同错误
+_error_cache: Dict[str, float] = {}
+# 错误消息冷却时间（秒）
+ERROR_COOLDOWN = 30
+# 消息发送间隔（秒）
+MESSAGE_SEND_INTERVAL = 1.5
+
+def _extract_error_type(error_message: str) -> str:
+    """
+    从错误消息中提取错误类型
+    
+    Args:
+        error_message: 完整的错误消息
+    
+    Returns:
+        str: 错误类型标识
+    """
+    # 提取Traceback中的关键错误信息
+    if "Traceback" in error_message:
+        # 尝试提取最后一行错误
+        lines = error_message.split("\n")
+        for line in reversed(lines):
+            if "Error" in line or "Exception" in line or "KeyError" in line:
+                return line.strip()
+    
+    # 提取"KeyError: 'xxx'"格式
+    if "KeyError" in error_message:
+        import re
+        match = re.search(r"KeyError: '([^']+)'", error_message)
+        if match:
+            return f"KeyError: '{match.group(1)}'"
+    
+    # 返回前50个字符作为错误类型
+    return error_message[:50]
+
+def _should_send_error(error_type: str) -> bool:
+    """
+    检查是否应该发送错误消息
+    
+    Args:
+        error_type: 错误类型标识
+    
+    Returns:
+        bool: 是否应该发送
+    """
+    current_time = time.time()
+    
+    # 检查是否在冷却期内
+    if error_type in _error_cache:
+        if current_time - _error_cache[error_type] < ERROR_COOLDOWN:
+            return False
+    
+    # 更新最后发送时间
+    _error_cache[error_type] = current_time
+    return True
+
+def _should_send_message(message_tag: str) -> bool:
+    """
+    检查是否应该发送消息（避免相同类型消息过于频繁）
+    
+    Args:
+        message_tag: 消息类型标识
+    
+    Returns:
+        bool: 是否应该发送
+    """
+    current_time = time.time()
+    
+    # 检查是否在冷却期内
+    if message_tag in _error_cache:
+        if current_time - _error_cache[message_tag] < ERROR_COOLDOWN:
+            return False
+    
+    return True
+
+def _update_last_send_time(message_tag: str) -> None:
+    """
+    更新消息最后发送时间
+    
+    Args:
+        message_tag: 消息类型标识
+    """
+    _error_cache[message_tag] = time.time()
+
+def _get_message_tag(message: str) -> str:
+    """
+    获取消息类型标识
+    
+    Args:
+        message: 消息内容
+    
+    Returns:
+        str: 消息类型标识
+    """
+    # 提取关键标识
+    if "KeyError" in message:
+        import re
+        match = re.search(r"KeyError: '([^']+)'", message)
+        if match:
+            return f"KeyError_{match.group(1)}"
+    
+    if "SettingWithCopyWarning" in message:
+        return "SettingWithCopyWarning"
+    
+    if "api freq out of limit" in message:
+        return "API_Freq_Limit"
+    
+    # 按消息前缀分类
+    if message.startswith("【系统错误】"):
+        return "System_Error"
+    if message.startswith("【ETF策略日报】"):
+        return "Daily_Report"
+    if message.startswith("【ETF策略】"):
+        return "Strategy_Message"
+    
+    # 默认使用消息的哈希值前10位
+    import hashlib
+    return hashlib.md5(message[:100].encode()).hexdigest()[:10]
+
 def _check_message_length(message: str) -> List[str]:
     """
     检查消息长度并进行分片处理
@@ -119,6 +238,15 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
     try:
         # 速率限制
         _rate_limit()
+        
+        # 控制消息发送速率
+        current_time = time.time()
+        elapsed = current_time - _last_send_time
+        if elapsed < MESSAGE_SEND_INTERVAL:
+            sleep_time = MESSAGE_SEND_INTERVAL - elapsed
+            logger.debug(f"消息发送速率控制，等待 {sleep_time:.2f} 秒")
+            time.sleep(sleep_time)
+        _last_send_time = time.time()
         
         # 企业微信文本消息格式
         payload = {
@@ -385,6 +513,21 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
         bool: 是否成功发送
     """
     try:
+        # 检查是否为空消息
+        if not message or not message.strip():
+            logger.warning("尝试发送空消息，已忽略")
+            return False
+        
+        # 特殊处理错误消息，避免频繁发送
+        if message_type == "error":
+            # 提取错误类型（例如"KeyError: 'fundamental'"）
+            error_type = _extract_error_type(message)
+            
+            # 检查是否在冷却期内
+            if not _should_send_error(error_type):
+                logger.info(f"错误消息在冷却期内，跳过发送: {error_type}")
+                return False
+        
         # 从环境变量获取Webhook（优先于配置文件）
         if webhook is None:
             webhook = os.getenv("WECOM_WEBHOOK", Config.WECOM_WEBHOOK)
@@ -621,6 +764,9 @@ def test_webhook_connection(webhook: Optional[str] = None) -> bool:
 try:
     # 确保必要的目录存在
     Config.init_dirs()
+    
+    # 初始化错误缓存
+    _error_cache = {}
     
     # 初始化日志
     logger.info("微信推送模块初始化完成")

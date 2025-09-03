@@ -236,17 +236,8 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
     :return: 是否发送成功
     """
     try:
-        # 速率限制
+        # 速率限制 - 由_rate_limit函数处理
         _rate_limit()
-        
-        # 控制消息发送速率
-        current_time = time.time()
-        elapsed = current_time - _last_send_time
-        if elapsed < MESSAGE_SEND_INTERVAL:
-            sleep_time = MESSAGE_SEND_INTERVAL - elapsed
-            logger.debug(f"消息发送速率控制，等待 {sleep_time:.2f} 秒")
-            time.sleep(sleep_time)
-        _last_send_time = time.time()
         
         # 企业微信文本消息格式
         payload = {
@@ -257,7 +248,7 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         }
         
         logger.debug(f"发送消息到企业微信 (重试 {retry_count}): {message[:100]}...")
-        response = requests.post(webhook, json=payload, timeout=_REQUEST_TIMEOUT)  # 修改为使用_REQUEST_TIMEOUT
+        response = requests.post(webhook, json=payload, timeout=_REQUEST_TIMEOUT)
         response.raise_for_status()
         result = response.json()
         

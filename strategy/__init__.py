@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 from .arbitrage import (
     calculate_arbitrage_opportunity,
     mark_arbitrage_opportunities_pushed,  # 修复：添加增量推送标记函数的导出
-    calculate_arbitrage_scores,
-    filter_valid_arbitrage_opportunities
+    calculate_arbitrage_scores
 )
 from .position import calculate_position_strategy
 from .etf_scoring import (

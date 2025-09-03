@@ -652,7 +652,7 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
         logger.error(f"计算风险评分失败: {str(e)}", exc_info=True)
         return 50.0  # 出错时返回中性评分
 
-def calculate_return_score(premium_discount: Union[float, str]) -> float:
+def calculate_return_score(premium_discount: Union[float, str, pd.Series, pd.DataFrame]) -> float:
     """
     计算收益评分（0-100分，分数越高表示潜在收益越大）
     
@@ -664,13 +664,41 @@ def calculate_return_score(premium_discount: Union[float, str]) -> float:
     """
     try:
         # 确保premium_discount是浮点数
+        if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
+            # 如果是pandas对象，尝试获取标量值
+            try:
+                premium_discount = premium_discount.item()
+                logger.debug("从pandas对象获取标量值成功")
+            except (ValueError, AttributeError):
+                # 如果无法转换为标量，取第一个值
+                try:
+                    premium_discount = premium_discount.iloc[0]
+                    logger.debug("从pandas对象获取第一个值成功")
+                except (IndexError, AttributeError):
+                    logger.error("无法从pandas对象获取有效值，使用默认值0.0")
+                    premium_discount = 0.0
+        
         if isinstance(premium_discount, str):
             try:
-                premium_discount = float(premium_discount)
-                logger.debug(f"将折溢价率字符串 '{premium_discount}' 转换为浮点数")
-            except ValueError:
+                # 尝试移除百分号等非数字字符
+                cleaned_str = ''.join(c for c in premium_discount if c.isdigit() or c in ['.', '-'])
+                if cleaned_str:
+                    premium_discount = float(cleaned_str)
+                    logger.debug(f"将折溢价率字符串 '{premium_discount}' 转换为浮点数")
+                else:
+                    logger.error(f"无法从字符串 '{premium_discount}' 提取有效数字，使用默认值0.0")
+                    premium_discount = 0.0
+            except (ValueError, TypeError):
                 logger.error(f"无法将折溢价率 '{premium_discount}' 转换为浮点数，使用默认值0.0")
                 premium_discount = 0.0
+        
+        # 确保是数值类型
+        if not isinstance(premium_discount, (int, float)):
+            logger.error(f"折溢价率类型错误: {type(premium_discount)}，使用默认值0.0")
+            premium_discount = 0.0
+        
+        # 记录实际使用的折溢价率值
+        logger.debug(f"实际使用的折溢价率值: {premium_discount}")
         
         # 定义合理的折溢价率范围
         MAX_DISCOUNT = -5.0  # 最大折价率（-5%）

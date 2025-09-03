@@ -39,6 +39,9 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     
+    # 创建安全副本以避免SettingWithCopyWarning
+    df = df.copy(deep=True)
+    
     # 如果已经是中文列名，直接返回
     if all(col in Config.CHINESE_COLUMNS for col in df.columns):
         return df
@@ -72,13 +75,9 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
             elif chn_col == "振幅" and "最高" in df.columns and "最低" in df.columns and "前收盘" in df.columns:
                 df["振幅"] = ((df["最高"] - df["最低"]) / df["前收盘"]) * 100
             else:
-                # 创建安全副本以避免SettingWithCopyWarning
-                df = df.copy(deep=True)
-                df[chn_col] = None  # 填充缺失列
+                # 填充缺失列
+                df[chn_col] = None
     
-    # 关键修复：不要删除非标准列，只确保标准列存在
-    # 原有问题代码：df = df[Config.CHINESE_COLUMNS]
-    # 修复后：保留所有列，只确保标准列存在
     logger.debug(f"确保中文列名完成，当前列名: {list(df.columns)}")
     return df
 
@@ -133,8 +132,6 @@ def load_etf_metadata(file_path: Optional[Union[str, Path]] = None) -> Dict[str,
         Dict[str, Any]: ETF元数据字典
     """
     try:
-        # 导入Config类来获取默认元数据文件路径
-        from config import Config
         if file_path is None:
             file_path = Config.METADATA_PATH
         file_path = Path(file_path)
@@ -168,8 +165,6 @@ def save_etf_metadata(metadata: Dict[str, Any], file_path: Optional[Union[str, P
         bool: 成功保存返回True，否则返回False
     """
     try:
-        # 导入Config类来获取默认元数据文件路径
-        from config import Config
         if file_path is None:
             file_path = Config.METADATA_PATH
         file_path = Path(file_path)
@@ -226,22 +221,28 @@ def write_json(file_path: Union[str, Path], data: Dict) -> bool:
         # 确保目录存在
         ensure_dir_exists(file_path.parent)
         
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 使用临时文件确保原子性写入
+        temp_file = file_path.with_suffix('.tmp')
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
         
+        # 重命名临时文件为目标文件
+        temp_file.replace(file_path)
+        logger.debug(f"写入JSON文件成功: {file_path}")
         return True
     
     except Exception as e:
         logger.error(f"写入JSON文件失败 {file_path}: {str(e)}")
         return False
 
-def ensure_dir_exists(path: str) -> None:
+def ensure_dir_exists(path: Union[str, Path]) -> None:
     """
     确保目录存在，如果不存在则创建
     """
     try:
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
+        path = Path(path)
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
             logger.info(f"创建目录: {path}")
         
         # 确保目录有写入权限
@@ -458,8 +459,75 @@ def write_csv(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool:
         # 合并参数
         merged_kwargs = {**default_kwargs, **kwargs}
         
-        df.to_csv(file_path, **merged_kwargs)
-        logger.debug(f"写入CSV文件成功: {file_path}")
+        # 使用临时文件确保原子性写入
+        temp_file = file_path.with_suffix('.tmp')
+        df.to_csv(temp_file, **merged_kwargs)
+        
+        # 重命名临时文件为目标文件
+        temp_file.replace(file_path)
+        logger.debug(f"写入CSV文件成功: {file_path}, 共{len(df)}行")
+        return True
+    
+    except Exception as e:
+        logger.error(f"写入CSV文件失败 {file_path}: {str(e)}")
+        return False
+
+def append_csv(file_path: Union[str, Path], data: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None) -> bool:
+    """
+    追加数据到CSV文件（增量爬取专用）
+    
+    Args:
+        file_path: CSV文件路径
+        data: 要追加的数据列表
+        fieldnames: 列名列表，如果为None则尝试从现有文件读取或使用数据中的键
+    
+    Returns:
+        bool: 成功追加返回True，否则返回False
+    """
+    try:
+        file_path = Path(file_path)
+        # 确保目录存在
+        ensure_dir_exists(file_path.parent)
+        
+        # 确定列名
+        if fieldnames is None:
+            if data:
+                fieldnames = list(data[0].keys())
+            elif file_path.exists():
+                # 尝试从现有文件读取列名
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    if reader.fieldnames:
+                        fieldnames = reader.fieldnames
+        
+        if not fieldnames:
+            logger.error(f"无法确定CSV列名: {file_path}")
+            return False
+        
+        # 使用临时文件确保原子性追加
+        temp_file = file_path.with_suffix('.tmp')
+        
+        # 复制现有文件内容到临时文件（如果存在）
+        if file_path.exists():
+            shutil.copy2(file_path, temp_file)
+        
+        # 追加新数据
+        file_exists = temp_file.exists()
+        mode = 'a' if file_exists else 'w'
+        with open(temp_file, mode, encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            # 如果文件不存在或为空，写入表头
+            if not file_exists or temp_file.stat().st_size == 0:
+                writer.writeheader()
+            
+            # 写入数据
+            for row in data:
+                writer.writerow(row)
+        
+        # 重命名临时文件为目标文件
+        temp_file.replace(file_path)
+        logger.debug(f"CSV文件写入成功: {file_path}, 共{len(data)}行")
         return True
     
     except Exception as e:

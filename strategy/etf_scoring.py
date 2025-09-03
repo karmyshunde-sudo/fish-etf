@@ -378,7 +378,7 @@ def create_basic_metadata_from_list() -> pd.DataFrame:
 
 def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
     """
-    计算ETF综合评分
+    计算ETF综合评分（0-100分）
     
     Args:
         etf_code: ETF代码
@@ -404,44 +404,88 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
             df = df.sort_values(DATE_COL)
         
         # 检查数据量
-        if len(df) < 30:
-            logger.warning(f"ETF {etf_code} 数据量不足，评分设为0")
-            return 0.0
+        min_required_data = 30
+        if len(df) < min_required_data:
+            # 检查ETF是否为新上市
+            size, listing_date = get_etf_basic_info(etf_code)
+            if listing_date:
+                try:
+                    # 尝试解析成立日期
+                    date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
+                    parsed_date = None
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(listing_date, fmt)
+                            break
+                        except:
+                            continue
+                    
+                    if parsed_date:
+                        # 计算ETF上市天数
+                        days_since_listing = (beijing_now - parsed_date).days
+                        if days_since_listing < min_required_data:
+                            logger.info(f"ETF {etf_code} 上市时间较短({days_since_listing}天)，使用现有数据计算评分")
+                            min_required_data = min(5, len(df))  # 至少需要5天数据
+                except Exception as e:
+                    logger.warning(f"解析ETF {etf_code} 成立日期失败: {str(e)}")
+            
+            if len(df) < min_required_data:
+                logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，评分设为0")
+                return 0.0
         
-        # 取最近30天数据
-        recent_30d = df.tail(30)
+        # 取最近min_required_data天数据
+        recent_data = df.tail(min_required_data)
         
         # 1. 流动性得分（日均成交额）
-        liquidity_score = calculate_liquidity_score(recent_30d)
+        liquidity_score = calculate_liquidity_score(recent_data)
         
         # 2. 风险控制得分
-        risk_score = calculate_risk_score(recent_30d)
+        risk_score = calculate_risk_score(recent_data)
         
         # 3. 收益能力得分
-        return_score = calculate_return_score(recent_30d)
+        return_score = calculate_return_score(recent_data)
         
         # 4. 情绪指标得分（成交量变化率）
-        sentiment_score = calculate_sentiment_score(recent_30d)
+        sentiment_score = calculate_sentiment_score(recent_data)
         
         # 5. 基本面得分（规模、成立时间等）
         fundamental_score = calculate_fundamental_score(etf_code)
         
+        # 验证所有得分是否在有效范围内 [0, 100]
+        scores = {
+            "liquidity": liquidity_score,
+            "risk": risk_score,
+            "return": return_score,
+            "sentiment": sentiment_score,
+            "fundamental": fundamental_score
+        }
+        
+        # 双重验证：确保所有得分在0-100范围内
+        for name, score in scores.items():
+            if score < 0 or score > 100:
+                logger.error(f"ETF {etf_code} {name}得分超出范围({score})，强制限制在0-100")
+                scores[name] = max(0, min(100, score))
+        
         # 计算综合评分（加权平均）
+        weights = Config.SCORE_WEIGHTS
         total_score = (
-            liquidity_score * 0.2 +
-            risk_score * 0.2 +
-            return_score * 0.25 +
-            sentiment_score * 0.15 +
-            fundamental_score * 0.2
+            scores["liquidity"] * weights['liquidity'] +
+            scores["risk"] * weights['risk'] +
+            scores["return"] * weights['return'] +
+            scores["sentiment"] * weights['sentiment'] +
+            scores["fundamental"] * weights['fundamental']
         )
+        
+        # 确保最终评分在0-100范围内
+        total_score = max(0, min(100, total_score))
         
         logger.debug(
             f"ETF {etf_code} 评分详情: "
-            f"流动性={liquidity_score:.2f}, "
-            f"风险={risk_score:.2f}, "
-            f"收益={return_score:.2f}, "
-            f"情绪={sentiment_score:.2f}, "
-            f"基本面={fundamental_score:.2f}, "
+            f"流动性={scores['liquidity']:.2f}({weights['liquidity']*100:.0f}%), "
+            f"风险={scores['risk']:.2f}({weights['risk']*100:.0f}%), "
+            f"收益={scores['return']:.2f}({weights['return']*100:.0f}%), "
+            f"情绪={scores['sentiment']:.2f}({weights['sentiment']*100:.0f}%), "
+            f"基本面={scores['fundamental']:.2f}({weights['fundamental']*100:.0f}%), "
             f"综合={total_score:.2f}"
         )
         
@@ -787,19 +831,37 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 优先使用"收盘"列，如果没有则使用"市场价格"，再没有则使用"最新价"
-        if CLOSE_COL in df.columns:
-            price_col = CLOSE_COL
-        elif "市场价格" in df.columns:
-            price_col = "市场价格"
-        elif "最新价" in df.columns:
-            price_col = "最新价"
-        else:
-            logger.warning(f"DataFrame缺少必要列: {CLOSE_COL}, '市场价格'或'最新价'")
+        # 获取价格列
+        price_col = get_price_column(df)
+        if not price_col:
+            logger.error("DataFrame缺少必要价格列，无法计算波动率。实际列名: " + ", ".join(df.columns))
+            return 0.0
+        
+        # 确保价格列是数值类型
+        if not pd.api.types.is_numeric_dtype(df[price_col]):
+            try:
+                df[price_col] = pd.to_numeric(df[price_col], errors='coerce')
+                # 移除NaN值
+                df = df.dropna(subset=[price_col])
+            except Exception as e:
+                logger.error(f"转换价格列为数值类型失败: {str(e)}")
+                return 0.0
+        
+        # 确保数据量足够
+        if len(df) < 2:
+            logger.warning("数据量不足，无法计算波动率")
             return 0.0
         
         # 计算日收益率
         df["daily_return"] = df[price_col].pct_change()
+        
+        # 移除NaN值
+        df = df.dropna(subset=["daily_return"])
+        
+        # 确保数据量足够
+        if len(df) < 2:
+            logger.warning("计算收益率后数据量不足，无法计算波动率")
+            return 0.0
         
         # 计算年化波动率
         volatility = df["daily_return"].std() * np.sqrt(252)
@@ -808,13 +870,45 @@ def calculate_volatility(df: pd.DataFrame) -> float:
     except Exception as e:
         error_msg = f"计算波动率失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        return 0.0
+
+def calculate_premium_discount(market_price: float, iopv: float) -> float:
+    """
+    计算折溢价率
+    
+    Args:
+        market_price: 市场价格
+        iopv: IOPV(基金份额参考净值)
+    
+    Returns:
+        float: 折溢价率（百分比），正数表示溢价，负数表示折价
+    """
+    try:
+        if iopv <= 0:
+            logger.warning(f"无效的IOPV: {iopv}")
+            return 0.0
         
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
+        # 双重验证：确保计算结果正确
+        premium_discount = ((market_price - iopv) / iopv) * 100
         
+        # 验证计算结果
+        if market_price > iopv and premium_discount <= 0:
+            logger.error(f"严重错误：市场价格({market_price}) > IOPV({iopv})，但计算出的折溢价率({premium_discount})≤0")
+            # 发送紧急警报
+            send_urgent_alert(f"折溢价率计算错误: 市场价格>{iopv}")
+            # 重新计算
+            premium_discount = abs((market_price - iopv) / iopv * 100)
+        elif market_price < iopv and premium_discount >= 0:
+            logger.error(f"严重错误：市场价格({market_price}) < IOPV({iopv})，但计算出的折溢价率({premium_discount})≥0")
+            # 发送紧急警报
+            send_urgent_alert(f"折溢价率计算错误: 市场价格<{iopv}")
+            # 重新计算并取负值
+            premium_discount = -abs((market_price - iopv) / iopv * 100)
+        
+        return round(premium_discount, 2)
+    
+    except Exception as e:
+        logger.error(f"计算折溢价率失败: {str(e)}")
         return 0.0
 
 def calculate_sharpe_ratio(df: pd.DataFrame) -> float:
@@ -976,6 +1070,13 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
                 logger.warning(f"权重字典缺少必要键: {key}, 使用默认值0.1")
                 weights[key] = 0.1
         
+        # 确保权重和为1
+        total_weight = sum(weights.values())
+        if abs(total_weight - 1.0) > 0.001:
+            logger.warning(f"权重和不为1 ({total_weight}), 正在归一化")
+            for key in weights:
+                weights[key] /= total_weight
+        
         # 综合评分（加权平均）
         total_score = (
             base_score * (weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']) +
@@ -983,11 +1084,16 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
             premium_score * weights['premium_discount']
         )
         
+        # 双重验证：确保评分在0-100范围内
+        if total_score < 0 or total_score > 100:
+            logger.error(f"ETF {etf_code} 套利综合评分超出范围({total_score})，强制限制在0-100")
+            total_score = max(0, min(100, total_score))
+        
         logger.debug(f"ETF {etf_code} 套利综合评分: {total_score:.2f} "
                      f"(基础评分: {base_score:.2f}, 成分股稳定性: {component_score:.2f}, "
                      f"折溢价评分: {premium_score:.2f})")
         
-        return min(max(total_score, 0), 100)  # 限制在0-100范围内
+        return total_score
     
     except Exception as e:
         logger.error(f"计算ETF {etf_code} 套利综合评分失败: {str(e)}", exc_info=True)

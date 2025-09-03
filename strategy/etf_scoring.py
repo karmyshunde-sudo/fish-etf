@@ -426,7 +426,7 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                         days_since_listing = (beijing_now - parsed_date).days
                         if days_since_listing < min_required_data:
                             logger.info(f"ETF {etf_code} 上市时间较短({days_since_listing}天)，使用现有数据计算评分")
-                            min_required_data = min(5, len(df))  # 至少需要5天数据
+                            min_required_data = max(5, len(df))  # 至少需要5天数据
                 except Exception as e:
                     logger.warning(f"解析ETF {etf_code} 成立日期失败: {str(e)}")
             
@@ -1089,7 +1089,7 @@ def calculate_arbitrage_score(etf_code: str, df: pd.DataFrame, premium_discount:
         weights = Config.ARBITRAGE_SCORE_WEIGHTS
         
         # 确保权重字典包含所有必要的键
-        required_keys = ['liquidity', 'risk', 'return', 'market_sentiment', 'fundamental', 'component_stability', 'premium_discount']
+        required_keys = ['premium_discount', 'liquidity', 'risk', 'return', 'market_sentiment', 'fundamental', 'component_stability']
         for key in required_keys:
             if key not in weights:
                 logger.warning(f"权重字典缺少必要键: {key}, 使用默认值0.1")

@@ -868,9 +868,9 @@ def mark_arbitrage_opportunities_pushed(discount_df: pd.DataFrame, premium_df: p
         # 获取当前日期
         current_date = get_beijing_time().strftime("%Y-%m-%d")
         
-        # 加载现有状态
-        discount_status = load_status_file(Config.DISCOUNT_STATUS_FILE)
-        premium_status = load_status_file(Config.PREMIUM_STATUS_FILE)
+        # 加载现有状态 - 使用正确的函数名
+        discount_status = load_discount_status()
+        premium_status = load_premium_status()
         
         # 更新折价状态
         for _, row in discount_df.iterrows():
@@ -888,9 +888,9 @@ def mark_arbitrage_opportunities_pushed(discount_df: pd.DataFrame, premium_df: p
                 "score": row["综合评分"]
             }
         
-        # 保存状态
-        save_status_file(Config.DISCOUNT_STATUS_FILE, discount_status)
-        save_status_file(Config.PREMIUM_STATUS_FILE, premium_status)
+        # 保存状态 - 使用正确的函数名
+        save_discount_status(discount_status)
+        save_premium_status(premium_status)
         
         logger.info(f"成功标记 {len(discount_df) + len(premium_df)} 个ETF套利机会为已推送")
         return True

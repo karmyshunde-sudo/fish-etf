@@ -65,10 +65,10 @@ def is_manual_trigger() -> bool:
 
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    基于实时数据计算ETF套利机会，分离折价和溢价机会
+    基于实时数据计算ETF套利机会
     
     Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: (折价机会DataFrame, 溢价机会DataFrame)
+        Tuple[pd.DataFrame, pd.DataFrame]: 折价机会DataFrame, 溢价机会DataFrame
     """
     try:
         # 获取当前双时区时间
@@ -77,7 +77,6 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 获取最新的套利机会
         discount_opportunities, premium_opportunities = get_latest_arbitrage_opportunities()
-        
         if discount_opportunities.empty and premium_opportunities.empty:
             logger.info("未发现有效套利机会")
             return pd.DataFrame(), pd.DataFrame()
@@ -86,7 +85,7 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         discount_opportunities = add_etf_basic_info(discount_opportunities)
         premium_opportunities = add_etf_basic_info(premium_opportunities)
         
-        # 计算综合评分
+        # 计算综合评分 - 关键修复：确保传递的是标量值
         discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
         premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
         
@@ -94,22 +93,17 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         discount_opportunities = filter_valid_discount_opportunities(discount_opportunities)
         premium_opportunities = filter_valid_premium_opportunities(premium_opportunities)
         
-        # 按绝对值排序
-        discount_opportunities = sort_opportunities_by_abs_premium(discount_opportunities)
-        premium_opportunities = sort_opportunities_by_abs_premium(premium_opportunities)
-        
         # 筛选今天尚未推送的套利机会（增量推送功能）
-        discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
-        premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
+        discount_opportunities = filter_new_arbitrage_opportunities(discount_opportunities)
+        premium_opportunities = filter_new_arbitrage_opportunities(premium_opportunities)
         
         logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会")
         logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会")
+        
         return discount_opportunities, premium_opportunities
-    
     except Exception as e:
-        error_msg = f"套利机会计算失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return pd.DataFrame(), pd.DataFrame()  # 确保始终返回DataFrame
+        logger.error(f"计算套利机会失败: {str(e)}", exc_info=True)
+        return pd.DataFrame(), pd.DataFrame()
 
 def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -256,7 +250,6 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
         scores = []
         for _, row in df.iterrows():
             etf_code = row["ETF代码"]
-            
             # 获取ETF日线数据
             etf_df = load_etf_daily_data(etf_code)
             if etf_df.empty:
@@ -264,20 +257,58 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 scores.append(0.0)
                 continue
             
+            # === 关键修复：确保传递的是标量值 ===
+            # 处理折溢价率是Series或DataFrame的情况
+            premium_discount = row["折溢价率"]
+            if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
+                # 方法1：使用.values.flatten()[0]获取标量值（最可靠）
+                try:
+                    premium_discount = premium_discount.values.flatten()[0]
+                    logger.debug(f"ETF {etf_code} 通过.values.flatten()[0]提取标量值: {premium_discount}")
+                except Exception as e:
+                    # 方法2：使用.item()
+                    try:
+                        premium_discount = premium_discount.item()
+                        logger.debug(f"ETF {etf_code} 通过.item()提取标量值: {premium_discount}")
+                    except Exception as e2:
+                        # 方法3：取第一个有效值
+                        try:
+                            valid_values = premium_discount[~pd.isna(premium_discount)]
+                            if not valid_values.empty:
+                                premium_discount = valid_values.iloc[0]
+                                logger.debug(f"ETF {etf_code} 通过.iloc[0]提取标量值: {premium_discount}")
+                            else:
+                                logger.error(f"ETF {etf_code} 折溢价率Series为空，使用默认值0.0")
+                                premium_discount = 0.0
+                        except Exception as e3:
+                            logger.error(f"ETF {etf_code} 无法从pandas对象提取值: {str(e3)}，使用默认值0.0")
+                            premium_discount = 0.0
+            
+            # 确保是数值类型
+            if not isinstance(premium_discount, (int, float)):
+                try:
+                    premium_discount = float(premium_discount)
+                    logger.debug(f"ETF {etf_code} 将非数值类型转换为浮点数: {premium_discount}")
+                except (ValueError, TypeError) as e:
+                    logger.error(f"ETF {etf_code} 无法将类型 {type(premium_discount)} 转换为浮点数: {str(e)}，使用默认值0.0")
+                    premium_discount = 0.0
+            
+            # 限制在合理范围内
+            MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
+            MAX_PREMIUM = 20.0    # 最大溢价率（20%）
+            premium_discount = max(min(premium_discount, MAX_PREMIUM), MAX_DISCOUNT)
+            
+            # 记录实际使用的值（用于调试）
+            logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")
+            
             # 计算综合评分
-            score = calculate_arbitrage_score(
-                etf_code, 
-                etf_df, 
-                row["折溢价率"]
-            )
+            score = calculate_arbitrage_score(etf_code, etf_df, premium_discount)
             scores.append(score)
         
         # 添加评分列
         df["综合评分"] = scores
-        
         logger.info(f"计算ETF套利综合评分完成，共 {len(df)} 个机会")
         return df
-    
     except Exception as e:
         logger.error(f"计算ETF套利综合评分失败: {str(e)}", exc_info=True)
         # 添加默认评分列

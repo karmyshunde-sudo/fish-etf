@@ -514,8 +514,24 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
     """
     try:
         # 检查是否为空消息
-        if not message or not message.strip():
+        if message is None:
             logger.warning("尝试发送空消息，已忽略")
+            return False
+        
+        # 类型安全转换：确保message是字符串
+        if isinstance(message, pd.DataFrame):
+            # 检查DataFrame是否为空
+            if message.empty:
+                logger.warning("尝试发送空DataFrame，已忽略")
+                return False
+            # 转换为字符串（使用更友好的格式）
+            message = _format_dataframe_as_string(message)
+        elif not isinstance(message, str):
+            message = str(message)
+        
+        # 检查是否为空字符串
+        if not message.strip():
+            logger.warning("尝试发送空字符串消息，已忽略")
             return False
         
         # 特殊处理错误消息，避免频繁发送

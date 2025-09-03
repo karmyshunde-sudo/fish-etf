@@ -25,22 +25,20 @@ from utils.date_utils import (
 logger = logging.getLogger(__name__)
 
 # 消息发送频率控制
-_last_send_time = 0
-_MIN_SEND_INTERVAL = 1.0  # 最小发送间隔(秒)，避免消息过密被封
+_last_send_time = 0.0  # 使用浮点数，避免时区问题
+_MIN_SEND_INTERVAL = 3.5  # 最小发送间隔(秒)，确保每分钟不超过17条消息
 _MAX_MESSAGE_LENGTH = 2000  # 企业微信消息最大长度(字符)
 _MESSAGE_CHUNK_SIZE = 1500  # 消息分块大小(字符)
 
 # 发送失败重试配置
 _MAX_RETRIES = 3
-_RETRY_DELAYS = [1, 2, 3]  # 重试延迟(秒) - 修改为更短的重试间隔
-_REQUEST_TIMEOUT = 5  # 新增：请求超时时间(秒)
+_RETRY_DELAYS = [2, 4, 8]  # 重试延迟(秒)，指数退避策略
+_REQUEST_TIMEOUT = 5.0  # 请求超时时间(秒)
 
 # 错误消息缓存，用于避免重复发送相同错误
-_error_cache: Dict[str, float] = {}
+_error_message_cache = {}  # 存储错误消息及其上次发送时间
 # 错误消息冷却时间（秒）
-ERROR_COOLDOWN = 30
-# 消息发送间隔（秒）
-MESSAGE_SEND_INTERVAL = 1.5
+_ERROR_COOLDOWN = 300  # 5分钟内相同错误只发送一次
 
 def _extract_error_type(error_message: str) -> str:
     """
@@ -83,12 +81,14 @@ def _should_send_error(error_type: str) -> bool:
     current_time = time.time()
     
     # 检查是否在冷却期内
-    if error_type in _error_cache:
-        if current_time - _error_cache[error_type] < ERROR_COOLDOWN:
+    if error_type in _error_message_cache:
+        last_sent = _error_message_cache[error_type]
+        # 如果在冷却期内，视为重复消息
+        if current_time - last_sent < _ERROR_COOLDOWN:
             return False
     
-    # 更新最后发送时间
-    _error_cache[error_type] = current_time
+    # 更新缓存
+    _error_message_cache[error_type] = current_time
     return True
 
 def _should_send_message(message_tag: str) -> bool:
@@ -104,8 +104,9 @@ def _should_send_message(message_tag: str) -> bool:
     current_time = time.time()
     
     # 检查是否在冷却期内
-    if message_tag in _error_cache:
-        if current_time - _error_cache[message_tag] < ERROR_COOLDOWN:
+    if message_tag in _error_message_cache:
+        last_sent = _error_message_cache[message_tag]
+        if current_time - last_sent < _ERROR_COOLDOWN:
             return False
     
     return True
@@ -117,7 +118,7 @@ def _update_last_send_time(message_tag: str) -> None:
     Args:
         message_tag: 消息类型标识
     """
-    _error_cache[message_tag] = time.time()
+    _error_message_cache[message_tag] = time.time()
 
 def _get_message_tag(message: str) -> str:
     """
@@ -215,16 +216,19 @@ def _check_message_length(message: str) -> List[str]:
 def _rate_limit() -> None:
     """
     速率限制，避免消息发送过于频繁
+    严格遵守企业微信API调用频率限制
     """
     global _last_send_time
     current_time = time.time()
     elapsed = current_time - _last_send_time
     
+    # 确保至少间隔_MIN_SEND_INTERVAL秒
     if elapsed < _MIN_SEND_INTERVAL:
         sleep_time = _MIN_SEND_INTERVAL - elapsed
-        logger.debug(f"速率限制，等待 {sleep_time:.2f} 秒")
+        logger.debug(f"速率限制：等待 {sleep_time:.2f} 秒以遵守API调用频率限制")
         time.sleep(sleep_time)
     
+    # 更新最后发送时间
     _last_send_time = time.time()
 
 def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bool:
@@ -236,7 +240,7 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
     :return: 是否发送成功
     """
     try:
-        # 速率限制 - 由_rate_limit函数处理
+        # 速率限制
         _rate_limit()
         
         # 企业微信文本消息格式
@@ -532,7 +536,7 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
             
             # 检查是否在冷却期内
             if not _should_send_error(error_type):
-                logger.info(f"错误消息在冷却期内，跳过发送: {error_type}")
+                logger.info(f"相同错误消息在冷却期内，跳过发送: {error_type}")
                 return False
         
         # 从环境变量获取Webhook（优先于配置文件）
@@ -795,7 +799,31 @@ try:
     Config.init_dirs()
     
     # 初始化错误缓存
-    _error_cache = {}
+    _error_message_cache = {}
+    
+    # 清理过期的错误消息缓存（每天清理一次）
+    def _cleanup_error_cache():
+        current_time = time.time()
+        expired_keys = []
+        for msg, timestamp in _error_message_cache.items():
+            if current_time - timestamp > 86400:  # 24小时
+                expired_keys.append(msg)
+        
+        for key in expired_keys:
+            del _error_message_cache[key]
+        
+        if expired_keys:
+            logger.debug(f"清理了 {len(expired_keys)} 条过期的错误消息缓存")
+    
+    # 定期清理缓存
+    import threading
+    def _cache_cleanup_thread():
+        while True:
+            time.sleep(3600)  # 每小时清理一次
+            _cleanup_error_cache()
+    
+    cleanup_thread = threading.Thread(target=_cache_cleanup_thread, daemon=True)
+    cleanup_thread.start()
     
     # 初始化日志
     logger.info("微信推送模块初始化完成")
@@ -809,7 +837,6 @@ except Exception as e:
     
     try:
         # 退回到基础日志配置
-        import logging
         logging.basicConfig(
             level="INFO",
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

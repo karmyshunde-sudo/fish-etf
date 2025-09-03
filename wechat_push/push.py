@@ -40,6 +40,16 @@ _error_message_cache = {}  # 存储错误消息及其上次发送时间
 # 错误消息冷却时间（秒）
 _ERROR_COOLDOWN = 300  # 5分钟内相同错误只发送一次
 
+def get_github_actions_url() -> str:
+    """获取GitHub Actions运行日志链接"""
+    github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+    github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+    
+    if github_run_id == "unknown" or not github_run_id:
+        return "无法获取日志链接"
+    
+    return f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
+
 def _extract_error_type(error_message: str) -> str:
     """
     从错误消息中提取错误类型
@@ -281,16 +291,6 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
-def get_github_actions_url() -> str:
-    """获取GitHub Actions运行日志链接"""
-    github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-    github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-    
-    if github_run_id == "unknown" or not github_run_id:
-        return "无法获取日志链接"
-    
-    return f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
-
 def _format_discount_message(df: pd.DataFrame) -> List[str]:
     """
     格式化折价机会消息，分页处理
@@ -314,9 +314,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
-        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
-        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
+        log_url = get_github_actions_url()
         
         # 页脚模板
         footer = (

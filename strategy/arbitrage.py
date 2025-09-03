@@ -48,6 +48,72 @@ from utils.alert_utils import send_urgent_alert
 # 初始化日志
 logger = logging.getLogger(__name__)
 
+def extract_scalar_value(value, default=0.0, log_prefix=""):
+    """
+    安全地从各种类型中提取标量值
+    
+    Args:
+        value: 可能是标量、Series、DataFrame、字符串等
+        default: 默认值，如果无法提取标量值
+        log_prefix: 日志前缀，用于标识调用位置
+    
+    Returns:
+        float: 标量值
+    """
+    try:
+        # 如果已经是标量值，直接返回
+        if isinstance(value, (int, float)):
+            return float(value)
+        
+        # 如果是字符串，尝试转换为浮点数
+        if isinstance(value, str):
+            # 尝试移除非数字字符
+            cleaned_str = ''.join(c for c in value if c.isdigit() or c in ['.', '-'])
+            if cleaned_str:
+                result = float(cleaned_str)
+                logger.debug(f"{log_prefix}从字符串提取标量值: '{value}' -> {result}")
+                return result
+            logger.warning(f"{log_prefix}无法从字符串 '{value}' 提取有效数字，使用默认值{default}")
+            return default
+        
+        # 如果是pandas对象，尝试提取标量值
+        if isinstance(value, (pd.Series, pd.DataFrame)):
+            # 尝试获取第一个值
+            if value.size > 0:
+                # 尝试使用.values.flatten()[0]（最可靠）
+                try:
+                    result = float(value.values.flatten()[0])
+                    logger.debug(f"{log_prefix}通过.values.flatten()[0]提取标量值: {result}")
+                    return result
+                except Exception as e:
+                    # 尝试使用.item()
+                    try:
+                        result = float(value.item())
+                        logger.debug(f"{log_prefix}通过.item()提取标量值: {result}")
+                        return result
+                    except Exception as e2:
+                        # 尝试使用.iloc[0]
+                        try:
+                            valid_values = value[~pd.isna(value)]
+                            if not valid_values.empty:
+                                result = float(valid_values.iloc[0])
+                                logger.debug(f"{log_prefix}通过.iloc[0]提取标量值: {result}")
+                                return result
+                        except Exception as e3:
+                            pass
+            
+            logger.error(f"{log_prefix}无法从pandas对象提取标量值(size={value.size})，使用默认值{default}")
+            return default
+        
+        # 尝试直接转换为浮点数
+        result = float(value)
+        logger.debug(f"{log_prefix}直接转换为浮点数: {result}")
+        return result
+    
+    except Exception as e:
+        logger.error(f"{log_prefix}无法从类型 {type(value)} 中提取标量值: {str(e)}，使用默认值{default}")
+        return default
+
 # 保留原有的 is_manual_trigger 函数定义
 def is_manual_trigger() -> bool:
     """
@@ -257,41 +323,11 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 scores.append(0.0)
                 continue
             
-            # === 关键修复：确保传递的是标量值 ===
-            # 处理折溢价率是Series或DataFrame的情况
-            premium_discount = row["折溢价率"]
-            if isinstance(premium_discount, (pd.Series, pd.DataFrame)):
-                # 方法1：使用.values.flatten()[0]获取标量值（最可靠）
-                try:
-                    premium_discount = premium_discount.values.flatten()[0]
-                    logger.debug(f"ETF {etf_code} 通过.values.flatten()[0]提取标量值: {premium_discount}")
-                except Exception as e:
-                    # 方法2：使用.item()
-                    try:
-                        premium_discount = premium_discount.item()
-                        logger.debug(f"ETF {etf_code} 通过.item()提取标量值: {premium_discount}")
-                    except Exception as e2:
-                        # 方法3：取第一个有效值
-                        try:
-                            valid_values = premium_discount[~pd.isna(premium_discount)]
-                            if not valid_values.empty:
-                                premium_discount = valid_values.iloc[0]
-                                logger.debug(f"ETF {etf_code} 通过.iloc[0]提取标量值: {premium_discount}")
-                            else:
-                                logger.error(f"ETF {etf_code} 折溢价率Series为空，使用默认值0.0")
-                                premium_discount = 0.0
-                        except Exception as e3:
-                            logger.error(f"ETF {etf_code} 无法从pandas对象提取值: {str(e3)}，使用默认值0.0")
-                            premium_discount = 0.0
-            
-            # 确保是数值类型
-            if not isinstance(premium_discount, (int, float)):
-                try:
-                    premium_discount = float(premium_discount)
-                    logger.debug(f"ETF {etf_code} 将非数值类型转换为浮点数: {premium_discount}")
-                except (ValueError, TypeError) as e:
-                    logger.error(f"ETF {etf_code} 无法将类型 {type(premium_discount)} 转换为浮点数: {str(e)}，使用默认值0.0")
-                    premium_discount = 0.0
+            # 使用辅助函数安全提取标量值
+            premium_discount = extract_scalar_value(
+                row["折溢价率"],
+                log_prefix=f"ETF {etf_code} 折溢价率: "
+            )
             
             # 限制在合理范围内
             MAX_DISCOUNT = -20.0  # 最大折价率（-20%）

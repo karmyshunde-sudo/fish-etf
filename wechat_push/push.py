@@ -205,6 +205,10 @@ def _check_message_length(message: str) -> List[str]:
             else:
                 current_chunk = paragraph
     
+    # 添加最后一个块
+    if current_chunk:
+        chunks.append(current_chunk)
+    
     # 添加分片标记
     if len(chunks) > 1:
         for i, chunk in enumerate(chunks):

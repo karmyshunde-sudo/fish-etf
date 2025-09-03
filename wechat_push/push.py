@@ -314,7 +314,9 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         utc_now, beijing_now = get_current_times()
         
         # 生成GitHub日志链接
-        log_url = get_github_actions_url()
+        github_run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+        github_repository = os.getenv("GITHUB_REPOSITORY", "karmyshunde-sudo/fish-etf")
+        log_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}" if github_run_id != "unknown" else "无法获取日志链接"
         
         # 页脚模板
         footer = (

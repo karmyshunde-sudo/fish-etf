@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
 from config import Config
 from retrying import retry
+from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -85,6 +86,22 @@ def crawl_etf_daily_sina(etf_code: str, start_date: str, end_date: str) -> pd.Da
         # 数据清洗和格式化
         df = clean_and_format_data(df)
         
+        # 新增：确保返回的DataFrame包含"上市日期"列
+        # 从ETF列表中获取上市日期
+        etf_list = load_all_etf_list()
+        target_code = str(etf_code).strip().zfill(6)
+        listing_date_row = etf_list[
+            etf_list["ETF代码"].astype(str).str.strip().str.zfill(6) == target_code
+        ]
+        
+        if not listing_date_row.empty:
+            listing_date = listing_date_row.iloc[0]["上市日期"]
+            # 使用.loc避免SettingWithCopyWarning
+            df.loc[:, "上市日期"] = listing_date
+        else:
+            # 使用.loc避免SettingWithCopyWarning
+            df.loc[:, "上市日期"] = ""
+        
         logger.info(f"新浪接口成功获取{etf_code}数据，共{len(df)}条")
         return df
     
@@ -122,7 +139,9 @@ def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
         "low": "最低",
         "close": "收盘",
         "volume": "成交量",
-        "amount": "成交额"
+        "amount": "成交额",
+        "listing_date": "上市日期",  # 新增：处理上市日期
+        "issue_date": "上市日期"     # 新增：处理上市日期
     }
     
     # 重命名列
@@ -163,9 +182,10 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
         
     # 确保所有必需列都存在
-    required_cols = list(Config.STANDARD_COLUMNS.keys())
+    # 修正：Config.STANDARD_COLUMNS 是列表，不是字典
+    required_cols = Config.STANDARD_COLUMNS
     # 排除不需要从新浪接口获取的列（这些列会在后续处理中添加）
-    exclude_cols = ["ETF代码", "ETF名称", "爬取时间"]
+    exclude_cols = ["ETF代码", "ETF名称", "爬取时间", "上市日期"]  # 新增：添加"上市日期"到排除列表
     required_data_cols = [col for col in required_cols if col not in exclude_cols]
     
     for col in required_data_cols:
@@ -174,18 +194,21 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 if col == "涨跌幅" and "收盘" in df.columns:
                     # 计算涨跌幅
                     df[col] = df["收盘"].pct_change().round(4)
+                    # 使用.loc避免SettingWithCopyWarning
                     df.loc[0, col] = 0.0
                     logger.debug(f"计算涨跌幅列完成")
                     
                 elif col == "涨跌额" and "收盘" in df.columns:
                     # 计算涨跌额
                     df[col] = (df["收盘"] - df["收盘"].shift(1)).round(4)
+                    # 使用.loc避免SettingWithCopyWarning
                     df.loc[0, col] = 0.0
                     logger.debug(f"计算涨跌额列完成")
                     
                 elif col == "振幅" and "最高" in df.columns and "最低" in df.columns and "收盘" in df.columns:
                     # 计算振幅
                     df[col] = ((df["最高"] - df["最低"]) / df["收盘"].shift(1) * 100).round(4)
+                    # 使用.loc避免SettingWithCopyWarning
                     df.loc[0, col] = 0.0
                     logger.debug(f"计算振幅列完成")
                     
@@ -217,6 +240,17 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         if "日期" in df.columns:
             df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
         
+        # 新增：处理上市日期列
+        if "上市日期" in df.columns:
+            # 处理可能的日期格式
+            try:
+                # 尝试转换为标准日期格式
+                df["上市日期"] = pd.to_datetime(df["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
+                # 处理NaT值
+                df["上市日期"] = df["上市日期"].fillna("")
+            except Exception as e:
+                logger.warning(f"处理上市日期列时出错: {str(e)}，将保留原始值")
+        
         # 去重
         if "日期" in df.columns:
             df = df.drop_duplicates(subset=["日期"], keep="last")
@@ -225,7 +259,8 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         numeric_columns = ["开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
         for col in numeric_columns:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                # 使用.loc避免SettingWithCopyWarning
+                df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         
         # 排序
         if "日期" in df.columns:
@@ -339,4 +374,3 @@ try:
     logger.info("新浪爬虫模块初始化完成")
 except Exception as e:
     print(f"新浪爬虫模块初始化失败: {str(e)}")
-# 0828-1256【sina_crawler.py代码】一共215行代码

@@ -202,6 +202,18 @@ def crawl_etf_daily_incremental() -> None:
                     etf_name = get_etf_name(etf_code)
                     logger.info(f"ETF代码：{etf_code} | 名称：{etf_name}")
                     
+                    # 获取ETF上市日期
+                    etf_list = load_all_etf_list()
+                    target_code = str(etf_code).strip().zfill(6)
+                    listing_date_row = etf_list[
+                        etf_list["ETF代码"].astype(str).str.strip().str.zfill(6) == target_code
+                    ]
+                    if not listing_date_row.empty:
+                        listing_date = listing_date_row.iloc[0]["上市日期"]
+                    else:
+                        logger.warning(f"未在全市场列表中找到ETF代码: {target_code} 的上市日期")
+                        listing_date = None
+                    
                     # 确定爬取时间范围（增量爬取）
                     start_date = get_last_crawl_date(etf_code, etf_daily_dir)
                     end_date = beijing_time.date().strftime("%Y-%m-%d")
@@ -237,6 +249,10 @@ def crawl_etf_daily_incremental() -> None:
                     df["ETF代码"] = etf_code
                     df["ETF名称"] = etf_name
                     df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 如果存在上市日期，则补充
+                    if listing_date is not None:
+                        df["上市日期"] = listing_date
                     
                     # 处理已有数据的追加逻辑
                     save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")

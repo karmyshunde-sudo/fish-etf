@@ -209,6 +209,7 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
+
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
@@ -257,6 +258,19 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             # 提取数字部分
             valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
             valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
+            
+            # === 关键修复：确保基金规模单位为"亿元" ===
+            # AkShare fund_etf_spot_em 接口返回的规模单位是"亿元"，无需转换
+            # 但为了安全起见，添加单位验证
+            if not valid_etfs.empty and valid_etfs["基金规模"].mean() > 1000:
+                # 如果平均规模大于1000，可能是"万元"单位，需要转换
+                logger.warning("检测到基金规模可能为'万元'单位，进行单位转换")
+                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 10000
+            elif not valid_etfs.empty and valid_etfs["基金规模"].mean() > 100000000:
+                # 如果平均规模大于1亿，可能是"元"单位，需要转换
+                logger.warning("检测到基金规模可能为'元'单位，进行单位转换")
+                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 100000000
+            # ======================================
         
         # 处理成交额：假设原始数据单位是"元"，转换为"万元"
         if "成交额" in valid_etfs.columns:
@@ -275,6 +289,11 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         error_msg = f"AkShare接口错误: {str(e)}"
         logger.error(f"❌ {error_msg}")
         return pd.DataFrame()  # 返回空DataFrame但不抛出异常
+
+@retry(stop_max_attempt_number=3,
+       wait_exponential_multiplier=1000,
+       wait_exponential_max=10000,
+       retry_on_exception=retry_if_network_error)
 
 @retry(stop_max_attempt_number=3,
        wait_exponential_multiplier=1000,
@@ -373,11 +392,19 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
             logger.warning("提取后无有效ETF代码")
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
         
-        # 处理基金规模：提取数字部分并转换为数值
+        # === 关键修复：确保基金规模单位为"亿元" ===
         if "基金规模" in valid_etfs.columns:
             # 提取数字部分
             valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
             valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
+            
+            # 新浪接口返回的规模单位通常是"万元"，需要转换为"亿元"
+            if not valid_etfs.empty and valid_etfs["基金规模"].mean() > 10:
+                logger.info(f"新浪接口返回的基金规模单位为'万元'，转换为'亿元'（平均规模: {valid_etfs['基金规模'].mean():.2f}万元）")
+                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 10000
+            else:
+                logger.info("新浪接口返回的基金规模单位为'亿元'，无需转换")
+        # ======================================
         
         # 确保上市日期格式正确
         if "上市日期" in valid_etfs.columns:

@@ -124,6 +124,12 @@ class Config:
     
     # 最低日均成交额阈值（万元）
     MIN_DAILY_VOLUME: float = 100.0  # 日均成交额≥100万
+
+    # 数据单位标准
+    ETF_DATA_UNITS = {
+        "fund_size": "亿元",  # 基金规模统一使用亿元
+        "daily_volume": "万元"  # 日均成交额统一使用万元
+    }
     
     # 仓位策略参数（均线策略）
     MA_SHORT_PERIOD: int = 5    # 短期均线（5日）

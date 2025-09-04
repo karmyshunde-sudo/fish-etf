@@ -326,7 +326,8 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 if col == '成交额':
                     # 如果有成交量，尝试估算成交额（简单估算：成交量 * 收盘价 * 100）
                     if '成交量' in df.columns and '收盘' in df.columns:
-                        df['成交额'] = (df['成交量'] * df['收盘'] * 100).round(2)
+                        # 计算出的成交额单位是元，转换为万元
+                        df['成交额'] = (df['成交量'] * df['收盘'] * 100 / 10000).round(2)
                     else:
                         df['成交额'] = 0.0
                 elif col == '振幅':
@@ -412,7 +413,9 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
                     elif col in ["开盘", "最高", "最低", "收盘"]:
                         df[col] = df[col].round(4)
                     elif col in ["成交额"]:
-                        df[col] = df[col].round(2)
+                        # 修复：将成交额从元转换为万元
+                        df[col] = df[col] / 10000
+                        df[col] = df[col].round(2)  # 保留2位小数
                 except Exception as e:
                     logger.error(f"转换列 {col} 为数值类型时出错: {str(e)}", exc_info=True)
                     df[col] = 0.0

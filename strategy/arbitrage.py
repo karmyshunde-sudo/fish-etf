@@ -35,7 +35,7 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
-from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities
+from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities as get_arbitrage_data
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -43,6 +43,7 @@ from .etf_scoring import (
     calculate_component_stability_score
 )
 from utils.alert_utils import send_urgent_alert
+from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -161,10 +162,14 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 获取最新的套利机会
-        discount_opportunities, premium_opportunities = get_latest_arbitrage_opportunities()
+        discount_opportunities, premium_opportunities = get_arbitrage_data()
         if discount_opportunities.empty and premium_opportunities.empty:
             logger.info("未发现有效套利机会")
             return pd.DataFrame(), pd.DataFrame()
+        
+        # 新增：添加上市日期信息
+        discount_opportunities = add_listing_date_info(discount_opportunities)
+        premium_opportunities = add_listing_date_info(premium_opportunities)
         
         # 添加规模和日均成交额信息
         discount_opportunities = add_etf_basic_info(discount_opportunities)
@@ -189,6 +194,47 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     except Exception as e:
         logger.error(f"计算套利机会失败: {str(e)}", exc_info=True)
         return pd.DataFrame(), pd.DataFrame()
+
+def add_listing_date_info(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    添加ETF上市日期信息
+    
+    Args:
+        df: 原始套利机会DataFrame
+    
+    Returns:
+        pd.DataFrame: 添加上市日期信息后的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 从all_etfs.csv获取ETF列表
+        etf_list = load_all_etf_list()
+        
+        if not etf_list.empty and "上市日期" in etf_list.columns:
+            # 创建ETF代码到上市日期的映射
+            listing_date_map = dict(zip(etf_list["ETF代码"], etf_list["上市日期"]))
+            
+            # 添加上市日期列
+            df["上市日期"] = df["ETF代码"].map(listing_date_map)
+            
+            # 处理缺失值
+            if "上市日期" in df.columns:
+                df["上市日期"] = df["上市日期"].fillna("")
+                
+            logger.info(f"已从all_etfs.csv添加上市日期信息，共{len(df)}条记录")
+        else:
+            logger.warning("无法从all_etfs.csv获取上市日期信息")
+            # 确保上市日期列存在，即使为空
+            df["上市日期"] = ""
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"获取上市日期信息失败: {str(e)}，将添加空列", exc_info=True)
+        df["上市日期"] = ""
+        return df
 
 def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -307,8 +353,9 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
                     # 转换为万元
                     avg_volume = recent_data["成交额"].mean() / 10000
             
-            df.at[idx, "基金规模"] = size
-            df.at[idx, "日均成交额"] = avg_volume
+            # 使用.loc避免SettingWithCopyWarning
+            df.loc[idx, "基金规模"] = size
+            df.loc[idx, "日均成交额"] = avg_volume
         
         logger.info(f"添加ETF基本信息完成，共处理 {len(df)} 个机会")
         return df
@@ -333,7 +380,7 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
     try:
         # 为每只ETF计算综合评分
         scores = []
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             etf_code = row["ETF代码"]
             # 获取ETF日线数据
             etf_df = load_etf_daily_data(etf_code)
@@ -354,6 +401,11 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             iopv = extract_scalar_value(row["IOPV"], log_prefix=f"ETF {etf_code} IOPV: ")
             fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")
             avg_volume = extract_scalar_value(row["日均成交额"], log_prefix=f"ETF {etf_code} 日均成交额: ")
+            # 新增：提取上市日期
+            listing_date = extract_scalar_value(
+                row.get("上市日期", ""), 
+                log_prefix=f"ETF {etf_code} 上市日期: "
+            )
             
             # 限制在合理范围内
             MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
@@ -372,7 +424,8 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 iopv,
                 fund_size,
                 avg_volume,
-                etf_df
+                etf_df,
+                listing_date  # 新增：传递上市日期
             )
             scores.append(score)
         
@@ -493,65 +546,6 @@ def calculate_daily_volume(etf_code: str) -> float:
     except Exception as e:
         logger.error(f"计算ETF {etf_code} 日均成交额失败: {str(e)}", exc_info=True)
         return 0.0
-
-def load_etf_list() -> pd.DataFrame:
-    """
-    加载ETF列表
-    
-    Returns:
-        pd.DataFrame: ETF列表
-    """
-    try:
-        # 检查ETF列表文件是否存在
-        if not os.path.exists(Config.ALL_ETFS_PATH):
-            logger.error("ETF列表文件不存在")
-            return pd.DataFrame()
-        
-        # 检查ETF列表是否过期
-        if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-            logger.warning("ETF列表已过期，可能影响套利计算准确性")
-        
-        # 读取ETF列表
-        etf_list = pd.read_csv(Config.ALL_ETFS_PATH, encoding="utf-8")
-        if etf_list.empty:
-            logger.warning("ETF列表为空")
-            return pd.DataFrame()
-        
-        # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "基金规模"]
-        for col in required_columns:
-            if col not in etf_list.columns:
-                logger.error(f"ETF列表缺少必要列: {col}")
-                return pd.DataFrame()
-        
-        # 添加日均成交额列（动态计算）
-        etf_list["日均成交额"] = 0.0
-        total = len(etf_list)
-        logger.info(f"开始计算 {total} 只ETF的日均成交额...")
-        
-        for i, (_, etf) in enumerate(etf_list.iterrows(), 1):
-            etf_code = etf["ETF代码"]
-            logger.debug(f"({i}/{total}) 计算ETF {etf_code} 的日均成交额")
-            
-            # 动态计算日均成交额
-            avg_daily_volume = calculate_daily_volume(etf_code)
-            etf_list.at[_, "日均成交额"] = avg_daily_volume
-        
-        # 筛选符合条件的ETF
-        # 小资金特殊筛选条件：
-        # 1. 基金规模 ≥ 5亿元（适合小资金）
-        # 2. 日均成交额 ≥ 100万元（小资金足够流动性）
-        filtered_etfs = etf_list[
-            (etf_list["基金规模"] >= 5.0) &
-            (etf_list["日均成交额"] >= 100)
-        ]
-        
-        logger.info(f"加载 {len(filtered_etfs)} 只符合条件的ETF（基金规模≥5亿元，日均成交额≥100万元）")
-        return filtered_etfs
-    
-    except Exception as e:
-        logger.error(f"加载ETF列表失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
 
 def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
     """
@@ -740,60 +734,6 @@ def load_arbitrage_data(date_str: str) -> pd.DataFrame:
         logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def crawl_arbitrage_data(is_manual: bool = False) -> Optional[str]:
-    """
-    爬取套利数据并保存
-    
-    Args:
-        is_manual: 是否是手动触发
-    
-    Returns:
-        Optional[str]: 保存的文件路径，如果爬取失败则返回None
-    """
-    try:
-        # 获取当前日期
-        today = get_beijing_time().strftime("%Y%m%d")
-        
-        # 构建套利数据目录
-        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
-        os.makedirs(arbitrage_dir, exist_ok=True)
-        
-        # 构建文件路径
-        file_path = os.path.join(arbitrage_dir, f"{today}.csv")
-        
-        # 直接爬取数据
-        from data_crawler.strategy_arbitrage_source import fetch_arbitrage_realtime_data
-        df = fetch_arbitrage_realtime_data()
-        
-        if not df.empty:
-            # 记录返回的列名用于诊断
-            logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
-            
-            # 确保列名一致性 - 显式设置列名
-            expected_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率", "净值时间", "计算时间"]
-            if len(df.columns) == len(expected_columns):
-                df.columns = expected_columns
-                logger.info(f"已重设列名: {df.columns.tolist()}")
-            else:
-                logger.warning(f"列名数量不匹配，期望{len(expected_columns)}列，实际{len(df.columns)}列")
-        
-        if df.empty:
-            logger.warning("未获取到套利数据，无法保存")
-            return None
-        
-        # 保存到CSV文件（明确指定header=True）
-        df.to_csv(file_path, index=False, encoding="utf-8-sig", header=True)
-        
-        # 添加验证日志
-        logger.info(f"成功保存套利数据到: {file_path} (共{len(df)}条记录)")
-        logger.info(f"保存的列名: {df.columns.tolist()}")
-        
-        return file_path
-    
-    except Exception as e:
-        logger.error(f"爬取套利数据失败: {str(e)}", exc_info=True)
-        return None
-
 def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     获取最新的套利机会
@@ -805,10 +745,6 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         Tuple[pd.DataFrame, pd.DataFrame]: (折价机会DataFrame, 溢价机会DataFrame)
     """
     try:
-        # 自动检测是否是手动触发
-        is_manual = is_manual_trigger()
-        logger.info(f"{'【测试模式】' if is_manual else ''}开始获取最新套利机会")
-        
         # 获取当前日期
         today = get_beijing_time().strftime("%Y%m%d")
         
@@ -819,57 +755,9 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         if not df.empty:
             logger.info(f"成功加载套利数据，实际列名: {list(df.columns)}")
         
-        # 检查是否在交易时间
-        if not is_trading_time():
-            if is_manual:
-                logger.warning("【测试模式】当前不是交易时间，尝试获取最新数据")
-                # 手动测试时，尝试直接爬取最新数据
-                from data_crawler.strategy_arbitrage_source import fetch_arbitrage_realtime_data
-                df = fetch_arbitrage_realtime_data()
-                
-                if not df.empty:
-                    # 添加测试标记
-                    if "备注" not in df.columns:
-                        df["备注"] = "【测试数据】直接爬取的最新数据"
-                    else:
-                        df["备注"] = df["备注"].fillna("【测试数据】直接爬取的最新数据")
-                    logger.info(f"【测试模式】成功直接爬取最新套利数据，共 {len(df)} 个机会")
-                else:
-                    logger.warning("【测试模式】直接爬取最新套利数据失败，尝试加载最近有效数据")
-                    # 尝试加载最近有效数据
-                    df = load_latest_valid_arbitrage_data()
-                    if not df.empty:
-                        logger.info(f"【测试模式】成功加载最近有效套利数据，共 {len(df)} 个机会")
-            else:
-                logger.info(f"当前不是交易时间 ({Config.TRADING_START_TIME} - {Config.TRADING_END_TIME})，跳过套利数据爬取")
-                return pd.DataFrame(), pd.DataFrame()
-        
-        # 如果数据为空，尝试重新爬取（有限次数）
-        retry_count = 0
-        while df.empty and retry_count < max_retry:
-            logger.warning(f"无今日套利数据，尝试重新爬取 (尝试 {retry_count+1}/{max_retry})")
-            file_path = crawl_arbitrage_data(is_manual=is_manual)
-            
-            # 详细检查爬取结果
-            if file_path and os.path.exists(file_path):
-                logger.info(f"成功爬取并保存套利数据到: {file_path}")
-                # 重新加载数据
-                df = load_arbitrage_data(today)
-            else:
-                logger.warning("重新爬取后仍无套利数据")
-                # 等待一段时间再重试，避免频繁请求
-                time.sleep(1.5)
-            
-            retry_count += 1
-        
         # 检查数据完整性
         if df.empty:
-            logger.warning("加载的套利数据为空，将尝试加载最近有效数据")
-            df = load_latest_valid_arbitrage_data()
-        
-        # 如果仍然为空，记录详细信息
-        if df.empty:
-            logger.error("无法获取任何有效的套利数据")
+            logger.warning("加载的套利数据为空")
             return pd.DataFrame(), pd.DataFrame()
         
         # 记录实际加载的列名用于诊断 (INFO级别)
@@ -919,33 +807,10 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
         logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
         
-        # 添加数据来源标记
-        if is_manual:
-            source = "【测试数据】最新爬取"
-        else:
-            source = "实时数据"
-        
-        # 为折价机会添加数据来源
-        if not discount_opportunities.empty:
-            if "数据来源" not in discount_opportunities.columns:
-                discount_opportunities["数据来源"] = source
-            else:
-                discount_opportunities["数据来源"] = discount_opportunities["数据来源"].fillna(source)
-        
-        # 为溢价机会添加数据来源
-        if not premium_opportunities.empty:
-            if "数据来源" not in premium_opportunities.columns:
-                premium_opportunities["数据来源"] = source
-            else:
-                premium_opportunities["数据来源"] = premium_opportunities["数据来源"].fillna(source)
-        
         return discount_opportunities, premium_opportunities
     
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
-        # 对于手动测试，返回空DataFrame
-        if is_manual_trigger():
-            return pd.DataFrame(), pd.DataFrame()
         return pd.DataFrame(), pd.DataFrame()
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:

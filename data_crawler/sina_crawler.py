@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
 from config import Config
 from retrying import retry
-from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -86,22 +85,6 @@ def crawl_etf_daily_sina(etf_code: str, start_date: str, end_date: str) -> pd.Da
         # 数据清洗和格式化
         df = clean_and_format_data(df)
         
-        # 新增：确保返回的DataFrame包含"上市日期"列
-        # 从ETF列表中获取上市日期
-        etf_list = load_all_etf_list()
-        target_code = str(etf_code).strip().zfill(6)
-        listing_date_row = etf_list[
-            etf_list["ETF代码"].astype(str).str.strip().str.zfill(6) == target_code
-        ]
-        
-        if not listing_date_row.empty:
-            listing_date = listing_date_row.iloc[0]["上市日期"]
-            # 使用.loc避免SettingWithCopyWarning
-            df.loc[:, "上市日期"] = listing_date
-        else:
-            # 使用.loc避免SettingWithCopyWarning
-            df.loc[:, "上市日期"] = ""
-        
         logger.info(f"新浪接口成功获取{etf_code}数据，共{len(df)}条")
         return df
     
@@ -139,9 +122,7 @@ def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
         "low": "最低",
         "close": "收盘",
         "volume": "成交量",
-        "amount": "成交额",
-        "listing_date": "上市日期",  # 新增：处理上市日期
-        "issue_date": "上市日期"     # 新增：处理上市日期
+        "amount": "成交额"
     }
     
     # 重命名列
@@ -185,7 +166,7 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     # 修正：Config.STANDARD_COLUMNS 是列表，不是字典
     required_cols = Config.STANDARD_COLUMNS
     # 排除不需要从新浪接口获取的列（这些列会在后续处理中添加）
-    exclude_cols = ["ETF代码", "ETF名称", "爬取时间", "上市日期"]  # 新增：添加"上市日期"到排除列表
+    exclude_cols = ["ETF代码", "ETF名称", "爬取时间"]
     required_data_cols = [col for col in required_cols if col not in exclude_cols]
     
     for col in required_data_cols:
@@ -240,17 +221,6 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         # 日期格式转换
         if "日期" in df.columns:
             df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
-        
-        # 新增：处理上市日期列
-        if "上市日期" in df.columns:
-            # 处理可能的日期格式
-            try:
-                # 尝试转换为标准日期格式
-                df["上市日期"] = pd.to_datetime(df["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
-                # 处理NaT值
-                df["上市日期"] = df["上市日期"].fillna("")
-            except Exception as e:
-                logger.warning(f"处理上市日期列时出错: {str(e)}，将保留原始值")
         
         # 去重
         if "日期" in df.columns:

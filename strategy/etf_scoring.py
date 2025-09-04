@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import logging
 import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
 from config import Config
@@ -653,7 +654,7 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                      f"流动性={scores['liquidity']:.2f}({weights['liquidity']*100:.0f}%), " +
                      f"风险={scores['risk']:.2f}({weights['risk']*100:.0f}%), " +
                      f"收益={scores['return']:.2f}({weights['return']*100:.0f}%), " +
-                     f"情绪={scores['sentiment']:.2f}({weights['sentiment']*100:.0f}%), " +
+                     f"情緒={scores['sentiment']:.2f}({weights['sentiment']*100:.0f}%), " +
                      f"基本面={scores['fundamental']:.2f}({weights['fundamental']*100:.0f}%), " +
                      f"综合={total_score:.2f}")
         
@@ -940,12 +941,13 @@ def get_top_rated_etfs(
                 listing_date = metadata_df[metadata_df["etf_code"] == etf_code]["listing_date"].values[0]
                 etf_name = get_etf_name(etf_code)
                 
-                # 计算日均成交额（单位：万元）
+                # 计算日均成交额
                 avg_volume = 0.0
                 if AMOUNT_COL in df.columns:
                     recent_30d = df.tail(30)
                     if len(recent_30d) > 0:
-                        avg_volume = recent_30d[AMOUNT_COL].mean() / 10000
+                        # 修复：不再进行单位转换，因为data_crawler中已统一转换为"万元"
+                        avg_volume = recent_30d[AMOUNT_COL].mean()
                 
                 # 仅保留满足条件的ETF
                 if size >= min_fund_size and avg_volume >= min_avg_volume:

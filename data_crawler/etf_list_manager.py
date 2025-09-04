@@ -4,7 +4,6 @@ import pandas as pd
 import logging
 import requests
 import time
-import json
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from retrying import retry
@@ -59,7 +58,7 @@ def update_all_etf_list() -> pd.DataFrame:
                 primary_etf_list = primary_etf_list[required_columns]
                 # 按基金规模降序排序
                 primary_etf_list = primary_etf_list.sort_values("基金规模", ascending=False)
-                primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
+                primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                 logger.info(f"✅ AkShare更新成功（{len(primary_etf_list)}只ETF）")
                 # 标记数据来源
                 primary_etf_list.source = "AkShare"
@@ -78,7 +77,7 @@ def update_all_etf_list() -> pd.DataFrame:
                         if col not in primary_etf_list.columns:
                             primary_etf_list[col] = ""
                     primary_etf_list = primary_etf_list[required_columns]
-                    primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
+                    primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                     logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
                     # 标记数据来源
                     primary_etf_list.source = "新浪"
@@ -107,7 +106,7 @@ def update_all_etf_list() -> pd.DataFrame:
                         backup_df.source = "兜底文件"
                         
                         # 保存兜底文件为当前ETF列表
-                        backup_df.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
+                        backup_df.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
                         return backup_df
                     except Exception as e:
                         logger.error(f"❌ 兜底文件处理失败: {str(e)}")
@@ -199,12 +198,13 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
+
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从AkShare获取ETF列表...")
-        # 使用正确的接口：fund_etf_spot_em
+        # 调用fund_etf_spot_em接口
         etf_info = ak.fund_etf_spot_em()
         if etf_info.empty:
             logger.warning("AkShare返回空的ETF列表")
@@ -213,26 +213,23 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         # 记录返回的列名，用于调试
         logger.debug(f"AkShare返回列名: {list(etf_info.columns)}")
         
-        # 标准化列名映射
-        column_mapping = {
-            "代码": "ETF代码",
-            "名称": "ETF名称",
-            "最新价": "最新价格",
-            "IOPV实时估值": "IOPV",
-            "基金折价率": "折溢价率",
-            "成交量": "成交量",
-            "成交额": "成交额",
-            "涨跌幅": "涨跌幅",
-            "涨跌额": "涨跌额",
-            "换手率": "换手率",
-            "更新时间": "更新时间"
-        }
+        # 标准化列名映射（根据实际返回列名修正）
+        column_mapping = {}
+        for col in etf_info.columns:
+            if "代码" in col:
+                column_mapping[col] = "ETF代码"
+            elif "名称" in col:
+                column_mapping[col] = "ETF名称"
+            elif "流通市值" in col:
+                column_mapping[col] = "基金规模"  # 修正：使用"流通市值"作为基金规模
+            elif "成交额" in col:
+                column_mapping[col] = "日均成交额"
         
         # 重命名列
         etf_info = etf_info.rename(columns=column_mapping)
         
         # 确保包含所有需要的列
-        required_columns = Config.ETF_STANDARD_COLUMNS
+        required_columns = Config.ETF_STANDARD_COLUMNS + ["日均成交额"]
         for col in required_columns:
             if col not in etf_info.columns:
                 etf_info[col] = ""
@@ -241,70 +238,38 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
-        # ============ 重要修改：从fund_aum_em接口获取基金规模 ============
-        try:
-            logger.info("尝试从fund_aum_em接口获取基金规模数据...")
-            fund_scale = ak.fund_aum_em()
-            
-            if not fund_scale.empty:
-                # 重命名列
-                fund_scale = fund_scale.rename(columns={
-                    "基金代码": "ETF代码",
-                    "最新规模（亿元）": "基金规模"
-                })
-                
-                # 确保ETF代码为6位数字
-                fund_scale["ETF代码"] = fund_scale["ETF代码"].astype(str).str.strip().str.zfill(6)
-                
-                # 仅保留需要的列
-                if "ETF代码" in fund_scale.columns and "基金规模" in fund_scale.columns:
-                    fund_scale = fund_scale[["ETF代码", "基金规模"]]
-                    
-                    # 将基金规模合并到ETF列表
-                    valid_etfs = pd.merge(
-                        valid_etfs,
-                        fund_scale,
-                        on="ETF代码",
-                        how="left"
-                    )
-                    
-                    logger.info(f"成功补充 {len(fund_scale)} 只ETF的基金规模数据")
-                else:
-                    logger.warning("fund_aum_em接口返回的数据缺少必要列，无法补充基金规模")
-            else:
-                logger.warning("fund_aum_em接口返回空数据，无法补充基金规模")
-        except Exception as e:
-            logger.error(f"从fund_aum_em接口获取基金规模数据失败: {str(e)}，继续使用原始数据")
-        # ============ 基金规模补充逻辑结束 ============
+        # 转换数据类型并处理单位
+        # 流通市值单位为元，转换为亿元（除以1亿）
+        valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
+        # 成交额单位为元，转换为万元（除以1万）
+        valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
         
-        # 处理成交额：假设原始数据单位是"元"，转换为"万元"
-        if "成交额" in valid_etfs.columns:
-            valid_etfs["成交额"] = pd.to_numeric(valid_etfs["成交额"], errors="coerce") / 10000
+        # 筛选条件：规模>10亿，日均成交额>5000万
+        filtered_etfs = valid_etfs[
+            (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
+            (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)
+        ].copy()
         
-        # 确保包含所有需要的列
-        for col in required_columns:
-            if col not in valid_etfs.columns:
-                valid_etfs[col] = ""
+        # 如果没有ETF通过筛选，返回原始数据（不筛选）
+        if filtered_etfs.empty:
+            logger.warning("ETF筛选条件过于严格，无符合要求的ETF，返回全部ETF")
+            filtered_etfs = valid_etfs.copy()
         
-        valid_etfs = valid_etfs[required_columns]
-        logger.info(f"AkShare获取到{len(etf_info)}只ETF，筛选后剩余{len(valid_etfs)}只")
-        return valid_etfs.drop_duplicates(subset="ETF代码")
+        filtered_etfs = filtered_etfs[Config.ETF_STANDARD_COLUMNS]
+        logger.info(f"AkShare获取到{len(etf_info)}只ETF，筛选后剩余{len(filtered_etfs)}只")
+        return filtered_etfs.drop_duplicates(subset="ETF代码")
     
     except Exception as e:
         error_msg = f"AkShare接口错误: {str(e)}"
         logger.error(f"❌ {error_msg}")
         return pd.DataFrame()  # 返回空DataFrame但不抛出异常
 
-@retry(stop_max_attempt_number=3,
-       wait_exponential_multiplier=1000,
-       wait_exponential_max=10000,
-       retry_on_exception=retry_if_network_error)
 def fetch_all_etfs_sina() -> pd.DataFrame:
     """新浪接口兜底获取ETF列表（带超时控制）
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从新浪获取ETF列表...")
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList  "
+        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList"
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
         response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
         response.raise_for_status()
@@ -376,13 +341,12 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         
         # 重命名列
         etf_list = etf_list.rename(columns={
-            "symbol": "ETF代码",
-            "name": "ETF名称",
-            "amount": "基金规模"  # 明确映射基金规模
+            "symbol": "完整代码",
+            "name": "ETF名称"
         })
         
-        # 确保ETF代码为6位数字
-        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
+        # 提取纯数字代码（使用正则表达式确保6位数字）
+        etf_list["ETF代码"] = etf_list["完整代码"].astype(str).str.extract(r'(\d{6})', expand=False)
         
         # 过滤有效的6位数字ETF代码
         valid_etfs = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
@@ -391,18 +355,11 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
             logger.warning("提取后无有效ETF代码")
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
         
-        # 确保基金规模单位为"亿元"
-        if "基金规模" in valid_etfs.columns:
-            # 提取数字部分
-            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
-            
-            # 新浪接口返回的规模单位通常是"万元"，需要转换为"亿元"
-            if not valid_etfs.empty and valid_etfs["基金规模"].mean() > 10:
-                logger.info(f"新浪接口返回的基金规模单位为'万元'，转换为'亿元'（平均规模: {valid_etfs['基金规模'].mean():.2f}万元）")
-                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 10000
-            else:
-                logger.info("新浪接口返回的基金规模单位为'亿元'，无需转换")
+        # 添加基金规模列（如果可能）
+        if "amount" in valid_etfs.columns:
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["amount"], errors="coerce") / 10000
+        else:
+            valid_etfs["基金规模"] = 0.0
         
         # 确保包含所有需要的列
         for col in Config.ETF_STANDARD_COLUMNS:
@@ -427,7 +384,7 @@ def read_csv_with_encoding(file_path: str) -> pd.DataFrame:
     :return: 读取的DataFrame
     """
     try:
-        return pd.read_csv(file_path, encoding='utf-8-sig')
+        return pd.read_csv(file_path, encoding='utf-8')
     except UnicodeDecodeError:
         try:
             return pd.read_csv(file_path, encoding='gbk')

@@ -109,6 +109,47 @@ def get_file_mtime(file_path: str) -> Optional[datetime]:
         logger.error(f"获取文件修改时间失败: {str(e)}", exc_info=True)
         return None
 
+def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    确保DataFrame使用中文列名，完全依赖config.py中定义的映射
+    
+    Args:
+        df: 原始DataFrame
+    
+    Returns:
+        pd.DataFrame: 使用中文列名的DataFrame
+    """
+    try:
+        if df.empty:
+            return df
+        
+        # 检查是否已经是中文列名 - 使用config中定义的STANDARD_COLUMNS
+        if all(col in Config.STANDARD_COLUMNS for col in df.columns):
+            logger.debug("DataFrame已使用标准中文列名，无需映射")
+            return df
+        
+        # 记录原始列名用于诊断
+        logger.info(f"原始列名: {list(df.columns)}")
+        
+        # 使用config中定义的列名映射
+        col_mapping = {}
+        for eng_col, chn_col in Config.COLUMN_NAME_MAPPING.items():
+            if eng_col in df.columns:
+                col_mapping[eng_col] = chn_col
+                logger.debug(f"映射列名: {eng_col} -> {chn_col}")
+        
+        # 重命名列
+        df = df.rename(columns=col_mapping)
+        
+        # 记录映射后的列名
+        logger.info(f"映射后列名: {list(df.columns)}")
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"确保中文列名失败: {str(e)}", exc_info=True)
+        return df
+
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """
     加载ETF日线数据
@@ -176,48 +217,51 @@ def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = No
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
+def load_arbitrage_data(date_str: str) -> pd.DataFrame:
     """
-    确保DataFrame使用中文列名
+    加载指定日期的套利数据
     
     Args:
-        df: 原始DataFrame
+        date_str: 日期字符串，格式为YYYYMMDD
     
     Returns:
-        pd.DataFrame: 使用中文列名的DataFrame
+        pd.DataFrame: 套利数据DataFrame
     """
     try:
-        # 检查是否已经是中文列名
-        if all(col in Config.CHINESE_COLUMNS for col in df.columns):
-            return df
+        # 构建套利数据目录
+        arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
+        os.makedirs(arbitrage_dir, exist_ok=True)
         
-        # 使用配置中的列名映射
-        column_mapping = {v: k for k, v in Config.COLUMN_NAME_MAPPING.items()}
+        # 构建文件路径
+        file_path = os.path.join(arbitrage_dir, f"{date_str}.csv")
         
-        # 只映射存在的列
-        valid_mapping = {eng: chi for eng, chi in column_mapping.items() if eng in df.columns}
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.info(f"套利数据文件不存在: {file_path}")
+            return pd.DataFrame()
         
-        # 记录映射信息
-        if valid_mapping:
-            logger.debug(f"列名映射: {valid_mapping}")
+        # 读取CSV文件（明确指定编码）
+        df = pd.read_csv(file_path, encoding="utf-8-sig")
         
-        # 重命名列
-        df = df.rename(columns=valid_mapping)
+        # 添加关键诊断日志
+        logger.info(f"成功加载套利数据: {file_path}")
+        logger.info(f"实际列名: {list(df.columns)}")
+        if not df.empty:
+            logger.info(f"前几行数据示例: {df.head().to_dict()}")
         
-        # 检查是否包含必要列
-        required_columns = ["日期", "收盘", "成交额"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        # 确保DataFrame使用中文列名
+        df = ensure_chinese_columns(df)
         
-        if missing_columns:
-            logger.warning(f"数据中缺少必要列: {', '.join(missing_columns)}")
-            # 记录实际存在的列
-            logger.debug(f"实际列名: {list(df.columns)}")
+        # 二次验证列名
+        if "ETF代码" not in df.columns or "ETF名称" not in df.columns:
+            logger.error(f"加载的套利数据缺少必要列，实际列名: {list(df.columns)}")
+            return pd.DataFrame()
         
         return df
     
     except Exception as e:
-        logger.error(f"确保中文列名失败: {str(e)}", exc_info=True)
-        return df
+        logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def load_arbitrage_status() -> Dict[str, Dict[str, Any]]:
     """

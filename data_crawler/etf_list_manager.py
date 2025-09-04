@@ -199,6 +199,7 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
+
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
@@ -240,12 +241,6 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
-        # 转换数据类型并处理单位
-        # 流通市值单位为元，转换为亿元（除以1亿）
-        valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
-        # 成交额单位为元，转换为万元（除以1万）
-        valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
-        
         # 确保上市日期格式正确
         if "上市日期" in valid_etfs.columns:
             # 处理可能的日期格式，确保是YYYY-MM-DD
@@ -253,7 +248,17 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             # 处理NaT值
             valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
         
+        # 移除单位转换 - 保留原始数据，由策略计算时处理单位问题
+        # 基金规模和日均成交额不再转换，保持原始单位
+        
+        # 确保所有数值列是数值类型
+        if "基金规模" in valid_etfs.columns:
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
+        if "日均成交额" in valid_etfs.columns:
+            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce")
+        
         # 筛选条件：规模>10亿，日均成交额>5000万
+        # 注意：这里的阈值单位应该与原始数据单位一致
         filtered_etfs = valid_etfs[
             (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
             (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)

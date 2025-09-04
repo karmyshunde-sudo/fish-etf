@@ -331,29 +331,6 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.debug(f"实际列名: {list(df.columns)}")
             return pd.DataFrame()
         
-        # 新增：从all_etfs.csv获取上市日期
-        try:
-            etf_list = load_all_etf_list()
-            if not etf_list.empty and "上市日期" in etf_list.columns:
-                # 创建ETF代码到上市日期的映射
-                listing_date_map = dict(zip(etf_list["ETF代码"], etf_list["上市日期"]))
-                
-                # 添加上市日期列
-                df["上市日期"] = df["ETF代码"].map(listing_date_map)
-                
-                # 处理缺失值
-                if "上市日期" in df.columns:
-                    df["上市日期"] = df["上市日期"].fillna("")
-                    
-                logger.debug(f"已从all_etfs.csv添加上市日期信息，共{len(df)}条记录")
-            else:
-                logger.warning("无法从all_etfs.csv获取上市日期信息")
-                # 确保上市日期列存在，即使为空
-                df["上市日期"] = ""
-        except Exception as e:
-            logger.error(f"获取上市日期信息失败: {str(e)}，将添加空列", exc_info=True)
-            df["上市日期"] = ""
-        
         # 修复：不再进行筛选和排序，只返回原始数据
         logger.info(f"成功加载 {len(df)} 条原始套利数据")
         return df

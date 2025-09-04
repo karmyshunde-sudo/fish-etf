@@ -227,12 +227,9 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         return 0.5  # 默认波动率
 
 def calculate_liquidity_score(df: pd.DataFrame) -> float:
-    """
-    计算流动性得分（日均成交额）
-    
+    """计算流动性得分（日均成交额）
     Args:
         df: ETF日线数据
-    
     Returns:
         float: 流动性得分
     """
@@ -240,15 +237,15 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
         if df is None or df.empty:
             logger.warning("传入的DataFrame为空，流动性得分设为0")
             return 0.0
-        
+
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
-        
+
         # 检查是否包含成交额列
         if AMOUNT_COL not in df.columns:
             logger.warning(f"ETF日线数据缺少{AMOUNT_COL}列，无法计算流动性得分")
             return 50.0
-        
+
         # 确保成交额列是数值类型
         if not pd.api.types.is_numeric_dtype(df[AMOUNT_COL]):
             try:
@@ -256,10 +253,10 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
             except Exception as e:
                 logger.error(f"成交额列转换失败: {str(e)}")
                 return 50.0
-        
+
         # 计算日均成交额（单位：万元）
         avg_volume = df[AMOUNT_COL].mean() / 10000
-        
+
         # 流动性评分（对数尺度，更符合实际感受）
         # 1000万元=50分，5000万元=75分，10000万元=90分
         if avg_volume <= 1000:
@@ -270,10 +267,9 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
             score = 75 + ((avg_volume - 5000) / 5000) * 15
         else:
             score = 90 + min((avg_volume - 10000) / 10000, 10)
-        
+
         logger.debug(f"ETF流动性评分: {score:.2f} (日均成交额: {avg_volume:.2f}万元)")
         return score
-    
     except Exception as e:
         logger.error(f"计算流动性得分失败: {str(e)}", exc_info=True)
         return 50.0

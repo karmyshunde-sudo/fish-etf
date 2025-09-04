@@ -248,8 +248,20 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             # 处理NaT值
             valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
         
-        # 移除单位转换 - 保留原始数据，由策略计算时处理单位问题
-        # 基金规模和日均成交额不再转换，保持原始单位
+        # 统一单位转换 - 这是关键修改
+        # 1. 基金规模：假设原始数据单位是"元"，转换为"亿元"
+        if "基金规模" in valid_etfs.columns:
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
+        
+        # 2. 日均成交额：假设原始数据单位是"元"，转换为"万元"
+        if "日均成交额" in valid_etfs.columns:
+            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
+        
+        # 3. 验证转换结果
+        if "基金规模" in valid_etfs.columns:
+            logger.debug(f"基金规模单位转换完成，示例值: {valid_etfs['基金规模'].iloc[0]} 亿元")
+        if "日均成交额" in valid_etfs.columns:
+            logger.debug(f"日均成交额单位转换完成，示例值: {valid_etfs['日均成交额'].iloc[0]} 万元")
         
         # 确保所有数值列是数值类型
         if "基金规模" in valid_etfs.columns:
@@ -258,7 +270,7 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce")
         
         # 筛选条件：规模>10亿，日均成交额>5000万
-        # 注意：这里的阈值单位应该与原始数据单位一致
+        # 注意：这里的阈值单位与转换后的单位一致（亿元和万元）
         filtered_etfs = valid_etfs[
             (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
             (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)
@@ -374,11 +386,26 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
             logger.warning("提取后无有效ETF代码")
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
         
-        # 添加基金规模列（如果可能）
+        # 统一单位转换 - 这是关键修改
+        # 1. 基金规模：假设原始数据单位是"元"，转换为"亿元"
         if "amount" in valid_etfs.columns:
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["amount"], errors="coerce") / 10000
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["amount"], errors="coerce") / 100000000
         else:
             valid_etfs["基金规模"] = 0.0
+        
+        # 2. 日均成交额：假设原始数据单位是"元"，转换为"万元"
+        if "volume" in valid_etfs.columns:
+            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["volume"], errors="coerce") / 10000
+        elif "成交额" in valid_etfs.columns:
+            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["成交额"], errors="coerce") / 10000
+        else:
+            valid_etfs["日均成交额"] = 0.0
+        
+        # 3. 验证转换结果
+        if "基金规模" in valid_etfs.columns:
+            logger.debug(f"基金规模单位转换完成，示例值: {valid_etfs['基金规模'].iloc[0]} 亿元")
+        if "日均成交额" in valid_etfs.columns:
+            logger.debug(f"日均成交额单位转换完成，示例值: {valid_etfs['日均成交额'].iloc[0]} 万元")
         
         # 确保上市日期格式正确
         if "上市日期" in valid_etfs.columns:

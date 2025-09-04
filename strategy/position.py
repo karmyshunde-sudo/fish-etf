@@ -22,6 +22,7 @@ from utils.date_utils import (
 )
 from utils.file_utils import load_etf_daily_data, init_dirs
 from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
+from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -313,9 +314,13 @@ def calculate_position_strategy() -> str:
         
         # 2.1 稳健仓策略（评分最高+均线策略）
         stable_etf = top_etfs.iloc[0]
-        stable_code = stable_etf["etf_code"]
-        stable_name = stable_etf["etf_name"]
+        stable_code = stable_etf["ETF代码"]
+        stable_name = stable_etf["ETF名称"]
         stable_df = load_etf_daily_data(stable_code)
+        
+        # 确保DataFrame是副本，避免SettingWithCopyWarning
+        if not stable_df.empty:
+            stable_df = stable_df.copy(deep=True)
         
         # 稳健仓当前持仓
         stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
@@ -349,16 +354,18 @@ def calculate_position_strategy() -> str:
         # 2.2 激进仓策略（近30天收益最高）
         return_list = []
         for _, row in top_etfs.iterrows():
-            code = row["etf_code"]
+            code = row["ETF代码"]
             df = load_etf_daily_data(code)
             if not df.empty and len(df) >= 30:
                 try:
+                    # 确保DataFrame是副本
+                    df = df.copy(deep=True)
                     return_30d = (df.iloc[-1]["收盘"] / df.iloc[-30]["收盘"] - 1) * 100
                     return_list.append({
-                        "etf_code": code,
-                        "etf_name": row["etf_name"],
+                        "ETF代码": code,
+                        "ETF名称": row["ETF名称"],
                         "return_30d": return_30d,
-                        "score": row["score"]
+                        "评分": row["评分"]
                     })
                 except (IndexError, KeyError):
                     logger.warning(f"计算ETF {code} 30天收益失败")
@@ -366,9 +373,13 @@ def calculate_position_strategy() -> str:
         
         if return_list:
             aggressive_etf = max(return_list, key=lambda x: x["return_30d"])
-            aggressive_code = aggressive_etf["etf_code"]
-            aggressive_name = aggressive_etf["etf_name"]
+            aggressive_code = aggressive_etf["ETF代码"]
+            aggressive_name = aggressive_etf["ETF名称"]
             aggressive_df = load_etf_daily_data(aggressive_code)
+            
+            # 确保DataFrame是副本
+            if not aggressive_df.empty:
+                aggressive_df = aggressive_df.copy(deep=True)
             
             # 激进仓当前持仓
             aggressive_position = position_df[position_df["仓位类型"] == "激进仓"]
@@ -452,6 +463,9 @@ def calculate_single_position_strategy(
         utc_now, beijing_now = get_current_times()
         current_date = beijing_now.strftime("%Y-%m-%d")
         
+        # 确保DataFrame是副本，避免SettingWithCopyWarning
+        etf_df = etf_df.copy(deep=True)
+        
         # 计算均线信号
         ma_bullish, ma_bearish = calculate_ma_signal(
             etf_df, 
@@ -461,11 +475,11 @@ def calculate_single_position_strategy(
         latest_close = etf_df.iloc[-1]["收盘"]
         
         # 当前持仓信息
-        current_code = str(current_position["ETF代码"]).strip()
-        current_name = str(current_position["ETF名称"]).strip()
-        current_cost = float(current_position["持仓成本价"])
-        current_date_held = str(current_position["持仓日期"]).strip()
-        current_quantity = int(current_position["持仓数量"])
+        current_code = str(current_position["ETF代码"]).strip() if not pd.isna(current_position["ETF代码"]) else ""
+        current_name = str(current_position["ETF名称"]).strip() if not pd.isna(current_position["ETF名称"]) else ""
+        current_cost = float(current_position["持仓成本价"]) if not pd.isna(current_position["持仓成本价"]) else 0.0
+        current_date_held = str(current_position["持仓日期"]).strip() if not pd.isna(current_position["持仓日期"]) else ""
+        current_quantity = int(current_position["持仓数量"]) if not pd.isna(current_position["持仓数量"]) else 0
         
         # 目标ETF信息
         target_etf_code = str(target_etf_code).strip()
@@ -476,8 +490,8 @@ def calculate_single_position_strategy(
         if current_code and current_code != "":
             # 获取当前持仓ETF的评分
             etf_list = get_top_rated_etfs(10)
-            if not etf_list.empty and current_code in etf_list["etf_code"].values:
-                current_score = etf_list[etf_list["etf_code"] == current_code]["score"].values[0]
+            if not etf_list.empty and current_code in etf_list["ETF代码"].values:
+                current_score = etf_list[etf_list["ETF代码"] == current_code]["评分"].values[0]
         
         # 1. 检查是否需要换仓
         if current_code and current_code != target_etf_code:
@@ -665,6 +679,9 @@ def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -
         Tuple[bool, bool]: (多头信号, 空头信号)
     """
     try:
+        # 确保DataFrame是副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 计算短期均线
         df["ma_short"] = df["收盘"].rolling(window=short_period).mean()
         # 计算长期均线
@@ -724,9 +741,9 @@ def get_etf_score(etf_code: str) -> float:
         # 从评分结果中获取
         top_etfs = get_top_rated_etfs(top_n=100)
         if not top_etfs.empty:
-            etf_row = top_etfs[top_etfs["etf_code"] == etf_code]
+            etf_row = top_etfs[top_etfs["ETF代码"] == etf_code]
             if not etf_row.empty:
-                return etf_row.iloc[0]["score"]
+                return etf_row.iloc[0]["评分"]
         
         # 如果不在评分结果中，尝试计算评分
         df = load_etf_daily_data(etf_code)

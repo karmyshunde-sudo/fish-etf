@@ -863,7 +863,7 @@ def load_etf_metadata() -> pd.DataFrame:
         df = ensure_chinese_columns(df)
         
         # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "基金规模", "上市日期"]
+        required_columns = ["ETF代码", "ETF名称", "基金规模"]
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"ETF元数据缺少必要列: {col}")
@@ -901,7 +901,6 @@ def create_base_etf_metadata() -> None:
                 "ETF代码": etf.get("ETF代码", ""),
                 "ETF名称": etf.get("ETF名称", ""),
                 "基金规模": etf.get("基金规模", 0.0),
-                "上市日期": etf.get("上市日期", "2020-01-01"),
                 "update_time": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
             })
         

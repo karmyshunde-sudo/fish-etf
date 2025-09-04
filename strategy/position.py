@@ -683,9 +683,9 @@ def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -
         df = df.copy(deep=True)
         
         # 计算短期均线
-        df["ma_short"] = df["收盘"].rolling(window=short_period).mean()
+        df.loc[:, "ma_short"] = df["收盘"].rolling(window=short_period).mean()
         # 计算长期均线
-        df["ma_long"] = df["收盘"].rolling(window=long_period).mean()
+        df.loc[:, "ma_long"] = df["收盘"].rolling(window=long_period).mean()
         
         # 检查数据量是否足够
         if len(df) < long_period:

@@ -214,7 +214,9 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
                 'amplitude_percent': '振幅',
                 'pct_chg': '涨跌幅',
                 'price_change': '涨跌额',
-                'turnover_ratio': '换手率'
+                'turnover_ratio': '换手率',
+                'listing_date': '上市日期',  # 新增：处理上市日期
+                'issue_date': '上市日期'     # 新增：处理上市日期
             }
             
             # 重命名列
@@ -269,7 +271,8 @@ def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
         '振幅': ['amplitude', '振幅%', '振幅百分比', 'amplitude_percent', 'amplitude_', 'amp_'],
         '涨跌幅': ['percent', '涨跌幅', '涨跌%', 'change_percent', 'pct_chg', 'changepercent', 'chg_pct', 'pctchange'],
         '涨跌额': ['change', '涨跌额', '价格变动', 'price_change', 'change_', 'chg_', 'pricechg'],
-        '换手率': ['turnover_rate', '换手率', 'turnover_ratio', 'turnover', 'turnoverrate', 'turnover_rate_']
+        '换手率': ['turnover_rate', '换手率', 'turnover_ratio', 'turnover', 'turnoverrate', 'turnover_rate_'],
+        '上市日期': ['listing_date', '上市日期', '成立日期', 'list_date', 'issue_date', 'listingdate']  # 新增：处理上市日期
     }
     
     # 创建新的列名映射
@@ -378,6 +381,17 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         # 日期格式转换
         if "日期" in df.columns:
             df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+        
+        # 新增：处理上市日期列
+        if "上市日期" in df.columns:
+            # 处理可能的日期格式
+            try:
+                # 尝试转换为标准日期格式
+                df["上市日期"] = pd.to_datetime(df["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
+                # 处理NaT值
+                df["上市日期"] = df["上市日期"].fillna("")
+            except Exception as e:
+                logger.warning(f"处理上市日期列时出错: {str(e)}，将保留原始值")
         
         # 数值列转换
         numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]

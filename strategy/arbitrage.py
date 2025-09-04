@@ -182,8 +182,8 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
         premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
-        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会")
-        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会")
+        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会（基于新评分机制）")
+        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会（基于新评分机制）")
         
         return discount_opportunities, premium_opportunities
     except Exception as e:
@@ -401,12 +401,15 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     
     try:
         # 按阈值过滤
+        # 新评分机制：有效折价率 = max(折价率 - 0.2%, 0)
+        # 有效折价率阈值：0.1% (对应20分)
+        # 评分阈值：60分（表示"可以考虑买入"）
         filtered_df = df[
-            (df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD) & 
-            (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
+            (df["折溢价率"] <= -0.3) &  # 考虑0.2%交易成本，有效折价率≥0.1%
+            (df["综合评分"] >= 60.0)     # 60分以上表示有效机会
         ]
         
-        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会")
+        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-0.3%，评分≥60分）")
         return filtered_df
     
     except Exception as e:
@@ -535,12 +538,15 @@ def load_etf_list() -> pd.DataFrame:
             etf_list.at[_, "日均成交额"] = avg_daily_volume
         
         # 筛选符合条件的ETF
+        # 小资金特殊筛选条件：
+        # 1. 基金规模 ≥ 5亿元（适合小资金）
+        # 2. 日均成交额 ≥ 100万元（小资金足够流动性）
         filtered_etfs = etf_list[
-            (etf_list["基金规模"] >= Config.GLOBAL_MIN_FUND_SIZE) &
-            (etf_list["日均成交额"] >= Config.GLOBAL_MIN_AVG_VOLUME)
+            (etf_list["基金规模"] >= 5.0) &
+            (etf_list["日均成交额"] >= 100)
         ]
         
-        logger.info(f"加载 {len(filtered_etfs)} 只符合条件的ETF")
+        logger.info(f"加载 {len(filtered_etfs)} 只符合条件的ETF（基金规模≥5亿元，日均成交额≥100万元）")
         return filtered_etfs
     
     except Exception as e:
@@ -875,7 +881,9 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         
         # 正确的筛选条件 - 分离折价和溢价
         # 折价机会：市场价格 < IOPV (折溢价率为负)
-        discount_opportunities = df[df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD].copy()
+        # 新评分机制：有效折价率 = max(折价率 - 0.2%, 0)
+        # 所以筛选条件为：折溢价率 ≤ -0.3%
+        discount_opportunities = df[df["折溢价率"] <= -0.3].copy()
         
         # 溢价机会：市场价格 > IOPV (折溢价率为正)
         premium_opportunities = df[df["折溢价率"] >= Config.PREMIUM_THRESHOLD].copy()
@@ -892,7 +900,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
             premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
         
         # 记录筛选结果
-        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
+        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥0.3%)")
         logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
         
         # 添加数据来源标记

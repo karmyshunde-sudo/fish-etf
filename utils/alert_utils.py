@@ -3,6 +3,9 @@
 """
 紧急警报工具模块
 提供系统异常时的紧急通知功能
+
+注意：此模块与 wechat_push/push.py 功能重叠，建议删除此文件，
+将冷却机制整合到 wechat_push/push.py 中。
 """
 
 import logging
@@ -57,7 +60,7 @@ def send_urgent_alert(message: str, priority: int = 1) -> bool:
 
 # 模块初始化
 try:
-    logger.info("紧急警报工具模块初始化完成")
+    logger.info("紧急警报工具模块初始化完成 - 注意：此模块与 wechat_push/push.py 功能重叠，建议删除")
 except Exception as e:
     error_msg = f"紧急警报工具模块初始化失败: {str(e)}"
     logger.error(error_msg)

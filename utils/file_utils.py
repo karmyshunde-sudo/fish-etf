@@ -45,6 +45,70 @@ def ensure_dir_exists(dir_path: str) -> bool:
         logger.error(f"创建目录失败: {dir_path} - {str(e)}", exc_info=True)
         return False
 
+def check_flag(flag_file: str) -> bool:
+    """
+    检查标志文件是否存在
+    
+    Args:
+        flag_file: 标志文件路径
+    
+    Returns:
+        bool: 标志文件是否存在
+    """
+    try:
+        return os.path.exists(flag_file)
+    except Exception as e:
+        logger.error(f"检查标志文件失败: {str(e)}", exc_info=True)
+        return False
+
+def set_flag(flag_file: str) -> bool:
+    """
+    设置标志文件
+    
+    Args:
+        flag_file: 标志文件路径
+    
+    Returns:
+        bool: 是否成功设置
+    """
+    try:
+        # 确保目录存在
+        dir_path = os.path.dirname(flag_file)
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # 创建标志文件
+        with open(flag_file, 'w', encoding='utf-8') as f:
+            f.write(f"标记于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        logger.debug(f"已设置标志文件: {flag_file}")
+        return True
+    except Exception as e:
+        logger.error(f"设置标志文件失败: {str(e)}", exc_info=True)
+        return False
+
+def get_file_mtime(file_path: str) -> Optional[datetime]:
+    """
+    获取文件最后修改时间
+    
+    Args:
+        file_path: 文件路径
+    
+    Returns:
+        Optional[datetime]: 文件最后修改时间，如果获取失败返回None
+    """
+    try:
+        if not os.path.exists(file_path):
+            return None
+        
+        # 获取文件最后修改时间戳
+        mtime = os.path.getmtime(file_path)
+        # 转换为datetime对象
+        return datetime.fromtimestamp(mtime)
+    except Exception as e:
+        logger.error(f"获取文件修改时间失败: {str(e)}", exc_info=True)
+        return None
+
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """
     加载ETF日线数据

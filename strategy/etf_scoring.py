@@ -110,72 +110,166 @@ def calculate_arbitrage_score(
     historical_data: Optional[pd.DataFrame] = None
 ) -> float:
     """
-    针对小资金（2万）优化的ETF捡漏评分系统（0-100分）
+    计算ETF套利综合评分
     
-    评分机制：
-    1. 基础筛选（不满足则直接0分）：
-       - ETF规模 ≥ 5亿元（避免迷你ETF风险）
-       - 日均成交额 ≥ 100万元（小资金足够流动性）
+    Args:
+        etf_code: ETF代码
+        etf_name: ETF名称
+        premium_discount: 折溢价率（标量值，不是Series）
+        market_price: 市场价格
+        iopv: IOPV净值
+        fund_size: 基金规模
+        avg_volume: 日均成交额
+        historical_data: 历史数据（可选）
     
-    2. 有效折价率计算：
-       - 有效折价率 = max(折价率 - 0.35%, 0)
-       - 考虑小资金实际交易成本更高（佣金+印花税+滑点）
-    
-    3. 评分公式：
-       - 得分 = min(100, 有效折价率 × 400)
-       - 0.25%有效折价 = 100分（理想捡漏机会）
-       - 0.1%有效折价 = 40分（一般机会）
-    
-    4. 附加条件（可选，根据风险偏好）：
-       - 连续2天折价：额外+10分
-       - 折价幅度大于行业平均：额外+5分
+    Returns:
+        float: 综合评分 (0-100)
     """
     try:
-        # 1. 基础筛选
-        if fund_size < 5.0:  # 5亿元规模下限
-            logger.debug(f"ETF {etf_code} 规模 {fund_size:.2f}亿元 < 5亿元，不满足规模要求")
-            return 0.0
-            
-        if avg_volume < 100:  # 100万元日均成交额（适合小资金）
-            logger.debug(f"ETF {etf_code} 日均成交额 {avg_volume:.2f}万元 < 100万元，不满足流动性要求")
-            return 0.0
-            
-        # 2. 有效折价率计算（小资金交易成本更高）
-        TRANSACTION_COST = 0.35  # 小资金实际交易成本约0.35%
-        effective_discount = 0.0
+        # 限制在合理范围内
+        MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
+        MAX_PREMIUM = 20.0    # 最大溢价率（20%）
+        premium_discount = max(min(premium_discount, MAX_PREMIUM), MAX_DISCOUNT)
         
-        # 仅计算折价情况（溢价对捡漏无价值）
-        if premium_discount < 0:
-            effective_discount = max(-premium_discount - TRANSACTION_COST, 0)
+        # 记录实际使用的值
+        logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")
         
-        # 3. 评分公式
-        score = min(100, effective_discount * 400)  # 更敏感的评分尺度
-        
-        # 4. 附加条件（如果提供了历史数据）
+        # 计算基础ETF评分
+        base_score = 70.0  # 默认值，实际应从历史数据计算
         if historical_data is not None and not historical_data.empty:
-            # 检查是否连续2天折价
+            base_score = calculate_etf_score(etf_code, historical_data)
+        
+        # 确保基础评分在0-100范围内
+        if base_score < 0 or base_score > 100:
+            logger.warning(f"ETF {etf_code} 基础评分超出范围({base_score:.2f})，强制限制在0-100")
+            base_score = max(0, min(100, base_score))
+        
+        # 计算成分股稳定性评分
+        component_score = calculate_component_stability_score(etf_code, historical_data)
+        
+        # 确保成分股稳定性评分在0-100范围内
+        if component_score < 0 or component_score > 100:
+            logger.warning(f"ETF {etf_code} 成分股稳定性评分超出范围({component_score:.2f})，强制限制在0-100")
+            component_score = max(0, min(100, component_score))
+        
+        # 计算折溢价率评分
+        if premium_discount < 0:
+            # 折价情况：折价率绝对值越大，评分越高
+            abs_premium = abs(premium_discount)
+            if abs_premium >= Config.DISCOUNT_THRESHOLD * 1.5:
+                premium_score = 100.0
+            elif abs_premium >= Config.DISCOUNT_THRESHOLD:
+                # 确保分母不为0
+                if Config.DISCOUNT_THRESHOLD * 0.5 > 0:
+                    premium_score = 80.0 + (abs_premium - Config.DISCOUNT_THRESHOLD) * 20.0 / (Config.DISCOUNT_THRESHOLD * 0.5)
+                else:
+                    premium_score = 100.0
+            else:
+                # 确保分母不为0
+                if Config.DISCOUNT_THRESHOLD > 0:
+                    premium_score = 50.0 + (abs_premium * 30.0 / Config.DISCOUNT_THRESHOLD)
+                else:
+                    premium_score = 50.0 + (abs_premium * 30.0)
+        else:
+            # 溢价情况：溢价率越小，评分越高
+            if premium_discount <= Config.PREMIUM_THRESHOLD * 0.5:
+                premium_score = 100.0
+            elif premium_discount <= Config.PREMIUM_THRESHOLD:
+                # 确保分母不为0
+                if Config.PREMIUM_THRESHOLD * 0.5 > 0:
+                    premium_score = 80.0 - (premium_discount - Config.PREMIUM_THRESHOLD * 0.5) * 40.0 / (Config.PREMIUM_THRESHOLD * 0.5)
+                else:
+                    premium_score = 100.0
+            else:
+                # 确保分母不为0
+                if Config.PREMIUM_THRESHOLD > 0:
+                    premium_score = 50.0 - (premium_discount - Config.PREMIUM_THRESHOLD) * 20.0 / (Config.PREMIUM_THRESHOLD * 1.0)
+                else:
+                    premium_score = 50.0 - (premium_discount * 20.0)
+        
+        # 确保折溢价率评分在0-100范围内
+        if premium_score < 0 or premium_score > 100:
+            logger.warning(f"ETF {etf_code} 折溢价率评分超出范围({premium_score:.2f})，强制限制在0-100")
+            premium_score = max(0, min(100, premium_score))
+        
+        # 获取评分权重
+        weights = Config.ARBITRAGE_SCORE_WEIGHTS.copy()
+        
+        # 确保权重字典包含所有必要的键
+        required_keys = ['premium_discount', 'liquidity', 'risk', 'return', 'market_sentiment', 'fundamental', 'component_stability']
+        for key in required_keys:
+            if key not in weights:
+                logger.warning(f"权重字典缺少必要键: {key}, 使用默认值0.1")
+                weights[key] = 0.1
+        
+        # 确保权重和为1
+        total_weight = sum(weights.values())
+        if abs(total_weight - 1.0) > 0.001:
+            logger.warning(f"权重和不为1 ({total_weight}), 正在归一化")
+            for key in weights:
+                weights[key] /= total_weight
+        
+        # 验证每个权重是否在合理范围内
+        for key, weight in weights.items():
+            if weight < 0 or weight > 1:
+                logger.error(f"权重 {key} 超出范围({weight:.2f})，强制限制在0-1")
+                weights[key] = max(0, min(1, weight))
+        
+        # ============== 新增：附加条件加分 ==============
+        # 1. 连续2天折价：额外+10分
+        consecutive_discount_bonus = 0
+        if premium_discount < 0 and historical_data is not None and not historical_data.empty:
+            # 确保有足够的历史数据
             if len(historical_data) >= 2:
+                # 获取前一天的折溢价率
                 prev_premium = historical_data["折溢价率"].iloc[-2]
-                if prev_premium < 0 and premium_discount < 0:
-                    score = min(100, score + 10)  # 连续折价加分
+                
+                # 检查前一天是否也是折价
+                if prev_premium < 0:
+                    consecutive_discount_bonus = 10
+                    logger.debug(f"ETF {etf_code} 连续2天折价，获得连续折价加分: +{consecutive_discount_bonus}分")
+        
+        # 2. 折价幅度大于行业平均：额外+5分
+        industry_avg_bonus = 0
+        if premium_discount < 0:
+            # 从配置中获取行业平均折价率（负值）
+            industry_avg_discount = getattr(Config, 'INDUSTRY_AVG_DISCOUNT', -0.15)
             
-            # 检查折价幅度是否大于行业平均（简化实现）
-            industry_avg = -0.15  # 假设行业平均折价率为-0.15%
-            if premium_discount < industry_avg:
-                score = min(100, score + 5)
+            # 如果当前折价率小于行业平均（即折价幅度更大）
+            if premium_discount < industry_avg_discount:
+                industry_avg_bonus = 5
+                logger.debug(f"ETF {etf_code} 折价幅度({premium_discount:.2f}%)大于行业平均({industry_avg_discount:.2f}%)，获得行业平均加分: +{industry_avg_bonus}分")
         
-        # 记录评分详情
-        logger.debug(f"ETF {etf_code} 捡漏评分详情: "
-                     f"折溢价率={premium_discount:.2f}%, "
-                     f"有效折价率={effective_discount:.2f}%, "
-                     f"规模={fund_size:.2f}亿元, "
-                     f"日均成交额={avg_volume:.2f}万元, "
-                     f"最终评分={score:.2f}")
+        # 将附加条件加分整合到基础评分中
+        base_score = min(100, base_score + consecutive_discount_bonus + industry_avg_bonus)
+        logger.debug(f"ETF {etf_code} 附加条件加分: 连续折价+{consecutive_discount_bonus}分, 行业平均+{industry_avg_bonus}分, 调整后基础评分={base_score:.2f}")
+        # ============== 新增结束 ==============
         
-        return score
+        # 综合评分（加权平均）
+        total_score = (
+            base_score * (weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']) +
+            component_score * weights['component_stability'] +
+            premium_score * weights['premium_discount']
+        )
+        
+        # 双重验证：确保评分在0-100范围内
+        if total_score < 0 or total_score > 100:
+            logger.error(f"ETF {etf_code} 套利综合评分超出范围({total_score:.2f})，强制限制在0-100")
+            total_score = max(0, min(100, total_score))
+        
+        # 添加详细日志，便于问题排查
+        logger.debug(f"ETF {etf_code} 套利综合评分详情: "
+                     f"基础评分={base_score:.2f}(权重{weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']:.2f}), "
+                     f"成分股稳定性={component_score:.2f}(权重{weights['component_stability']:.2f}), "
+                     f"折溢价率={premium_score:.2f}(权重{weights['premium_discount']:.2f}), "
+                     f"连续折价加分={consecutive_discount_bonus}, "
+                     f"行业平均加分={industry_avg_bonus}, "
+                     f"最终评分={total_score:.2f}")
+        
+        return total_score
     
     except Exception as e:
-        logger.error(f"计算ETF {etf_code} 捡漏评分失败: {str(e)}", exc_info=True)
+        logger.error(f"计算ETF {etf_code} 套利综合评分失败: {str(e)}", exc_info=True)
         return 0.0
 
 def calculate_component_stability_score(etf_code: str, df: pd.DataFrame) -> float:

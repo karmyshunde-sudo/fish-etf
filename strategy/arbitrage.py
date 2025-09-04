@@ -42,7 +42,7 @@ from .etf_scoring import (
     calculate_arbitrage_score,
     calculate_component_stability_score
 )
-from utils.alert_utils import send_urgent_alert
+from wechat_push.push import send_wechat_message
 from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 
 # 初始化日志

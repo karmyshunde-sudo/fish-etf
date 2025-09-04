@@ -43,7 +43,6 @@ from .etf_scoring import (
     calculate_component_stability_score
 )
 from wechat_push.push import send_wechat_message
-from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -167,10 +166,6 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             logger.info("未发现有效套利机会")
             return pd.DataFrame(), pd.DataFrame()
         
-        # 新增：添加上市日期信息
-        discount_opportunities = add_listing_date_info(discount_opportunities)
-        premium_opportunities = add_listing_date_info(premium_opportunities)
-        
         # 添加规模和日均成交额信息
         discount_opportunities = add_etf_basic_info(discount_opportunities)
         premium_opportunities = add_etf_basic_info(premium_opportunities)
@@ -199,49 +194,8 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             message=error_msg,
             message_type="error"
         )
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
-def add_listing_date_info(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    添加ETF上市日期信息
-    
-    Args:
-        df: 原始套利机会DataFrame
-    
-    Returns:
-        pd.DataFrame: 添加上市日期信息后的DataFrame
-    """
-    if df.empty:
-        return df
-    
-    try:
-        # 从all_etfs.csv获取ETF列表
-        etf_list = load_all_etf_list()
-        
-        if not etf_list.empty and "上市日期" in etf_list.columns:
-            # 创建ETF代码到上市日期的映射
-            listing_date_map = dict(zip(etf_list["ETF代码"], etf_list["上市日期"]))
-            
-            # 添加上市日期列
-            df["上市日期"] = df["ETF代码"].map(listing_date_map)
-            
-            # 处理缺失值
-            if "上市日期" in df.columns:
-                df["上市日期"] = df["上市日期"].fillna("")
-                
-            logger.info(f"已从all_etfs.csv添加上市日期信息，共{len(df)}条记录")
-        else:
-            logger.warning("无法从all_etfs.csv获取上市日期信息")
-            # 确保上市日期列存在，即使为空
-            df["上市日期"] = ""
-        
-        return df
-    
-    except Exception as e:
-        logger.error(f"获取上市日期信息失败: {str(e)}，将添加空列", exc_info=True)
-        df["上市日期"] = ""
-        return df
-
 def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
     过滤掉今天已经推送过的折价机会
@@ -407,11 +361,6 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             iopv = extract_scalar_value(row["IOPV"], log_prefix=f"ETF {etf_code} IOPV: ")
             fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")
             avg_volume = extract_scalar_value(row["日均成交额"], log_prefix=f"ETF {etf_code} 日均成交额: ")
-            # 新增：提取上市日期
-            listing_date = extract_scalar_value(
-                row.get("上市日期", ""), 
-                log_prefix=f"ETF {etf_code} 上市日期: "
-            )
             
             # 限制在合理范围内
             MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
@@ -430,8 +379,7 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 iopv,
                 fund_size,
                 avg_volume,
-                etf_df,
-                listing_date  # 新增：传递上市日期
+                etf_df
             )
             scores.append(score)
         

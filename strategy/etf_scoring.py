@@ -254,8 +254,8 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
                 logger.error(f"成交额列转换失败: {str(e)}")
                 return 50.0
 
-        # 计算日均成交额（单位：万元）
-        avg_volume = df[AMOUNT_COL].mean() / 10000
+        # 修复：不再进行单位转换，因为data_crawler中已统一转换为"万元"
+        avg_volume = df[AMOUNT_COL].mean()
 
         # 流动性评分（对数尺度，更符合实际感受）
         # 1000万元=50分，5000万元=75分，10000万元=90分

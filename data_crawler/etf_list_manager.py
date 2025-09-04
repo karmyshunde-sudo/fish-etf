@@ -205,8 +205,8 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从AkShare获取ETF列表...")
-        # 调用fund_etf_spot_em接口
-        etf_info = ak.fund_etf_spot_em()
+        # 调用fund_em_info接口
+        etf_info = ak.fund_em_info()
         if etf_info.empty:
             logger.warning("AkShare返回空的ETF列表")
             return pd.DataFrame()
@@ -214,25 +214,33 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         # 记录返回的列名，用于调试
         logger.debug(f"AkShare返回列名: {list(etf_info.columns)}")
         
-        # 标准化列名映射（根据实际返回列名修正）
+        # 标准化列名映射
         column_mapping = {}
         for col in etf_info.columns:
-            if "代码" in col:
+            if "基金代码" in col or "代码" in col:
                 column_mapping[col] = "ETF代码"
-            elif "名称" in col:
+            elif "基金名称" in col or "名称" in col:
                 column_mapping[col] = "ETF名称"
-            elif "流通市值" in col:
-                column_mapping[col] = "基金规模"  # 修正：使用"流通市值"作为基金规模
-            elif "成交额" in col:
-                column_mapping[col] = "日均成交额"
-            elif "上市日期" in col or "成立日期" in col:  # 新增：处理上市日期
+            elif "基金类型" in col or "类型" in col:
+                column_mapping[col] = "基金类型"
+            elif "成立日期" in col or "上市日期" in col or "日期" in col:
                 column_mapping[col] = "上市日期"
+            elif "基金规模" in col or "规模" in col:
+                column_mapping[col] = "基金规模"
+            elif "最新规模" in col:
+                column_mapping[col] = "基金规模"
+            elif "单位净值" in col:
+                column_mapping[col] = "单位净值"
+            elif "累计净值" in col:
+                column_mapping[col] = "累计净值"
+            elif "日增长率" in col:
+                column_mapping[col] = "日增长率"
         
         # 重命名列
         etf_info = etf_info.rename(columns=column_mapping)
         
         # 确保包含所有需要的列
-        required_columns = Config.ETF_STANDARD_COLUMNS + ["日均成交额"]
+        required_columns = Config.ETF_STANDARD_COLUMNS
         for col in required_columns:
             if col not in etf_info.columns:
                 etf_info[col] = ""
@@ -248,42 +256,33 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             # 处理NaT值
             valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
         
-        # 统一单位转换 - 这是关键修改
-        # 1. 基金规模：假设原始数据单位是"元"，转换为"亿元"
+        # 统一单位转换
+        # 1. 基金规模：假设原始数据单位是"亿元"，保持不变
         if "基金规模" in valid_etfs.columns:
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
-        
-        # 2. 日均成交额：假设原始数据单位是"元"，转换为"万元"
-        if "日均成交额" in valid_etfs.columns:
-            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
-        
-        # 3. 验证转换结果
-        if "基金规模" in valid_etfs.columns:
-            logger.debug(f"基金规模单位转换完成，示例值: {valid_etfs['基金规模'].iloc[0]} 亿元")
-        if "日均成交额" in valid_etfs.columns:
-            logger.debug(f"日均成交额单位转换完成，示例值: {valid_etfs['日均成交额'].iloc[0]} 万元")
-        
-        # 确保所有数值列是数值类型
-        if "基金规模" in valid_etfs.columns:
+            # 尝试提取数字部分
+            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
             valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
-        if "日均成交额" in valid_etfs.columns:
-            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce")
+            # 确保基金规模是数值类型
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
         
-        # 筛选条件：规模>10亿，日均成交额>5000万
-        # 注意：这里的阈值单位与转换后的单位一致（亿元和万元）
-        filtered_etfs = valid_etfs[
-            (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
-            (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)
-        ].copy()
+        # 2. 日均成交额：需要从日线数据获取，这里不处理
         
-        # 如果没有ETF通过筛选，返回原始数据（不筛选）
-        if filtered_etfs.empty:
-            logger.warning("ETF筛选条件过于严格，无符合要求的ETF，返回全部ETF")
-            filtered_etfs = valid_etfs.copy()
+        # 筛选条件：规模>10亿，但这里不筛选，因为规模数据可能不准确
+        # filtered_etfs = valid_etfs[valid_etfs["基金规模"] > 10].copy()
         
-        filtered_etfs = filtered_etfs[Config.ETF_STANDARD_COLUMNS]
-        logger.info(f"AkShare获取到{len(etf_info)}只ETF，筛选后剩余{len(filtered_etfs)}只")
-        return filtered_etfs.drop_duplicates(subset="ETF代码")
+        # 如果没有ETF通过筛选，返回原始数据
+        # if filtered_etfs.empty:
+        #    logger.warning("ETF筛选条件过于严格，无符合要求的ETF，返回全部ETF")
+        #    filtered_etfs = valid_etfs.copy()
+        
+        # 确保包含所有需要的列
+        for col in required_columns:
+            if col not in valid_etfs.columns:
+                valid_etfs[col] = ""
+        
+        valid_etfs = valid_etfs[required_columns]
+        logger.info(f"AkShare获取到{len(etf_info)}只ETF，筛选后剩余{len(valid_etfs)}只")
+        return valid_etfs.drop_duplicates(subset="ETF代码")
     
     except Exception as e:
         error_msg = f"AkShare接口错误: {str(e)}"
@@ -371,13 +370,14 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         
         # 重命名列
         etf_list = etf_list.rename(columns={
-            "symbol": "完整代码",
+            "symbol": "ETF代码",
             "name": "ETF名称",
-            "date": "上市日期"  # 新增：处理上市日期
+            "date": "上市日期",
+            "amount": "基金规模"  # 新增：处理基金规模
         })
         
-        # 提取纯数字代码（使用正则表达式确保6位数字）
-        etf_list["ETF代码"] = etf_list["完整代码"].astype(str).str.extract(r'(\d{6})', expand=False)
+        # 确保ETF代码为6位数字
+        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
         
         # 过滤有效的6位数字ETF代码
         valid_etfs = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
@@ -385,27 +385,6 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         if valid_etfs.empty:
             logger.warning("提取后无有效ETF代码")
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
-        
-        # 统一单位转换 - 这是关键修改
-        # 1. 基金规模：假设原始数据单位是"元"，转换为"亿元"
-        if "amount" in valid_etfs.columns:
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["amount"], errors="coerce") / 100000000
-        else:
-            valid_etfs["基金规模"] = 0.0
-        
-        # 2. 日均成交额：假设原始数据单位是"元"，转换为"万元"
-        if "volume" in valid_etfs.columns:
-            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["volume"], errors="coerce") / 10000
-        elif "成交额" in valid_etfs.columns:
-            valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["成交额"], errors="coerce") / 10000
-        else:
-            valid_etfs["日均成交额"] = 0.0
-        
-        # 3. 验证转换结果
-        if "基金规模" in valid_etfs.columns:
-            logger.debug(f"基金规模单位转换完成，示例值: {valid_etfs['基金规模'].iloc[0]} 亿元")
-        if "日均成交额" in valid_etfs.columns:
-            logger.debug(f"日均成交额单位转换完成，示例值: {valid_etfs['日均成交额'].iloc[0]} 万元")
         
         # 确保上市日期格式正确
         if "上市日期" in valid_etfs.columns:

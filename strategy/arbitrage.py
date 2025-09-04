@@ -719,14 +719,17 @@ def load_arbitrage_data(date_str: str) -> pd.DataFrame:
         
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            logger.debug(f"套利数据文件不存在: {file_path}")
+            logger.info(f"套利数据文件不存在: {file_path}")
             return pd.DataFrame()
         
-        # 读取CSV文件
-        df = pd.read_csv(file_path)
+        # 读取CSV文件（明确指定编码）
+        df = pd.read_csv(file_path, encoding="utf-8-sig")
         
-        # 记录加载的列名用于诊断
-        logger.debug(f"成功加载套利数据: {file_path}，列名: {list(df.columns)}，共{len(df)}条")
+        # 添加关键诊断日志（INFO级别，确保可见）
+        logger.info(f"成功加载套利数据: {file_path}")
+        logger.info(f"实际列名: {list(df.columns)}")
+        if not df.empty:
+            logger.info(f"前几行数据示例: {df.head().to_dict()}")
         
         # 确保DataFrame使用中文列名
         df = ensure_chinese_columns(df)
@@ -758,21 +761,33 @@ def crawl_arbitrage_data(is_manual: bool = False) -> Optional[str]:
         # 构建文件路径
         file_path = os.path.join(arbitrage_dir, f"{today}.csv")
         
-        # 直接爬取数据，不通过get_latest_arbitrage_opportunities避免递归
+        # 直接爬取数据
         from data_crawler.strategy_arbitrage_source import fetch_arbitrage_realtime_data
         df = fetch_arbitrage_realtime_data()
         
-        # 记录返回的列名用于诊断
         if not df.empty:
+            # 记录返回的列名用于诊断
             logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
+            
+            # 确保列名一致性 - 显式设置列名
+            expected_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "折溢价率", "净值时间", "计算时间"]
+            if len(df.columns) == len(expected_columns):
+                df.columns = expected_columns
+                logger.info(f"已重设列名: {df.columns.tolist()}")
+            else:
+                logger.warning(f"列名数量不匹配，期望{len(expected_columns)}列，实际{len(df.columns)}列")
         
         if df.empty:
             logger.warning("未获取到套利数据，无法保存")
             return None
         
-        # 保存到CSV文件
-        df.to_csv(file_path, index=False, encoding="utf-8-sig")
+        # 保存到CSV文件（明确指定header=True）
+        df.to_csv(file_path, index=False, encoding="utf-8-sig", header=True)
+        
+        # 添加验证日志
         logger.info(f"成功保存套利数据到: {file_path} (共{len(df)}条记录)")
+        logger.info(f"保存的列名: {df.columns.tolist()}")
+        
         return file_path
     
     except Exception as e:
@@ -800,9 +815,9 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         # 尝试加载今天的套利数据
         df = load_arbitrage_data(today)
         
-        # 记录实际加载的列名用于诊断
+        # 记录实际加载的列名用于诊断 (INFO级别)
         if not df.empty:
-            logger.debug(f"成功加载套利数据，实际列名: {list(df.columns)}")
+            logger.info(f"成功加载套利数据，实际列名: {list(df.columns)}")
         
         # 检查是否在交易时间
         if not is_trading_time():
@@ -857,8 +872,11 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
             logger.error("无法获取任何有效的套利数据")
             return pd.DataFrame(), pd.DataFrame()
         
-        # 记录实际加载的列名用于诊断
-        logger.debug(f"成功加载套利数据，实际列名: {list(df.columns)}")
+        # 记录实际加载的列名用于诊断 (INFO级别)
+        logger.info(f"成功加载套利数据，实际列名: {list(df.columns)}")
+        
+        # 标准化列名 - 处理可能的空格问题
+        df.columns = [col.strip() for col in df.columns]
         
         # 检查数据完整性
         required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
@@ -867,7 +885,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         if missing_columns:
             logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
             # 记录实际存在的列
-            logger.debug(f"实际列名: {list(df.columns)}")
+            logger.info(f"实际列名: {list(df.columns)}")
             return pd.DataFrame(), pd.DataFrame()
         
         # 修复：在策略计算模块中计算正确的折溢价率
@@ -881,9 +899,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         
         # 正确的筛选条件 - 分离折价和溢价
         # 折价机会：市场价格 < IOPV (折溢价率为负)
-        # 新评分机制：有效折价率 = max(折价率 - 0.2%, 0)
-        # 所以筛选条件为：折溢价率 ≤ -0.3%
-        discount_opportunities = df[df["折溢价率"] <= -0.3].copy()
+        discount_opportunities = df[df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD].copy()
         
         # 溢价机会：市场价格 > IOPV (折溢价率为正)
         premium_opportunities = df[df["折溢价率"] >= Config.PREMIUM_THRESHOLD].copy()
@@ -900,7 +916,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
             premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
         
         # 记录筛选结果
-        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥0.3%)")
+        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
         logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
         
         # 添加数据来源标记

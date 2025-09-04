@@ -51,13 +51,14 @@ def update_all_etf_list() -> pd.DataFrame:
             primary_etf_list = fetch_all_etfs_akshare()
             
             if not primary_etf_list.empty:
+                # 补充完整代码、上市日期和其他信息
+                primary_etf_list = enrich_etf_data(primary_etf_list)
+                
                 # 确保包含所有需要的列
                 required_columns = Config.ETF_STANDARD_COLUMNS
                 for col in required_columns:
                     if col not in primary_etf_list.columns:
                         primary_etf_list[col] = ""
-                # 补充完整代码和上市日期
-                primary_etf_list = enrich_etf_data(primary_etf_list)
                 primary_etf_list = primary_etf_list[required_columns]
                 # 按基金规模降序排序
                 primary_etf_list = primary_etf_list.sort_values("基金规模", ascending=False)
@@ -74,13 +75,14 @@ def update_all_etf_list() -> pd.DataFrame:
                 primary_etf_list = fetch_all_etfs_sina()
                 
                 if not primary_etf_list.empty:
+                    # 补充完整代码、上市日期和其他信息
+                    primary_etf_list = enrich_etf_data(primary_etf_list)
+                    
                     # 确保包含所有需要的列
                     required_columns = Config.ETF_STANDARD_COLUMNS
                     for col in required_columns:
                         if col not in primary_etf_list.columns:
                             primary_etf_list[col] = ""
-                    # 补充完整代码和上市日期
-                    primary_etf_list = enrich_etf_data(primary_etf_list)
                     primary_etf_list = primary_etf_list[required_columns]
                     primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
                     logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
@@ -98,13 +100,13 @@ def update_all_etf_list() -> pd.DataFrame:
                         # 确保ETF代码格式正确
                         backup_df["ETF代码"] = backup_df["ETF代码"].astype(str).str.strip().str.zfill(6)
                         backup_df = backup_df[backup_df["ETF代码"].str.match(r'^\d{6}$')]
+                        # 补充完整代码、上市日期和其他信息
+                        backup_df = enrich_etf_data(backup_df)
                         # 确保包含所有需要的列
                         required_columns = Config.ETF_STANDARD_COLUMNS
                         for col in required_columns:
                             if col not in backup_df.columns:
                                 backup_df[col] = ""
-                        # 补充完整代码和上市日期
-                        backup_df = enrich_etf_data(backup_df)
                         backup_df = backup_df[required_columns].drop_duplicates()
                         # 按基金规模降序排序
                         backup_df = backup_df.sort_values("基金规模", ascending=False)
@@ -135,12 +137,12 @@ def update_all_etf_list() -> pd.DataFrame:
                     backup_df = read_csv_with_encoding(Config.BACKUP_ETFS_PATH)
                     backup_df["ETF代码"] = backup_df["ETF代码"].astype(str).str.strip().str.zfill(6)
                     backup_df = backup_df[backup_df["ETF代码"].str.match(r'^\d{6}$')]
+                    # 补充完整代码、上市日期和其他信息
+                    backup_df = enrich_etf_data(backup_df)
                     required_columns = Config.ETF_STANDARD_COLUMNS
                     for col in required_columns:
                         if col not in backup_df.columns:
                             backup_df[col] = ""
-                    # 补充完整代码和上市日期
-                    backup_df = enrich_etf_data(backup_df)
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 使用兜底文件作为最后手段")
@@ -160,6 +162,8 @@ def update_all_etf_list() -> pd.DataFrame:
         logger.info("ℹ️ 无需更新，加载本地ETF列表")
         try:
             etf_list = read_csv_with_encoding(Config.ALL_ETFS_PATH)
+            # 补充完整代码、上市日期和其他信息
+            etf_list = enrich_etf_data(etf_list)
             # 确保包含所有需要的列
             required_columns = Config.ETF_STANDARD_COLUMNS
             for col in required_columns:
@@ -178,12 +182,12 @@ def update_all_etf_list() -> pd.DataFrame:
                     backup_df = read_csv_with_encoding(Config.BACKUP_ETFS_PATH)
                     backup_df["ETF代码"] = backup_df["ETF代码"].astype(str).str.strip().str.zfill(6)
                     backup_df = backup_df[backup_df["ETF代码"].str.match(r'^\d{6}$')]
+                    # 补充完整代码、上市日期和其他信息
+                    backup_df = enrich_etf_data(backup_df)
                     required_columns = Config.ETF_STANDARD_COLUMNS
                     for col in required_columns:
                         if col not in backup_df.columns:
                             backup_df[col] = ""
-                    # 补充完整代码和上市日期
-                    backup_df = enrich_etf_data(backup_df)
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 本地文件加载失败，使用兜底文件")
@@ -431,38 +435,84 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
 
 def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
-    """补充完整代码和上市日期"""
+    """补充完整代码和上市日期，并添加其他有用信息"""
     try:
         # 补充完整代码
         def get_full_code(code: str) -> str:
-            if code.startswith("5") or code.startswith("159"):
-                return f"sz.{code}"
-            elif code.startswith("51"):
+            code = str(code).strip().zfill(6)
+            if code.startswith("51"):
                 return f"sh.{code}"
-            return f"otc.{code}"
+            elif code.startswith("5") or code.startswith("159"):
+                return f"sz.{code}"
+            return code  # 保持原样，可能是一些特殊代码
         
         df["完整代码"] = df["ETF代码"].apply(get_full_code)
         
-        # 补充上市日期（如果还没有）
-        if "上市日期" not in df.columns or df["上市日期"].isnull().all():
-            # 为上市日期列设置默认空值
-            df["上市日期"] = ""
+        # 添加额外列（如果不存在）
+        additional_columns = [
+            "基金类型", "成立日期", "基金规模（最新）", "基金管理人", 
+            "基金托管人", "跟踪标的", "业绩比较基准", "单位净值", 
+            "累计净值", "近 1 月涨幅", "近 3 月涨幅", "近 6 月涨幅", 
+            "近 1 年涨幅", "成立以来涨幅"
+        ]
+        for col in additional_columns:
+            if col not in df.columns:
+                df[col] = ""
+        
+        # 补充额外信息
+        logger.info("正在补充ETF额外信息...")
+        for idx, row in df.iterrows():
+            etf_code = row["ETF代码"]
+            full_code = row["完整代码"]  # 使用完整代码
             
-            logger.info("正在补充ETF上市日期...")
-            for idx, row in df.iterrows():
-                etf_code = row["ETF代码"]
-                try:
-                    # 获取ETF历史行情
-                    df_hist = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date="", end_date="")
-                    if not df_hist.empty:
-                        listing_date = df_hist["日期"].min()
-                        df.at[idx, "上市日期"] = listing_date
-                        logger.debug(f"ETF {etf_code} 上市日期: {listing_date}")
-                    else:
-                        logger.warning(f"ETF {etf_code} 无历史数据，无法获取上市日期")
-                except Exception as e:
-                    logger.error(f"获取ETF {etf_code} 上市日期失败: {str(e)}")
-                    df.at[idx, "上市日期"] = ""
+            try:
+                # 将完整代码转换为AkShare接口需要的格式（移除点号）
+                # 从 "sh.510300" 转换为 "sh510300"（8位不带点号）
+                akshare_code = full_code.replace(".", "")
+                
+                # 获取ETF基本信息
+                info = ak.fund_etf_fund_info_em(symbol=akshare_code)
+                if not info.empty:
+                    # 提取成立日期作为上市日期
+                    listing_date = info["成立日期"].iloc[0]
+                    df.at[idx, "上市日期"] = listing_date
+                    
+                    # 提取其他信息
+                    df.at[idx, "基金类型"] = info["基金类型"].iloc[0]
+                    df.at[idx, "基金规模（最新）"] = info["基金规模（最新）"].iloc[0]
+                    df.at[idx, "基金管理人"] = info["基金管理人"].iloc[0]
+                    df.at[idx, "基金托管人"] = info["基金托管人"].iloc[0]
+                    df.at[idx, "跟踪标的"] = info["跟踪标的"].iloc[0]
+                    df.at[idx, "业绩比较基准"] = info["业绩比较基准"].iloc[0]
+                    df.at[idx, "单位净值"] = info["单位净值"].iloc[0]
+                    df.at[idx, "累计净值"] = info["累计净值"].iloc[0]
+                    df.at[idx, "近 1 月涨幅"] = info["近 1 月涨幅"].iloc[0]
+                    df.at[idx, "近 3 月涨幅"] = info["近 3 月涨幅"].iloc[0]
+                    df.at[idx, "近 6 月涨幅"] = info["近 6 月涨幅"].iloc[0]
+                    df.at[idx, "近 1 年涨幅"] = info["近 1 年涨幅"].iloc[0]
+                    df.at[idx, "成立以来涨幅"] = info["成立以来涨幅"].iloc[0]
+                    
+                    # 确保基金规模单位为"亿元"
+                    if "基金规模（最新）" in df.columns:
+                        # 提取数字部分
+                        size_str = str(df.at[idx, "基金规模（最新）"])
+                        size_num = ''.join(filter(lambda x: x.isdigit() or x == '.', size_str))
+                        if size_num:
+                            size_value = float(size_num)
+                            # 如果包含"万"字，表示单位是"万份"
+                            if "万" in size_str:
+                                # 万份转为亿份，再乘以单位净值估算规模
+                                size_value = size_value * 0.0001  # 万份转为亿份
+                            # 如果包含"亿"字，已经是亿份
+                            df.at[idx, "基金规模"] = size_value
+                        else:
+                            df.at[idx, "基金规模"] = 0.0
+                    
+                    logger.debug(f"ETF {etf_code} 信息补充成功")
+                else:
+                    logger.warning(f"ETF {etf_code} 无基本信息，无法补充信息")
+            except Exception as e:
+                logger.error(f"获取ETF {etf_code} 信息失败: {str(e)}")
         
         return df
     

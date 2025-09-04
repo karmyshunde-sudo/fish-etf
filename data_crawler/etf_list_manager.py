@@ -470,27 +470,20 @@ def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
                 # 从 "sh.510300" 转换为 "sh510300"（8位不带点号）
                 akshare_code = full_code.replace(".", "")
                 
-                # 获取ETF基本信息 - 修复：使用正确的参数名
+                # 获取ETF基本信息
                 info = ak.fund_etf_fund_info_em(fund=akshare_code)
-                if not info.empty:
+                
+                # 严格检查DataFrame是否为空
+                if info is not None and not info.empty and not info.isnull().all().all():
                     # 提取成立日期作为上市日期
-                    listing_date = info["成立日期"].iloc[0]
-                    df.at[idx, "上市日期"] = listing_date
+                    if "成立日期" in info.columns and not pd.isna(info["成立日期"].iloc[0]):
+                        listing_date = info["成立日期"].iloc[0]
+                        df.at[idx, "上市日期"] = listing_date
                     
                     # 提取其他信息
-                    df.at[idx, "基金类型"] = info["基金类型"].iloc[0]
-                    df.at[idx, "基金规模（最新）"] = info["基金规模（最新）"].iloc[0]
-                    df.at[idx, "基金管理人"] = info["基金管理人"].iloc[0]
-                    df.at[idx, "基金托管人"] = info["基金托管人"].iloc[0]
-                    df.at[idx, "跟踪标的"] = info["跟踪标的"].iloc[0]
-                    df.at[idx, "业绩比较基准"] = info["业绩比较基准"].iloc[0]
-                    df.at[idx, "单位净值"] = info["单位净值"].iloc[0]
-                    df.at[idx, "累计净值"] = info["累计净值"].iloc[0]
-                    df.at[idx, "近 1 月涨幅"] = info["近 1 月涨幅"].iloc[0]
-                    df.at[idx, "近 3 月涨幅"] = info["近 3 月涨幅"].iloc[0]
-                    df.at[idx, "近 6 月涨幅"] = info["近 6 月涨幅"].iloc[0]
-                    df.at[idx, "近 1 年涨幅"] = info["近 1 年涨幅"].iloc[0]
-                    df.at[idx, "成立以来涨幅"] = info["成立以来涨幅"].iloc[0]
+                    for col in additional_columns:
+                        if col in info.columns and not pd.isna(info[col].iloc[0]):
+                            df.at[idx, col] = info[col].iloc[0]
                     
                     # 确保基金规模单位为"亿元"
                     if "基金规模（最新）" in df.columns:
@@ -513,6 +506,8 @@ def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
                     logger.warning(f"ETF {etf_code} 无基本信息，无法补充信息")
             except Exception as e:
                 logger.error(f"获取ETF {etf_code} 信息失败: {str(e)}")
+                # 添加更详细的错误信息
+                logger.debug(f"ETF {etf_code} 完整代码: {full_code}, AkShare代码: {akshare_code}")
         
         return df
     

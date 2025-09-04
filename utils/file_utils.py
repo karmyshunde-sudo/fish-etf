@@ -87,27 +87,32 @@ def set_flag(flag_file: str) -> bool:
         logger.error(f"设置标志文件失败: {str(e)}", exc_info=True)
         return False
 
-def get_file_mtime(file_path: str) -> Optional[datetime]:
+def get_file_mtime(file_path: str) -> Tuple[Optional[datetime], Optional[datetime]]:
     """
-    获取文件最后修改时间
+    获取文件最后修改时间（UTC与北京时间）
     
     Args:
         file_path: 文件路径
     
     Returns:
-        Optional[datetime]: 文件最后修改时间，如果获取失败返回None
+        Tuple[Optional[datetime], Optional[datetime]]: (UTC时间, 北京时间)，如果获取失败返回(None, None)
     """
     try:
         if not os.path.exists(file_path):
-            return None
+            return None, None
         
         # 获取文件最后修改时间戳
         mtime = os.path.getmtime(file_path)
-        # 转换为datetime对象
-        return datetime.fromtimestamp(mtime)
+        
+        # 转换为datetime对象（带时区信息）
+        utc_time = datetime.fromtimestamp(mtime, tz=Config.UTC_TIMEZONE)
+        beijing_time = datetime.fromtimestamp(mtime, tz=Config.BEIJING_TIMEZONE)
+        
+        return utc_time, beijing_time
+    
     except Exception as e:
         logger.error(f"获取文件修改时间失败: {str(e)}", exc_info=True)
-        return None
+        return None, None
 
 def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     """

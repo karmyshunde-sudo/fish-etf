@@ -120,10 +120,10 @@ class Config:
     SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF
     
     # 最低规模阈值（亿元）
-    MIN_ETP_SIZE: float = 10.0  # 规模≥10亿
+    MIN_ETP_SIZE: float = 1.0  # 规模≥1亿
     
     # 最低日均成交额阈值（万元）
-    MIN_DAILY_VOLUME: float = 5000.0  # 日均成交额≥5000万
+    MIN_DAILY_VOLUME: float = 100.0  # 日均成交额≥100万
     
     # 仓位策略参数（均线策略）
     MA_SHORT_PERIOD: int = 5    # 短期均线（5日）

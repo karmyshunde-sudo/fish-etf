@@ -441,9 +441,9 @@ def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
         def get_full_code(code: str) -> str:
             code = str(code).strip().zfill(6)
             if code.startswith("51"):
-                return f"sh.{code}"
+                return f"sh{code}"
             elif code.startswith("5") or code.startswith("159"):
-                return f"sz.{code}"
+                return f"sz{code}"
             return code  # 保持原样，可能是一些特殊代码
         
         df["完整代码"] = df["ETF代码"].apply(get_full_code)
@@ -470,8 +470,8 @@ def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
                 # 从 "sh.510300" 转换为 "sh510300"（8位不带点号）
                 akshare_code = full_code.replace(".", "")
                 
-                # 获取ETF基本信息
-                info = ak.fund_etf_fund_info_em(symbol=akshare_code)
+                # 获取ETF基本信息 - 修复：使用正确的参数名
+                info = ak.fund_etf_fund_info_em(fund=akshare_code)
                 if not info.empty:
                     # 提取成立日期作为上市日期
                     listing_date = info["成立日期"].iloc[0]

@@ -26,6 +26,25 @@ logger = logging.getLogger(__name__)
 # 重新导出init_dirs函数，使其可以从file_utils模块导入
 init_dirs = Config.init_dirs
 
+def ensure_dir_exists(dir_path: str) -> bool:
+    """
+    确保目录存在，如果不存在则创建
+    
+    Args:
+        dir_path: 目录路径
+    
+    Returns:
+        bool: 是否成功创建或目录已存在
+    """
+    try:
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+            logger.debug(f"已创建目录: {dir_path}")
+        return True
+    except Exception as e:
+        logger.error(f"创建目录失败: {dir_path} - {str(e)}", exc_info=True)
+        return False
+
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """
     加载ETF日线数据

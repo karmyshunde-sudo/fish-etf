@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 import logging
 import os
-import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
 from config import Config
@@ -33,7 +32,7 @@ CLOSE_COL = "收盘" if "收盘" in Config.STANDARD_COLUMNS else "close"
 AMOUNT_COL = "成交额" if "成交额" in Config.STANDARD_COLUMNS else "amount"
 ETF_CODE_COL = "ETF代码"
 FUND_SIZE_COL = "基金规模"
-LISTING_DATE_COL = "上市日期"  # 新增：定义上市日期列名
+LISTING_DATE_COL = "上市日期"  # 统一使用"上市日期"
 
 def extract_scalar_value(value, default=0.0, log_prefix=""):
     """
@@ -591,17 +590,20 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                 logger.info(f"ETF {etf_code} 数据量不足({len(df)}天)，使用现有数据计算评分")
                 min_required_data = len(df)
         
+        # 取最近min_required_data天数据
+        recent_data = df.tail(min_required_data)
+        
         # 1. 流动性得分（日均成交额）
-        liquidity_score = calculate_liquidity_score(df)
+        liquidity_score = calculate_liquidity_score(recent_data)
         
         # 2. 风险控制得分
-        risk_score = calculate_risk_score(df)
+        risk_score = calculate_risk_score(recent_data)
         
         # 3. 收益能力得分
-        return_score = calculate_return_score(df)
+        return_score = calculate_return_score(recent_data)
         
         # 4. 情绪指标得分（成交量变化率）
-        sentiment_score = calculate_sentiment_score(df)
+        sentiment_score = calculate_sentiment_score(recent_data)
         
         # 5. 基本面得分（规模、上市时间等）
         fundamental_score = calculate_fundamental_score(etf_code)
@@ -654,7 +656,7 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
                      f"流动性={scores['liquidity']:.2f}({weights['liquidity']*100:.0f}%), " +
                      f"风险={scores['risk']:.2f}({weights['risk']*100:.0f}%), " +
                      f"收益={scores['return']:.2f}({weights['return']*100:.0f}%), " +
-                     f"情緒={scores['sentiment']:.2f}({weights['sentiment']*100:.0f}%), " +
+                     f"情绪={scores['sentiment']:.2f}({weights['sentiment']*100:.0f}%), " +
                      f"基本面={scores['fundamental']:.2f}({weights['fundamental']*100:.0f}%), " +
                      f"综合={total_score:.2f}")
         
@@ -791,7 +793,7 @@ def calculate_arbitrage_score(
                 industry_avg_bonus = 5
                 logger.debug(f"ETF {etf_code} 折价幅度({premium_discount:.2f}%)大于行业平均({industry_avg_discount:.2f}%)，获得行业平均加分: +{industry_avg_bonus}分")
         
-        # 将合附加条件加分到基础评分中
+        # 将附加条件加分整合到基础评分中
         base_score = min(100, base_score + consecutive_discount_bonus + industry_avg_bonus)
         logger.debug(f"ETF {etf_code} 附加条件加分: 连续折价+{consecutive_discount_bonus}分, 行业平均+{industry_avg_bonus}分, 调整后基础评分={base_score:.2f}")
         # ============== 新增结束 ==============
@@ -937,8 +939,16 @@ def get_top_rated_etfs(
                 size = 0.0
                 listing_date = ""
                 
-                size = metadata_df[metadata_df["etf_code"] == etf_code]["size"].values[0]
-                listing_date = metadata_df[metadata_df["etf_code"] == etf_code]["listing_date"].values[0]
+                # 修复：安全地获取size和listing_date，避免KeyError
+                if "size" in metadata_df.columns:
+                    size = metadata_df[metadata_df["etf_code"] == etf_code]["size"].values[0]
+                if LISTING_DATE_COL in metadata_df.columns:
+                    listing_date = metadata_df[metadata_df["etf_code"] == etf_code][LISTING_DATE_COL].values[0]
+                elif "listing_date" in metadata_df.columns:
+                    listing_date = metadata_df[metadata_df["etf_code"] == etf_code]["listing_date"].values[0]
+                elif "上市日期" in metadata_df.columns:
+                    listing_date = metadata_df[metadata_df["etf_code"] == etf_code]["上市日期"].values[0]
+                
                 etf_name = get_etf_name(etf_code)
                 
                 # 计算日均成交额

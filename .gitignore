@@ -23,3 +23,4 @@ temp/
 !data/etf_daily/  
 !data/etf_daily/*.csv  
 !data/arbitrage/
+!data/arbitrage/*.csv

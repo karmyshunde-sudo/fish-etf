@@ -4,6 +4,7 @@ import pandas as pd
 import logging
 import requests
 import time
+import json
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from retrying import retry
@@ -58,7 +59,7 @@ def update_all_etf_list() -> pd.DataFrame:
                 primary_etf_list = primary_etf_list[required_columns]
                 # 按基金规模降序排序
                 primary_etf_list = primary_etf_list.sort_values("基金规模", ascending=False)
-                primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
+                primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
                 logger.info(f"✅ AkShare更新成功（{len(primary_etf_list)}只ETF）")
                 # 标记数据来源
                 primary_etf_list.source = "AkShare"
@@ -77,7 +78,7 @@ def update_all_etf_list() -> pd.DataFrame:
                         if col not in primary_etf_list.columns:
                             primary_etf_list[col] = ""
                     primary_etf_list = primary_etf_list[required_columns]
-                    primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
+                    primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
                     logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
                     # 标记数据来源
                     primary_etf_list.source = "新浪"
@@ -106,7 +107,7 @@ def update_all_etf_list() -> pd.DataFrame:
                         backup_df.source = "兜底文件"
                         
                         # 保存兜底文件为当前ETF列表
-                        backup_df.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8")
+                        backup_df.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
                         return backup_df
                     except Exception as e:
                         logger.error(f"❌ 兜底文件处理失败: {str(e)}")
@@ -198,7 +199,6 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
-
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
@@ -224,6 +224,8 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
                 column_mapping[col] = "基金规模"  # 修正：使用"流通市值"作为基金规模
             elif "成交额" in col:
                 column_mapping[col] = "日均成交额"
+            elif "上市日期" in col or "成立日期" in col:  # 新增：处理上市日期
+                column_mapping[col] = "上市日期"
         
         # 重命名列
         etf_info = etf_info.rename(columns=column_mapping)
@@ -243,6 +245,13 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce") / 100000000
         # 成交额单位为元，转换为万元（除以1万）
         valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
+        
+        # 确保上市日期格式正确
+        if "上市日期" in valid_etfs.columns:
+            # 处理可能的日期格式，确保是YYYY-MM-DD
+            valid_etfs["上市日期"] = pd.to_datetime(valid_etfs["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
+            # 处理NaT值
+            valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
         
         # 筛选条件：规模>10亿，日均成交额>5000万
         filtered_etfs = valid_etfs[
@@ -264,6 +273,10 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         logger.error(f"❌ {error_msg}")
         return pd.DataFrame()  # 返回空DataFrame但不抛出异常
 
+@retry(stop_max_attempt_number=3,
+       wait_exponential_multiplier=1000,
+       wait_exponential_max=10000,
+       retry_on_exception=retry_if_network_error)
 def fetch_all_etfs_sina() -> pd.DataFrame:
     """新浪接口兜底获取ETF列表（带超时控制）
     :return: 包含ETF信息的DataFrame"""
@@ -342,7 +355,8 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         # 重命名列
         etf_list = etf_list.rename(columns={
             "symbol": "完整代码",
-            "name": "ETF名称"
+            "name": "ETF名称",
+            "date": "上市日期"  # 新增：处理上市日期
         })
         
         # 提取纯数字代码（使用正则表达式确保6位数字）
@@ -360,6 +374,13 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
             valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["amount"], errors="coerce") / 10000
         else:
             valid_etfs["基金规模"] = 0.0
+        
+        # 确保上市日期格式正确
+        if "上市日期" in valid_etfs.columns:
+            # 处理可能的日期格式，确保是YYYY-MM-DD
+            valid_etfs["上市日期"] = pd.to_datetime(valid_etfs["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
+            # 处理NaT值
+            valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
         
         # 确保包含所有需要的列
         for col in Config.ETF_STANDARD_COLUMNS:
@@ -384,7 +405,7 @@ def read_csv_with_encoding(file_path: str) -> pd.DataFrame:
     :return: 读取的DataFrame
     """
     try:
-        return pd.read_csv(file_path, encoding='utf-8')
+        return pd.read_csv(file_path, encoding='utf-8-sig')
     except UnicodeDecodeError:
         try:
             return pd.read_csv(file_path, encoding='gbk')

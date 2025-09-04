@@ -225,8 +225,7 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             "涨跌幅": "涨跌幅",
             "涨跌额": "涨跌额",
             "换手率": "换手率",
-            "更新时间": "更新时间",
-            "规模": "基金规模"  # 明确映射基金规模
+            "更新时间": "更新时间"
         }
         
         # 重命名列
@@ -242,23 +241,41 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
-        # 处理基金规模：提取数字部分并转换为数值
-        if "基金规模" in valid_etfs.columns:
-            # 提取数字部分
-            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
+        # ============ 重要修改：从fund_aum_em接口获取基金规模 ============
+        try:
+            logger.info("尝试从fund_aum_em接口获取基金规模数据...")
+            fund_scale = ak.fund_aum_em()
             
-            # 确保基金规模单位为"亿元"
-            # AkShare fund_etf_spot_em 接口返回的规模单位是"亿元"，无需转换
-            # 但为了安全起见，添加单位验证
-            if not valid_etfs.empty and valid_etfs["基金规模"].mean() > 1000:
-                # 如果平均规模大于1000，可能是"万元"单位，需要转换
-                logger.warning("检测到基金规模可能为'万元'单位，进行单位转换")
-                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 10000
-            elif not valid_etfs.empty and valid_etfs["基金规模"].mean() > 100000000:
-                # 如果平均规模大于1亿，可能是"元"单位，需要转换
-                logger.warning("检测到基金规模可能为'元'单位，进行单位转换")
-                valid_etfs["基金规模"] = valid_etfs["基金规模"] / 100000000
+            if not fund_scale.empty:
+                # 重命名列
+                fund_scale = fund_scale.rename(columns={
+                    "基金代码": "ETF代码",
+                    "最新规模（亿元）": "基金规模"
+                })
+                
+                # 确保ETF代码为6位数字
+                fund_scale["ETF代码"] = fund_scale["ETF代码"].astype(str).str.strip().str.zfill(6)
+                
+                # 仅保留需要的列
+                if "ETF代码" in fund_scale.columns and "基金规模" in fund_scale.columns:
+                    fund_scale = fund_scale[["ETF代码", "基金规模"]]
+                    
+                    # 将基金规模合并到ETF列表
+                    valid_etfs = pd.merge(
+                        valid_etfs,
+                        fund_scale,
+                        on="ETF代码",
+                        how="left"
+                    )
+                    
+                    logger.info(f"成功补充 {len(fund_scale)} 只ETF的基金规模数据")
+                else:
+                    logger.warning("fund_aum_em接口返回的数据缺少必要列，无法补充基金规模")
+            else:
+                logger.warning("fund_aum_em接口返回空数据，无法补充基金规模")
+        except Exception as e:
+            logger.error(f"从fund_aum_em接口获取基金规模数据失败: {str(e)}，继续使用原始数据")
+        # ============ 基金规模补充逻辑结束 ============
         
         # 处理成交额：假设原始数据单位是"元"，转换为"万元"
         if "成交额" in valid_etfs.columns:
@@ -287,7 +304,7 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从新浪获取ETF列表...")
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList"
+        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList  "
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
         response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
         response.raise_for_status()

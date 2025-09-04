@@ -56,6 +56,8 @@ def update_all_etf_list() -> pd.DataFrame:
                 for col in required_columns:
                     if col not in primary_etf_list.columns:
                         primary_etf_list[col] = ""
+                # 补充完整代码和上市日期
+                primary_etf_list = enrich_etf_data(primary_etf_list)
                 primary_etf_list = primary_etf_list[required_columns]
                 # 按基金规模降序排序
                 primary_etf_list = primary_etf_list.sort_values("基金规模", ascending=False)
@@ -77,6 +79,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     for col in required_columns:
                         if col not in primary_etf_list.columns:
                             primary_etf_list[col] = ""
+                    # 补充完整代码和上市日期
+                    primary_etf_list = enrich_etf_data(primary_etf_list)
                     primary_etf_list = primary_etf_list[required_columns]
                     primary_etf_list.to_csv(Config.ALL_ETFS_PATH, index=False, encoding="utf-8-sig")
                     logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
@@ -99,6 +103,8 @@ def update_all_etf_list() -> pd.DataFrame:
                         for col in required_columns:
                             if col not in backup_df.columns:
                                 backup_df[col] = ""
+                        # 补充完整代码和上市日期
+                        backup_df = enrich_etf_data(backup_df)
                         backup_df = backup_df[required_columns].drop_duplicates()
                         # 按基金规模降序排序
                         backup_df = backup_df.sort_values("基金规模", ascending=False)
@@ -133,6 +139,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     for col in required_columns:
                         if col not in backup_df.columns:
                             backup_df[col] = ""
+                    # 补充完整代码和上市日期
+                    backup_df = enrich_etf_data(backup_df)
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 使用兜底文件作为最后手段")
@@ -174,6 +182,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     for col in required_columns:
                         if col not in backup_df.columns:
                             backup_df[col] = ""
+                    # 补充完整代码和上市日期
+                    backup_df = enrich_etf_data(backup_df)
                     backup_df = backup_df[required_columns].drop_duplicates()
                     backup_df = backup_df.sort_values("基金规模", ascending=False)
                     logger.warning("⚠️ 本地文件加载失败，使用兜底文件")
@@ -225,7 +235,8 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             "涨跌幅": "涨跌幅",
             "涨跌额": "涨跌额",
             "换手率": "换手率",
-            "更新时间": "更新时间"
+            "更新时间": "更新时间",
+            "规模": "基金规模"  # 明确映射基金规模
         }
         
         # 重命名列
@@ -241,22 +252,15 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
-        # 添加上市日期列（从日线数据获取）
-        valid_etfs["上市日期"] = ""
+        # 处理基金规模：提取数字部分并转换为数值
+        if "基金规模" in valid_etfs.columns:
+            # 提取数字部分
+            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
         
-        # 统一单位转换
-        # 1. 基金规模：需要从日线数据获取，这里不处理
-        # 2. 成交额：假设原始数据单位是"元"，转换为"万元"
+        # 处理成交额：假设原始数据单位是"元"，转换为"万元"
         if "成交额" in valid_etfs.columns:
             valid_etfs["成交额"] = pd.to_numeric(valid_etfs["成交额"], errors="coerce") / 10000
-        
-        # 筛选条件：规模>10亿，但这里不筛选，因为规模数据需要从日线数据获取
-        # filtered_etfs = valid_etfs[valid_etfs["基金规模"] > 10].copy()
-        
-        # 如果没有ETF通过筛选，返回原始数据
-        # if filtered_etfs.empty:
-        #    logger.warning("ETF筛选条件过于严格，无符合要求的ETF，返回全部ETF")
-        #    filtered_etfs = valid_etfs.copy()
         
         # 确保包含所有需要的列
         for col in required_columns:
@@ -356,7 +360,7 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
             "symbol": "ETF代码",
             "name": "ETF名称",
             "date": "上市日期",
-            "amount": "基金规模"  # 新增：处理基金规模
+            "amount": "基金规模"  # 明确映射基金规模
         })
         
         # 确保ETF代码为6位数字
@@ -368,6 +372,12 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         if valid_etfs.empty:
             logger.warning("提取后无有效ETF代码")
             return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+        
+        # 处理基金规模：提取数字部分并转换为数值
+        if "基金规模" in valid_etfs.columns:
+            # 提取数字部分
+            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
+            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
         
         # 确保上市日期格式正确
         if "上市日期" in valid_etfs.columns:
@@ -392,6 +402,46 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
         error_msg = f"❌ 新浪接口错误: {str(e)}"
         logger.error(error_msg)
         return pd.DataFrame(columns=Config.ETF_STANDARD_COLUMNS)
+
+def enrich_etf_data(df: pd.DataFrame) -> pd.DataFrame:
+    """补充完整代码和上市日期"""
+    try:
+        # 补充完整代码
+        def get_full_code(code: str) -> str:
+            if code.startswith("5") or code.startswith("159"):
+                return f"sz.{code}"
+            elif code.startswith("51"):
+                return f"sh.{code}"
+            return f"otc.{code}"
+        
+        df["完整代码"] = df["ETF代码"].apply(get_full_code)
+        
+        # 补充上市日期（如果还没有）
+        if "上市日期" not in df.columns or df["上市日期"].isnull().all():
+            # 为上市日期列设置默认空值
+            df["上市日期"] = ""
+            
+            logger.info("正在补充ETF上市日期...")
+            for idx, row in df.iterrows():
+                etf_code = row["ETF代码"]
+                try:
+                    # 获取ETF历史行情
+                    df_hist = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date="", end_date="")
+                    if not df_hist.empty:
+                        listing_date = df_hist["日期"].min()
+                        df.at[idx, "上市日期"] = listing_date
+                        logger.debug(f"ETF {etf_code} 上市日期: {listing_date}")
+                    else:
+                        logger.warning(f"ETF {etf_code} 无历史数据，无法获取上市日期")
+                except Exception as e:
+                    logger.error(f"获取ETF {etf_code} 上市日期失败: {str(e)}")
+                    df.at[idx, "上市日期"] = ""
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"❌ 补充ETF数据失败: {str(e)}")
+        return df
 
 def read_csv_with_encoding(file_path: str) -> pd.DataFrame:
     """读取CSV文件，自动兼容UTF-8和GBK编码

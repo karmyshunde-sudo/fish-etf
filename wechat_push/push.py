@@ -420,21 +420,28 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         
         messages = []
         
-        # 第1页：封面页
+        # 第1页：封面页（包含风险提示）
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
                 "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
                 f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
-                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
+                "⚠️ 风险提示：\n"
+                "1. 市场价格低于净值是短期现象，不一定能立即获利\n"
+                "2. 实际交易中可能因价格变动导致机会消失\n"
+                "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
+                "4. 本策略综合评分考虑了折溢价率、流动性、波动率、成分股稳定性等因素\n"
+                "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
+                "6. 本策略仅供参考，不构成投资建议"
                 + footer
             )
             messages.append(page1)
         
-        # 后续页：ETF详情
+        # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
             start_idx = page * ETFS_PER_PAGE
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
@@ -462,7 +469,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 content += f"   📊 IOPV: {iopv:.3f}元\n"
                 content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                 content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合得分: {score:.1f}分 【{recommendation}】\n\n"
+                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
             
             # 添加页脚
             content += footer
@@ -512,21 +519,28 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         
         messages = []
         
-        # 第1页：封面页
+        # 第1页：封面页（包含风险提示）
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格高于净值，若你只在二级市场交易注意规避风险】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
                 "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
                 f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
-                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
+                "⚠️ 风险提示：\n"
+                "1. 市场价格高于净值是短期现象，不一定能立即获利\n"
+                "2. 实际交易中可能因价格变动导致机会消失\n"
+                "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
+                "4. 本策略综合评分考虑了溢价率、流动性、波动率、成分股稳定性等因素\n"
+                "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
+                "6. 本策略仅供参考，不构成投资建议"
                 + footer
             )
             messages.append(page1)
         
-        # 后续页：ETF详情
+        # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
             start_idx = page * ETFS_PER_PAGE
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
@@ -554,7 +568,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 content += f"   📊 IOPV: {iopv:.3f}元\n"
                 content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                 content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合得分: {score:.1f}分 【{recommendation}】\n\n"
+                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
             
             # 添加页脚
             content += footer
@@ -566,6 +580,74 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         error_msg = f"生成溢价消息内容失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return [f"【溢价策略】生成消息内容时发生错误，请检查日志"]
+
+def _format_position_message(strategies: Dict[str, str]) -> List[str]:
+    """
+    格式化仓位策略消息，分页处理
+    
+    Args:
+        strategies: 策略字典
+    
+    Returns:
+        List[str]: 分页后的消息列表
+    """
+    try:
+        # 每页显示的策略数量
+        STRATEGIES_PER_PAGE = 1  # 每页只显示一个仓位类型
+        total_strategies = len(strategies)
+        total_pages = (total_strategies + STRATEGIES_PER_PAGE - 1) // STRATEGIES_PER_PAGE  # 向上取整
+        
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        
+        # 生成GitHub日志链接
+        log_url = get_github_actions_url()
+        
+        # 页脚模板
+        footer = (
+            "\n──────────────────\n"
+            f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "──────────────────\n"
+            f"🔗 数据来源: {log_url}\n"
+            "📊 环境：生产"
+        )
+        
+        messages = []
+        
+        # 第1页：封面页
+        if total_pages > 0:
+            page1 = (
+                "【ETF仓位操作提示】\n\n"
+                f"💓共{total_strategies}个仓位策略，分{total_pages}条消息推送，这是第一条消息\n\n"
+                "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
+                "⚠️ 风险提示：\n"
+                "• 操作建议仅供参考，不构成投资建议\n"
+                "• 市场有风险，投资需谨慎\n"
+                "• 请结合个人风险承受能力做出投资决策"
+                + footer
+            )
+            messages.append(page1)
+        
+        # 后续页：策略详情
+        for page in range(total_pages):
+            position_type = list(strategies.keys())[page]
+            strategy = strategies[position_type]
+            
+            # 生成当前页的策略详情
+            content = f"💓共{total_strategies}个仓位策略，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
+            content += f"【{position_type}】\n{strategy}\n"
+            
+            # 添加页脚
+            content += footer
+            messages.append(content)
+        
+        return messages
+    
+    except Exception as e:
+        error_msg = f"生成仓位消息内容失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return [f"【仓位策略】生成消息内容时发生错误，请检查日志"]
 
 def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> Union[str, List[str]]:
     """
@@ -586,6 +668,8 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
             return _format_discount_message(message)
         elif message_type == "premium" and isinstance(message, pd.DataFrame):
             return _format_premium_message(message)
+        elif message_type == "position" and isinstance(message, dict):
+            return _format_position_message(message)
         
         # 确保message是字符串
         if not isinstance(message, str):
@@ -625,14 +709,14 @@ def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str
             "⚠️ 注意: 消息格式化过程中发生错误"
         )
 
-def send_wechat_message(message: Union[str, pd.DataFrame], 
+def send_wechat_message(message: Union[str, pd.DataFrame, Dict], 
                        message_type: str = "default",
                        webhook: Optional[str] = None) -> bool:
     """
     发送消息到企业微信，自动应用消息模板
     
     Args:
-        message: 消息内容（纯业务内容，可以是字符串或DataFrame）
+        message: 消息内容（纯业务内容，可以是字符串、DataFrame或字典）
         message_type: 消息类型（task, discount, premium, position, error, daily_report等）
         webhook: 企业微信Webhook地址
         
@@ -653,6 +737,11 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
                 return False
             # 转换为字符串（使用更友好的格式）
             message = _format_dataframe_as_string(message)
+        elif isinstance(message, dict):
+            # 如果是字典，检查是否为空
+            if not message:
+                logger.warning("尝试发送空字典，已忽略")
+                return False
         elif not isinstance(message, str):
             message = str(message)
         
@@ -719,7 +808,7 @@ def send_wechat_message(message: Union[str, pd.DataFrame],
 
 def _format_dataframe_as_string(df: pd.DataFrame) -> str:
     """
-    将DataFrame格式化为更友好的字符串
+    将 DataFrame格式化为更友好的字符串
     
     Args:
         df: 要格式化的DataFrame

@@ -221,8 +221,18 @@ jobs:
             fi
           fi
           
-          # 提交折价状态文件（增量推送功能）- 修复：检查文件是否存在
+          # 提交套利数据文件
           if [[ "$TASK" == "calculate_arbitrage" ]]; then
+            echo "【增量推送】提交套利数据文件..."
+            git add data/arbitrage/
+            if ! git diff --quiet HEAD -- data/arbitrage/; then
+              git commit -m "【增量推送】自动更新套利数据文件 [${TRIGGER_TYPE}]"
+              git push origin main || echo "套利数据文件推送失败"
+              echo "套利数据文件提交成功"
+            else
+              echo "套利数据文件无变化，无需提交"
+            fi
+            
             echo "【增量推送】提交折价状态文件..."
             if [ -f "data/flags/discount_status.json" ]; then
               git add data/flags/discount_status.json

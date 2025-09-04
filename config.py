@@ -99,7 +99,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/{etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -168,6 +168,9 @@ class Config:
     # 明确区分折价和溢价阈值
     DISCOUNT_THRESHOLD: float = 0.5   # 折价阈值（0.5%）
     PREMIUM_THRESHOLD: float = 0.5    # 溢价阈值（0.5%）
+    
+    # 行业平均折价率（用于附加条件加分）
+    INDUSTRY_AVG_DISCOUNT: float = -0.15  # 行业平均折价率（-0.15%）
     
     # 显示阈值（用于消息中）
     MIN_DISCOUNT_DISPLAY_THRESHOLD: float = 0.3  # 显示折价机会的最小阈值（0.3%）
@@ -604,7 +607,8 @@ def _validate_critical_config():
             "MIN_PREMIUM_DISPLAY_THRESHOLD",  # 新增验证项
             "MIN_FUND_SIZE",  # 新增验证项
             "MIN_AVG_VOLUME",  # 新增验证项
-            "SCORE_WEIGHTS"  # 新增验证项
+            "SCORE_WEIGHTS",  # 新增验证项
+            "INDUSTRY_AVG_DISCOUNT"  # 新增验证项
         ]
         
         for config_name in critical_configs:
@@ -619,123 +623,4 @@ def _validate_critical_config():
                     logging.warning("已添加缺失的REQUEST_TIMEOUT配置项")
                 elif config_name == "ETFS_DAILY_DIR":
                     setattr(Config, "ETFS_DAILY_DIR", os.path.join(Config.DATA_DIR, "etf_daily"))
-                    logging.warning("已添加缺失的ETFS_DAILY_DIR配置项")
-                elif config_name == "UTC_TIMEZONE":
-                    setattr(Config, "UTC_TIMEZONE", timezone.utc)
-                    logging.warning("已添加缺失的UTC_TIMEZONE配置项")
-                elif config_name == "BEIJING_TIMEZONE":
-                    setattr(Config, "BEIJING_TIMEZONE", timezone(timedelta(hours=8)))
-                    logging.warning("已添加缺失的BEIJING_TIMEZONE配置项")
-                elif config_name == "STANDARD_COLUMNS":
-                    setattr(Config, "STANDARD_COLUMNS", list(Config.COLUMN_NAME_MAPPING.values()))
-                    logging.warning("已添加缺失的STANDARD_COLUMNS配置项")
-                elif config_name == "MIN_ARBITRAGE_DISPLAY_THRESHOLD":
-                    setattr(Config, "MIN_ARBITRAGE_DISPLAY_THRESHOLD", 3.0)
-                    logging.warning("已添加缺失的MIN_ARBITRAGE_DISPLAY_THRESHOLD配置项")
-                elif config_name == "ARBITRAGE_STATUS_FILE":
-                    setattr(Config, "ARBITRAGE_STATUS_FILE", os.path.join(Config.FLAG_DIR, "arbitrage_status.json"))
-                    logging.warning("已添加缺失的ARBITRAGE_STATUS_FILE配置项")
-                elif config_name == "DISCOUNT_STATUS_FILE":
-                    setattr(Config, "DISCOUNT_STATUS_FILE", os.path.join(Config.FLAG_DIR, "discount_status.json"))
-                    logging.warning("已添加缺失的DISCOUNT_STATUS_FILE配置项")
-                elif config_name == "PREMIUM_STATUS_FILE":
-                    setattr(Config, "PREMIUM_STATUS_FILE", os.path.join(Config.FLAG_DIR, "premium_status.json"))
-                    logging.warning("已添加缺失的PREMIUM_STATUS_FILE配置项")
-                elif config_name == "ARBITRAGE_SCORE_WEIGHTS":
-                    setattr(Config, "ARBITRAGE_SCORE_WEIGHTS", {
-                        'premium_discount': 0.30,
-                        'liquidity': 0.15,
-                        'risk': 0.15,
-                        'return': 0.10,
-                        'market_sentiment': 0.10,
-                        'fundamental': 0.10,
-                        'component_stability': 0.10
-                    })
-                    logging.warning("已添加缺失的ARBITRAGE_SCORE_WEIGHTS配置项")
-                elif config_name == "DISCOUNT_THRESHOLD":
-                    setattr(Config, "DISCOUNT_THRESHOLD", 0.5)
-                    logging.warning("已添加缺失的DISCOUNT_THRESHOLD配置项")
-                elif config_name == "PREMIUM_THRESHOLD":
-                    setattr(Config, "PREMIUM_THRESHOLD", 0.5)
-                    logging.warning("已添加缺失的PREMIUM_THRESHOLD配置项")
-                elif config_name == "ARBITRAGE_SCORE_THRESHOLD":
-                    setattr(Config, "ARBITRAGE_SCORE_THRESHOLD", 70.0)
-                    logging.warning("已添加缺失的ARBITRAGE_SCORE_THRESHOLD配置项")
-                elif config_name == "MIN_DISCOUNT_DISPLAY_THRESHOLD":
-                    setattr(Config, "MIN_DISCOUNT_DISPLAY_THRESHOLD", 0.3)
-                    logging.warning("已添加缺失的MIN_DISCOUNT_DISPLAY_THRESHOLD配置项")
-                elif config_name == "MIN_PREMIUM_DISPLAY_THRESHOLD":
-                    setattr(Config, "MIN_PREMIUM_DISPLAY_THRESHOLD", 0.3)
-                    logging.warning("已添加缺失的MIN_PREMIUM_DISPLAY_THRESHOLD配置项")
-                elif config_name == "MIN_FUND_SIZE":
-                    setattr(Config, "MIN_FUND_SIZE", 10.0)
-                    logging.warning("已添加缺失的MIN_FUND_SIZE配置项")
-                elif config_name == "MIN_AVG_VOLUME":
-                    setattr(Config, "MIN_AVG_VOLUME", 5000.0)
-                    logging.warning("已添加缺失的MIN_AVG_VOLUME配置项")
-                elif config_name == "SCORE_WEIGHTS":
-                    setattr(Config, "SCORE_WEIGHTS", {
-                        'liquidity': 0.20,
-                        'risk': 0.25,
-                        'return': 0.25,
-                        'sentiment': 0.15,
-                        'fundamental': 0.15
-                    })
-                    logging.warning("已添加缺失的SCORE_WEIGHTS配置项")
-    except Exception as e:
-        logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
-
-# 执行额外验证
-try:
-    _validate_critical_config()
-except Exception as e:
-    logging.error(f"配置验证过程中发生错误: {str(e)}", exc_info=True)
-
-# -------------------------
-# 检查环境变量
-# -------------------------
-try:
-    wecom_webhook = os.getenv("WECOM_WEBHOOK")
-    if wecom_webhook:
-        logging.info("检测到WECOM_WEBHOOK环境变量已设置")
-    else:
-        logging.warning("WECOM_WEBHOOK环境变量未设置，微信推送可能无法工作")
-        
-    # 确保Config中的WECOM_WEBHOOK与环境变量一致
-    Config.WECOM_WEBHOOK = wecom_webhook or ""
-except Exception as e:
-    logging.error(f"检查环境变量时出错: {str(e)}", exc_info=True)
-
-# -------------------------
-# 时区检查 - 修复：简化时区验证逻辑
-# -------------------------
-try:
-    # 尝试获取当前北京时间
-    from utils.date_utils import get_beijing_time, get_utc_time
-    beijing_time = get_beijing_time()
-    utc_time = get_utc_time()
-    
-    logging.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logging.info(f"当前UTC时间: {utc_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # 验证时区设置
-    if beijing_time.tzinfo is None or utc_time.tzinfo is None:
-        logging.warning("时区信息不完整，可能存在时区问题")
-    else:
-        logging.info(f"北京时间时区: {beijing_time.tzname()}")
-        logging.info(f"UTC时间时区: {utc_time.tzname()}")
-        
-        # 简化验证：直接检查时区偏移
-        beijing_offset = beijing_time.utcoffset().total_seconds() / 3600
-        utc_offset = utc_time.utcoffset().total_seconds() / 3600
-        time_diff = beijing_offset - utc_offset
-        
-        if abs(time_diff - 8) > 0.01:  # 允许0.01小时的误差
-            logging.warning(f"时区偏移不正确: 北京时间比UTC时间快 {time_diff:.2f} 小时")
-        else:
-            logging.info("时区设置验证通过")
-            
-except ImportError:
-    logging.warning("无法导入date_utils模块，时区检查跳过")
-except Exception as e:
-    logging.error(f"时区检查失败: {str(e)}", exc_info=True)
+      

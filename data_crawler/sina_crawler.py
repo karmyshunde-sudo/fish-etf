@@ -214,7 +214,8 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                     
                 elif col == "换手率" and "成交量" in df.columns and "成交额" in df.columns and "收盘" in df.columns:
                     # 计算换手率（近似计算）
-                    df[col] = (df["成交量"] / (df["成交额"] / df["收盘"]) * 100).round(4)
+                    # 由于成交额单位是元，需要转换为万元再计算
+                    df[col] = (df["成交量"] / (df["成交额"] / 10000 / df["收盘"]) * 100).round(4)
                     logger.debug(f"计算换手率列完成")
                     
                 else:
@@ -261,6 +262,11 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
             if col in df.columns:
                 # 使用.loc避免SettingWithCopyWarning
                 df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                
+                # 特殊处理成交额：将元转换为万元
+                if col == "成交额":
+                    df.loc[:, col] = df[col] / 10000
+                    df.loc[:, col] = df[col].round(2)  # 保留2位小数
         
         # 排序
         if "日期" in df.columns:

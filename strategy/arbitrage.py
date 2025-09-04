@@ -191,10 +191,16 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会（基于新评分机制）")
         
         return discount_opportunities, premium_opportunities
-    except Exception as e:
-        logger.error(f"计算套利机会失败: {str(e)}", exc_info=True)
-        return pd.DataFrame(), pd.DataFrame()
 
+    except Exception as e:
+        error_msg = f"计算套利机会失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        return pd.DataFrame()
+    
 def add_listing_date_info(df: pd.DataFrame) -> pd.DataFrame:
     """
     添加ETF上市日期信息

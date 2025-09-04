@@ -356,8 +356,8 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
                 # 取最近30天数据
                 recent_data = etf_df.tail(30)
                 if len(recent_data) > 0:
-                    # 转换为万元
-                    avg_volume = recent_data["成交额"].mean() / 10000
+                    # 修复：不再进行单位转换，因为data_crawler中已统一转换为"万元"
+                    avg_volume = recent_data["成交额"].mean()
             
             # 使用.loc避免SettingWithCopyWarning
             df.loc[idx, "基金规模"] = size
@@ -539,10 +539,10 @@ def calculate_daily_volume(etf_code: str) -> float:
             logger.debug(f"ETF {etf_code} 数据不足（{len(recent_data)}天），无法准确计算日均成交额")
             return 0.0
         
-        # 计算日均成交额（单位：万元）
+        # 计算日均成交额
         if "成交额" in recent_data.columns:
-            # 假设成交额单位是元，转换为万元
-            avg_volume = recent_data["成交额"].mean() / 10000
+            # 修复：不再进行单位转换，因为data_crawler中已统一转换为"万元"
+            avg_volume = recent_data["成交额"].mean()
             logger.debug(f"ETF {etf_code} 日均成交额: {avg_volume:.2f}万元（{len(recent_data)}天数据）")
             return avg_volume
         else:

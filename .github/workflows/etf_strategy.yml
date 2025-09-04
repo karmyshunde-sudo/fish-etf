@@ -18,12 +18,19 @@ on:
           - 'calculate_arbitrage'
           - 'calculate_position'
           - 'update_etf_list'
+          - 'clean_daily_data'
+          - 'clean_arbitrage_data'
+          - 'clean_trade_records'
 
 jobs:
   run_etf_task:
     if: >-
       (github.event_name == 'schedule') || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '')
+      (github.event_name == 'workflow_dispatch' && 
+       github.event.inputs.task != '' &&
+       github.event.inputs.task != 'clean_daily_data' &&
+       github.event.inputs.task != 'clean_arbitrage_data' &&
+       github.event.inputs.task != 'clean_trade_records')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -302,6 +309,183 @@ jobs:
             
             # 构建消息内容
             payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${TASK}]执行失败\\n触发方式: ${TRIGGER_TYPE}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志链接: ${LOG_URL}\\n\\n注意：套利增量推送任务不会因已推送而跳过，会持续检查新机会\"}}"
+            
+            # 发送企业微信通知
+            curl -s -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
+          fi
+
+  manual-clean-daily-data:
+    name: 手动清理日线数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_daily_data'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
+          
+      - name: 清理日线数据文件
+        run: |
+          echo "正在清理日线数据文件..."
+          rm -rf data/etf_daily/*.csv
+          echo "日线数据文件已清理完成"
+          
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 提交数据变更
+          git add data/etf_daily/
+          git commit -m "【手动清理】清除ETF日线数据文件"
+          git push origin main || echo "数据清理提交失败"
+          
+      - name: 发送清理完成通知
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            
+            # 构建消息内容
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            
+            # 发送企业微信通知
+            curl -s -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
+          fi
+
+  manual-clean-arbitrage-data:
+    name: 手动清理套利数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_arbitrage_data'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
+          
+      - name: 清理套利数据文件
+        run: |
+          echo "正在清理套利数据文件..."
+          rm -rf data/arbitrage/*.csv
+          echo "套利数据文件已清理完成"
+          
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 提交数据变更
+          git add data/arbitrage/
+          git commit -m "【手动清理】清除套利数据文件"
+          git push origin main || echo "数据清理提交失败"
+          
+      - name: 发送清理完成通知
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            
+            # 构建消息内容
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】套利数据文件已清理完成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            
+            # 发送企业微信通知
+            curl -s -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
+          fi
+
+  manual-clean-trade-records:
+    name: 手动清理交易记录
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_trade_records'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
+          
+      - name: 清理交易记录文件
+        run: |
+          echo "正在清理交易记录文件..."
+          rm -f data/trade_records.csv
+          echo "交易记录文件已清理完成"
+          
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 提交数据变更
+          git add data/trade_records.csv
+          git commit -m "【手动清理】清除交易记录文件"
+          git push origin main || echo "数据清理提交失败"
+          
+      - name: 发送清理完成通知
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            
+            # 构建消息内容
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】交易记录文件已清理完成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
             
             # 发送企业微信通知
             curl -s -X POST "$WECOM_WEBHOOK" \

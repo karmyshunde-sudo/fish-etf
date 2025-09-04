@@ -357,6 +357,32 @@ def _send_single_message(webhook: str, message: str, retry_count: int = 0) -> bo
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
         return False
 
+def _get_recommendation(score: float) -> str:
+    """
+    根据评分获取推荐级别
+    
+    Args:
+        score: ETF评分（0-100分）
+    
+    Returns:
+        str: 推荐级别
+    """
+    try:
+        score = float(score)
+        if score >= 80:
+            return "强烈推荐买入"
+        elif score >= 60:
+            return "推荐买入"
+        elif score >= 40:
+            return "可以考虑买入"
+        elif score >= 20:
+            return "观望"
+        else:
+            return "不建议买入"
+    except Exception as e:
+        logger.error(f"获取推荐级别失败: {str(e)}，使用默认值'不建议买入'")
+        return "不建议买入"
+
 def _format_discount_message(df: pd.DataFrame) -> List[str]:
     """
     格式化折价机会消息，分页处理
@@ -427,13 +453,16 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
                 score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
                 
+                # 获取推荐级别
+                recommendation = _get_recommendation(score)
+                
                 content += f"{i}. {etf_name} ({etf_code})\n"
                 content += f"   💹 折价率: {abs(premium_discount):.2f}%\n"
                 content += f"   📈 市场价格: {market_price:.3f}元\n"
                 content += f"   📊 IOPV: {iopv:.3f}元\n"
                 content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                 content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
+                content += f"   ⭐ 综合得分: {score:.1f}分 【{recommendation}】\n\n"
             
             # 添加页脚
             content += footer
@@ -516,13 +545,16 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
                 score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
                 
+                # 获取推荐级别
+                recommendation = _get_recommendation(score)
+                
                 content += f"{i}. {etf_name} ({etf_code})\n"
                 content += f"   💹 溢价率: {premium_discount:.2f}%\n"
                 content += f"   📈 市场价格: {market_price:.3f}元\n"
                 content += f"   📊 IOPV: {iopv:.3f}元\n"
                 content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                 content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
+                content += f"   ⭐ 综合得分: {score:.1f}分 【{recommendation}】\n\n"
             
             # 添加页脚
             content += footer

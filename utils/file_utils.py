@@ -974,6 +974,7 @@ def is_file_outdated(file_path: str, days: int) -> bool:
         file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
         
         # 获取当前时间
+        from utils.date_utils import get_beijing_time
         current_time = get_beijing_time()
         
         # 检查是否过期
@@ -982,21 +983,6 @@ def is_file_outdated(file_path: str, days: int) -> bool:
     except Exception as e:
         logger.error(f"检查文件是否过期失败: {str(e)}", exc_info=True)
         return True
-
-def get_beijing_time() -> datetime:
-    """
-    获取当前北京时间
-    
-    Returns:
-        datetime: 北京时间
-    """
-    try:
-        # 从config中获取时区
-        from config import Config
-        return datetime.now(Config.BEIJING_TIMEZONE)
-    except Exception as e:
-        logger.error(f"获取北京时间失败: {str(e)}", exc_info=True)
-        return datetime.now()
 
 def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str) -> None:
     """
@@ -1012,6 +998,7 @@ def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str) -> None:
         failed_file = os.path.join(etf_daily_dir, "failed_etfs.csv")
         
         # 获取当前时间
+        from utils.date_utils import get_beijing_time
         current_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
         
         # 检查文件是否存在
@@ -1047,6 +1034,7 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             return
         
         # 获取当前时间
+        from utils.date_utils import get_beijing_time
         current_time = get_beijing_time()
         
         # 遍历目录中的文件
@@ -1079,6 +1067,7 @@ def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
     """
     try:
         history = []
+        from utils.date_utils import get_beijing_time
         beijing_now = get_beijing_time()
         
         for i in range(days):
@@ -1123,6 +1112,7 @@ def save_etf_score_history(etf_code: str, score: float, rank: int) -> None:
             os.makedirs(Config.SCORE_HISTORY_DIR, exist_ok=True)
         
         # 获取当前日期
+        from utils.date_utils import get_beijing_time
         date = get_beijing_time().strftime("%Y-%m-%d")
         
         # 构建文件路径
@@ -1142,45 +1132,6 @@ def save_etf_score_history(etf_code: str, score: float, rank: int) -> None:
     
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 评分历史失败: {str(e)}", exc_info=True)
-
-def load_etf_metadata() -> pd.DataFrame:
-    """
-    加载ETF元数据
-    
-    Returns:
-        pd.DataFrame: ETF元数据
-    """
-    try:
-        # 检查元数据文件是否存在
-        if not os.path.exists(Config.METADATA_PATH):
-            logger.warning("ETF元数据文件不存在，将尝试创建")
-            # 尝试创建基础元数据
-            create_base_etf_metadata()
-            if not os.path.exists(Config.METADATA_PATH):
-                logger.error("ETF元数据文件创建失败")
-                return pd.DataFrame()
-        
-        # 加载元数据
-        df = pd.read_csv(Config.METADATA_PATH)
-        
-        # 确保使用中文列名
-        df = ensure_chinese_columns(df)
-        
-        # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "基金规模", "上市日期"]
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"ETF元数据缺少必要列: {col}")
-                return pd.DataFrame()
-        
-        # 确保ETF代码是6位字符串
-        df["ETF代码"] = df["ETF代码"].astype(str).str.strip().str.zfill(6)
-        
-        return df
-    
-    except Exception as e:
-        logger.error(f"加载ETF元数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
 
 # 模块初始化
 try:

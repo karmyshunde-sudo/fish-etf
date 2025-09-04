@@ -199,14 +199,13 @@ def retry_if_network_error(exception: Exception) -> bool:
        wait_exponential_multiplier=1000,
        wait_exponential_max=10000,
        retry_on_exception=retry_if_network_error)
-
 def fetch_all_etfs_akshare() -> pd.DataFrame:
     """使用AkShare接口获取ETF列表（带规模和成交额筛选）
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从AkShare获取ETF列表...")
-        # 调用fund_em_info接口
-        etf_info = ak.fund_em_info()
+        # 使用正确的接口：fund_etf_spot_em
+        etf_info = ak.fund_etf_spot_em()
         if etf_info.empty:
             logger.warning("AkShare返回空的ETF列表")
             return pd.DataFrame()
@@ -215,26 +214,19 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         logger.debug(f"AkShare返回列名: {list(etf_info.columns)}")
         
         # 标准化列名映射
-        column_mapping = {}
-        for col in etf_info.columns:
-            if "基金代码" in col or "代码" in col:
-                column_mapping[col] = "ETF代码"
-            elif "基金名称" in col or "名称" in col:
-                column_mapping[col] = "ETF名称"
-            elif "基金类型" in col or "类型" in col:
-                column_mapping[col] = "基金类型"
-            elif "成立日期" in col or "上市日期" in col or "日期" in col:
-                column_mapping[col] = "上市日期"
-            elif "基金规模" in col or "规模" in col:
-                column_mapping[col] = "基金规模"
-            elif "最新规模" in col:
-                column_mapping[col] = "基金规模"
-            elif "单位净值" in col:
-                column_mapping[col] = "单位净值"
-            elif "累计净值" in col:
-                column_mapping[col] = "累计净值"
-            elif "日增长率" in col:
-                column_mapping[col] = "日增长率"
+        column_mapping = {
+            "代码": "ETF代码",
+            "名称": "ETF名称",
+            "最新价": "最新价格",
+            "IOPV实时估值": "IOPV",
+            "基金折价率": "折溢价率",
+            "成交量": "成交量",
+            "成交额": "成交额",
+            "涨跌幅": "涨跌幅",
+            "涨跌额": "涨跌额",
+            "换手率": "换手率",
+            "更新时间": "更新时间"
+        }
         
         # 重命名列
         etf_info = etf_info.rename(columns=column_mapping)
@@ -249,25 +241,16 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
-        # 确保上市日期格式正确
-        if "上市日期" in valid_etfs.columns:
-            # 处理可能的日期格式，确保是YYYY-MM-DD
-            valid_etfs["上市日期"] = pd.to_datetime(valid_etfs["上市日期"], errors="coerce").dt.strftime("%Y-%m-%d")
-            # 处理NaT值
-            valid_etfs["上市日期"] = valid_etfs["上市日期"].fillna("")
+        # 添加上市日期列（从日线数据获取）
+        valid_etfs["上市日期"] = ""
         
         # 统一单位转换
-        # 1. 基金规模：假设原始数据单位是"亿元"，保持不变
-        if "基金规模" in valid_etfs.columns:
-            # 尝试提取数字部分
-            valid_etfs["基金规模"] = valid_etfs["基金规模"].astype(str).str.extract('([0-9.]+)', expand=False)
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
-            # 确保基金规模是数值类型
-            valid_etfs["基金规模"] = pd.to_numeric(valid_etfs["基金规模"], errors="coerce")
+        # 1. 基金规模：需要从日线数据获取，这里不处理
+        # 2. 成交额：假设原始数据单位是"元"，转换为"万元"
+        if "成交额" in valid_etfs.columns:
+            valid_etfs["成交额"] = pd.to_numeric(valid_etfs["成交额"], errors="coerce") / 10000
         
-        # 2. 日均成交额：需要从日线数据获取，这里不处理
-        
-        # 筛选条件：规模>10亿，但这里不筛选，因为规模数据可能不准确
+        # 筛选条件：规模>10亿，但这里不筛选，因为规模数据需要从日线数据获取
         # filtered_etfs = valid_etfs[valid_etfs["基金规模"] > 10].copy()
         
         # 如果没有ETF通过筛选，返回原始数据

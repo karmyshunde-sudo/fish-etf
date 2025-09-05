@@ -160,26 +160,59 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 获取最新的套利机会
-        # 修复：处理可能返回3个值的情况
-        result = get_arbitrage_data()
-        if isinstance(result, tuple) and len(result) == 3:
-            discount_opportunities, premium_opportunities, _ = result
-        elif isinstance(result, tuple) and len(result) == 2:
-            discount_opportunities, premium_opportunities = result
-        else:
-            logger.error(f"get_arbitrage_data() 返回值格式错误，期望2或3个值，实际返回: {result}")
+        # 获取所有的ETF数据（一个DataFrame）
+        all_opportunities = get_arbitrage_data()
+        
+        # 检查返回值类型
+        if not isinstance(all_opportunities, pd.DataFrame):
+            logger.error(f"get_arbitrage_data() 返回值类型错误，期望pd.DataFrame，实际返回: {type(all_opportunities)}")
             return pd.DataFrame(), pd.DataFrame()
         
-        if discount_opportunities.empty and premium_opportunities.empty:
+        if all_opportunities.empty:
             logger.info("未发现有效套利机会")
             return pd.DataFrame(), pd.DataFrame()
+        
+        # 确保DataFrame使用中文列名
+        all_opportunities = ensure_chinese_columns(all_opportunities)
+        
+        # 确保包含"折溢价率"列
+        if "折溢价率" not in all_opportunities.columns:
+            # 如果没有"折溢价率"列，尝试计算
+            if "市场价格" in all_opportunities.columns and "IOPV" in all_opportunities.columns:
+                logger.info("DataFrame缺少'折溢价率'列，尝试计算")
+                # 计算折溢价率
+                all_opportunities["折溢价率"] = ((all_opportunities["市场价格"] - all_opportunities["IOPV"]) / all_opportunities["IOPV"]) * 100
+            else:
+                logger.error("DataFrame缺少'折溢价率'列，且无法计算（缺少'市场价格'或'IOPV'列）")
+                return pd.DataFrame(), pd.DataFrame()
+        
+        # 拆分折价和溢价机会
+        # 折价：市场价格 < IOPV (折溢价率为负)
+        discount_opportunities = all_opportunities[all_opportunities["折溢价率"] <= -Config.DISCOUNT_THRESHOLD].copy()
+        
+        # 溢价：市场价格 > IOPV (折溢价率为正)
+        premium_opportunities = all_opportunities[all_opportunities["折溢价率"] >= Config.PREMIUM_THRESHOLD].copy()
+        
+        # 按折溢价率绝对值排序
+        if not discount_opportunities.empty:
+            discount_opportunities["abs_premium_discount"] = discount_opportunities["折溢价率"].abs()
+            discount_opportunities = discount_opportunities.sort_values("abs_premium_discount", ascending=False)
+            discount_opportunities = discount_opportunities.drop(columns=["abs_premium_discount"])
+        
+        if not premium_opportunities.empty:
+            premium_opportunities["abs_premium_discount"] = premium_opportunities["折溢价率"].abs()
+            premium_opportunities = premium_opportunities.sort_values("abs_premium_discount", ascending=False)
+            premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
+        
+        # 记录筛选结果
+        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
+        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
         
         # 添加规模和日均成交额信息
         discount_opportunities = add_etf_basic_info(discount_opportunities)
         premium_opportunities = add_etf_basic_info(premium_opportunities)
         
-        # 计算综合评分 - 关键修复：确保传递的是标量值
+        # 计算综合评分
         discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
         premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
         
@@ -310,7 +343,7 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
         # 为每只ETF添加基本信息
         for idx, row in df.iterrows():
             etf_code = row["ETF代码"]
-            size, _ = get_etf_basic_info(etf_code)
+            size = get_etf_basic_info(etf_code)
             
             # 计算日均成交额
             avg_volume = 0.0
@@ -697,7 +730,7 @@ def load_arbitrage_data(date_str: str) -> pd.DataFrame:
         logger.error(f"加载套利数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def get_latest_arbitrage_opportunities(max_retry: int = 3) -> pd.DataFrame:
     """
     获取最新的套利机会
     
@@ -705,7 +738,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         max_retry: 最大重试次数
     
     Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: (折价机会DataFrame, 溢价机会DataFrame)
+        pd.DataFrame: 套利机会DataFrame
     """
     try:
         # 获取当前日期
@@ -721,7 +754,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         # 检查数据完整性
         if df.empty:
             logger.warning("加载的套利数据为空")
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame()
         
         # 记录实际加载的列名用于诊断 (INFO级别)
         logger.info(f"成功加载套利数据，实际列名: {list(df.columns)}")
@@ -737,7 +770,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
             logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
             # 记录实际存在的列
             logger.info(f"实际列名: {list(df.columns)}")
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame()
         
         # 修复：在策略计算模块中计算正确的折溢价率
         # 正确的计算公式：(市场价格 - IOPV) / IOPV * 100
@@ -748,33 +781,11 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> Tuple[pd.DataFrame
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
         
-        # 正确的筛选条件 - 分离折价和溢价
-        # 折价机会：市场价格 < IOPV (折溢价率为负)
-        discount_opportunities = df[df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD].copy()
-        
-        # 溢价机会：市场价格 > IOPV (折溢价率为正)
-        premium_opportunities = df[df["折溢价率"] >= Config.PREMIUM_THRESHOLD].copy()
-        
-        # 按折溢价率绝对值排序
-        if not discount_opportunities.empty:
-            discount_opportunities["abs_premium_discount"] = discount_opportunities["折溢价率"].abs()
-            discount_opportunities = discount_opportunities.sort_values("abs_premium_discount", ascending=False)
-            discount_opportunities = discount_opportunities.drop(columns=["abs_premium_discount"])
-        
-        if not premium_opportunities.empty:
-            premium_opportunities["abs_premium_discount"] = premium_opportunities["折溢价率"].abs()
-            premium_opportunities = premium_opportunities.sort_values("abs_premium_discount", ascending=False)
-            premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
-        
-        # 记录筛选结果
-        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
-        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
-        
-        return discount_opportunities, premium_opportunities
+        return df
     
     except Exception as e:
         logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame()
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
     """
@@ -998,3 +1009,13 @@ except Exception as e:
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
         print(error_msg)
+    
+    # 发送错误通知
+    try:
+        from wechat_push.push import send_wechat_message
+        send_wechat_message(
+            message=f"套利策略模块初始化失败: {str(e)}",
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

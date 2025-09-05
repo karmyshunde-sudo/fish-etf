@@ -9,10 +9,11 @@ import akshare as ak
 import inspect
 import os
 import logging
+import time
 from datetime import datetime
 import traceback
 import sys
-import time
+
 
 # 配置日志
 logging.basicConfig(level=logging.ERROR)

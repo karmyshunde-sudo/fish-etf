@@ -589,7 +589,7 @@ jobs:
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
           
           # 创建Python脚本
-          cat > get_akshare_info.py << EOF
+          cat > get_akshare_info.py << 'END_OF_SCRIPT'
 import akshare as ak
 import inspect
 import os
@@ -636,7 +636,13 @@ for func_name in sorted(functions):
             elif func_name == 'stock_zh_a_hist':
                 result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
             elif func_name == 'stock_zh_a_hist_min':
-                result = ak.stock_zh_a_hist_min(symbol="sh000001", period="5", start_date="2020-01-01 09:30:00", end_date="2020-01-01 15:00:00")
+                # 简化长行，避免YAML解析问题
+                result = ak.stock_zh_a_hist_min(
+                    symbol="sh000001", 
+                    period="5", 
+                    start_date="2020-01-01 09:30:00", 
+                    end_date="2020-01-01 15:00:00"
+                )
             elif func_name == 'stock_zh_a_hist_hfq':
                 result = ak.stock_zh_a_hist_hfq(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
             elif func_name == 'stock_zh_a_hist_hfq_em':
@@ -689,7 +695,7 @@ with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
     f.write(output)
 
 print(f"AkShare信息已保存到 {output_dir}/{file_name}")
-EOF
+END_OF_SCRIPT
           
           # 运行Python脚本
           python get_akshare_info.py

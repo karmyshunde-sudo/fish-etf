@@ -391,6 +391,14 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 scores.append(0.0)
                 continue
             
+            # 检查必要列是否存在
+            required_columns = ["折溢价率", "市场价格", "IOPV"]
+            missing_columns = [col for col in required_columns if col not in row.index]
+            if missing_columns:
+                logger.warning(f"ETF {etf_code} 缺少必要列: {', '.join(missing_columns)}")
+                scores.append(0.0)
+                continue
+            
             # 使用辅助函数安全提取标量值
             premium_discount = extract_scalar_value(
                 row["折溢价率"],
@@ -398,7 +406,8 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             )
             
             # 从DataFrame行中提取所有必需参数
-            etf_name = extract_scalar_value(row["ETF名称"], log_prefix=f"ETF {etf_code} 名称: ")
+            # 修复：ETF名称是字符串，不应该使用extract_scalar_value
+            etf_name = row["ETF名称"]
             market_price = extract_scalar_value(row["市场价格"], log_prefix=f"ETF {etf_code} 市场价格: ")
             iopv = extract_scalar_value(row["IOPV"], log_prefix=f"ETF {etf_code} IOPV: ")
             fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")

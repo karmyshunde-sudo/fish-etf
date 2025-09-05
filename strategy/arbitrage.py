@@ -161,7 +161,16 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 获取最新的套利机会
-        discount_opportunities, premium_opportunities = get_arbitrage_data()
+        # 修复：处理可能返回3个值的情况
+        result = get_arbitrage_data()
+        if isinstance(result, tuple) and len(result) == 3:
+            discount_opportunities, premium_opportunities, _ = result
+        elif isinstance(result, tuple) and len(result) == 2:
+            discount_opportunities, premium_opportunities = result
+        else:
+            logger.error(f"get_arbitrage_data() 返回值格式错误，期望2或3个值，实际返回: {result}")
+            return pd.DataFrame(), pd.DataFrame()
+        
         if discount_opportunities.empty and premium_opportunities.empty:
             logger.info("未发现有效套利机会")
             return pd.DataFrame(), pd.DataFrame()

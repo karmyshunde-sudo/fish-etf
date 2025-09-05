@@ -424,22 +424,14 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
                 "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
                 f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
-                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
-                "⚠️ 风险提示：\n"
-                "1. 市场价格低于净值是短期现象，不一定能立即获利\n"
-                "2. 实际交易中可能因价格变动导致机会消失\n"
-                "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
-                "4. 本策略综合评分考虑了折溢价率、流动性、波动率、成分股稳定性等因素\n"
-                "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
-                "6. 本策略仅供参考，不构成投资建议"
-                + footer
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
             )
-            messages.append(page1)
+            messages.append(page1 + footer)
         
         # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
@@ -460,16 +452,15 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
                 score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
                 
-                # 获取推荐级别
-                recommendation = _get_recommendation(score)
-                
-                content += f"{i}. {etf_name} ({etf_code})\n"
-                content += f"   💹 折价率: {abs(premium_discount):.2f}%\n"
-                content += f"   📈 市场价格: {market_price:.3f}元\n"
-                content += f"   📊 IOPV: {iopv:.3f}元\n"
-                content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
-                content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
+                content += (
+                    f"{i}. {etf_name} ({etf_code})\n"
+                    f"   💹 折价率: {abs(premium_discount):.2f}%\n"
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
+                    f"   ⭐ 综合评分: {score:.1f}\n\n"
+                )
             
             # 添加页脚
             content += footer
@@ -523,22 +514,14 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格高于净值，若你只在二级市场交易注意规避风险】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
                 "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
                 f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
-                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}\n\n"
-                "⚠️ 风险提示：\n"
-                "1. 市场价格高于净值是短期现象，不一定能立即获利\n"
-                "2. 实际交易中可能因价格变动导致机会消失\n"
-                "3. 一级市场套利需要大额资金和特殊权限，散户无法直接操作\n"
-                "4. 本策略综合评分考虑了溢价率、流动性、波动率、成分股稳定性等因素\n"
-                "5. 请结合市场整体情况谨慎决策，避免因成分股问题导致的假性套利机会\n"
-                "6. 本策略仅供参考，不构成投资建议"
-                + footer
+                f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
             )
-            messages.append(page1)
+            messages.append(page1 + footer)
         
         # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
@@ -559,16 +542,15 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
                 score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
                 
-                # 获取推荐级别
-                recommendation = _get_recommendation(score)
-                
-                content += f"{i}. {etf_name} ({etf_code})\n"
-                content += f"   💹 溢价率: {premium_discount:.2f}%\n"
-                content += f"   📈 市场价格: {market_price:.3f}元\n"
-                content += f"   📊 IOPV: {iopv:.3f}元\n"
-                content += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
-                content += f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                content += f"   ⭐ 综合评分: {score:.1f}\n\n"
+                content += (
+                    f"{i}. {etf_name} ({etf_code})\n"
+                    f"   💹 溢价率: {premium_discount:.2f}%\n"
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
+                    f"   ⭐ 综合评分: {score:.1f}\n\n"
+                )
             
             # 添加页脚
             content += footer
@@ -619,15 +601,14 @@ def _format_position_message(strategies: Dict[str, str]) -> List[str]:
         if total_pages > 0:
             page1 = (
                 "【ETF仓位操作提示】\n\n"
-                f"💓共{total_strategies}个仓位策略，分{total_pages}条消息推送，这是第一条消息\n\n"
+                f"💓共{total_strategies}个仓位策略，分{total_pages}条消息推送，这是第1条消息\n\n"
                 "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
                 "⚠️ 风险提示：\n"
                 "• 操作建议仅供参考，不构成投资建议\n"
                 "• 市场有风险，投资需谨慎\n"
                 "• 请结合个人风险承受能力做出投资决策"
-                + footer
             )
-            messages.append(page1)
+            messages.append(page1 + footer)
         
         # 后续页：策略详情
         for page in range(total_pages):
@@ -649,10 +630,10 @@ def _format_position_message(strategies: Dict[str, str]) -> List[str]:
         logger.error(error_msg, exc_info=True)
         return [f"【仓位策略】生成消息内容时发生错误，请检查日志"]
 
-def _apply_message_template(message: Union[str, pd.DataFrame], message_type: str) -> Union[str, List[str]]:
+def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_type: str) -> Union[str, List[str]]:
     """
     应用对应类型的消息模板
-    :param message: 原始消息内容（可以是字符串或DataFrame）
+    :param message: 原始消息内容（可以是字符串、DataFrame或字典）
     :param message_type: 消息类型
     :return: 格式化后的消息（字符串或消息列表）
     """

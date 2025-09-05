@@ -23,6 +23,11 @@ on:
           - 'clean_trade_records'
           - 'clean_numeric_csv'
           - 'show_akshare_info'  # 新增：显示AkShare信息
+      interface_name:
+        description: 'AkShare接口名称（可选）'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   run_etf_task:
@@ -588,8 +593,15 @@ jobs:
           # 获取北京时间（格式：YYYYMMDD）
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
           
+          # 获取用户输入的接口名称
+          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+          
           # 运行预定义的脚本（直接调用已存在的data_crawler/get_akshare_info.py）
-          python data_crawler/get_akshare_info.py $BEIJING_DATE
+          if [ -z "$INTERFACE_NAME" ]; then
+            python data_crawler/get_akshare_info.py $BEIJING_DATE
+          else
+            python data_crawler/get_akshare_info.py $BEIJING_DATE "$INTERFACE_NAME"
+          fi
           
           # 检查文件是否创建成功
           if [ -f "data/flags/${BEIJING_DATE}akshare_info.txt" ]; then
@@ -617,9 +629,14 @@ jobs:
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
             BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
+            INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
             
             # 构建消息内容
-            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
+            if [ -z "$INTERFACE_NAME" ]; then
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
+            else
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】已查询AkShare接口信息\\n接口名称: ${INTERFACE_NAME}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            fi
             
             # 发送企业微信通知
             curl -s -X POST "$WECOM_WEBHOOK" \

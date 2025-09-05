@@ -588,38 +588,17 @@ jobs:
             echo "警告: requirements.txt 文件不存在"
           fi
           
-      - name: 获取AkShare信息并保存
+      - name: 获取AkShare信息
         run: |
-          # 获取北京时间（格式：YYYYMMDD）
-          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
-          
           # 获取用户输入的接口名称
           INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
           
-          # 运行预定义的脚本（直接调用已存在的data_crawler/get_akshare_info.py）
+          # 运行脚本
           if [ -z "$INTERFACE_NAME" ]; then
-            python data_crawler/get_akshare_info.py $BEIJING_DATE
+            python data_crawler/get_akshare_info.py
           else
-            python data_crawler/get_akshare_info.py $BEIJING_DATE "$INTERFACE_NAME"
+            python data_crawler/get_akshare_info.py "$INTERFACE_NAME"
           fi
-          
-          # 检查文件是否创建成功
-          if [ -f "data/flags/${BEIJING_DATE}akshare_info.txt" ]; then
-            echo "文件创建成功"
-          else
-            echo "文件创建失败"
-            exit 1
-          fi
-          
-      - name: 提交AkShare信息文件
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          # 提交数据变更
-          git add data/flags/${BEIJING_DATE}akshare_info.txt
-          git commit -m "【手动任务】更新AkShare信息文件"
-          git push origin main || echo "AkShare信息文件提交失败"
           
       - name: 发送完成通知
         env:
@@ -628,12 +607,11 @@ jobs:
           if [ -n "$WECOM_WEBHOOK" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
-            BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
             INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
             
             # 构建消息内容
             if [ -z "$INTERFACE_NAME" ]; then
-              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
             else
               payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】已查询AkShare接口信息\\n接口名称: ${INTERFACE_NAME}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
             fi

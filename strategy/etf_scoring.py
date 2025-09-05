@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import logging
 import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
 from config import Config
@@ -532,7 +533,8 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         
         # 确保权重和为1
         total_weight = sum(weights.values())
-        if total_weight != 1.0:
+        # 修复：使用容差比较浮点数
+        if abs(total_weight - 1.0) > 1e-10:
             logger.warning(f"权重和不为1 ({total_weight:.2f})，自动调整")
             for key in weights:
                 weights[key] = weights[key] / total_weight
@@ -789,7 +791,8 @@ def calculate_arbitrage_score(etf_code: str,
         
         # 确保权重和为1
         total_weight = sum(weights.values())
-        if total_weight != 1.0:
+        # 修复：使用容差比较浮点数
+        if abs(total_weight - 1.0) > 1e-10:
             logger.warning(f"权重和不为1 ({total_weight:.2f})，自动调整")
             for key in weights:
                 weights[key] = weights[key] / total_weight

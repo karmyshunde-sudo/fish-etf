@@ -21,7 +21,8 @@ on:
           - 'clean_daily_data'
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
-          - 'clean_numeric_csv'  # 新增：清理纯数字CSV文件
+          - 'clean_numeric_csv'
+          - 'show_akshare_info'  # 新增：显示AkShare信息
 
 jobs:
   run_etf_task:
@@ -32,7 +33,8 @@ jobs:
        github.event.inputs.task != 'clean_daily_data' &&
        github.event.inputs.task != 'clean_arbitrage_data' &&
        github.event.inputs.task != 'clean_trade_records' &&
-       github.event.inputs.task != 'clean_numeric_csv')
+       github.event.inputs.task != 'clean_numeric_csv' &&
+       github.event.inputs.task != 'show_akshare_info')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -307,7 +309,7 @@ jobs:
             TASK="${{ env.TASK }}"
             
             # 获取任务执行日志链接
-            LOG_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            LOG_URL="https://github.com/  ${{ github.repository }}/actions/runs/${{ github.run_id }}"
             
             # 构建消息内容
             payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${TASK}]执行失败\\n触发方式: ${TRIGGER_TYPE}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志链接: ${LOG_URL}\\n\\n注意：套利增量推送任务不会因已推送而跳过，会持续检查新机会\"}}"
@@ -548,6 +550,179 @@ jobs:
             
             # 构建消息内容
             payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            
+            # 发送企业微信通知
+            curl -s -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
+          fi
+
+  show-akshare-info:
+    name: 显示AkShare信息
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
+          
+      - name: 获取AkShare信息并保存
+        run: |
+          # 获取北京时间
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
+          
+          # 创建Python脚本
+          cat > get_akshare_info.py << EOF
+import akshare as ak
+import inspect
+import os
+import logging
+from datetime import datetime
+import traceback
+
+# 配置日志
+logging.basicConfig(level=logging.ERROR)
+
+# 获取akshare版本
+version = ak.__version__
+
+# 获取所有可用函数
+functions = []
+for name, obj in inspect.getmembers(ak):
+    if inspect.isfunction(obj) and not name.startswith('_'):
+        functions.append(name)
+
+# 准备输出内容
+output = f"AkShare Version: {version}\\n"
+output += f"Total Functions: {len(functions)}\\n\\n"
+output += "=" * 50 + "\\n"
+output += "Available Functions and Their Columns\\n"
+output += "=" * 50 + "\\n\\n"
+
+# 获取每个函数返回的列名
+for func_name in sorted(functions):
+    try:
+        func = getattr(ak, func_name)
+        
+        # 尝试调用函数
+        try:
+            # 尝试无参数调用
+            result = func()
+        except TypeError:
+            # 如果函数需要参数，尝试一些常见参数
+            if func_name == 'fund_etf_hist_sina':
+                result = ak.fund_etf_hist_sina(symbol="etf")
+            elif func_name == 'fund_etf_spot_em':
+                result = ak.fund_etf_spot_em()
+            elif func_name == 'fund_aum_em':
+                result = ak.fund_aum_em()
+            elif func_name == 'stock_zh_a_hist':
+                result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+            elif func_name == 'stock_zh_a_hist_min':
+                result = ak.stock_zh_a_hist_min(symbol="sh000001", period="5", start_date="2020-01-01 09:30:00", end_date="2020-01-01 15:00:00")
+            elif func_name == 'stock_zh_a_hist_hfq':
+                result = ak.stock_zh_a_hist_hfq(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+            elif func_name == 'stock_zh_a_hist_hfq_em':
+                result = ak.stock_zh_a_hist_hfq_em(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+            elif func_name == 'stock_zh_a_minute':
+                result = ak.stock_zh_a_minute(symbol="sh000001", period="5", adjust="qfq")
+            elif func_name == 'stock_zh_a_daily':
+                result = ak.stock_zh_a_daily(symbol="sh000001", adjust="qfq")
+            elif func_name == 'stock_zh_a_spot_em':
+                result = ak.stock_zh_a_spot_em()
+            elif func_name == 'stock_zh_a_hist':
+                result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+            elif func_name == 'fund_etf_hist_em':
+                result = ak.fund_etf_hist_em()
+            elif func_name == 'fund_etf_iopv_em':
+                result = ak.fund_etf_iopv_em()
+            else:
+                result = None
+        
+        # 如果结果是DataFrame，获取列名
+        if result is not None and hasattr(result, 'columns'):
+            columns = ", ".join(result.columns)
+            output += f"{func_name}:\\n"
+            output += f"  Columns: {columns}\\n\\n"
+        else:
+            output += f"{func_name}:\\n"
+            output += "  Result: DataFrame not returned or function requires specific parameters\\n\\n"
+    except Exception as e:
+        output += f"{func_name}:\\n"
+        output += f"  Error: {str(e)}\\n"
+        output += f"  Traceback: {traceback.format_exc()}\\n\\n"
+
+# 获取当前北京时间
+beijing_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# 添加时间戳
+output += "=" * 50 + "\\n"
+output += f"Generated on: {beijing_time} (Beijing Time)\\n"
+output += "=" * 50 + "\\n"
+
+# 保存到文件
+file_name = f"{BEIJING_DATE}akshare_info.txt"
+output_dir = "data/flags"
+
+# 确保目录存在
+os.makedirs(output_dir, exist_ok=True)
+
+# 写入文件
+with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
+    f.write(output)
+
+print(f"AkShare信息已保存到 {output_dir}/{file_name}")
+EOF
+          
+          # 运行Python脚本
+          python get_akshare_info.py
+          
+          # 检查文件是否创建成功
+          if [ -f "data/flags/${BEIJING_DATE}akshare_info.txt" ]; then
+            echo "文件创建成功"
+          else
+            echo "文件创建失败"
+            exit 1
+          fi
+          
+      - name: 提交AkShare信息文件
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 提交数据变更
+          git add data/flags/${BEIJING_DATE}akshare_info.txt
+          git commit -m "【手动任务】更新AkShare信息文件"
+          git push origin main || echo "AkShare信息文件提交失败"
+          
+      - name: 发送完成通知
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
+            
+            # 构建消息内容
+            payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
             
             # 发送企业微信通知
             curl -s -X POST "$WECOM_WEBHOOK" \

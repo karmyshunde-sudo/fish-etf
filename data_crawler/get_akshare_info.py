@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 获取AkShare信息工具
-输出AkShare版本、所有可用接口及其返回的列名
+注意：这不是项目的主程序，而是被工作流调用的工具脚本
 """
 
 import akshare as ak
@@ -18,12 +18,20 @@ logging.basicConfig(level=logging.ERROR)
 
 # 获取akshare版本
 version = ak.__version__
+print(f"🚀 开始获取AkShare信息...")
+print(f"✅ AkShare版本: {version}")
 
-# 获取所有可用函数
+# 获取所有可用函数 - 这是关键部分，通过inspect模块获取akshare中所有公共函数
+print("🔍 正在扫描所有可用接口...")
+start_time = time.time()
+
 functions = []
 for name, obj in inspect.getmembers(ak):
     if inspect.isfunction(obj) and not name.startswith('_'):
         functions.append(name)
+
+elapsed = time.time() - start_time
+print(f"✅ 共找到 {len(functions)} 个可用接口 (耗时: {elapsed:.2f} 秒)")
 
 # 按字母顺序排序
 functions = sorted(functions)
@@ -59,35 +67,40 @@ file_path = os.path.join(output_dir, file_name)
 with open(file_path, "w", encoding="utf-8") as f:
     f.write(output)
 
-print(f"AkShare信息已保存到 {file_path}")
-print(f"当前AkShare版本: {version}")
-print(f"可用接口总数: {len(functions)}")
-print(f"完整接口列表已保存至: {file_path}")
-print("提示: 您可以查看上述文件获取所有可用接口列表")
-print("如需查询特定接口的列名，请使用: python get_akshare_info.py 接口名称")
+print(f"📁 AkShare信息已保存到 {file_path}")
+print(f"📌 提示: 完整接口列表已保存至: {file_path}")
 
 # 如果提供了接口名称参数，打印该接口的列名
 if len(sys.argv) > 1 and sys.argv[1].strip() != "":
     interface_name = sys.argv[1].strip()
-    print(f"\n查询接口: {interface_name}")
+    print(f"\n🔍 开始查询接口: {interface_name}")
     
     if interface_name in functions:
         try:
             # 尝试调用函数
             try:
                 # 尝试无参数调用
+                print(f"  📡 尝试无参数调用接口 {interface_name}...")
                 result = getattr(ak, interface_name)()
+                print(f"  ✅ 接口 {interface_name} 调用成功")
             except TypeError:
                 # 如果函数需要参数，尝试一些常见参数
+                print(f"  ⚠️ 接口 {interface_name} 需要参数，尝试常见参数...")
+                
                 if interface_name == 'fund_etf_hist_sina':
+                    print("  📡 尝试调用: fund_etf_hist_sina(symbol='etf')")
                     result = ak.fund_etf_hist_sina(symbol="etf")
                 elif interface_name == 'fund_etf_spot_em':
+                    print("  📡 尝试调用: fund_etf_spot_em()")
                     result = ak.fund_etf_spot_em()
                 elif interface_name == 'fund_aum_em':
+                    print("  📡 尝试调用: fund_aum_em()")
                     result = ak.fund_aum_em()
                 elif interface_name == 'stock_zh_a_hist':
+                    print("  📡 尝试调用: stock_zh_a_hist(symbol='sh000001', period='daily', start_date='20200101', end_date='20200110')")
                     result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_hist_min':
+                    print("  📡 尝试调用: stock_zh_a_hist_min(...)")
                     result = ak.stock_zh_a_hist_min(
                         symbol="sh000001", 
                         period="5", 
@@ -95,33 +108,45 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                         end_date="2020-01-01 15:00:00"
                     )
                 elif interface_name == 'stock_zh_a_hist_hfq':
+                    print("  📡 尝试调用: stock_zh_a_hist_hfq(...)")
                     result = ak.stock_zh_a_hist_hfq(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_hist_hfq_em':
+                    print("  📡 尝试调用: stock_zh_a_hist_hfq_em(...)")
                     result = ak.stock_zh_a_hist_hfq_em(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_minute':
+                    print("  📡 尝试调用: stock_zh_a_minute(...)")
                     result = ak.stock_zh_a_minute(symbol="sh000001", period="5", adjust="qfq")
                 elif interface_name == 'stock_zh_a_daily':
+                    print("  📡 尝试调用: stock_zh_a_daily(...)")
                     result = ak.stock_zh_a_daily(symbol="sh000001", adjust="qfq")
                 elif interface_name == 'stock_zh_a_spot_em':
+                    print("  📡 尝试调用: stock_zh_a_spot_em()")
                     result = ak.stock_zh_a_spot_em()
                 elif interface_name == 'stock_zh_a_hist':
+                    print("  📡 尝试调用: stock_zh_a_hist(...)")
                     result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'fund_etf_hist_em':
+                    print("  📡 尝试调用: fund_etf_hist_em()")
                     result = ak.fund_etf_hist_em()
                 elif interface_name == 'fund_etf_iopv_em':
+                    print("  📡 尝试调用: fund_etf_iopv_em()")
                     result = ak.fund_etf_iopv_em()
                 else:
+                    print(f"  ⚠️ 接口 {interface_name} 需要特定参数，但未在预定义列表中")
                     result = None
             
             # 如果结果是DataFrame，打印列名
             if result is not None and hasattr(result, 'columns'):
                 columns = ", ".join(result.columns)
-                print(f"Columns: {columns}")
+                print(f"  🗂️ 列名: {columns}")
             else:
-                print("Result: DataFrame not returned or function requires specific parameters")
+                print("  📊 结果: 未返回DataFrame或需要特定参数")
         except Exception as e:
-            print(f"Error: {str(e)}")
-            print(f"Traceback: {traceback.format_exc()}")
+            print(f"  ❌ 接口 {interface_name} 调用失败: {str(e)}")
+            print(f"  📝 Traceback: {traceback.format_exc()}")
     else:
-        print(f"Error: Interface '{interface_name}' not found in AkShare")
-        print(f"提示: 当前版本AkShare共有 {len(functions)} 个可用接口，您可以查看 {file_path} 获取完整列表")
+        print(f"  ❌ 错误: 接口 '{interface_name}' 未在AkShare中找到")
+        print(f"  📌 提示: 当前版本AkShare共有 {len(functions)} 个可用接口，您可以查看 {file_path} 获取完整列表")
+else:
+    print("\nℹ️ 提示: 如需查询特定接口的列名，请使用: python get_akshare_info.py 接口名称")
+    print("   例如: python get_akshare_info.py fund_aum_em")

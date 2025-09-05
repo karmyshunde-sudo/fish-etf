@@ -175,23 +175,52 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         # 确保DataFrame使用中文列名
         all_opportunities = ensure_chinese_columns(all_opportunities)
         
-        # 确保包含"折溢价率"列
-        if "折溢价率" not in all_opportunities.columns:
-            # 如果没有"折溢价率"列，尝试计算
-            if "市场价格" in all_opportunities.columns and "IOPV" in all_opportunities.columns:
-                logger.info("DataFrame缺少'折溢价率'列，尝试计算")
-                # 计算折溢价率
-                all_opportunities["折溢价率"] = ((all_opportunities["市场价格"] - all_opportunities["IOPV"]) / all_opportunities["IOPV"]) * 100
-            else:
-                logger.error("DataFrame缺少'折溢价率'列，且无法计算（缺少'市场价格'或'IOPV'列）")
-                return pd.DataFrame(), pd.DataFrame()
+        # 标准化列名 - 处理可能的空格问题
+        all_opportunities.columns = [col.strip() for col in all_opportunities.columns]
+        
+        # ===== 关键修复：确保必要列存在 =====
+        # 必须有"ETF代码"、"ETF名称"、"市场价格"和"IOPV"列
+        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+        missing_columns = [col for col in required_columns if col not in all_opportunities.columns]
+        
+        if missing_columns:
+            logger.error(f"DataFrame缺少必要列: {', '.join(missing_columns)}")
+            # 记录实际存在的列
+            logger.info(f"实际列名: {list(all_opportunities.columns)}")
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # ===== 关键修复：始终基于原始数据重新计算折溢价率 =====
+        # 不依赖可能不可靠的外部计算值
+        # 创建一个新的DataFrame，只保留必要列
+        valid_opportunities = all_opportunities[required_columns].copy()
+        
+        # 从原始数据重新计算折溢价率
+        # 确保IOPV不为零
+        valid_opportunities = valid_opportunities[valid_opportunities["IOPV"] > 0]
+        
+        # 计算折溢价率
+        valid_opportunities["折溢价率"] = (
+            (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / valid_opportunities["IOPV"]
+        ) * 100
+        
+        # 处理异常值
+        valid_opportunities = valid_opportunities[
+            (valid_opportunities["折溢价率"] >= -30) & (valid_opportunities["折溢价率"] <= 30)
+        ]
+        
+        # 记录筛选前的统计信息
+        logger.info(f"筛选前数据量: {len(valid_opportunities)}，折溢价率范围: {valid_opportunities['折溢价率'].min():.2f}% ~ {valid_opportunities['折溢价率'].max():.2f}%")
         
         # 拆分折价和溢价机会
         # 折价：市场价格 < IOPV (折溢价率为负)
-        discount_opportunities = all_opportunities[all_opportunities["折溢价率"] <= -Config.DISCOUNT_THRESHOLD].copy()
+        discount_opportunities = valid_opportunities[
+            valid_opportunities["折溢价率"] <= -Config.DISCOUNT_THRESHOLD
+        ].copy()
         
         # 溢价：市场价格 > IOPV (折溢价率为正)
-        premium_opportunities = all_opportunities[all_opportunities["折溢价率"] >= Config.PREMIUM_THRESHOLD].copy()
+        premium_opportunities = valid_opportunities[
+            valid_opportunities["折溢价率"] >= Config.PREMIUM_THRESHOLD
+        ].copy()
         
         # 按折溢价率绝对值排序
         if not discount_opportunities.empty:
@@ -391,11 +420,12 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 scores.append(0.0)
                 continue
             
-            # 检查必要列是否存在
+            # 检查必要列是否存在 - 现在应该总是存在，因为我们在早期阶段已验证
+            # 但还是做一下检查以确保数据完整性
             required_columns = ["折溢价率", "市场价格", "IOPV"]
             missing_columns = [col for col in required_columns if col not in row.index]
             if missing_columns:
-                logger.warning(f"ETF {etf_code} 缺少必要列: {', '.join(missing_columns)}")
+                logger.error(f"ETF {etf_code} 缺少必要列: {', '.join(missing_columns)}")
                 scores.append(0.0)
                 continue
             

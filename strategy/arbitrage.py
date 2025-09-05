@@ -189,24 +189,26 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             logger.info(f"实际列名: {list(all_opportunities.columns)}")
             return pd.DataFrame(), pd.DataFrame()
         
-        # ===== 关键修复：始终基于原始数据重新计算折溢价率 =====
-        # 不依赖可能不可靠的外部计算值
-        # 创建一个新的DataFrame，只保留必要列
-        valid_opportunities = all_opportunities[required_columns].copy()
+        # ===== 关键修复：确保数据有效性 =====
+        # 1. 确保IOPV有效（大于最小阈值）
+        MIN_IOPV = 0.01  # 最小IOPV阈值
+        valid_opportunities = all_opportunities[all_opportunities["IOPV"] > MIN_IOPV].copy()
         
-        # 从原始数据重新计算折溢价率
-        # 确保IOPV不为零
-        valid_opportunities = valid_opportunities[valid_opportunities["IOPV"] > 0]
+        # 2. 确保市场价格有效
+        valid_opportunities = valid_opportunities[valid_opportunities["市场价格"] > 0].copy()
         
-        # 计算折溢价率
+        # 3. 从原始数据重新计算折溢价率（不依赖可能不可靠的外部计算值）
         valid_opportunities["折溢价率"] = (
             (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / valid_opportunities["IOPV"]
         ) * 100
         
-        # 处理异常值
-        valid_opportunities = valid_opportunities[
-            (valid_opportunities["折溢价率"] >= -30) & (valid_opportunities["折溢价率"] <= 30)
-        ]
+        # 4. 限制折溢价率在合理范围内
+        MAX_DISCOUNT = -30.0  # 最大折价率（-30%）
+        MAX_PREMIUM = 30.0    # 最大溢价率（30%）
+        valid_opportunities["折溢价率"] = valid_opportunities["折溢价率"].clip(
+            lower=MAX_DISCOUNT, 
+            upper=MAX_PREMIUM
+        )
         
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(valid_opportunities)}，折溢价率范围: {valid_opportunities['折溢价率'].min():.2f}% ~ {valid_opportunities['折溢价率'].max():.2f}%")
@@ -420,8 +422,7 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 scores.append(0.0)
                 continue
             
-            # 检查必要列是否存在 - 现在应该总是存在，因为我们在早期阶段已验证
-            # 但还是做一下检查以确保数据完整性
+            # 检查必要列是否存在
             required_columns = ["折溢价率", "市场价格", "IOPV"]
             missing_columns = [col for col in required_columns if col not in row.index]
             if missing_columns:

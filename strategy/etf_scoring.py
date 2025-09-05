@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 import logging
 import os
-import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Union
 from config import Config
@@ -31,7 +30,6 @@ logger = logging.getLogger(__name__)
 DATE_COL = "日期" if "日期" in Config.STANDARD_COLUMNS else "date"
 CLOSE_COL = "收盘" if "收盘" in Config.STANDARD_COLUMNS else "close"
 AMOUNT_COL = "成交额" if "成交额" in Config.STANDARD_COLUMNS else "amount"
-PREMIUM_DISCOUNT_COL = "折溢价率"  # 添加折溢价率列常量
 ETF_CODE_COL = "ETF代码"
 FUND_SIZE_COL = "基金规模"
 
@@ -377,15 +375,19 @@ def calculate_volatility(df: pd.DataFrame) -> float:
             logger.error(f"数据中缺少必要列: {CLOSE_COL}")
             return 0.0
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
+        # 检查收盘价列是否为数值类型
+        if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
+            try:
+                df[CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+            except Exception as e:
+                logger.error(f"收盘价列转换失败: {str(e)}")
+                return 0.2  # 默认波动率
         
         # 计算日收益率
-        df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
+        df["daily_return"] = df[CLOSE_COL].pct_change()
         
         # 处理NaN值
         if "daily_return" in df.columns:
-            df["daily_return"] = pd.to_numeric(df["daily_return"], errors='coerce')
             df = df.dropna(subset=["daily_return"])
         
         # 计算年化波动率
@@ -432,7 +434,8 @@ def get_etf_basic_info(etf_code: str) -> float:
         
         # 确保ETF列表中的ETF代码也是6位数字
         etf_list = etf_list.copy()  # 创建副本避免SettingWithCopyWarning
-        etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).str.strip().str.zfill(6)
+        # 修复：使用apply方法处理每个值，避免FutureWarning
+        etf_list[ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).apply(lambda x: x.strip().zfill(6))
         
         etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         if not etf_row.empty:
@@ -716,14 +719,14 @@ def calculate_arbitrage_score(etf_code: str,
             # 确保有足够的历史数据
             if len(historical_data) >= 2:
                 # 检查"折溢价率"列是否存在
-                if PREMIUM_DISCOUNT_COL in historical_data.columns:
+                if "折溢价率" in historical_data.columns:
                     # 获取前一天的折溢价率
-                    prev_premium = historical_data[PREMIUM_DISCOUNT_COL].iloc[-2]
+                    prev_premium = historical_data["折溢价率"].iloc[-2]
                     # 检查前一天是否也是折价
                     if prev_premium < 0:
                         consecutive_discount_bonus = 10
                 else:
-                    logger.warning(f"ETF {etf_code} 历史数据中缺少{PREMIUM_DISCOUNT_COL}列，无法判断连续折价")
+                    logger.warning(f"ETF {etf_code} 历史数据中缺少'折溢价率'列，无法判断连续折价")
         
         # 2. 行业平均折价：额外+5分
         # 这里可以添加行业平均折价率的计算逻辑

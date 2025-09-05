@@ -600,6 +600,29 @@ jobs:
             python data_crawler/get_akshare_info.py "$INTERFACE_NAME"
           fi
           
+      - name: 检查文件是否创建成功
+        run: |
+          # 获取当前北京时间（格式：YYYYMMDD）
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
+          
+          # 检查文件是否创建成功
+          if [ -f "data/flags/${BEIJING_DATE}akshare_info.txt" ]; then
+            echo "文件创建成功"
+          else
+            echo "文件创建失败"
+            exit 1
+          fi
+          
+      - name: 提交AkShare信息文件
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 提交数据变更
+          git add data/flags/*.txt
+          git commit -m "【手动任务】更新AkShare信息文件"
+          git push origin main || echo "AkShare信息文件提交失败"
+          
       - name: 发送完成通知
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -608,10 +631,11 @@ jobs:
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
             INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+            BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y%m%d')
             
             # 构建消息内容
             if [ -z "$INTERFACE_NAME" ]; then
-              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
             else
               payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】已查询AkShare接口信息\\n接口名称: ${INTERFACE_NAME}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
             fi

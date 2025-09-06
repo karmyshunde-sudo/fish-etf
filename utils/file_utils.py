@@ -159,6 +159,24 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         logger.error(f"确保中文列名失败: {str(e)}", exc_info=True)
         return df
 
+def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    标准化列名（英文转中文）
+    这是ensure_chinese_columns的别名，用于明确表示在数据爬取上下文中的用途
+    
+    Args:
+        df: 输入DataFrame
+    
+    Returns:
+        pd.DataFrame: 标准化列名后的DataFrame
+    """
+    try:
+        return ensure_chinese_columns(df)
+    
+    except Exception as e:
+        logger.error(f"标准化列名失败: {str(e)}", exc_info=True)
+        return df
+
 def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
     """
     获取ETF最后爬取的日期

@@ -183,9 +183,9 @@ def crawl_etf_daily_incremental() -> None:
                 with open(completed_file, "a", encoding="utf-8") as f:
                     f.write(f"{etf_code}\n")
                 
-                # 限制请求频率
-                time.sleep(Config.CRAWL_INTERVAL)
-            
+                # 限制请求频率 - 修复：使用硬编码值代替Config.CRAWL_INTERVAL
+                time.sleep(3)  # 默认3秒间隔
+                
             # 批次间暂停
             if batch_idx < num_batches - 1:
                 logger.info(f"批次处理完成，暂停 {Config.BATCH_INTERVAL} 秒...")

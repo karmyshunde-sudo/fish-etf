@@ -33,14 +33,13 @@ from utils.data_processor import (
     limit_to_one_year_data
 )
 
-
 # 初始化日志
 logger = logging.getLogger(__name__)
 
 # 重试配置
-MAX_RETRY_ATTEMPTS = 3
-RETRY_WAIT_FIXED = 2000  # 毫秒
-RETRY_WAIT_EXPONENTIAL_MAX = 10000  # 毫秒
+MAX_RETRY_ATTEMPTS = 5  # 增加重试次数，从3增加到5
+RETRY_WAIT_FIXED = 3000  # 增加等待时间，从2000毫秒增加到3000毫秒
+RETRY_WAIT_EXPONENTIAL_MAX = 15000  # 增加最大等待时间，从10000毫秒增加到15000毫秒
 
 # 打印AkShare版本
 logger.info(f"AkShare版本: {ak.__version__}")
@@ -67,7 +66,9 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     Returns:
         bool: 如果是AkShare错误返回True，否则返回False
     """
-    return isinstance(exception, (ValueError, ConnectionError, TimeoutError))
+    # 扩展异常类型，包括requests库的网络错误
+    from requests.exceptions import ConnectionError, Timeout
+    return isinstance(exception, (ValueError, ConnectionError, Timeout, OSError))
 
 @retry(stop_max_attempt_number=MAX_RETRY_ATTEMPTS,
        wait_fixed=RETRY_WAIT_FIXED,
@@ -103,7 +104,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd
         logger.info(f"📊 AkShare数据源返回的原始列名: {list(df.columns)}")
         
         # 标准化列名
-        df = standardize_column_names(df)
+        df = ensure_chinese_columns(df)
         
         # 确保所有必需列都存在
         df = ensure_required_columns(df)
@@ -114,10 +115,10 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd
         # 限制数据量为1年（365天）
         df = limit_to_one_year_data(df, end_date)
         
-        logger.info(f"AkShare成功获取{etf_code}数据，共{len(df)}条（已限制为1年数据）")
+        logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
         return df
     except Exception as e:
-        logger.error(f"AkShare爬取{etf_code}失败：{str(e)}", exc_info=True)
+        logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
         # 等待一段时间后重试
         time.sleep(2)
         raise  # 触发重试
@@ -139,33 +140,46 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
         lambda: try_fund_etf_hist_sina(etf_code)
     ]
     
+    total_interfaces = len(interfaces)
+    logger.info(f"尝试获取ETF {etf_code} 数据，最多 {total_interfaces} 种接口")
+    
     for i, interface in enumerate(interfaces):
-        try:
-            logger.debug(f"尝试第{i+1}种接口获取ETF {etf_code} 数据")
-            df = interface()
-            
-            if not df.empty:
-                logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据")
-                
-                # 记录返回的列名，用于调试
-                logger.info(f"📊 第{i+1}种接口返回的原始列名: {list(df.columns)}")
-                
-                # 对返回的数据进行日期过滤
-                if 'date' in df.columns:
-                    df['date'] = pd.to_datetime(df['date'])
-                    mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
-                    df = df.loc[mask]
-                elif '日期' in df.columns:
-                    df['日期'] = pd.to_datetime(df['日期'])
-                    mask = (df['日期'] >= pd.to_datetime(start_date)) & (df['日期'] <= pd.to_datetime(end_date))
-                    df = df.loc[mask]
+        for attempt in range(MAX_RETRY_ATTEMPTS):
+            try:
+                logger.debug(f"尝试第{i+1}种接口（第{attempt+1}次尝试）获取ETF {etf_code} 数据")
+                df = interface()
                 
                 if not df.empty:
-                    logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据（过滤后）")
-                    return df
-        except Exception as e:
-            logger.warning(f"第{i+1}种接口调用失败: {str(e)}", exc_info=True)
-            continue
+                    logger.info(f"第{i+1}种接口（第{attempt+1}次尝试）成功获取ETF {etf_code} 数据")
+                    # 记录返回的列名，用于调试
+                    logger.info(f"📊 第{i+1}种接口返回的原始列名: {list(df.columns)}")
+                    
+                    # 对返回的数据进行日期过滤
+                    if 'date' in df.columns:
+                        df['date'] = pd.to_datetime(df['date'])
+                        mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
+                        df = df.loc[mask]
+                    elif '日期' in df.columns:
+                        df['日期'] = pd.to_datetime(df['日期'])
+                        mask = (df['日期'] >= pd.to_datetime(start_date)) & (df['日期'] <= pd.to_datetime(end_date))
+                        df = df.loc[mask]
+                    
+                    if not df.empty:
+                        logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据（过滤后）")
+                        return df
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # 专门处理网络错误，进行指数退避重试
+                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）网络错误: {str(e)}", exc_info=True)
+                if attempt < MAX_RETRY_ATTEMPTS - 1:
+                    # 指数退避策略
+                    wait_time = RETRY_WAIT_FIXED * (2 ** attempt) / 1000
+                    wait_time = min(wait_time, RETRY_WAIT_EXPONENTIAL_MAX / 1000)
+                    logger.info(f"网络错误，等待 {wait_time:.2f} 秒后重试（指数退避）...")
+                    time.sleep(wait_time)
+            except Exception as e:
+                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）调用失败: {str(e)}", exc_info=True)
+                # 非网络错误，直接尝试下一个接口
+                break
     
     logger.warning(f"所有AkShare接口均无法获取ETF {etf_code} 数据")
     return pd.DataFrame()
@@ -191,8 +205,9 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
             logger.info(f"📊 fund_etf_hist_em 接口返回的原始列名: {list(df.columns)}")
         return df
     except Exception as e:
+        # 不再捕获所有异常，让网络错误可以触发重试机制
         logger.warning(f"fund_etf_hist_em 接口调用失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
+        raise  # 抛出异常，让重试机制处理
 
 def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
     """

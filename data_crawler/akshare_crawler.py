@@ -11,10 +11,24 @@ import pandas as pd
 import logging
 import time
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date  # 修复：添加date导入
 from config import Config
 from retrying import retry
-from utils.date_utils import get_beijing_time  # 导入北京时间工具
+
+# 修复：添加必要的导入
+from utils.date_utils import (
+    get_current_times,
+    get_beijing_time,
+    get_utc_time,
+    get_last_trading_day,  # 添加get_last_trading_day导入
+    is_trading_day
+)
+from utils.file_utils import (
+    ensure_chinese_columns,
+    ensure_required_columns,
+    clean_and_format_data,
+    limit_to_one_year_data
+)
 
 # 初始化日志
 logger = logging.getLogger(__name__)

@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from config import Config
 from retrying import retry
+from utils.date_utils import get_beijing_time  # 导入北京时间工具
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -67,7 +68,9 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd
         pd.DataFrame: 包含ETF日线数据的DataFrame
     """
     try:
-        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
+        # 严格使用北京时间
+        beijing_time = get_beijing_time()
+        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date} (北京时间)")
         
         # 尝试多种AkShare接口
         df = try_multiple_akshare_interfaces(etf_code, start_date, end_date)
@@ -376,35 +379,47 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     try:
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 日期格式转换
         if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+            # 严格使用北京时间
+            df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce').dt.tz_localize(Config.UTC_TIMEZONE, errors='ignore')
+            df.loc[:, "日期"] = df["日期"].dt.tz_convert(Config.BEIJING_TIMEZONE)
+            df.loc[:, "日期"] = df["日期"].dt.date
+            
+            # 确保日期列是字符串格式（YYYY-MM-DD）
+            df.loc[:, "日期"] = df["日期"].apply(lambda x: x.strftime("%Y-%m-%d") if not pd.isna(x) else "")
         
         # 数值列转换
         numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
         for col in numeric_cols:
             if col in df.columns:
                 try:
+                    # 创建副本以避免SettingWithCopyWarning
+                    df = df.copy(deep=True)
+                    
                     # 处理可能的字符串值（如"-"）
                     if df[col].dtype == 'object':
-                        df[col] = df[col].replace('-', '0')
+                        df.loc[:, col] = df[col].replace('-', '0')
                     
                     # 尝试转换为数值类型
-                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                    df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
                     
                     # 特殊处理：涨跌幅和振幅保留2位小数
                     if col in ["涨跌幅", "振幅"]:
-                        df[col] = df[col].round(2)
+                        df.loc[:, col] = df[col].round(2)
                     # 其他数值列根据需要保留小数位
                     elif col in ["开盘", "最高", "最低", "收盘"]:
-                        df[col] = df[col].round(4)
+                        df.loc[:, col] = df[col].round(4)
                     elif col in ["成交额"]:
                         # 修复：将成交额从元转换为万元
-                        df[col] = df[col] / 10000
-                        df[col] = df[col].round(2)  # 保留2位小数
+                        df.loc[:, col] = df[col] / 10000
+                        df.loc[:, col] = df[col].round(2)  # 保留2位小数
                 except Exception as e:
                     logger.error(f"转换列 {col} 为数值类型时出错: {str(e)}", exc_info=True)
-                    df[col] = 0.0
+                    df.loc[:, col] = 0.0
         
         # 处理重复数据
         if "日期" in df.columns:
@@ -440,8 +455,11 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
             logger.warning("数据中缺少日期列，无法限制为1年数据")
             return df
         
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 转换日期列
-        df["日期"] = pd.to_datetime(df["日期"])
+        df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
         
         # 过滤数据
         mask = df["日期"] >= pd.to_datetime(one_year_ago)

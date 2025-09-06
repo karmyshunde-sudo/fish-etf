@@ -117,37 +117,28 @@ def crawl_etf_daily_incremental() -> None:
                 logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                 
                 # 确定爬取时间范围（增量爬取）
-                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
-                is_first_crawl = not os.path.exists(save_path)
+                start_date = get_last_crawl_date(etf_code, etf_daily_dir)
                 
                 # 获取最近一个交易日作为结束日期
                 last_trading_day = get_last_trading_day()
                 end_date = last_trading_day.strftime("%Y-%m-%d")
                 
-                # 首次爬取获取一年数据，增量爬取只获取新数据
-                if is_first_crawl:
-                    # 首次爬取：获取1年历史数据
-                    start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
-                    logger.info(f"📅 首次爬取，获取1年历史数据：{start_date} 至 {end_date}")
-                else:
-                    # 增量爬取：获取上次爬取后的数据
-                    start_date = get_last_crawl_date(etf_code, etf_daily_dir)
-                    # 如果上次爬取日期已经是今天，无需再爬
-                    if start_date >= end_date:
-                        logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
-                        # 标记为已完成
-                        with open(completed_file, "a", encoding="utf-8") as f:
-                            f.write(f"{etf_code}\n")
-                        continue
-                    logger.info(f"📅 增量爬取，获取新数据：{start_date} 至 {end_date}")
+                if start_date > end_date:
+                    logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
+                    # 标记为已完成
+                    with open(completed_file, "a", encoding="utf-8") as f:
+                        f.write(f"{etf_code}\n")
+                    continue
+                
+                logger.info(f"📅 爬取时间范围：{start_date} 至 {end_date}")
                 
                 # 先尝试AkShare爬取
-                df = crawl_etf_daily_akshare(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
+                df = crawl_etf_daily_akshare(etf_code, start_date, end_date)
                 
                 # AkShare失败则尝试新浪爬取
                 if df.empty:
                     logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
-                    df = crawl_etf_daily_sina(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
+                    df = crawl_etf_daily_sina(etf_code, start_date, end_date)
                 
                 # 数据校验
                 if df.empty:
@@ -168,6 +159,7 @@ def crawl_etf_daily_incremental() -> None:
                 df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
                 
                 # 处理已有数据的追加逻辑
+                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
                 if os.path.exists(save_path):
                     try:
                         existing_df = pd.read_csv(save_path)
@@ -182,17 +174,39 @@ def crawl_etf_daily_incremental() -> None:
                         combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
                         combined_df = combined_df.sort_values("日期", ascending=False)
                         
-                        # 保存合并后的数据
-                        combined_df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                        
-                        logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                        # 使用临时文件进行原子操作，确保数据安全
+                        temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                        try:
+                            combined_df.to_csv(temp_file.name, index=False)
+                            # 原子替换：先写入临时文件，再替换原文件
+                            shutil.move(temp_file.name, save_path)
+                            logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                        finally:
+                            if os.path.exists(temp_file.name):
+                                os.unlink(temp_file.name)
                     except Exception as e:
                         logger.error(f"合并数据失败: {str(e)}，尝试覆盖保存", exc_info=True)
-                        df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                        logger.info(f"✅ 数据已覆盖保存至: {save_path} ({len(df)}条)")
+                        # 使用临时文件进行原子操作
+                        temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                        try:
+                            df.to_csv(temp_file.name, index=False)
+                            # 原子替换
+                            shutil.move(temp_file.name, save_path)
+                            logger.info(f"✅ 数据已覆盖保存至: {save_path} ({len(df)}条)")
+                        finally:
+                            if os.path.exists(temp_file.name):
+                                os.unlink(temp_file.name)
                 else:
-                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                    # 使用临时文件进行原子操作
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                    try:
+                        df.to_csv(temp_file.name, index=False)
+                        # 原子替换
+                        shutil.move(temp_file.name, save_path)
+                        logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                    finally:
+                        if os.path.exists(temp_file.name):
+                            os.unlink(temp_file.name)
                 
                 # 标记为已完成
                 with open(completed_file, "a", encoding="utf-8") as f:
@@ -209,6 +223,45 @@ def crawl_etf_daily_incremental() -> None:
     
     except Exception as e:
         logger.error(f"ETF日线数据增量爬取任务执行失败: {str(e)}", exc_info=True)
+        raise
+
+def save_all_etf_data(etf_data_cache: Dict[str, pd.DataFrame], etf_daily_dir: str) -> None:
+    """
+    一次性保存所有ETF数据到文件
+    Args:
+        etf_data_cache: 内存中的ETF数据缓存
+        etf_daily_dir: ETF日线数据目录
+    """
+    logger.info("开始批量保存ETF数据到文件...")
+    try:
+        for etf_code, df in etf_data_cache.items():
+            save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+            try:
+                if os.path.exists(save_path):
+                    existing_df = pd.read_csv(save_path)
+                    # 确保现有数据也是中文列名
+                    existing_df = ensure_chinese_columns(existing_df)
+                    
+                    # 确保必需列
+                    existing_df = ensure_required_columns(existing_df)
+                    
+                    # 合并数据并去重
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                    combined_df = combined_df.sort_values("日期", ascending=False)
+                    
+                    # 保存合并后的数据
+                    combined_df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                    
+                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                else:
+                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+            except Exception as e:
+                logger.error(f"保存ETF {etf_code} 数据失败: {str(e)}", exc_info=True)
+        logger.info(f"批量保存完成，共处理 {len(etf_data_cache)} 个ETF")
+    except Exception as e:
+        logger.error(f"批量保存ETF数据失败: {str(e)}", exc_info=True)
         raise
 
 def update_etf_list() -> bool:

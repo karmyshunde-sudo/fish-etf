@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import akshare as ak
+# 修复：添加 retrying 导入 - 这是关键修复
+from retrying import retry
 
 # 添加必要的导入
 from config import Config
@@ -22,7 +24,7 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated,
     is_trading_day,
-    get_last_trading_day  # 修复：添加get_last_trading_day导入
+    get_last_trading_day
 )
 from utils.file_utils import (
     ensure_dir_exists,

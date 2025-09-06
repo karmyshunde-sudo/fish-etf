@@ -159,132 +159,6 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         logger.error(f"确保中文列名失败: {str(e)}", exc_info=True)
         return df
 
-def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    标准化列名（英文转中文）
-    这是ensure_chinese_columns的别名，用于明确表示在数据爬取上下文中的用途
-    
-    Args:
-        df: 输入DataFrame
-    
-    Returns:
-        pd.DataFrame: 标准化列名后的DataFrame
-    """
-    try:
-        return ensure_chinese_columns(df)
-    
-    except Exception as e:
-        logger.error(f"标准化列名失败: {str(e)}", exc_info=True)
-        return df
-
-def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    确保DataFrame包含所有必需列
-    
-    Args:
-        df: 输入DataFrame
-    
-    Returns:
-        pd.DataFrame: 包含所有必需列的DataFrame
-    """
-    try:
-        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额']
-        
-        # 检查并添加缺失列
-        for col in required_columns:
-            if col not in df.columns:
-                logger.warning(f"数据中缺少必要列: {col}")
-                df.loc[:, col] = np.nan
-        
-        # 确保日期列格式正确
-        if '日期' in df.columns:
-            # 使用loc避免SettingWithCopyWarning
-            df.loc[:, '日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-        
-        return df
-    
-    except Exception as e:
-        logger.error(f"确保必需列失败: {str(e)}", exc_info=True)
-        return df
-
-def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    清洗和格式化数据
-    
-    Args:
-        df: 输入DataFrame
-    
-    Returns:
-        pd.DataFrame: 清洗和格式化后的DataFrame
-    """
-    try:
-        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 去重（基于日期）
-        df = df.drop_duplicates(subset=['日期'], keep='last')
-        
-        # 按日期排序
-        df = df.sort_values('日期', ascending=False)
-        
-        # 处理数值列
-        numeric_columns = ['开盘', '最高', '最低', '收盘', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率']
-        for col in numeric_columns:
-            if col in df.columns:
-                # 使用loc避免SettingWithCopyWarning
-                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 确保日期列格式正确
-        if '日期' in df.columns:
-            # 使用loc避免SettingWithCopyWarning
-            df.loc[:, '日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-        
-        return df
-    
-    except Exception as e:
-        logger.error(f"数据清洗和格式化失败: {str(e)}", exc_info=True)
-        return df
-
-def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
-    """
-    限制数据量为1年（365天）
-    
-    Args:
-        df: 输入DataFrame
-        end_date: 结束日期（YYYY-MM-DD）
-    
-    Returns:
-        pd.DataFrame: 限制为1年数据的DataFrame
-    """
-    try:
-        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 确保日期列是datetime类型
-        df['日期'] = pd.to_datetime(df['日期'])
-        
-        # 计算开始日期
-        end_date_dt = pd.to_datetime(end_date)
-        start_date_dt = end_date_dt - timedelta(days=365)
-        
-        # 过滤数据
-        df = df[(df['日期'] >= start_date_dt) & (df['日期'] <= end_date_dt)]
-        
-        # 按日期排序
-        df = df.sort_values('日期', ascending=False)
-        
-        # 转换日期回字符串格式
-        df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
-        
-        return df
-    
-    except Exception as e:
-        logger.error(f"限制数据量为1年失败: {str(e)}", exc_info=True)
-        return df
-
 def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
     """
     获取ETF最后爬取的日期
@@ -301,6 +175,8 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         
         # 如果文件不存在，返回初始爬取日期
         if not os.path.exists(file_path):
+            # 局部导入，避免循环导入
+            from utils.date_utils import get_beijing_time
             current_date = get_beijing_time().date()
             start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 无历史数据，使用初始日期: {start_date}")
@@ -311,6 +187,8 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         
         # 如果DataFrame为空或没有日期列，返回初始爬取日期
         if df.empty or "日期" not in df.columns:
+            # 局部导入，避免循环导入
+            from utils.date_utils import get_beijing_time
             current_date = get_beijing_time().date()
             start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
@@ -331,6 +209,7 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
     except Exception as e:
         logger.error(f"获取ETF {etf_code} 最后爬取日期失败: {str(e)}", exc_info=True)
         # 出错时返回初始爬取日期
+        from utils.date_utils import get_beijing_time
         current_date = get_beijing_time().date()
         start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
         return start_date

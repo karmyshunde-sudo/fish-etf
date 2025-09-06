@@ -56,21 +56,19 @@ def retry_if_akshare_error(exception: Exception) -> bool:
        retry_on_result=empty_result_check,
        retry_on_exception=retry_if_akshare_error)
 def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    用AkShare爬取ETF日线数据
-    
+    """用AkShare爬取ETF日线数据
     Args:
         etf_code: ETF代码 (6位数字)
         start_date: 开始日期 (YYYY-MM-DD)
         end_date: 结束日期 (YYYY-MM-DD)
-        
     Returns:
         pd.DataFrame: 包含ETF日线数据的DataFrame
     """
     try:
-        # 严格使用北京时间
-        beijing_time = get_beijing_time()
-        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date} (北京时间)")
+        # 确保结束日期是交易日
+        end_date = get_last_trading_day(end_date).strftime("%Y-%m-%d")
+        
+        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
         
         # 尝试多种AkShare接口
         df = try_multiple_akshare_interfaces(etf_code, start_date, end_date)

@@ -29,7 +29,10 @@ from utils.file_utils import (
     get_last_crawl_date,
     record_failed_etf,
     ensure_chinese_columns,
-    standardize_column_names,
+    standardize_column_names
+)
+# 从正确的模块导入数据处理函数
+from utils.data_processor import (
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data

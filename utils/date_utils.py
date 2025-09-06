@@ -28,9 +28,9 @@ def get_current_times() -> Tuple[datetime, datetime]:
     try:
         # 直接使用config.py中定义的时区变量
         from config import Config
+        
         utc_now = datetime.now(Config.UTC_TIMEZONE)
         beijing_now = datetime.now(Config.BEIJING_TIMEZONE)
-        
         logger.debug(f"获取当前时间: UTC={utc_now}, 北京={beijing_now}")
         return utc_now, beijing_now
     except Exception as e:
@@ -73,109 +73,13 @@ def get_utc_time() -> datetime:
         from config import Config
         return datetime.utcnow().replace(tzinfo=Config.UTC_TIMEZONE)
 
-def is_trading_time() -> bool:
-    """
-    检查当前是否在交易时间（不依赖其他可能引起循环导入的模块）
-    
-    Returns:
-        bool: 是否在交易时间
-    """
-    from datetime import datetime
-    from config import Config
-    
-    # 获取当前系统时间（假设系统时区已设置为北京时间）
-    current_time = datetime.now().time()
-    
-    # 将配置中的交易时间字符串转换为time对象
-    trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
-    trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
-    
-    # 检查是否在交易时间内
-    return trading_start <= current_time <= trading_end
-
-def is_same_day(date1: datetime, date2: datetime) -> bool:
-    """
-    判断两个时间是否是同一天
-    
-    Args:
-        date1: 第一个日期时间
-        date2: 第二个日期时间
-        
-    Returns:
-        bool: 如果是同一天返回True，否则返回False
-    """
-    try:
-        # 直接比较日期部分
-        return date1.date() == date2.date()
-    except Exception as e:
-        logger.error(f"日期比较失败: {str(e)}", exc_info=True)
-        return False
-
-def is_file_outdated(file_path: Union[str, Path], max_age_days: int) -> bool:
-    """
-    判断文件是否过期
-    :param file_path: 文件路径
-    :param max_age_days: 最大年龄（天）
-    :return: 如果文件过期返回True，否则返回False
-    """
-    if not os.path.exists(file_path):
-        logger.debug(f"文件不存在: {file_path}")
-        return True
-    
-    try:
-        # 简单方法：直接计算时间差（秒）
-        current_timestamp = time.time()
-        file_timestamp = os.path.getmtime(file_path)
-        days_since_update = (current_timestamp - file_timestamp) / (24 * 3600)
-        
-        # 直接使用时间戳计算，不涉及时区转换
-        need_update = days_since_update >= max_age_days
-        
-        if need_update:
-            logger.info(f"文件已过期({days_since_update:.1f}天)，需要更新")
-        else:
-            logger.debug(f"文件未过期({days_since_update:.1f}天)，无需更新")
-            
-        return need_update
-    except Exception as e:
-        logger.error(f"检查文件更新状态失败: {str(e)}", exc_info=True)
-        # 出错时保守策略是要求更新
-        return True
-
-def get_file_mtime(file_path: Union[str, Path]) -> Tuple[Optional[datetime], Optional[datetime]]:
-    """
-    获取文件修改时间（UTC与北京时间）
-    :param file_path: 文件路径
-    :return: (UTC时间, 北京时间)
-    """
-    try:
-        from config import Config
-        file_path = Path(file_path)
-        if not file_path.exists() or not file_path.is_file():
-            logger.warning(f"文件不存在或不是文件: {file_path}")
-            return None, None
-        
-        # 获取文件修改时间戳
-        timestamp = file_path.stat().st_mtime
-        
-        # 使用config定义的时区
-        utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
-        beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
-        
-        logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
-        return utc_time, beijing_time
-    
-    except Exception as e:
-        logger.error(f"获取文件修改时间失败 {file_path}: {str(e)}", exc_info=True)
-        return None, None
-
 def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
     """
     判断指定日期是否为交易日（A股市场）
     
     Args:
         date_param: 要判断的日期，如果为None则使用当前北京时间
-        
+    
     Returns:
         bool: 如果是交易日返回True，否则返回False
     """
@@ -204,42 +108,57 @@ def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
         
         logger.debug(f"{date_param} 是交易日")
         return True
-        
-    except Exception as e:
-        logger.error(f"判断交易日失败 {date_param}: {str(e)}", exc_info=True)
-        return False
-
-def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
-    """
-    判断当前是否在交易时间内（A股市场）
     
-    Args:
-        time_to_check: 要检查的时间，如果为None则使用当前时间
-        
+    except Exception as e:
+        logger.error(f"判断交易日失败: {str(e)}", exc_info=True)
+        # 回退：简单判断（仅检查是否为周末）
+        if date_param is None:
+            date_param = datetime.now().date()
+        return date_param.weekday() < 5
+
+def is_trading_time() -> bool:
+    """
+    检查当前是否在交易时间（不依赖其他可能引起循环导入的模块）
+    
     Returns:
-        bool: 如果在交易时间内返回True，否则返回False
+        bool: 是否在交易时间
     """
     try:
+        from datetime import datetime
         from config import Config
         
-        if time_to_check is None:
-            time_to_check = get_beijing_time()
+        # 获取当前系统时间（假设系统时区已设置为北京时间）
+        current_time = datetime.now().time()
         
-        # 检查是否为交易日
-        if not is_trading_day(time_to_check):
-            return False
+        # 将配置中的交易时间字符串转换为time对象
+        trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+        trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
         
-        # 检查时间是否在交易时段内
-        current_time = time_to_check.time()
-        market_open = datetime.strptime(f"{Config.MARKET_OPEN_TIME[0]}:{Config.MARKET_OPEN_TIME[1]}", "%H:%M").time()
-        market_close = datetime.strptime(f"{Config.MARKET_CLOSE_TIME[0]}:{Config.MARKET_CLOSE_TIME[1]}", "%H:%M").time()
-        
-        is_open = market_open <= current_time <= market_close
-        logger.debug(f"市场状态检查: {time_to_check} -> {'开市' if is_open else '闭市'}")
-        return is_open
-        
+        # 检查是否在交易时间内
+        return trading_start <= current_time <= trading_end
+    
     except Exception as e:
-        logger.error(f"判断市场状态失败 {time_to_check}: {str(e)}", exc_info=True)
+        logger.error(f"判断交易时间失败: {str(e)}", exc_info=True)
+        # 回退：使用默认交易时间
+        current_time = datetime.now().time()
+        return datetime.strptime("09:30", "%H:%M").time() <= current_time <= datetime.strptime("15:00", "%H:%M").time()
+
+def is_same_day(date1: datetime, date2: datetime) -> bool:
+    """
+    判断两个时间是否是同一天
+    
+    Args:
+        date1: 第一个日期时间
+        date2: 第二个日期时间
+    
+    Returns:
+        bool: 如果是同一天返回True，否则返回False
+    """
+    try:
+        # 直接比较日期部分
+        return date1.date() == date2.date()
+    except Exception as e:
+        logger.error(f"比较日期失败: {str(e)}", exc_info=True)
         return False
 
 def get_next_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
@@ -248,7 +167,7 @@ def get_next_trading_day(date_param: Optional[Union[datetime, date]] = None) -> 
     
     Args:
         date_param: 起始日期，如果为None则使用当前日期
-        
+    
     Returns:
         datetime: 下一个交易日
     """
@@ -269,7 +188,7 @@ def get_next_trading_day(date_param: Optional[Union[datetime, date]] = None) -> 
         
         logger.debug(f"下一个交易日: {date_param} -> {next_day}")
         return datetime.combine(next_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
-        
+    
     except Exception as e:
         logger.error(f"获取下一个交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：简单加一天
@@ -281,7 +200,7 @@ def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None)
     
     Args:
         date_param: 起始日期，如果为None则使用当前日期
-        
+    
     Returns:
         datetime: 上一个交易日
     """
@@ -302,8 +221,177 @@ def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None)
         
         logger.debug(f"上一个交易日: {date_param} -> {prev_day}")
         return datetime.combine(prev_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
-        
+    
     except Exception as e:
         logger.error(f"获取上一个交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：简单减一天
-        return
+        return (date_param if date_param else get_beijing_time()) - timedelta(days=1)
+
+def is_file_outdated(file_path: str, max_age_days: int) -> bool:
+    """
+    判断文件是否过期
+    
+    Args:
+        file_path: 文件路径
+        max_age_days: 最大年龄（天）
+    
+    Returns:
+        bool: 文件是否过期
+    """
+    try:
+        from config import Config
+        
+        if not os.path.exists(file_path):
+            logger.info(f"文件不存在: {file_path}")
+            return True
+        
+        # 获取文件最后修改时间戳
+        timestamp = os.path.getmtime(file_path)
+        
+        # 使用config定义的时区
+        utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
+        beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
+        
+        # 当前北京时间
+        current_beijing_time = get_beijing_time()
+        
+        # 计算文件年龄（天）
+        file_age = (current_beijing_time - beijing_time).days
+        
+        logger.debug(f"文件 {file_path} 年龄: {file_age} 天 (最大允许年龄: {max_age_days} 天)")
+        
+        return file_age > max_age_days
+    
+    except Exception as e:
+        logger.error(f"检查文件过期状态失败 {file_path}: {str(e)}", exc_info=True)
+        # 出错时保守策略：认为文件未过期
+        return False
+
+def get_file_mtime(file_path: str) -> Tuple[datetime, datetime]:
+    """
+    获取文件最后修改时间（UTC和北京时间）
+    
+    Args:
+        file_path: 文件路径
+    
+    Returns:
+        Tuple[datetime, datetime]: (UTC时间, 北京时间)
+    """
+    try:
+        from config import Config
+        
+        if not os.path.exists(file_path):
+            return get_utc_time(), get_beijing_time()
+        
+        # 获取文件最后修改时间戳
+        timestamp = os.path.getmtime(file_path)
+        
+        # 使用config定义的时区
+        utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
+        beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
+        
+        logger.debug(f"获取文件修改时间: {file_path} -> UTC: {utc_time}, CST: {beijing_time}")
+        return utc_time, beijing_time
+    
+    except Exception as e:
+        logger.error(f"获取文件修改时间失败 {file_path}: {str(e)}", exc_info=True)
+        return get_utc_time(), get_beijing_time()
+
+def format_time_for_display(dt: datetime) -> str:
+    """
+    格式化时间用于显示
+    
+    Args:
+        dt: datetime对象
+    
+    Returns:
+        str: 格式化后的时间字符串
+    """
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        logger.error(f"格式化时间失败: {str(e)}", exc_info=True)
+        return str(dt)
+
+def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
+    """
+    判断指定时间是否在市场开市时间内
+    
+    Args:
+        time_to_check: 要检查的时间，默认为当前时间
+    
+    Returns:
+        bool: 如果在开市时间内返回True，否则返回False
+    """
+    try:
+        from config import Config
+        
+        if time_to_check is None:
+            time_to_check = get_beijing_time()
+        
+        # 将时间转换为北京时间
+        if time_to_check.tzinfo is None:
+            time_to_check = time_to_check.replace(tzinfo=Config.UTC_TIMEZONE)
+        beijing_time = time_to_check.astimezone(Config.BEIJING_TIMEZONE)
+        
+        # 获取市场开市和闭市时间
+        market_open = datetime.strptime(f"{Config.MARKET_OPEN_TIME[0]}:{Config.MARKET_OPEN_TIME[1]}", "%H:%M").time()
+        market_close = datetime.strptime(f"{Config.MARKET_CLOSE_TIME[0]}:{Config.MARKET_CLOSE_TIME[1]}", "%H:%M").time()
+        
+        # 检查是否在交易时间内
+        current_time = beijing_time.time()
+        is_open = market_open <= current_time <= market_close
+        
+        logger.debug(f"市场状态检查: {time_to_check} -> {'开市' if is_open else '闭市'}")
+        return is_open
+    
+    except Exception as e:
+        logger.error(f"判断市场状态失败 {time_to_check}: {str(e)}", exc_info=True)
+        return False
+
+# 模块初始化
+try:
+    # 确保必要的目录存在
+    from config import Config
+    Config.init_dirs()
+    
+    # 验证时区设置
+    utc_now, beijing_now = get_current_times()
+    
+    # 验证时区设置
+    if beijing_now.tzinfo is None or utc_now.tzinfo is None:
+        logging.warning("时区信息不完整，可能存在时区问题")
+    else:
+        logging.info(f"北京时间时区: {beijing_now.tzname()}")
+        logging.info(f"UTC时间时区: {utc_now.tzname()}")
+    
+    # 简化验证：直接检查时区偏移
+    beijing_offset = beijing_now.utcoffset().total_seconds() / 3600
+    utc_offset = utc_now.utcoffset().total_seconds() / 3600
+    time_diff = beijing_offset - utc_offset
+    
+    if abs(time_diff - 8) > 0.01:  # 允许0.01小时的误差
+        logging.warning(f"时区偏移不正确: 北京时间比UTC时间快 {time_diff:.2f} 小时")
+    else:
+        logging.info("时区设置验证通过")
+    
+    # 初始化日志
+    logger.info("日期时间工具模块初始化完成")
+    
+except ImportError:
+    logging.warning("无法导入date_utils模块，时区检查跳过")
+except Exception as e:
+    logger.error(f"日期时间工具模块初始化失败: {str(e)}", exc_info=True)
+    
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(f"日期时间工具模块初始化失败: {str(e)}")
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(f"日期时间工具模块初始化失败: {str(e)}")

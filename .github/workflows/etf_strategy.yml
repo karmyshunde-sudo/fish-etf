@@ -5,8 +5,8 @@ on:
     # GitHub Actions使用UTC时区，注释中表示对应的北京时间
     - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (日线爬取)
     - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算，每5分钟一次)
-    - cron: '0 5 * * 1-5'   # UTC 05:00 = 北京时间 13:00 (仓位策略)
-    - cron: '0 12 * * 0'    # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
+    - cron: '30 7 * * 1-5'    # UTC 07:30 = 北京时间 15:30 (仓位策略)
+    - cron: '0 12 * * 0'      # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
   workflow_dispatch:
     inputs:
       task:
@@ -110,7 +110,7 @@ jobs:
               echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "*/5 2-7 * * 1-5" ]]; then
               echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
-            elif [[ "${{ github.event.schedule }}" == "0 5 * * 1-5" ]]; then
+            elif [[ "${{ github.event.schedule }}" == "30 7 * * 1-5" ]]; then
               echo "TASK=calculate_position" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "0 12 * * 0" ]]; then
               echo "TASK=update_etf_list" >> $GITHUB_ENV
@@ -131,6 +131,24 @@ jobs:
           chmod -R 777 data/
           echo "数据目录结构:"
           find data/ -type d -exec ls -ld {} \;
+      
+      - name: 检查是否为交易日（仅日线爬取任务）
+        id: check_trading_day
+        if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'
+        run: |
+          # 获取当前北京时间
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
+          BEIJING_DAY=$(TZ=Asia/Shanghai date '+%u')  # 1-7, 1表示周一，7表示周日
+          
+          # 检查是否为周末
+          if [ "$BEIJING_DAY" -gt 5 ]; then
+            echo "IS_TRADING_DAY=false" >> $GITHUB_OUTPUT
+            echo "当前是周末（$BEIJING_DATE），跳过日线爬取任务"
+          else
+            # 这里可以添加更复杂的交易日检查逻辑（考虑节假日）
+            echo "IS_TRADING_DAY=true" >> $GITHUB_OUTPUT
+            echo "当前是交易日（$BEIJING_DATE）"
+          fi
       
       - name: 检查是否已推送标志（仅定时任务）
         id: check_flags
@@ -154,6 +172,15 @@ jobs:
           else
             echo "手动触发任务，跳过标志检查"
           fi
+      
+      - name: 跳过非交易日的日线爬取任务
+        if: >-
+          env.TASK == 'crawl_etf_daily' && 
+          env.TRIGGER_TYPE == 'schedule' && 
+          steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
+        run: |
+          echo "任务 $TASK 今日不是交易日，跳过执行（定时任务）"
+          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 跳过已推送任务（仅定时任务）
         if: >-
@@ -314,7 +341,7 @@ jobs:
             TASK="${{ env.TASK }}"
             
             # 获取任务执行日志链接
-            LOG_URL="https://github.com/  ${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            LOG_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             
             # 构建消息内容
             payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${TASK}]执行失败\\n触发方式: ${TRIGGER_TYPE}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n日志链接: ${LOG_URL}\\n\\n注意：套利增量推送任务不会因已推送而跳过，会持续检查新机会\"}}"

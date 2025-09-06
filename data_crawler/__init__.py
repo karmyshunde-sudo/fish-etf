@@ -52,12 +52,7 @@ def retry_if_exception(exception: Exception) -> bool:
     """重试条件：网络或数据相关错误"""
     return isinstance(exception, (ConnectionError, TimeoutError, ValueError, pd.errors.EmptyDataError))
 
-@retry(
-    stop_max_attempt_number=3,
-    wait_exponential_multiplier=1000,
-    wait_exponential_max=10000,
-    retry_on_exception=retry_if_exception
-)
+@retry(stop_max_attempt_number=3,wait_exponential_multiplier=1000,wait_exponential_max=10000,retry_on_exception=retry_if_exception)
 def akshare_retry(func, *args, **kwargs):
     """带重试机制的函数调用封装"""
     return func(*args, **kwargs)

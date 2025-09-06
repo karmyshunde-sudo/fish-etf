@@ -162,6 +162,7 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
 def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     标准化列名（英文转中文）
+    这是ensure_chinese_columns的别名，用于明确表示在数据爬取上下文中的用途
     
     Args:
         df: 输入DataFrame
@@ -283,6 +284,56 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"限制数据量为1年失败: {str(e)}", exc_info=True)
         return df
+
+def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
+    """
+    获取ETF最后爬取的日期
+    
+    Args:
+        etf_code: ETF代码
+        etf_daily_dir: ETF日线数据目录
+    
+    Returns:
+        str: 最后爬取日期（YYYY-MM-DD），如果无历史数据则返回初始爬取日期
+    """
+    try:
+        file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+        
+        # 如果文件不存在，返回初始爬取日期
+        if not os.path.exists(file_path):
+            current_date = get_beijing_time().date()
+            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 无历史数据，使用初始日期: {start_date}")
+            return start_date
+        
+        # 读取CSV文件
+        df = pd.read_csv(file_path)
+        
+        # 如果DataFrame为空或没有日期列，返回初始爬取日期
+        if df.empty or "日期" not in df.columns:
+            current_date = get_beijing_time().date()
+            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
+            return start_date
+        
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
+        # 确保日期列是datetime类型
+        if not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+            df["日期"] = pd.to_datetime(df["日期"])
+        
+        # 获取最新日期
+        latest_date = df["日期"].max().strftime("%Y-%m-%d")
+        logger.debug(f"ETF {etf_code} 最后爬取日期: {latest_date}")
+        return latest_date
+    
+    except Exception as e:
+        logger.error(f"获取ETF {etf_code} 最后爬取日期失败: {str(e)}", exc_info=True)
+        # 出错时返回初始爬取日期
+        current_date = get_beijing_time().date()
+        start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        return start_date
 
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """

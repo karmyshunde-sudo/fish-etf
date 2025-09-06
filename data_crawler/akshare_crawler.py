@@ -404,9 +404,10 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         
         # 日期格式转换
         if "日期" in df.columns:
-            # 严格使用北京时间
-            df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce').dt.tz_localize(Config.UTC_TIMEZONE, errors='ignore')
-            df.loc[:, "日期"] = df["日期"].dt.tz_convert(Config.BEIJING_TIMEZONE)
+            # 转换为datetime
+            df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
+            
+            # 直接处理为日期对象（不使用时区转换，因为ETF数据通常只有日期）
             df.loc[:, "日期"] = df["日期"].dt.date
             
             # 确保日期列是字符串格式（YYYY-MM-DD）

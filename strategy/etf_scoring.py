@@ -385,7 +385,8 @@ def calculate_volatility(df: pd.DataFrame) -> float:
                 return 0.2  # 默认波动率
         
         # 计算日收益率
-        df["daily_return"] = df[CLOSE_COL].pct_change()
+        df = df.copy(deep=True)  # 创建副本避免SettingWithCopyWarning
+        df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
         
         # 处理NaN值
         if "daily_return" in df.columns:
@@ -433,10 +434,11 @@ def get_etf_basic_info(etf_code: str) -> float:
                 logger.warning(f"ETF列表缺少必要列: {col}")
                 return 0.0
         
+        # 创建副本避免SettingWithCopyWarning
+        etf_list = etf_list.copy(deep=True)
+        
         # 确保ETF列表中的ETF代码也是6位数字
-        etf_list = etf_list.copy()  # 创建副本避免SettingWithCopyWarning
-        # 修复：使用apply方法处理每个值，避免FutureWarning
-        etf_list[ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).apply(lambda x: x.strip().zfill(6))
+        etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).apply(lambda x: x.strip().zfill(6))
         
         etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         if not etf_row.empty:
@@ -718,12 +720,15 @@ def calculate_arbitrage_score(etf_code: str,
         
         # 1. 连续2天折价：额外+10分
         if premium_discount < 0 and historical_data is not None and not historical_data.empty:
+            # 创建副本以避免SettingWithCopyWarning
+            hist_data = historical_data.copy(deep=True)
+            
             # 确保有足够的历史数据
-            if len(historical_data) >= 2:
+            if len(hist_data) >= 2:
                 # 检查"折溢价率"列是否存在
-                if "折溢价率" in historical_data.columns:
+                if "折溢价率" in hist_data.columns:
                     # 获取前一天的折溢价率
-                    prev_premium = historical_data["折溢价率"].iloc[-2]
+                    prev_premium = hist_data["折溢价率"].iloc[-2]
                     # 检查前一天是否也是折价
                     if prev_premium < 0:
                         consecutive_discount_bonus = 10
@@ -735,7 +740,7 @@ def calculate_arbitrage_score(etf_code: str,
         
         # 调整基础评分
         base_score = base_score + consecutive_discount_bonus + industry_avg_bonus
-        base_score = min(100, base_score)  # 确保不超过100
+        base_score = max(0, min(100, base_score))  # 确保在0-100范围内
         
         logger.debug(f"ETF {etf_code} 附加条件加分: 连续折价+{consecutive_discount_bonus}分, 行业平均+{industry_avg_bonus}分, 调整后基础评分={base_score:.2f}")
         # ============== 新增结束 ==============
@@ -873,7 +878,9 @@ def get_top_rated_etfs(top_n=None,
                 size = 0.0
                 # 修复：安全地获取size，避免KeyError
                 if "size" in metadata_df.columns:
-                    size = metadata_df[metadata_df["etf_code"] == etf_code]["size"].values[0]
+                    size_row = metadata_df[metadata_df["etf_code"] == etf_code]
+                    if not size_row.empty:
+                        size = size_row["size"].iloc[0]
                 
                 etf_name = get_etf_name(etf_code)
                 
@@ -911,12 +918,17 @@ def get_top_rated_etfs(top_n=None,
         total_etfs = len(score_df)
         
         # 计算前X%的ETF数量
-        if top_n is not None:
-            top_n = min(top_n, total_etfs)
-            score_df = score_df.head(top_n)
+        top_percent = Config.SCORE_TOP_PERCENT
+        top_count = max(10, int(total_etfs * top_percent / 100))
         
-        logger.info(f"筛选出 {len(score_df)} 只符合条件的ETF")
-        return score_df
+        # 记录筛选结果
+        logger.info(f"评分完成。共{total_etfs}只ETF评分≥{min_score}，取前{top_percent}%({top_count}只)")
+        logger.info(f"应用筛选参数: 规模≥{min_fund_size}亿元, 日均成交额≥{min_avg_volume}万元")
+        
+        # 返回结果
+        if top_n is not None and top_n > 0:
+            return score_df.head(top_n)
+        return score_df.head(top_count)
     
     except Exception as e:
         error_msg = f"获取高评分ETF列表失败: {str(e)}"

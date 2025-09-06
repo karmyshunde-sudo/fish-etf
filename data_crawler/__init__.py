@@ -20,7 +20,14 @@ from config import Config
 from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
 from .akshare_crawler import crawl_etf_daily_akshare
 from .sina_crawler import crawl_etf_daily_sina
-from utils.date_utils import get_beijing_time, is_trading_day
+from utils.date_utils import (
+    get_current_times,
+    get_beijing_time,
+    get_utc_time,
+    is_file_outdated,
+    is_trading_day,
+    get_last_trading_day  # 添加这一行
+)
 from utils.file_utils import ensure_chinese_columns
 
 # 初始化日志

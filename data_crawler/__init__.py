@@ -22,14 +22,16 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated,
     is_trading_day,
-    get_last_trading_day  # 修复：添加get_last_trading_day导入
+    get_last_trading_day
 )
 from utils.file_utils import (
     ensure_dir_exists,
     get_last_crawl_date,
     record_failed_etf,
-    ensure_chinese_columns,
-    standardize_column_names,
+    ensure_chinese_columns
+)
+# 从新的数据处理模块导入数据处理函数
+from utils.data_processor import (
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data
@@ -145,6 +147,9 @@ def crawl_etf_daily_incremental() -> None:
                 # 确保使用中文列名
                 df = ensure_chinese_columns(df)
                 
+                # 确保所有必需列都存在
+                df = ensure_required_columns(df)
+                
                 # 补充ETF基本信息
                 df["ETF代码"] = etf_code
                 df["ETF名称"] = etf_name
@@ -157,6 +162,9 @@ def crawl_etf_daily_incremental() -> None:
                         existing_df = pd.read_csv(save_path)
                         # 确保现有数据也是中文列名
                         existing_df = ensure_chinese_columns(existing_df)
+                        
+                        # 确保必需列
+                        existing_df = ensure_required_columns(existing_df)
                         
                         # 合并数据并去重
                         combined_df = pd.concat([existing_df, df], ignore_index=True)

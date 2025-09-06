@@ -76,12 +76,13 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     retry_on_result=empty_result_check,
     retry_on_exception=retry_if_akshare_error
 )
-def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
     """用AkShare爬取ETF日线数据
     Args:
         etf_code: ETF代码 (6位数字)
         start_date: 开始日期 (YYYY-MM-DD)
         end_date: 结束日期 (YYYY-MM-DD)
+        is_first_crawl: 是否是首次爬取
     
     Returns:
         pd.DataFrame: 包含ETF日线数据的DataFrame
@@ -115,15 +116,14 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd
         # 数据清洗：去重、格式转换
         df = clean_and_format_data(df)
         
-        # 限制数据量为1年（365天）
-        df = limit_to_one_year_data(df, end_date)
+        # 首次爬取时限制数据量为1年（365天）
+        if is_first_crawl:
+            df = limit_to_one_year_data(df, end_date)
         
         logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
         return df
     except Exception as e:
         logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
-        # 等待一段时间后重试
-        time.sleep(2)
         raise  # 触发重试
 
 def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:

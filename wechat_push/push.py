@@ -394,6 +394,9 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if df.empty:
             return ["【折价机会】\n未发现有效折价套利机会"]
         
@@ -442,15 +445,17 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+                # 先提取ETF代码，避免在日志前缀中使用未定义变量
+                etf_code = _extract_scalar_value(row.get('ETF代码', ''), log_prefix=f"ETF {row.get('ETF代码', '未知')} 代码: ")
+                
                 # 使用辅助函数安全提取标量值
-                etf_name = _extract_scalar_value(row['ETF名称'], log_prefix=f"ETF {row['ETF代码']} 名称: ")
-                etf_code = _extract_scalar_value(row['ETF代码'], log_prefix=f"ETF {row['ETF代码']} 代码: ")
-                premium_discount = _extract_scalar_value(row['折溢价率'], log_prefix=f"ETF {etf_code} 折溢价率: ")
-                market_price = _extract_scalar_value(row['市场价格'], log_prefix=f"ETF {etf_code} 市场价格: ")
-                iopv = _extract_scalar_value(row['IOPV'], log_prefix=f"ETF {etf_code} IOPV: ")
-                fund_size = _extract_scalar_value(row['规模'], log_prefix=f"ETF {etf_code} 规模: ")
-                avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
-                score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
+                etf_name = _extract_scalar_value(row.get('ETF名称', ''), log_prefix=f"ETF {etf_code} 名称: ")
+                premium_discount = _extract_scalar_value(row.get('折溢价率', 0.0), log_prefix=f"ETF {etf_code} 折溢价率: ")
+                market_price = _extract_scalar_value(row.get('市场价格', 0.0), log_prefix=f"ETF {etf_code} 市场价格: ")
+                iopv = _extract_scalar_value(row.get('IOPV', 0.0), log_prefix=f"ETF {etf_code} IOPV: ")
+                fund_size = _extract_scalar_value(row.get('规模', 0.0), log_prefix=f"ETF {etf_code} 规模: ")
+                avg_volume = _extract_scalar_value(row.get('日均成交额', 0.0), log_prefix=f"ETF {etf_code} 日均成交额: ")
+                score = _extract_scalar_value(row.get('综合评分', 0.0), log_prefix=f"ETF {etf_code} 综合评分: ")
                 
                 content += (
                     f"{i}. {etf_name} ({etf_code})\n"
@@ -484,6 +489,9 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         if df.empty:
             return ["【溢价机会】\n未发现有效溢价套利机会"]
         
@@ -532,15 +540,17 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+                # 先提取ETF代码，避免在日志前缀中使用未定义变量
+                etf_code = _extract_scalar_value(row.get('ETF代码', ''), log_prefix=f"ETF {row.get('ETF代码', '未知')} 代码: ")
+                
                 # 使用辅助函数安全提取标量值
-                etf_name = _extract_scalar_value(row['ETF名称'], log_prefix=f"ETF {row['ETF代码']} 名称: ")
-                etf_code = _extract_scalar_value(row['ETF代码'], log_prefix=f"ETF {row['ETF代码']} 代码: ")
-                premium_discount = _extract_scalar_value(row['折溢价率'], log_prefix=f"ETF {etf_code} 折溢价率: ")
-                market_price = _extract_scalar_value(row['市场价格'], log_prefix=f"ETF {etf_code} 市场价格: ")
-                iopv = _extract_scalar_value(row['IOPV'], log_prefix=f"ETF {etf_code} IOPV: ")
-                fund_size = _extract_scalar_value(row['规模'], log_prefix=f"ETF {etf_code} 规模: ")
-                avg_volume = _extract_scalar_value(row['日均成交额'], log_prefix=f"ETF {etf_code} 日均成交额: ")
-                score = _extract_scalar_value(row['综合评分'], log_prefix=f"ETF {etf_code} 综合评分: ")
+                etf_name = _extract_scalar_value(row.get('ETF名称', ''), log_prefix=f"ETF {etf_code} 名称: ")
+                premium_discount = _extract_scalar_value(row.get('折溢价率', 0.0), log_prefix=f"ETF {etf_code} 折溢价率: ")
+                market_price = _extract_scalar_value(row.get('市场价格', 0.0), log_prefix=f"ETF {etf_code} 市场价格: ")
+                iopv = _extract_scalar_value(row.get('IOPV', 0.0), log_prefix=f"ETF {etf_code} IOPV: ")
+                fund_size = _extract_scalar_value(row.get('规模', 0.0), log_prefix=f"ETF {etf_code} 规模: ")
+                avg_volume = _extract_scalar_value(row.get('日均成交额', 0.0), log_prefix=f"ETF {etf_code} 日均成交额: ")
+                score = _extract_scalar_value(row.get('综合评分', 0.0), log_prefix=f"ETF {etf_code} 综合评分: ")
                 
                 content += (
                     f"{i}. {etf_name} ({etf_code})\n"

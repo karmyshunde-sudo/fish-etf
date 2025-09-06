@@ -227,6 +227,39 @@ def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None)
         # 回退：简单减一天
         return (date_param if date_param else get_beijing_time()) - timedelta(days=1)
 
+def get_last_trading_day(date_param: Optional[Union[datetime, date]] = None) -> date:
+    """
+    获取最近一个交易日（包括今天，如果今天是交易日）
+    
+    Args:
+        date_param: 日期，如果为None则使用当前日期
+    
+    Returns:
+        date: 最近一个交易日
+    """
+    try:
+        from config import Config
+        
+        if date_param is None:
+            date_param = get_beijing_time().date()
+        elif isinstance(date_param, datetime):
+            date_param = date_param.date()
+        
+        # 如果是交易日，返回当天
+        if is_trading_day(date_param):
+            return date_param
+        
+        # 如果不是交易日，向前查找最近的交易日
+        while not is_trading_day(date_param):
+            date_param = date_param - timedelta(days=1)
+        
+        return date_param
+    
+    except Exception as e:
+        logger.error(f"获取最近交易日失败 {date_param}: {str(e)}", exc_info=True)
+        # 回退：返回昨天
+        return (date_param if date_param else get_beijing_time().date()) - timedelta(days=1)
+
 def is_file_outdated(file_path: str, max_age_days: int) -> bool:
     """
     判断文件是否过期

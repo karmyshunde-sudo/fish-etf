@@ -83,8 +83,12 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str) -> pd
         pd.DataFrame: 包含ETF日线数据的DataFrame
     """
     try:
-        # 确保结束日期是交易日
-        end_date = get_last_trading_day(end_date).strftime("%Y-%m-%d")
+        # 修复：将字符串日期转换为date对象
+        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+        # 获取最近交易日
+        last_trading_day = get_last_trading_day(end_date_obj)
+        # 转换回字符串格式
+        end_date = last_trading_day.strftime("%Y-%m-%d")
         
         logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
         

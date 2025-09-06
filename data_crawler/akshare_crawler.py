@@ -11,7 +11,7 @@ import pandas as pd
 import logging
 import time
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from config import Config
 from retrying import retry
 from utils.date_utils import get_beijing_time  # 导入北京时间工具

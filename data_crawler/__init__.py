@@ -22,13 +22,14 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated,
     is_trading_day,
-    get_last_trading_day  # 从date_utils获取最近交易日
+    get_last_trading_day  # 修复：添加get_last_trading_day导入
 )
 from utils.file_utils import (
     ensure_dir_exists,
-    get_last_crawl_date,  # 从file_utils获取最后爬取日期
-    record_failed_etf,    # 从file_utils获取失败记录函数
+    get_last_crawl_date,
+    record_failed_etf,
     ensure_chinese_columns,
+    standardize_column_names,
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data
@@ -253,22 +254,24 @@ def get_crawl_status() -> Dict[str, Any]:
 # 模块初始化
 try:
     # 确保必要的目录存在
-    if Config.init_dirs():
-        logger.info("数据爬取模块初始化完成")
-    else:
-        logger.warning("数据爬取模块初始化完成，但存在警告")
-except Exception as e:
-    logger.error(f"数据爬取模块初始化失败: {str(e)}", exc_info=True)
+    Config.init_dirs()
     
-    # 退回到基础日志配置
+    # 初始化日志
+    logger.info("数据爬取模块初始化完成")
+    
+except Exception as e:
+    error_msg = f"数据爬取模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    
     try:
+        # 退回到基础日志配置
         import logging
         logging.basicConfig(
             level="INFO",
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.StreamHandler()]
         )
-        logging.error(f"数据爬取模块初始化失败: {str(e)}")
+        logging.error(error_msg)
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
         print(f"数据爬取模块初始化失败: {str(e)}")

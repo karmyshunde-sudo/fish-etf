@@ -35,7 +35,8 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time,
     is_file_outdated,
-    is_trading_day
+    is_trading_day,
+    get_last_trading_day  # 新增：导入获取最近交易日的函数
 )
 
 # 初始化日志配置

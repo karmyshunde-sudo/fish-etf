@@ -111,9 +111,12 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
             logger.warning("套利数据为空，跳过保存")
             return ""
         
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 添加时间戳列
         if "timestamp" not in df.columns:
-            df["timestamp"] = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[:, "timestamp"] = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
         
         # 创建数据目录
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
@@ -126,8 +129,8 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
         
         # 保存数据 - 增量追加模式
         if os.path.exists(file_path):
-            # 读取现有数据
-            existing_df = pd.read_csv(file_path, encoding="utf-8-sig")
+            # 读取现有数据并创建副本
+            existing_df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
             # 合并数据
             combined_df = pd.concat([existing_df, df], ignore_index=True)
             # 去重（基于ETF代码和时间戳）
@@ -190,8 +193,11 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             logger.error("AkShare未返回ETF实时行情数据")
             return pd.DataFrame()
         
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 过滤出需要的ETF
-        df = df[df['代码'].isin(etf_codes)]
+        df = df[df['代码'].isin(etf_codes)].copy(deep=True)
         
         if df.empty:
             logger.warning("筛选后无符合条件的ETF数据")
@@ -209,10 +215,10 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         
         # 只保留我们需要的列
         available_columns = [col for col in column_mapping.keys() if col in df.columns]
-        df = df[available_columns].rename(columns=column_mapping)
+        df = df[available_columns].rename(columns=column_mapping).copy(deep=True)
         
         # 添加计算时间
-        df['计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+        df.loc[:, '计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         
         # 修复：移除所有计算逻辑，只返回原始数据
         # 不再计算折溢价率，这部分逻辑应该在策略层处理
@@ -248,8 +254,8 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
             logger.debug(f"套利数据文件不存在: {file_path}")
             return pd.DataFrame()
         
-        # 读取数据
-        df = pd.read_csv(file_path, encoding="utf-8-sig")
+        # 读取数据并创建副本
+        df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
         logger.debug(f"成功加载套利数据: {file_path} (共{len(df)}条记录)")
         return df
     
@@ -320,6 +326,9 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.error("无法获取任何有效的套利数据")
             return pd.DataFrame()
         
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 修复：不再检查"折溢价率"列，因为数据源可能不提供该列
         # 只检查必要列是否存在
         required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
@@ -359,6 +368,9 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
             
             # 检查数据是否有效
             if not df.empty:
+                # 创建DataFrame的副本，避免SettingWithCopyWarning
+                df = df.copy(deep=True)
+                
                 # 检查是否包含必要列
                 required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if all(col in df.columns for col in required_columns) and len(df) > 0:

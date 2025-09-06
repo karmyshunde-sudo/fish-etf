@@ -119,28 +119,39 @@ def crawl_etf_daily_incremental() -> None:
                 logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                 
                 # 确定爬取时间范围（增量爬取）
-                start_date = get_last_crawl_date(etf_code, etf_daily_dir)
+                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+                is_first_crawl = not os.path.exists(save_path)
                 
                 # 获取最近一个交易日作为结束日期
                 last_trading_day = get_last_trading_day()
                 end_date = last_trading_day.strftime("%Y-%m-%d")
                 
-                if start_date > end_date:
-                    logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
-                    # 标记为已完成
-                    with open(completed_file, "a", encoding="utf-8") as f:
-                        f.write(f"{etf_code}\n")
-                    continue
-                
-                logger.info(f"📅 爬取时间范围：{start_date} 至 {end_date}")
+                # 首次爬取获取一年数据，增量爬取只获取新数据
+                if is_first_crawl:
+                    # 首次爬取：获取1年历史数据
+                    start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
+                    logger.info(f"📅 首次爬取，获取1年历史数据：{start_date} 至 {end_date}")
+                else:
+                    # 增量爬取：获取上次爬取后的数据
+                    start_date = get_last_crawl_date(etf_code, etf_daily_dir)
+                    # 如果上次爬取日期已经是今天，无需再爬
+                    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+                    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+                    if start_date_obj > end_date_obj:
+                        logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
+                        # 标记为已完成
+                        with open(completed_file, "a", encoding="utf-8") as f:
+                            f.write(f"{etf_code}\n")
+                        continue
+                    logger.info(f"📅 增量爬取，获取新数据：{start_date} 至 {end_date}")
                 
                 # 先尝试AkShare爬取
-                df = crawl_etf_daily_akshare(etf_code, start_date, end_date)
+                df = crawl_etf_daily_akshare(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
                 
                 # AkShare失败则尝试新浪爬取
                 if df.empty:
                     logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
-                    df = crawl_etf_daily_sina(etf_code, start_date, end_date)
+                    df = crawl_etf_daily_sina(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
                 
                 # 数据校验
                 if df.empty:
@@ -161,7 +172,6 @@ def crawl_etf_daily_incremental() -> None:
                 df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
                 
                 # 处理已有数据的追加逻辑
-                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
                 if os.path.exists(save_path):
                     try:
                         existing_df = pd.read_csv(save_path)

@@ -13,7 +13,6 @@ import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import akshare as ak
-from retrying import retry
 
 # 添加必要的导入
 from config import Config
@@ -23,16 +22,14 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated,
     is_trading_day,
-    get_last_trading_day
+    get_last_trading_day  # 修复：添加get_last_trading_day导入
 )
 from utils.file_utils import (
     ensure_dir_exists,
     get_last_crawl_date,
     record_failed_etf,
-    ensure_chinese_columns
-)
-# 从新的数据处理模块导入数据处理函数
-from utils.data_processor import (
+    ensure_chinese_columns,
+    standardize_column_names,
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data
@@ -53,7 +50,12 @@ def retry_if_exception(exception: Exception) -> bool:
     """重试条件：网络或数据相关错误"""
     return isinstance(exception, (ConnectionError, TimeoutError, ValueError, pd.errors.EmptyDataError))
 
-@retry(stop_max_attempt_number=3,wait_exponential_multiplier=1000,wait_exponential_max=10000,retry_on_exception=retry_if_exception)
+@retry(
+    stop_max_attempt_number=3,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=10000,
+    retry_on_exception=retry_if_exception
+)
 def akshare_retry(func, *args, **kwargs):
     """带重试机制的函数调用封装"""
     return func(*args, **kwargs)
@@ -183,13 +185,14 @@ def crawl_etf_daily_incremental() -> None:
                 with open(completed_file, "a", encoding="utf-8") as f:
                     f.write(f"{etf_code}\n")
                 
-                # 限制请求频率 - 修复：使用硬编码值代替Config.CRAWL_INTERVAL
-                time.sleep(3)  # 默认3秒间隔
-                
+                # 限制请求频率
+                time.sleep(3)  # 使用硬编码值代替Config.CRAWL_INTERVAL
+            
             # 批次间暂停
             if batch_idx < num_batches - 1:
-                logger.info(f"批次处理完成，暂停 {Config.BATCH_INTERVAL} 秒...")
-                time.sleep(Config.BATCH_INTERVAL)
+                batch_pause_seconds = 10  # 硬编码值，10秒
+                logger.info(f"批次处理完成，暂停 {batch_pause_seconds} 秒...")
+                time.sleep(batch_pause_seconds)
     
     except Exception as e:
         logger.error(f"ETF日线数据增量爬取任务执行失败: {str(e)}", exc_info=True)

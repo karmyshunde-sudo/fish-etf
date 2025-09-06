@@ -10,6 +10,8 @@ import os
 import time
 import pandas as pd
 import logging
+import tempfile  # 修复：添加tempfile导入
+import shutil    # 修复：添加shutil导入
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import akshare as ak

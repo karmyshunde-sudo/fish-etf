@@ -39,6 +39,19 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
         repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
         relative_path = os.path.relpath(file_path, repo_root)
         
+        # 在GitHub Actions环境中设置Git用户信息
+        if 'GITHUB_ACTIONS' in os.environ:
+            logger.info("检测到GitHub Actions环境，设置Git用户信息")
+            # 使用GitHub Actor作为用户名
+            actor = os.environ.get('GITHUB_ACTOR', 'fish-etf-bot')
+            # 使用GitHub提供的noreply邮箱
+            email = f"{actor}@users.noreply.github.com"
+            
+            # 设置Git用户信息
+            subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
+            subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+            logger.info(f"已设置Git用户: {actor} <{email}>")
+        
         # 添加文件到暂存区
         add_cmd = ['git', 'add', relative_path]
         subprocess.run(add_cmd, check=True, cwd=repo_root)
@@ -51,6 +64,11 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
         
         # 推送到远程仓库
         branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+        # 使用GITHUB_TOKEN进行身份验证
+        if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
+            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
+        
         push_cmd = ['git', 'push', 'origin', branch]
         subprocess.run(push_cmd, check=True, cwd=repo_root)
         logger.info(f"已推送到远程仓库: origin/{branch}")

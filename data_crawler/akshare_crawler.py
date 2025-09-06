@@ -15,20 +15,24 @@ from datetime import datetime, timedelta, date  # 修复：添加date导入
 from config import Config
 from retrying import retry
 
-# 修复：添加必要的导入
+# 修复：正确导入函数
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    get_last_trading_day,  # 添加get_last_trading_day导入
+    get_last_trading_day,
     is_trading_day
 )
+# 从正确的模块导入数据处理函数
 from utils.file_utils import (
     ensure_chinese_columns,
+)
+from utils.data_processor import (
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data
 )
+
 
 # 初始化日志
 logger = logging.getLogger(__name__)

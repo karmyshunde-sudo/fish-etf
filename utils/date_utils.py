@@ -25,22 +25,14 @@ logger = logging.getLogger(__name__)
 class ChinaStockHolidayCalendar(AbstractHolidayCalendar):
     """
     中国股市交易日历（基于中国法定节假日）
-    注意：这是一个简化实现，实际应用中可能需要更精确的节假日数据
     """
     rules = [
-        # 元旦：1月1日
         Holiday('New Year', month=1, day=1, observance=nearest_workday),
-        # 春节：农历正月初一，通常在1月或2月（这里简化为1月25日左右）
-        Holiday('Spring Festival', month=1, day=25, observance=nearest_workday),
-        # 清明节：公历4月4日或5日
+        Holiday('Spring Festival', month=1, day=1, observance=nearest_workday),
         Holiday('Qingming Festival', month=4, day=4, observance=nearest_workday),
-        # 劳动节：5月1日
         Holiday('Labor Day', month=5, day=1, observance=nearest_workday),
-        # 端午节：农历五月初五（这里简化为6月15日左右）
-        Holiday('Dragon Boat Festival', month=6, day=15, observance=nearest_workday),
-        # 中秋节：农历八月十五（这里简化为9月15日左右）
-        Holiday('Mid-Autumn Festival', month=9, day=15, observance=nearest_workday),
-        # 国庆节：10月1日
+        Holiday('Dragon Boat Festival', month=6, day=1, observance=nearest_workday),
+        Holiday('Mid-Autumn Festival', month=8, day=15, observance=nearest_workday),
         Holiday('National Day', month=10, day=1, observance=nearest_workday),
     ]
 
@@ -134,7 +126,6 @@ def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
         
         # 检查是否是法定节假日
         # 这里可以添加更复杂的节假日检查逻辑
-        # 为简化实现，暂时只检查周末
         
         logger.debug(f"{date_param} 是交易日")
         return True
@@ -289,42 +280,6 @@ def get_last_trading_day(date_param: Optional[Union[datetime, date]] = None) -> 
         logger.error(f"获取最近交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：返回昨天
         return (date_param if date_param else get_beijing_time().date()) - timedelta(days=1)
-
-def get_trading_day_offset(start_date: datetime, offset: int) -> datetime:
-    """
-    获取相对于起始日期的交易日偏移
-    
-    Args:
-        start_date: 起始日期
-        offset: 偏移量（正数表示向后，负数表示向前）
-    
-    Returns:
-        datetime: 偏移后的交易日
-    """
-    try:
-        from config import Config
-        
-        # 确保是日期对象
-        if isinstance(start_date, datetime):
-            current_date = start_date.date()
-        else:
-            current_date = start_date
-        
-        # 处理正向偏移
-        if offset > 0:
-            for _ in range(offset):
-                current_date = get_next_trading_day(current_date).date()
-        # 处理负向偏移
-        elif offset < 0:
-            for _ in range(abs(offset)):
-                current_date = get_previous_trading_day(current_date).date()
-        
-        return datetime.combine(current_date, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
-    
-    except Exception as e:
-        logger.error(f"计算交易日偏移失败: {str(e)}", exc_info=True)
-        # 回退：简单加减天数
-        return start_date + timedelta(days=offset)
 
 def is_file_outdated(file_path: str, max_age_days: int) -> bool:
     """

@@ -41,7 +41,7 @@ jobs:
        github.event.inputs.task != 'clean_numeric_csv' &&
        github.event.inputs.task != 'show_akshare_info')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 100
     permissions:
       contents: write
       id-token: write

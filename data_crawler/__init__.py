@@ -107,6 +107,10 @@ def crawl_etf_daily_incremental() -> None:
         batch_size = Config.CRAWL_BATCH_SIZE
         num_batches = (total + batch_size - 1) // batch_size
         
+        # 统计已提交的ETF数量
+        committed_count = 0
+        last_commit_time = time.time()
+        
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, total)
@@ -223,6 +227,20 @@ def crawl_etf_daily_incremental() -> None:
                 # 标记为已完成
                 with open(completed_file, "a", encoding="utf-8") as f:
                     f.write(f"{etf_code}\n")
+                
+                # 立即提交到Git仓库（每成功保存1个ETF就提交一次）
+                try:
+                    from utils.git_utils import commit_and_push_file
+                    commit_message = f"feat: 自动更新ETF {etf_code} 日线数据 - {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                    if commit_and_push_file(save_path, commit_message):
+                        committed_count += 1
+                        logger.info(f"✅ 已提交ETF {etf_code} 数据到Git仓库（累计 {committed_count} 个ETF）")
+                    else:
+                        logger.error(f"❌ 提交ETF {etf_code} 数据到Git仓库失败")
+                except ImportError:
+                    logger.warning("未找到git_utils模块，跳过Git提交")
+                except Exception as e:
+                    logger.error(f"提交ETF {etf_code} 数据到Git仓库时出错: {str(e)}", exc_info=True)
                 
                 # 限制请求频率
                 time.sleep(3)  # 使用硬编码值代替Config.CRAWL_INTERVAL

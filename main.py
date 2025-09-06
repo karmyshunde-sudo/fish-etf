@@ -73,11 +73,15 @@ def should_execute_crawl_etf_daily() -> bool:
     beijing_time = get_beijing_time()
     beijing_date = beijing_time.date()
     
+    # 检查是否为交易日
+    is_trading = is_trading_day(beijing_date)
+    
     # 非交易日且未到补爬时间（18点后允许补爬）
-    if not is_trading_day(beijing_date) and beijing_time.hour < 18:
+    if not is_trading and beijing_time.hour < 18:
         logger.info(f"今日{beijing_date}非交易日且未到补爬时间（{beijing_time.hour}点），跳过爬取日线数据（定时任务）")
         return False
     
+    logger.info(f"今日{beijing_date}{'是' if is_trading else '不是'}交易日，当前时间{beijing_time.hour}点，{'执行' if is_trading or beijing_time.hour >= 18 else '跳过'}爬取日线数据")
     return True
 
 def should_execute_calculate_arbitrage() -> bool:
@@ -310,6 +314,12 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
         # 计算套利机会
         logger.info("开始计算套利机会")
         discount_df, premium_df = calculate_arbitrage_opportunity()
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        if not discount_df.empty:
+            discount_df = discount_df.copy(deep=True)
+        if not premium_df.empty:
+            premium_df = premium_df.copy(deep=True)
         
         # 检查是否有新的套利机会
         new_opportunities = False
@@ -607,7 +617,7 @@ def run_scheduled_tasks():
                 handle_update_etf_list()
         
         # 爬取日线数据
-        if beijing_now.hour == 16 and beijing_now.minute == 0:
+        if beijing_now.hour == 18 and beijing_now.minute == 0:
             logger.info("执行ETF日线数据增量爬取任务")
             handle_crawl_etf_daily()
         

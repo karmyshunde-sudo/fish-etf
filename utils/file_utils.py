@@ -128,6 +128,9 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return df
         
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 检查是否已经是中文列名 - 使用config中定义的STANDARD_COLUMNS
         if all(col in Config.STANDARD_COLUMNS for col in df.columns):
             logger.debug("DataFrame已使用标准中文列名，无需映射")
@@ -185,6 +188,9 @@ def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = No
         # 读取CSV文件
         df = pd.read_csv(file_path)
         
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 记录加载的列名用于诊断
         logger.debug(f"成功加载ETF {etf_code} 日线数据: {file_path}，列名: {list(df.columns)}，共{len(df)}条")
         
@@ -209,12 +215,13 @@ def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = No
             logger.debug(f"ETF {etf_code} 日线数据缺少'折溢价率'列，将尝试从其他列计算")
             # 尝试从其他列计算折溢价率（如果可用）
             if "市场价格" in df.columns and "IOPV" in df.columns:
-                df["折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+                # 使用.loc避免SettingWithCopyWarning
+                df.loc[:, "折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
                 logger.info(f"已计算ETF {etf_code} 的折溢价率")
             else:
                 logger.warning(f"ETF {etf_code} 无法计算折溢价率，缺少必要列")
                 # 添加默认折溢价率列
-                df["折溢价率"] = 0.0
+                df.loc[:, "折溢价率"] = 0.0
         
         return df
     
@@ -247,6 +254,9 @@ def load_arbitrage_data(date_str: str) -> pd.DataFrame:
         
         # 读取CSV文件（明确指定编码）
         df = pd.read_csv(file_path, encoding="utf-8-sig")
+        
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
         
         # 添加关键诊断日志
         logger.info(f"成功加载套利数据: {file_path}")
@@ -864,6 +874,9 @@ def load_etf_metadata() -> pd.DataFrame:
         # 加载元数据
         df = pd.read_csv(Config.METADATA_PATH)
         
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
         # 确保使用中文列名
         df = ensure_chinese_columns(df)
         
@@ -875,7 +888,7 @@ def load_etf_metadata() -> pd.DataFrame:
                 return pd.DataFrame()
         
         # 确保ETF代码是6位字符串
-        df["ETF代码"] = df["ETF代码"].astype(str).str.strip().str.zfill(6)
+        df.loc[:, "ETF代码"] = df["ETF代码"].astype(str).str.strip().str.zfill(6)
         
         return df
     
@@ -939,6 +952,9 @@ def load_all_etf_list() -> pd.DataFrame:
         # 读取ETF列表
         etf_list = pd.read_csv(Config.ALL_ETFS_PATH, encoding="utf-8")
         
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        etf_list = etf_list.copy(deep=True)
+        
         # 确保使用中文列名
         etf_list = ensure_chinese_columns(etf_list)
         
@@ -950,7 +966,7 @@ def load_all_etf_list() -> pd.DataFrame:
                 return pd.DataFrame()
         
         # 确保ETF代码是6位字符串
-        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
+        etf_list.loc[:, "ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
         
         return etf_list
     

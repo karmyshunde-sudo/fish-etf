@@ -29,7 +29,6 @@ from utils.file_utils import (
     get_last_crawl_date,  # 从file_utils获取最后爬取日期
     record_failed_etf,    # 从file_utils获取失败记录函数
     ensure_chinese_columns,
-    standardize_column_names,
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data

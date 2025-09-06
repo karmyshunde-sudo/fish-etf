@@ -179,25 +179,24 @@ def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
     """
-    获取ETF最后爬取的日期
+    获取ETF最后爬取日期
     
     Args:
         etf_code: ETF代码
         etf_daily_dir: ETF日线数据目录
     
     Returns:
-        str: 最后爬取日期（YYYY-MM-DD），如果无历史数据则返回初始爬取日期
+        str: 最后爬取日期（格式：YYYY-MM-DD）
     """
     try:
         file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
         
         # 如果文件不存在，返回初始爬取日期
         if not os.path.exists(file_path):
-            # 局部导入，避免循环导入
-            from utils.date_utils import get_beijing_time
-            current_date = get_beijing_time().date()
-            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
-            logger.debug(f"ETF {etf_code} 无历史数据，使用初始日期: {start_date}")
+            # 首次爬取：获取1年历史数据
+            last_trading_day = get_last_trading_day()
+            start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 无历史数据，首次爬取使用日期: {start_date}")
             return start_date
         
         # 读取CSV文件
@@ -205,11 +204,10 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         
         # 如果DataFrame为空或没有日期列，返回初始爬取日期
         if df.empty or "日期" not in df.columns:
-            # 局部导入，避免循环导入
-            from utils.date_utils import get_beijing_time
-            current_date = get_beijing_time().date()
-            start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
-            logger.debug(f"ETF {etf_code} 数据文件异常，使用初始日期: {start_date}")
+            # 首次爬取：获取1年历史数据
+            last_trading_day = get_last_trading_day()
+            start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
+            logger.debug(f"ETF {etf_code} 数据文件异常，首次爬取使用日期: {start_date}")
             return start_date
         
         # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
@@ -221,15 +219,16 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         
         # 获取最新日期
         latest_date = df["日期"].max().strftime("%Y-%m-%d")
-        logger.debug(f"ETF {etf_code} 最后爬取日期: {latest_date}")
-        return latest_date
+        # 返回最新日期的下一天，因为我们要爬取新数据
+        next_date = (datetime.strptime(latest_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        logger.debug(f"ETF {etf_code} 最后爬取日期: {latest_date}，增量爬取从 {next_date} 开始")
+        return next_date
     
     except Exception as e:
         logger.error(f"获取ETF {etf_code} 最后爬取日期失败: {str(e)}", exc_info=True)
         # 出错时返回初始爬取日期
-        from utils.date_utils import get_beijing_time
-        current_date = get_beijing_time().date()
-        start_date = (current_date - timedelta(days=Config.INITIAL_CRAWL_DAYS)).strftime("%Y-%m-%d")
+        last_trading_day = get_last_trading_day()
+        start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
         return start_date
 
 def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:

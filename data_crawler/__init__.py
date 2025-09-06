@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import akshare as ak
+from retrying import retry
 
 # 添加必要的导入
 from config import Config

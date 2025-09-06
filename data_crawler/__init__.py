@@ -142,11 +142,8 @@ def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str, error_me
         logger.error(f"记录失败ETF信息失败: {str(e)}", exc_info=True)
 
 def crawl_etf_daily_incremental() -> None:
-    """
-    增量爬取ETF日线数据（单只保存+断点续爬逻辑）
-    
-    注意：此函数不再包含是否执行的判断逻辑，由调用方决定是否执行
-    """
+    """增量爬取ETF日线数据（单只保存+断点续爬逻辑）
+    注意：此函数不再包含是否执行的判断逻辑，由调用方决定是否执行"""
     try:
         logger.info("===== 开始执行任务：crawl_etf_daily =====")
         beijing_time = get_beijing_time()
@@ -175,113 +172,104 @@ def crawl_etf_daily_incremental() -> None:
         all_codes = get_filtered_etf_codes()
         to_crawl_codes = [code for code in all_codes if code not in completed_codes]
         total = len(to_crawl_codes)
-        
         if total == 0:
             logger.info("所有ETF日线数据均已爬取完成，无需继续")
             return
-        
         logger.info(f"待爬取ETF总数：{total}只")
         
         # 分批爬取（每批50只）
         batch_size = Config.CRAWL_BATCH_SIZE
-        batches = [to_crawl_codes[i:i+batch_size] for i in range(0, total, batch_size)]
-        logger.info(f"共分为 {len(batches)} 个批次，每批 {batch_size} 只ETF")
+        num_batches = (total + batch_size - 1) // batch_size
         
-        # 逐批、逐只爬取
-        for batch_idx, batch in enumerate(batches, 1):
-            batch_num = len(batch)
-            logger.info(f"==============================")
-            logger.info(f"正在处理批次 {batch_idx}/{len(batches)}")
-            logger.info(f"ETF范围：{batch_idx*batch_size - batch_size + 1}-{min(batch_idx*batch_size, total)}只（共{batch_num}只）")
-            logger.info(f"==============================")
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, total)
+            batch_codes = to_crawl_codes[start_idx:end_idx]
             
-            for idx, etf_code in enumerate(batch, 1):
-                try:
-                    # 打印当前进度
-                    logger.info(f"--- 批次{batch_idx} - 第{idx}只 / 共{batch_num}只 ---")
-                    etf_name = get_etf_name(etf_code)
-                    logger.info(f"ETF代码：{etf_code} | 名称：{etf_name}")
-                    
-                    # 确定爬取时间范围（增量爬取）
-                    start_date = get_last_crawl_date(etf_code, etf_daily_dir)
-                    end_date = beijing_time.date().strftime("%Y-%m-%d")
-                    
-                    if start_date > end_date:
-                        logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
-                        # 标记为已完成
-                        with open(completed_file, "a", encoding="utf-8") as f:
-                            f.write(f"{etf_code}\n")
-                        continue
-                    
-                    logger.info(f"📅 爬取时间范围：{start_date} 至 {end_date}")
-                    
-                    # 先尝试AkShare爬取
-                    df = crawl_etf_daily_akshare(etf_code, start_date, end_date)
-                    
-                    # AkShare失败则尝试新浪爬取
-                    if df.empty:
-                        logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
-                        df = crawl_etf_daily_sina(etf_code, start_date, end_date)
-                    
-                    # 数据校验
-                    if df.empty:
-                        logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
-                        # 记录失败日志，但不标记为已完成，以便下次重试
-                        record_failed_etf(etf_daily_dir, etf_code, etf_name)
-                        continue
-                    
-                    # 确保使用中文列名
-                    df = ensure_chinese_columns(df)
-                    
-                    # 补充ETF基本信息
-                    df["ETF代码"] = etf_code
-                    df["ETF名称"] = etf_name
-                    df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    # 处理已有数据的追加逻辑
-                    save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
-                    if os.path.exists(save_path):
-                        try:
-                            existing_df = pd.read_csv(save_path)
-                            # 确保现有数据也是中文列名
-                            existing_df = ensure_chinese_columns(existing_df)
-                            
-                            # 合并数据并去重
-                            combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=["日期"], keep="last")
-                            # 按日期排序
-                            combined_df = combined_df.sort_values("日期", ascending=False)
-                            df = combined_df
-                        except Exception as e:
-                            logger.error(f"合并现有数据失败: {str(e)}，将覆盖原文件", exc_info=True)
-                    
-                    # 保存数据
-                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                    logger.info(f"✅ 保存成功：{save_path}（共{len(df)}条数据）")
-                    
-                    # 记录已完成
+            logger.info(f"处理第 {batch_idx+1}/{num_batches} 批 ETF ({len(batch_codes)}只)")
+            
+            for etf_code in batch_codes:
+                etf_name = get_etf_name(etf_code)
+                logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
+                
+                # 确定爬取时间范围（增量爬取）
+                start_date = get_last_crawl_date(etf_code, etf_daily_dir)
+                
+                # 获取最近一个交易日作为结束日期
+                last_trading_day = get_last_trading_day()
+                end_date = last_trading_day.strftime("%Y-%m-%d")
+                
+                if start_date > end_date:
+                    logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
+                    # 标记为已完成
                     with open(completed_file, "a", encoding="utf-8") as f:
                         f.write(f"{etf_code}\n")
-                    
-                    # 单只爬取后短休眠
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    # 单只失败不中断，记录日志后继续
-                    logger.error(f"❌ 爬取失败：{str(e)}", exc_info=True)
-                    # 记录失败日志
-                    record_failed_etf(etf_daily_dir, etf_code, etf_name, str(e))
-                    time.sleep(3)  # 失败后延长休眠
                     continue
+                
+                logger.info(f"📅 爬取时间范围：{start_date} 至 {end_date}")
+                
+                # 先尝试AkShare爬取
+                df = crawl_etf_daily_akshare(etf_code, start_date, end_date)
+                
+                # AkShare失败则尝试新浪爬取
+                if df.empty:
+                    logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
+                    df = crawl_etf_daily_sina(etf_code, start_date, end_date)
+                
+                # 数据校验
+                if df.empty:
+                    logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
+                    # 记录失败日志，但不标记为已完成，以便下次重试
+                    record_failed_etf(etf_daily_dir, etf_code, etf_name)
+                    continue
+                
+                # 确保使用中文列名
+                df = ensure_chinese_columns(df)
+                
+                # 补充ETF基本信息
+                df["ETF代码"] = etf_code
+                df["ETF名称"] = etf_name
+                df["爬取时间"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 处理已有数据的追加逻辑
+                save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+                if os.path.exists(save_path):
+                    try:
+                        existing_df = pd.read_csv(save_path)
+                        # 确保现有数据也是中文列名
+                        existing_df = ensure_chinese_columns(existing_df)
+                        
+                        # 合并数据并去重
+                        combined_df = pd.concat([existing_df, df], ignore_index=True)
+                        combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                        combined_df = combined_df.sort_values("日期", ascending=False)
+                        
+                        # 保存合并后的数据
+                        combined_df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                        
+                        logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                    except Exception as e:
+                        logger.error(f"合并数据失败: {str(e)}，尝试覆盖保存", exc_info=True)
+                        df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                        logger.info(f"✅ 数据已覆盖保存至: {save_path} ({len(df)}条)")
+                else:
+                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
+                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                
+                # 标记为已完成
+                with open(completed_file, "a", encoding="utf-8") as f:
+                    f.write(f"{etf_code}\n")
+                
+                # 限制请求频率
+                time.sleep(Config.CRAWL_INTERVAL)
             
-            # 批次间长休眠（减轻服务器压力）
-            if batch_idx < len(batches):
-                logger.info(f"批次{batch_idx}处理完成，休眠10秒后继续...")
-                time.sleep(10)
-        
-        logger.info("===== 所有待爬取ETF处理完毕 =====")
-        
+            # 批次间暂停
+            if batch_idx < num_batches - 1:
+                logger.info(f"批次处理完成，暂停 {Config.BATCH_INTERVAL} 秒...")
+                time.sleep(Config.BATCH_INTERVAL)
+    
     except Exception as e:
-        logger.error(f"增量爬取任务执行失败: {str(e)}", exc_info=True)
+        logger.error(f"ETF日线数据增量爬取任务执行失败: {str(e)}", exc_info=True)
         raise
 
 def update_etf_list() -> bool:

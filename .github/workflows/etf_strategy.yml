@@ -3,9 +3,9 @@ name: ETF仓位折溢套利
 on:
   schedule:
     # GitHub Actions使用UTC时区，注释中表示对应的北京时间
-    - cron: '0 8 * * 1-5'   # UTC 08:00 = 北京时间 16:00 (日线爬取)
-    - cron: '*/5 1-6 * * 1-5' # UTC 01:00-06:00 = 北京时间 09:00-14:00 (套利计算，每5分钟一次)
-    - cron: '0 6 * * 1-5'   # UTC 06:00 = 北京时间 14:00 (仓位策略)
+    - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (日线爬取)
+    - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算，每5分钟一次)
+    - cron: '0 5 * * 1-5'   # UTC 05:00 = 北京时间 13:00 (仓位策略)
     - cron: '0 12 * * 0'    # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
   workflow_dispatch:
     inputs:
@@ -106,11 +106,11 @@ jobs:
           
           # 确定任务类型
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            if [[ "${{ github.event.schedule }}" == "0 8 * * 1-5" ]]; then
+            if [[ "${{ github.event.schedule }}" == "0 10 * * 1-5" ]]; then
               echo "TASK=crawl_etf_daily" >> $GITHUB_ENV
-            elif [[ "${{ github.event.schedule }}" == "*/5 1-6 * * 1-5" ]]; then
+            elif [[ "${{ github.event.schedule }}" == "*/5 2-7 * * 1-5" ]]; then
               echo "TASK=calculate_arbitrage" >> $GITHUB_ENV
-            elif [[ "${{ github.event.schedule }}" == "0 6 * * 1-5" ]]; then
+            elif [[ "${{ github.event.schedule }}" == "0 5 * * 1-5" ]]; then
               echo "TASK=calculate_position" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "0 12 * * 0" ]]; then
               echo "TASK=update_etf_list" >> $GITHUB_ENV

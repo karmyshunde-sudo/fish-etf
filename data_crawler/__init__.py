@@ -11,24 +11,36 @@ import time
 import pandas as pd
 import logging
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from retrying import retry
+from typing import List, Dict, Any, Tuple, Optional
 import akshare as ak
-from pandas.tseries.offsets import CustomBusinessDay
-from pandas.tseries.holiday import AbstractHolidayCalendar, Holiday
+
+# 添加必要的导入
 from config import Config
-from .etf_list_manager import update_all_etf_list, get_filtered_etf_codes, load_all_etf_list
-from .akshare_crawler import crawl_etf_daily_akshare
-from .sina_crawler import crawl_etf_daily_sina
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
     is_file_outdated,
     is_trading_day,
-    get_last_trading_day  # 添加这一行
+    get_last_trading_day  # 修复：添加get_last_trading_day导入
 )
-from utils.file_utils import ensure_chinese_columns
+from utils.file_utils import (
+    ensure_dir_exists,
+    get_last_crawl_date,
+    record_failed_etf,
+    ensure_chinese_columns,
+    standardize_column_names,
+    ensure_required_columns,
+    clean_and_format_data,
+    limit_to_one_year_data
+)
+from data_crawler.akshare_crawler import crawl_etf_daily_akshare
+from data_crawler.sina_crawler import crawl_etf_daily_sina
+from data_crawler.etf_list_manager import (
+    get_filtered_etf_codes,
+    get_etf_name,
+    update_all_etf_list
+)
 
 # 初始化日志
 logger = logging.getLogger(__name__)

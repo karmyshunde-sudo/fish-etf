@@ -641,6 +641,7 @@ def generate_report():
                 message_lines = []
                 message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
                 message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
+                # 修正：错误信号类型显示问题
                 message_lines.append(f"❌ 信号：数据获取失败")
                 message_lines.append("──────────────────")
                 message_lines.append("⚠️ 获取指数数据失败，请检查数据源")
@@ -661,6 +662,7 @@ def generate_report():
                 message_lines = []
                 message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
                 message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
+                # 修正：错误信号类型显示问题
                 message_lines.append(f"⚠️ 信号：数据不足")
                 message_lines.append("──────────────────")
                 message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天")
@@ -690,7 +692,9 @@ def generate_report():
             message_lines = []
             message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
             message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
-            message_lines.append(f"✅ 信号：{status}（{status}信号）")
+            # 修正：根据信号类型选择正确的符号
+            signal_symbol = "✅" if status == "YES" else "❌"
+            message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）")
             message_lines.append("──────────────────")
             message_lines.append(signal_message)
             message_lines.append("──────────────────")
@@ -708,7 +712,9 @@ def generate_report():
             name_padding = 10 if len(name) <= 4 else 8  # 中文名称通常2-4个字
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
             
-            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】✅ 信号：{status}📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%"
+            # 修正：根据信号类型选择正确的符号
+            signal_symbol = "✅" if status == "YES" else "❌"
+            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1
@@ -729,7 +735,8 @@ def generate_report():
     
     except Exception as e:
         logger.error(f"策略执行失败: {str(e)}", exc_info=True)
-        send_wechat_message(f"🚨 策略执行异常: {str(e)}")
+        # 修正：错误消息与正常信号消息分离
+        send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}", message_type="error")
 
 if __name__ == "__main__":
     logger.info("===== 开始执行ETF Yes/No策略 =====")

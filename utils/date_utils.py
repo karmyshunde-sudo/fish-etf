@@ -91,43 +91,77 @@ def get_utc_time() -> datetime:
         from config import Config
         return datetime.utcnow().replace(tzinfo=Config.UTC_TIMEZONE)
 
-def is_trading_day(date_param: Optional[Union[datetime, date]] = None) -> bool:
+def is_trading_day(date_param: Optional[Union[date, str]] = None) -> bool:
     """
-    判断指定日期是否为交易日（A股市场）
+    检查是否为交易日
     
     Args:
-        date_param: 要判断的日期，如果为None则使用当前北京时间
+        date_param: 日期 (date对象或YYYY-MM-DD字符串)
     
     Returns:
-        bool: 如果是交易日返回True，否则返回False
+        bool: 是否为交易日
     """
     try:
-        from config import Config
-        
+        # 处理输入参数
         if date_param is None:
-            # 直接使用config定义的北京时间
-            date_param = get_beijing_time().date()
-        elif isinstance(date_param, datetime):
-            # 如果传入的是datetime，确保使用config定义的时区
-            if date_param.tzinfo is None:
-                date_param = date_param.replace(tzinfo=Config.UTC_TIMEZONE)
-            date_param = date_param.astimezone(Config.BEIJING_TIMEZONE).date()
-        elif isinstance(date_param, date):
-            # 如果传入的是date，直接使用
-            pass
+            date_obj = get_beijing_time().date()
+        elif isinstance(date_param, str):
+            date_obj = datetime.strptime(date_param, "%Y-%m-%d").date()
         else:
-            logger.error(f"无效的日期类型: {type(date_param)}")
+            date_obj = date_param
+        
+        # 检查是否为周末
+        if date_obj.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
             return False
         
-        # 周末不是交易日
-        if date_param.weekday() >= 5:  # 5=周六, 6=周日
-            logger.debug(f"{date_param} 是周末，非交易日")
+        # 检查是否为法定节假日（这里简化处理，实际应查询节假日数据库）
+        # 可以根据需要添加更多节假日检查逻辑
+        year = date_obj.year
+        month = date_obj.month
+        day = date_obj.day
+        
+        # 简单检查中国主要节假日
+        if month == 1 and day == 1:  # 元旦
+            return False
+        if month == 10 and 1 <= day <= 7:  # 国庆节
+            return False
+        if month == 5 and 1 <= day <= 3:  # 劳动节
             return False
         
-        # 检查是否是法定节假日
-        # 这里可以添加更复杂的节假日检查逻辑
+        # 特殊调休日处理（简化版）
+        # 实际应用中应该有一个节假日数据库
+        special_holidays = [
+            # 2025年节假日（示例）
+            "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", 
+            "2025-01-31", "2025-02-01", "2025-02-02", "2025-02-03",
+            "2025-04-04", "2025-04-05", "2025-04-06",
+            "2025-05-01", "2025-05-02", "2025-05-03",
+            "2025-06-08", "2025-06-09", "2025-06-10",
+            "2025-09-15", "2025-09-16", "2025-09-17",
+            "2025-10-01", "2025-10-02", "2025-10-03", 
+            "2025-10-04", "2025-10-05", "2025-10-06", "2025-10-07"
+        ]
         
-        logger.debug(f"{date_param} 是交易日")
+        if date_obj.strftime("%Y-%m-%d") in special_holidays:
+            return False
+        
+        # 工作日调休为假期的情况（简化版）
+        # 实际应用中应该有一个节假日数据库
+        special_workdays = [
+            # 2025年调休（示例）
+            "2025-01-26", "2025-01-27", "2025-02-08",
+            "2025-04-27", "2025-05-10",
+            "2025-09-28", "2025-10-11"
+        ]
+        
+        if date_obj.strftime("%Y-%m-%d") in special_workdays:
+            return True
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"检查交易日失败 {date_param}: {str(e)}", exc_info=True)
+        # 出错时保守策略：假设是交易日
         return True
     
     except Exception as e:
@@ -182,38 +216,35 @@ def is_same_day(date1: datetime, date2: datetime) -> bool:
         logger.error(f"比较日期失败: {str(e)}", exc_info=True)
         return False
 
-def get_next_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
+def get_next_trading_day(current_date: date) -> date:
     """
     获取下一个交易日
     
     Args:
-        date_param: 起始日期，如果为None则使用当前日期
+        current_date: 当前日期
     
     Returns:
-        datetime: 下一个交易日
+        date: 下一个交易日
     """
     try:
-        from config import Config
+        # 确保输入是date对象
+        if isinstance(current_date, datetime):
+            current_date = current_date.date()
         
-        if date_param is None:
-            date_param = get_beijing_time()
-        
-        # 转换为日期对象
-        if isinstance(date_param, datetime):
-            date_param = date_param.date()
-        
-        # 循环查找下一个交易日
-        next_day = date_param + timedelta(days=1)
+        # 获取最近交易日
+        next_day = current_date + timedelta(days=1)
         while not is_trading_day(next_day):
             next_day += timedelta(days=1)
+            # 防止无限循环
+            if (next_day - current_date).days > 30:
+                logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
+                break
         
-        logger.debug(f"下一个交易日: {date_param} -> {next_day}")
-        return datetime.combine(next_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
-    
+        return next_day
     except Exception as e:
-        logger.error(f"获取下一个交易日失败 {date_param}: {str(e)}", exc_info=True)
-        # 回退：简单加一天
-        return (date_param if date_param else get_beijing_time()) + timedelta(days=1)
+        logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
+        # 出错时返回明天
+        return current_date + timedelta(days=1)
 
 def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
     """

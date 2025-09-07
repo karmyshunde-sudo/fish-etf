@@ -240,8 +240,10 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         # 转换为字符串
         latest_date_str = latest_date.strftime("%Y-%m-%d")
         
-        # 返回最新日期的下一天，因为我们要爬取新数据
-        next_date = (latest_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        # 获取下一个交易日作为开始日期
+        next_trading_day = get_next_trading_day(latest_date)
+        next_date = next_trading_day.strftime("%Y-%m-%d")
+        
         logger.debug(f"ETF {etf_code} 最后爬取日期: {latest_date_str}，增量爬取从 {next_date} 开始")
         return next_date
     

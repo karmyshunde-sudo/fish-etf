@@ -426,7 +426,7 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
             df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
             
             # 直接处理为日期对象（不使用时区转换，因为ETF数据通常只有日期）
-            df.loc[:, "日期"] = df["日期"].dt.date
+            df.loc[:, "日期"] = df["日期"].dt.strftime("%Y-%m-%d")
             
             # 确保日期列是字符串格式（YYYY-MM-DD）
             df.loc[:, "日期"] = df["日期"].apply(lambda x: x.strftime("%Y-%m-%d") if not pd.isna(x) else "")

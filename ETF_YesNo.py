@@ -303,7 +303,8 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     last_10_days = df.tail(10)
     deviations = []
     for i in range(len(last_10_days)):
-        if i < CRITICAL_VALUE_DAYS - 1:
+        # 确保有足够的数据计算均线
+        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[-10 + i]):
             continue
             
         deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
@@ -314,7 +315,8 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     # 检查价格是否反复穿越均线
     cross_count = 0
     for i in range(len(close_prices)-10, len(close_prices)-1):
-        if i < CRITICAL_VALUE_DAYS - 1:
+        # 确保有足够的数据计算均线
+        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[i]) or np.isnan(ma_values[i+1]):
             continue
             
         if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
@@ -326,8 +328,13 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     is_volatile = cross_count >= min_cross_count
     
     # 计算最近10天偏离率范围
-    min_deviation = min(deviations)
-    max_deviation = max(deviations)
+    if deviations:
+        min_deviation = min(deviations)
+        max_deviation = max(deviations)
+    else:
+        # 当没有有效数据时，使用0作为默认值
+        min_deviation = 0
+        max_deviation = 0
     
     return is_volatile, cross_count, (min_deviation, max_deviation)
 
@@ -338,7 +345,7 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
         dict: 形态检测结果
     """
     if len(df) < 20:  # 需要足够数据
-        return {"m_top": False, "head_and_shoulders": False, "confidence": 0}
+        return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
     # 获取收盘价
     close_prices = df["收盘"].values
@@ -351,7 +358,7 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     
     # 如果找到的高点少于3个，无法形成头肩顶
     if len(peaks) < 3:
-        return {"m_top": False, "head_and_shoulders": False, "confidence": 0}
+        return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
     
     # 检测M头（两个高点）
     m_top_detected = False
@@ -489,7 +496,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                        pattern_msg = f"【注意】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
+                        pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
                 

@@ -41,6 +41,7 @@ jobs:
        github.event.inputs.task != 'clean_arbitrage_data' &&
        github.event.inputs.task != 'clean_trade_records' &&
        github.event.inputs.task != 'clean_numeric_csv' &&
+       github.event.inputs.task != 'etf_yesno' &&
        github.event.inputs.task != 'show_akshare_info')
     runs-on: ubuntu-latest
     timeout-minutes: 100

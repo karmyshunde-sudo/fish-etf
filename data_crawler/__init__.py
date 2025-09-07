@@ -80,36 +80,53 @@ def crawl_etf_daily_incremental() -> None:
         etf_daily_dir = Config.ETFS_DAILY_DIR
         logger.info(f"✅ 确保目录存在: {etf_daily_dir}")
         
-        # 已完成列表路径
+        # 获取最近一个交易日作为结束日期
+        last_trading_day = get_last_trading_day()
+        end_date = last_trading_day.strftime("%Y-%m-%d")
+        
+        # 获取待爬取ETF列表
+        all_codes = get_filtered_etf_codes()
+        to_crawl_codes = []
+        
+        # 精确判断哪些ETF需要爬取
+        for code in all_codes:
+            save_path = os.path.join(etf_daily_dir, f"{code}.csv")
+            is_first_crawl = not os.path.exists(save_path)
+            
+            if is_first_crawl:
+                # 首次爬取，需要获取数据
+                to_crawl_codes.append(code)
+                continue
+            
+            # 检查现有数据的最新日期
+            latest_data_date = get_latest_data_date(save_path)
+            if latest_data_date < last_trading_day:
+                # 数据不是最新的，需要增量爬取
+                to_crawl_codes.append(code)
+        
+        total = len(to_crawl_codes)
+        if total == 0:
+            logger.info("所有ETF日线数据均已最新，无需继续")
+            return
+        logger.info(f"待爬取ETF总数：{total}只（基于实际数据状态判断）")
+        
+        # 已完成列表路径（仅用于记录进度，不用于判断是否需要爬取）
         completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
         
-        # 加载已完成列表
+        # 加载已完成列表（仅用于进度显示）
         completed_codes = set()
         if os.path.exists(completed_file):
             try:
                 with open(completed_file, "r", encoding="utf-8") as f:
                     completed_codes = set(line.strip() for line in f if line.strip())
-                logger.info(f"已完成爬取的ETF数量：{len(completed_codes)}")
+                logger.info(f"进度记录中已完成爬取的ETF数量：{len(completed_codes)}")
             except Exception as e:
-                logger.error(f"读取已完成列表失败: {str(e)}", exc_info=True)
+                logger.error(f"读取进度记录失败: {str(e)}", exc_info=True)
                 completed_codes = set()
-        
-        # 获取待爬取ETF列表
-        all_codes = get_filtered_etf_codes()
-        to_crawl_codes = [code for code in all_codes if code not in completed_codes]
-        total = len(to_crawl_codes)
-        if total == 0:
-            logger.info("所有ETF日线数据均已爬取完成，无需继续")
-            return
-        logger.info(f"待爬取ETF总数：{total}只")
         
         # 分批爬取（每批50只）
         batch_size = Config.CRAWL_BATCH_SIZE
         num_batches = (total + batch_size - 1) // batch_size
-        
-        # 统计已提交的ETF数量
-        committed_count = 0
-        last_commit_time = time.time()
         
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
@@ -126,10 +143,6 @@ def crawl_etf_daily_incremental() -> None:
                 save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
                 is_first_crawl = not os.path.exists(save_path)
                 
-                # 获取最近一个交易日作为结束日期
-                last_trading_day = get_last_trading_day()
-                end_date = last_trading_day.strftime("%Y-%m-%d")
-                
                 # 首次爬取获取一年数据，增量爬取只获取新数据
                 if is_first_crawl:
                     # 首次爬取：获取1年历史数据
@@ -143,7 +156,7 @@ def crawl_etf_daily_incremental() -> None:
                     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
                     if start_date_obj > end_date_obj:
                         logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
-                        # 标记为已完成
+                        # 标记为已完成（仅用于进度显示）
                         with open(completed_file, "a", encoding="utf-8") as f:
                             f.write(f"{etf_code}\n")
                         continue
@@ -224,23 +237,22 @@ def crawl_etf_daily_incremental() -> None:
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
                 
-                # 标记为已完成
-                with open(completed_file, "a", encoding="utf-8") as f:
-                    f.write(f"{etf_code}\n")
-                
                 # 立即提交到Git仓库（每成功保存1个ETF就提交一次）
                 try:
                     from utils.git_utils import commit_and_push_file
                     commit_message = f"feat: 自动更新ETF {etf_code} 日线数据 - {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}"
                     if commit_and_push_file(save_path, commit_message):
-                        committed_count += 1
-                        logger.info(f"✅ 已提交ETF {etf_code} 数据到Git仓库（累计 {committed_count} 个ETF）")
+                        logger.info(f"✅ 已提交ETF {etf_code} 数据到Git仓库")
                     else:
                         logger.error(f"❌ 提交ETF {etf_code} 数据到Git仓库失败")
                 except ImportError:
                     logger.warning("未找到git_utils模块，跳过Git提交")
                 except Exception as e:
                     logger.error(f"提交ETF {etf_code} 数据到Git仓库时出错: {str(e)}", exc_info=True)
+                
+                # 标记为已完成（仅用于进度显示）
+                with open(completed_file, "a", encoding="utf-8") as f:
+                    f.write(f"{etf_code}\n")
                 
                 # 限制请求频率
                 time.sleep(3)  # 使用硬编码值代替Config.CRAWL_INTERVAL

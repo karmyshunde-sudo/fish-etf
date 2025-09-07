@@ -194,7 +194,6 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         # 如果文件不存在，返回初始爬取日期
         if not os.path.exists(file_path):
             # 首次爬取：获取1年历史数据
-            from utils.date_utils import get_last_trading_day
             last_trading_day = get_last_trading_day()
             start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 无历史数据，首次爬取使用日期: {start_date}")
@@ -206,7 +205,6 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         # 如果DataFrame为空或没有日期列，返回初始爬取日期
         if df.empty or "日期" not in df.columns:
             # 首次爬取：获取1年历史数据
-            from utils.date_utils import get_last_trading_day
             last_trading_day = get_last_trading_day()
             start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 数据文件异常，首次爬取使用日期: {start_date}")
@@ -225,7 +223,6 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         # 如果处理后DataFrame为空
         if df.empty:
             # 首次爬取：获取1年历史数据
-            from utils.date_utils import get_last_trading_day
             last_trading_day = get_last_trading_day()
             start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 日期列无效，首次爬取使用日期: {start_date}")
@@ -235,7 +232,6 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         latest_date = df["日期"].max()
         if pd.isna(latest_date):
             # 首次爬取：获取1年历史数据
-            from utils.date_utils import get_last_trading_day
             last_trading_day = get_last_trading_day()
             start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
             logger.debug(f"ETF {etf_code} 日期列包含无效值，首次爬取使用日期: {start_date}")
@@ -245,6 +241,8 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         latest_date_str = latest_date.strftime("%Y-%m-%d")
         
         # 获取下一个交易日作为开始日期
+        # 局部导入，避免循环导入
+        from utils.date_utils import get_next_trading_day
         next_trading_day = get_next_trading_day(latest_date)
         next_date = next_trading_day.strftime("%Y-%m-%d")
         
@@ -254,7 +252,6 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
     except Exception as e:
         logger.error(f"获取ETF {etf_code} 最后爬取日期失败: {str(e)}", exc_info=True)
         # 出错时返回初始爬取日期
-        from utils.date_utils import get_last_trading_day
         last_trading_day = get_last_trading_day()
         start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
         return start_date

@@ -7,6 +7,7 @@ on:
     - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算，每5分钟一次)
     - cron: '30 7 * * 1-5'    # UTC 07:30 = 北京时间 15:30 (仓位策略)
     - cron: '0 12 * * 0'      # UTC 12:00 = 北京时间 20:00 (ETF列表更新，周日)
+    - cron: '0 15 * * *'      # UTC 15:00 = 北京时间 23:00 (每天晚上11点鱼盆YES NO)
   workflow_dispatch:
     inputs:
       task:
@@ -23,6 +24,7 @@ on:
           - 'clean_trade_records'
           - 'clean_numeric_csv'
           - 'show_akshare_info'  # 新增：显示AkShare信息
+          - 'etf_yesno'  # 新增：鱼盆指数yesno
       interface_name:
         description: 'AkShare接口名称（可选）'
         required: false
@@ -114,6 +116,8 @@ jobs:
               echo "TASK=calculate_position" >> $GITHUB_ENV
             elif [[ "${{ github.event.schedule }}" == "0 12 * * 0" ]]; then
               echo "TASK=update_etf_list" >> $GITHUB_ENV
+            elif [[ "${{ github.event.schedule }}" == "0 15 * * *" ]]; then
+              echo "TASK=etf_yesno" >> $GITHUB_ENV
             else
               echo "未知的定时任务: ${{ github.event.schedule }}"
               echo "TASK=unknown" >> $GITHUB_ENV
@@ -665,6 +669,75 @@ jobs:
               payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】AkShare信息已生成\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\\n文件名: ${BEIJING_DATE}akshare_info.txt\"}}"
             else
               payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动任务】已查询AkShare接口信息\\n接口名称: ${INTERFACE_NAME}\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            fi
+            
+            # 发送企业微信通知
+            curl -s -X POST "$WECOM_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$payload" || echo "企业微信通知发送失败"
+          else
+            echo "未设置企业微信webhook，跳过通知"
+          fi
+
+  etf_yesno:
+    name: ETF Yes/No 策略
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'etf_yesno'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "警告: requirements.txt 文件不存在"
+          fi
+          
+      - name: 执行ETF Yes/No策略
+        run: |
+          echo "开始执行ETF Yes/No策略..."
+          # 创建日志目录
+          mkdir -p data/logs
+          # 获取当前北京时间
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
+          
+          # 执行策略并记录日志
+          python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
+          
+          # 检查执行结果
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "策略执行成功"
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "策略执行失败"
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+      - name: 发送策略结果通知
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
+            
+            # 构建消息内容
+            if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF Yes/No策略】执行成功\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
+            else
+              payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【ETF Yes/No策略】执行失败\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"
             fi
             
             # 发送企业微信通知

@@ -390,3 +390,31 @@ except Exception as e:
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
         print(f"数据爬取模块初始化失败: {str(e)}")
+
+def get_latest_data_date(file_path: str) -> date:
+    """
+    获取数据文件中的最新日期
+    
+    Args:
+        file_path: 数据文件路径
+        
+    Returns:
+        date: 最新日期
+    """
+    try:
+        df = pd.read_csv(file_path)
+        if "日期" in df.columns and not df.empty:
+            # 确保日期列是datetime类型
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+            # 删除无效日期
+            df = df.dropna(subset=["日期"])
+            # 获取最大日期
+            if not df.empty:
+                latest_date = df["日期"].max()
+                if not pd.isna(latest_date):
+                    return latest_date.date()
+    except Exception as e:
+        logger.error(f"获取文件 {file_path} 最新日期失败: {str(e)}", exc_info=True)
+    
+    # 出错时返回一个较早的日期，确保会重新爬取
+    return date(2024, 9, 1)

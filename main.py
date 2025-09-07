@@ -495,6 +495,46 @@ def handle_check_arbitrage_exit() -> Dict[str, Any]:
         )
         return {"status": "error", "message": error_msg}
 
+def handle_etf_yesno() -> Dict[str, Any]:
+    """
+    处理ETF Yes/No策略任务
+    
+    Returns:
+        Dict[str, Any]: 任务执行结果
+    """
+    try:
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        logger.info(f"开始执行ETF Yes/No策略 (UTC: {utc_now}, CST: {beijing_now})")
+        
+        # 导入ETF_YesNo模块
+        from ETF_YesNo import generate_report
+        
+        # 执行策略
+        generate_report()
+        
+        success_msg = "ETF Yes/No策略执行完成"
+        logger.info(success_msg)
+        
+        # 构建结果字典
+        result = {
+            "status": "success",
+            "message": success_msg,
+            "execution_time_utc": utc_now.strftime("%Y-%m-%d %H:%M"),
+            "execution_time_beijing": beijing_now.strftime("%Y-%m-%d %H:%M")
+        }
+        
+        # 发送任务完成通知
+        send_task_completion_notification("etf_yesno", result)
+        
+        return result
+    except Exception as e:
+        error_msg = f"ETF Yes/No策略执行失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        result = {"status": "error", "message": error_msg}
+        send_task_completion_notification("etf_yesno", result, message_type="error")
+        return result
+
 def main() -> Dict[str, Any]:
     """
     主函数：根据环境变量执行对应任务
@@ -526,7 +566,8 @@ def main() -> Dict[str, Any]:
             "calculate_position": handle_calculate_position,
             "update_etf_list": handle_update_etf_list,
             "send_daily_report": handle_send_daily_report,
-            "check_arbitrage_exit": handle_check_arbitrage_exit
+            "check_arbitrage_exit": handle_check_arbitrage_exit,
+            "etf_yesno": handle_etf_yesno  # 新增：ETF Yes/No策略任务
         }
         
         if task in task_handlers:
@@ -622,6 +663,11 @@ def run_scheduled_tasks():
             logger.info("执行ETF日线数据增量爬取任务")
             handle_crawl_etf_daily()
         
+        # ETF Yes/No策略（每天晚上11点）
+        if beijing_now.hour == 23 and beijing_now.minute == 0:
+            logger.info("执行ETF Yes/No策略任务")
+            handle_etf_yesno()
+        
         logger.info("定时任务执行完成")
         
     except Exception as e:
@@ -653,6 +699,10 @@ def test_all_modules():
         # 测试仓位策略
         logger.info("测试仓位策略...")
         handle_calculate_position()
+        
+        # 测试ETF Yes/No策略
+        logger.info("测试ETF Yes/No策略...")
+        handle_etf_yesno()
         
         # 测试每日报告
         logger.info("测试每日报告...")

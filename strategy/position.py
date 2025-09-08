@@ -239,42 +239,49 @@ def record_trade(**kwargs):
 
 def generate_position_content(strategies: Dict[str, str]) -> str:
     """
-    生成仓位策略内容（不包含格式）
+    生成仓位策略内容
     
     Args:
         strategies: 策略字典
     
     Returns:
-        str: 纯业务内容
+        str: 格式化后的策略内容
     """
-    try:
-        content = "【ETF仓位操作提示】\n"
-        content += "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
-        
-        for position_type, strategy in strategies.items():
-            content += f"【{position_type}】\n{strategy}\n\n"
-        
-        # 添加风险提示
-        content += (
-            "⚠️ 风险提示\n"
-            "• 操作建议仅供参考，不构成投资建议\n"
-            "• 市场有风险，投资需谨慎\n"
-            "• 请结合个人风险承受能力做出投资决策\n"
-        )
-        
-        return content
+    content = "【ETF仓位操作提示】\n"
+    content += "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
     
-    except Exception as e:
-        error_msg = f"生成仓位内容失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return "【ETF仓位操作提示】\n生成仓位内容时发生错误"
+    for position_type, strategy in strategies.items():
+        # 解析策略内容，提取详细数据
+        if "ETF名称" in strategy and "ETF代码" in strategy and "当前价格" in strategy:
+            # 提取ETF名称和代码
+            etf_name = strategy.split("ETF名称：")[1].split("\n")[0]
+            etf_code = strategy.split("ETF代码：")[1].split("\n")[0]
+            current_price = strategy.split("当前价格：")[1].split("\n")[0]
+            
+            # 提取20日均线和偏离率
+            critical_value = strategy.split("20日均线：")[1].split("\n")[0] if "20日均线：" in strategy else "N/A"
+            deviation = strategy.split("偏离率：")[1].split("\n")[0] if "偏离率：" in strategy else "N/A"
+            
+            # 提取评分、规模和成交额
+            score = strategy.split("评分：")[1].split("\n")[0] if "评分：" in strategy else "N/A"
+            fund_size = strategy.split("基金规模：")[1].split("\n")[0] if "基金规模：" in strategy else "N/A"
+            avg_volume = strategy.split("日均成交额：")[1].split("\n")[0] if "日均成交额：" in strategy else "N/A"
+            
+            # 生成详细内容
+            content += f"【{position_type}】\n"
+            content += f"ETF名称：{etf_name}（{etf_code}）\n"
+            content += f"当前价格：{current_price}\n"
+            content += f"20日均线：{critical_value}\n"
+            content += f"偏离率：{deviation}\n"
+            content += f"评分：{score}\n"
+            content += f"基金规模：{fund_size}\n"
+            content += f"日均成交额：{avg_volume}\n"
+            content += f"操作建议：{strategy.split('操作建议：')[1] if '操作建议：' in strategy else '详细建议'}\n\n"
+        else:
+            # 如果策略内容不符合预期格式，直接显示
+            content += f"【{position_type}】\n{strategy}\n\n"
+    
+    return content
 
 def calculate_position_strategy() -> str:
     """

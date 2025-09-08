@@ -152,6 +152,12 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         # 重命名列
         df = df.rename(columns=col_mapping)
         
+        # 确保关键列存在
+        required_columns = ["日期", "收盘", "成交额"]
+        for col in required_columns:
+            if col not in df.columns:
+                logger.warning(f"DataFrame缺少必要列: {col}")
+        
         # 记录映射后的列名
         logger.info(f"映射后列名: {list(df.columns)}")
         

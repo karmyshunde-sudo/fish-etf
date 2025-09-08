@@ -20,7 +20,7 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-from utils.file_utils import load_etf_daily_data, load_etf_metadata
+from utils.file_utils import load_etf_daily_data, load_etf_metadata, ensure_chinese_columns
 from data_crawler.etf_list_manager import load_all_etf_list, get_etf_name
 from wechat_push.push import send_wechat_message
 
@@ -121,6 +121,13 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
         # 确保使用中文列名
         df = ensure_chinese_columns(df)
         
+        # 检查数据完整性
+        required_columns = ["日期", "收盘", "成交额"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"流动性评分所需列缺失: {', '.join(missing_columns)}")
+            return 50.0  # 返回默认值
+        
         # 计算日均成交额（单位：万元）
         avg_volume = 0.0
         if AMOUNT_COL in df.columns:
@@ -167,14 +174,42 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
         float: 风险评分（0-100分）
     """
     try:
+        # 创建DataFrame的深拷贝
+        df = df.copy(deep=True)
+        
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
+        
         # 确保有足够数据
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，风险评分可能不准确")
         
+        # 检查数据完整性
+        required_columns = ["日期", "收盘"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"风险评分所需列缺失: {', '.join(missing_columns)}")
+            return 50.0  # 返回默认值
+        
         # 计算波动率
         if CLOSE_COL in df.columns and len(df) > 1:
-            daily_returns = df[CLOSE_COL].pct_change().dropna()
-            volatility = daily_returns.std() * np.sqrt(252)  # 年化波动率
+            # 创建副本以避免SettingWithCopyWarning
+            df = df.copy(deep=True)
+            
+            # 确保收盘价列是数值类型
+            if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
+                df.loc[:, CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+            
+            # 计算日收益率
+            df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
+            
+            # 处理NaN值
+            df = df.dropna(subset=["daily_return"])
+            
+            if not df.empty:
+                volatility = df["daily_return"].std() * np.sqrt(252)  # 年化波动率
+            else:
+                volatility = 0.2  # 默认波动率
             
             # 波动率评分（越低越好）：
             # 波动率≤0.1=100分，0.2=75分，0.3=50分，0.4=25分，≥0.5=0分
@@ -213,15 +248,22 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         float: 收益能力评分
     """
     try:
-        # 创建DataFrame的深拷贝 - 这是关键修复点
+        # 创建DataFrame的深拷贝
         df = df.copy(deep=True)
+        
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
         
         # 确保有足够数据
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，收益评分可能不准确")
         
-        # 确保使用中文列名
-        df = ensure_chinese_columns(df)
+        # 检查数据完整性
+        required_columns = ["日期", "收盘"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"收益评分所需列缺失: {', '.join(missing_columns)}")
+            return 50.0  # 返回默认值
         
         # 检查是否包含必要列
         if CLOSE_COL not in df.columns:
@@ -286,19 +328,40 @@ def calculate_sentiment_score(df: pd.DataFrame) -> float:
         float: 情绪评分
     """
     try:
+        # 创建DataFrame的深拷贝
+        df = df.copy(deep=True)
+        
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
+        
         # 确保有足够数据
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，情绪评分可能不准确")
         
+        # 检查数据完整性
+        required_columns = ["日期", "成交额"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"情绪评分所需列缺失: {', '.join(missing_columns)}")
+            return 50.0  # 返回默认值
+        
         # 计算最近5天的成交额变化率
         volume_change = 0.0
         if AMOUNT_COL in df.columns and len(df) >= 5:
+            # 确保成交额列是数值类型
+            if not pd.api.types.is_numeric_dtype(df[AMOUNT_COL]):
+                df.loc[:, AMOUNT_COL] = pd.to_numeric(df[AMOUNT_COL], errors='coerce')
+            
             volume_5d = df[AMOUNT_COL].tail(5)
             volume_change = (volume_5d.iloc[-1] / volume_5d.iloc[0]) - 1
         
         # 计算最近5天的价格变化
         recent_price_change = 0.0
         if CLOSE_COL in df.columns and len(df) >= 5:
+            # 确保收盘价列是数值类型
+            if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
+                df.loc[:, CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+            
             recent_price_change = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[-5]) - 1
         
         # 综合情绪指标
@@ -390,20 +453,23 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         float: 波动率
     """
     try:
-        # 创建DataFrame的深拷贝 - 这是关键修复点
+        # 创建DataFrame的深拷贝
         df = df.copy(deep=True)
         
         # 确保使用中文列名
-        try:
-            from utils.file_utils import ensure_chinese_columns
-            df = ensure_chinese_columns(df)
-        except ImportError:
-            logger.warning("无法导入ensure_chinese_columns，尝试使用内置列名映射")
+        df = ensure_chinese_columns(df)
+        
+        # 检查数据完整性
+        required_columns = ["日期", "收盘"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"波动率计算所需列缺失: {', '.join(missing_columns)}")
+            return 0.2  # 返回默认波动率
         
         # 检查是否包含必要列
         if CLOSE_COL not in df.columns:
             logger.error(f"数据中缺少必要列: {CLOSE_COL}")
-            return 0.0
+            return 0.2
         
         # 检查收盘价列是否为数值类型
         if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
@@ -413,6 +479,9 @@ def calculate_volatility(df: pd.DataFrame) -> float:
             except Exception as e:
                 logger.error(f"收盘价列转换失败: {str(e)}")
                 return 0.2  # 默认波动率
+        
+        # 创建副本以避免SettingWithCopyWarning
+        df = df.copy(deep=True)
         
         # 计算日收益率
         df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
@@ -467,7 +536,8 @@ def get_etf_basic_info(etf_code: str) -> float:
         etf_list = etf_list.copy(deep=True)
         
         # 确保ETF列表中的ETF代码也是6位数字
-        etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str).apply(lambda x: x.strip().zfill(6))
+        etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str)
+        etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].str.strip().str.zfill(6)
         
         etf_row = etf_list[etf_list[ETF_CODE_COL] == etf_code]
         if not etf_row.empty:
@@ -510,6 +580,9 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         
         # 创建安全副本
         df = df.copy(deep=True)
+        
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
         
         # 确保数据按日期排序
         if DATE_COL in df.columns:
@@ -993,7 +1066,7 @@ def calculate_position_strategy() -> str:
         report += f"推荐关注的ETF (前{len(top_etfs)}名):\n"
         
         for idx, row in top_etfs.iterrows():
-            report += f"{idx+1}. {row['ETF代码']} {row['ETF名称']} (评分: {row['评分']:.2f}, 规模: {row['规模']}亿元)\n"
+            report += f"{idx+1}. {row['ETF代码']} {row['ETF名称']} (评分: {row['评分']:.2f}, 规模: {row['规模']:.2f}亿元)\n"
         
         # 根据ETF数量和评分确定仓位
         if len(top_etfs) >= 5:

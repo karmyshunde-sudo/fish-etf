@@ -764,7 +764,7 @@ def analyze_etf_score_trend(etf_code: str) -> str:
 
 def calculate_arbitrage_score(etf_code: str,
                             etf_name: str,
-                            premium_discount: float,
+                            premium_discount: float,  # 这已经是折溢价率，不需要再计算
                             market_price: float,
                             iopv: float,
                             fund_size: float,
@@ -812,40 +812,6 @@ def calculate_arbitrage_score(etf_code: str,
         if component_score < 0 or component_score > 100:
             logger.warning(f"ETF {etf_code} 成分股稳定性评分超出范围({component_score:.2f})，强制限制在0-100")
             component_score = max(0, min(100, component_score))
-        
-        # 计算折溢价率评分
-        premium_score = 50.0  # 默认值
-        
-        # ============== 新增：附加条件加分 ==============
-        consecutive_discount_bonus = 0
-        industry_avg_bonus = 0
-        
-        # 1. 连续2天折价：额外+10分
-        if premium_discount < 0 and historical_data is not None and not historical_data.empty:
-            # 创建副本以避免SettingWithCopyWarning
-            hist_data = historical_data.copy(deep=True)
-            
-            # 确保有足够的历史数据
-            if len(hist_data) >= 2:
-                # 检查"折溢价率"列是否存在
-                if "折溢价率" in hist_data.columns:
-                    # 获取前一天的折溢价率
-                    prev_premium = hist_data["折溢价率"].iloc[-2]
-                    # 检查前一天是否也是折价
-                    if prev_premium < 0:
-                        consecutive_discount_bonus = 10
-                else:
-                    logger.warning(f"ETF {etf_code} 历史数据中缺少'折溢价率'列，无法判断连续折价")
-        
-        # 2. 行业平均折价：额外+5分
-        # 这里可以添加行业平均折价率的计算逻辑
-        
-        # 调整基础评分
-        base_score = base_score + consecutive_discount_bonus + industry_avg_bonus
-        base_score = max(0, min(100, base_score))  # 确保在0-100范围内
-        
-        logger.debug(f"ETF {etf_code} 附加条件加分: 连续折价+{consecutive_discount_bonus}分, 行业平均+{industry_avg_bonus}分, 调整后基础评分={base_score:.2f}")
-        # ============== 新增结束 ==============
         
         # 折价情况
         if premium_discount < 0:
@@ -921,8 +887,6 @@ def calculate_arbitrage_score(etf_code: str,
                      f"基础评分={base_score:.2f}(权重{weights['liquidity'] + weights['risk'] + weights['return'] + weights['market_sentiment'] + weights['fundamental']:.2f}), " +
                      f"成分股稳定性={component_score:.2f}(权重{weights['component_stability']:.2f}), " +
                      f"折溢价率={premium_score:.2f}(权重{weights['premium_discount']:.2f}), " +
-                     f"连续折价加分={consecutive_discount_bonus}, " +
-                     f"行业平均加分={industry_avg_bonus}, " +
                      f"最终评分={total_score:.2f}")
         
         return total_score

@@ -691,15 +691,13 @@ def generate_report():
             # 构建消息
             message_lines = []
             message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
-            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
+            message_lines.append(f"📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）")
             message_lines.append("──────────────────")
             message_lines.append(signal_message)
             message_lines.append("──────────────────")
-            message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-            message_lines.append("📊 数据来源：GIT：fish-etf")
             
             message = "\n".join(message_lines)
             
@@ -714,7 +712,7 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%"
+            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1
@@ -724,8 +722,6 @@ def generate_report():
         if valid_indices_count > 0:
             # 构建总结消息
             summary_message = "\n".join(summary_lines) + "\n***\n──────────────────"
-            summary_message += f"\n📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}"
-            summary_message += "\n📊 数据来源：GIT：fish-etf"
             
             logger.info("推送总结消息")
             send_wechat_message(summary_message)

@@ -851,7 +851,7 @@ def get_top_rated_etfs(top_n=None,
             logger.warning("元数据为空，无法获取ETF列表")
             return pd.DataFrame()
         
-        all_codes = metadata_df["etf_code"].tolist()
+       all_codes = metadata_df["ETF代码"].tolist()
         if not all_codes:
             logger.warning("元数据中无ETF代码")
             return pd.DataFrame()

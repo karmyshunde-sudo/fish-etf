@@ -987,8 +987,10 @@ def load_etf_metadata() -> pd.DataFrame:
                 logger.error(f"ETF元数据缺少必要列: {col}")
                 return pd.DataFrame()
         
-        # 确保ETF代码是6位字符串
-        df.loc[:, "ETF代码"] = df["ETF代码"].astype(str).str.strip().str.zfill(6)
+        # 修复：先确保ETF代码列是字符串类型
+        # 先转换为字符串，再进行格式化
+        df["ETF代码"] = df["ETF代码"].astype(str)
+        df["ETF代码"] = df["ETF代码"].str.strip().str.zfill(6)
         
         return df
     
@@ -1015,8 +1017,10 @@ def create_base_etf_metadata() -> None:
         # 创建元数据列表
         metadata_list = []
         for _, etf in etf_list.iterrows():
+            # 修复：确保ETF代码是字符串
+            etf_code = str(etf.get("ETF代码", "")).strip().zfill(6)
             metadata_list.append({
-                "ETF代码": etf.get("ETF代码", ""),
+                "ETF代码": etf_code,
                 "ETF名称": etf.get("ETF名称", ""),
                 "基金规模": etf.get("基金规模", 0.0),
                 "update_time": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -1065,8 +1069,10 @@ def load_all_etf_list() -> pd.DataFrame:
                 logger.error(f"ETF列表缺少必要列: {col}")
                 return pd.DataFrame()
         
-        # 确保ETF代码是6位字符串
-        etf_list.loc[:, "ETF代码"] = etf_list["ETF代码"].astype(str).str.strip().str.zfill(6)
+        # 修复：先确保ETF代码列是字符串类型
+        # 先转换为字符串，再进行格式化
+        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
+        etf_list["ETF代码"] = etf_list["ETF代码"].str.strip().str.zfill(6)
         
         return etf_list
     
@@ -1093,15 +1099,28 @@ def is_file_outdated(file_path: str, days: int) -> bool:
         # 获取文件最后修改时间
         file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
         
+        # 修复：统一时区处理
+        # 将文件修改时间转换为时区感知对象（使用北京时间时区）
+        file_mtime = file_mtime.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         # 获取当前时间
         from utils.date_utils import get_beijing_time
         current_time = get_beijing_time()
         
         # 检查是否过期
-        return (current_time - file_mtime).days > days
+        time_diff = current_time - file_mtime
+        is_outdated = time_diff.days > days
+        
+        if is_outdated:
+            logger.info(f"文件 {file_path} 已过期（{time_diff.days}天 > {days}天）")
+        else:
+            logger.debug(f"文件 {file_path} 未过期（{time_diff.days}天 ≤ {days}天）")
+        
+        return is_outdated
     
     except Exception as e:
         logger.error(f"检查文件是否过期失败: {str(e)}", exc_info=True)
+        # 出错时视为过期，触发更新
         return True
 
 def record_failed_etf(etf_daily_dir: str, etf_code: str, etf_name: str) -> None:

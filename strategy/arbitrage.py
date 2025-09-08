@@ -489,16 +489,31 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     try:
-        # 按阈值过滤
-        # 新评分机制：有效折价率 = max(折价率 - 0.2%, 0)
-        # 有效折价率阈值：0.1% (对应20分)
-        # 评分阈值：60分（表示"可以考虑买入"）
+        # 检查必要列是否存在
+        required_columns = ["ETF代码", "ETF名称", "折溢价率"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
+            # 记录实际存在的列
+            logger.info(f"实际列名: {list(df.columns)}")
+            return pd.DataFrame()
+        
+        # 记录筛选前的统计信息
+        logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+        
+        # 直接使用已有的折溢价率列，不再重新计算
+        # 折价机会：折溢价率为负
         filtered_df = df[
-            (df["折溢价率"] <= -0.3) &  # 考虑0.2%交易成本，有效折价率≥0.1%
-            (df["综合评分"] >= 60.0)     # 60分以上表示有效机会
+            (df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD) &
+            (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
         ]
         
-        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-0.3%，评分≥60分）")
+        # 按折溢价率绝对值排序（降序，折价率越大越靠前）
+        if not filtered_df.empty:
+            filtered_df = filtered_df.sort_values("折溢价率", ascending=True)
+        
+        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-{Config.DISCOUNT_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
         return filtered_df
     
     except Exception as e:
@@ -519,13 +534,31 @@ def filter_valid_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     try:
-        # 按阈值过滤
+        # 检查必要列是否存在
+        required_columns = ["ETF代码", "ETF名称", "折溢价率"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
+            # 记录实际存在的列
+            logger.info(f"实际列名: {list(df.columns)}")
+            return pd.DataFrame()
+        
+        # 记录筛选前的统计信息
+        logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+        
+        # 直接使用已有的折溢价率列，不再重新计算
+        # 溢价机会：折溢价率为正
         filtered_df = df[
-            (df["折溢价率"] >= Config.PREMIUM_THRESHOLD) & 
+            (df["折溢价率"] >= Config.PREMIUM_THRESHOLD) &
             (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
         ]
         
-        logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(filtered_df)} 个有效机会")
+        # 按折溢价率降序排序（溢价率越大越靠前）
+        if not filtered_df.empty:
+            filtered_df = filtered_df.sort_values("折溢价率", ascending=False)
+        
+        logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：溢价率≥{Config.PREMIUM_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
         return filtered_df
     
     except Exception as e:

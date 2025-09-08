@@ -235,7 +235,10 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
                 etf_info[col] = ""
         
         # 数据清洗：确保代码为6位数字
-        etf_info["ETF代码"] = etf_info["ETF代码"].astype(str).str.strip().str.zfill(6)
+        # 修复：先确保ETF代码列是字符串类型
+        etf_info["ETF代码"] = etf_info["ETF代码"].astype(str)
+        etf_info["ETF代码"] = etf_info["ETF代码"].str.strip().str.zfill(6)
+        
         valid_etfs = etf_info[etf_info["ETF代码"].str.match(r'^\d{6}$', na=False)].copy()
         
         # 转换数据类型并处理单位
@@ -256,13 +259,12 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
             filtered_etfs = valid_etfs.copy()
         
         filtered_etfs = filtered_etfs[Config.ETF_STANDARD_COLUMNS]
-        logger.info(f"AkShare获取到{len(etf_info)}只ETF，筛选后剩余{len(filtered_etfs)}只")
-        return filtered_etfs.drop_duplicates(subset="ETF代码")
+        logger.info(f"AkShare成功获取ETF列表，共 {len(filtered_etfs)} 条有效记录")
+        return filtered_etfs
     
     except Exception as e:
-        error_msg = f"AkShare接口错误: {str(e)}"
-        logger.error(f"❌ {error_msg}")
-        return pd.DataFrame()  # 返回空DataFrame但不抛出异常
+        logger.error(f"获取ETF列表失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def fetch_all_etfs_sina() -> pd.DataFrame:
     """新浪接口兜底获取ETF列表（带超时控制）

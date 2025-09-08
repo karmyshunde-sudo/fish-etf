@@ -396,6 +396,15 @@ def handle_calculate_position() -> Dict[str, Any]:
         logger.info("开始计算仓位策略")
         message = calculate_position_strategy()
         
+        # 检查是否是错误消息
+        if "失败" in message or "无法计算" in message:
+            logger.error(f"仓位策略计算失败: {message}")
+            send_wechat_message(
+                message=f"仓位策略计算失败: {message}",
+                message_type="error"
+            )
+            return {"status": "error", "message": message}
+        
         # 推送消息
         send_success = send_wechat_message(message, message_type="position")
         

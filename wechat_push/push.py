@@ -415,10 +415,10 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         footer = (
             "\n──────────────────\n"
             f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 数据来源: {log_url}\n"
-            "📊 环境：生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
+ 
         )
         
         messages = []
@@ -510,12 +510,11 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         footer = (
             "\n──────────────────\n"
             f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 数据来源: {log_url}\n"
-            "📊 环境：生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
-        
+   
         messages = []
         
         # 第1页：封面页（包含风险提示）
@@ -599,10 +598,9 @@ def _format_position_message(strategies: Dict[str, str]) -> List[str]:
         footer = (
             "\n──────────────────\n"
             f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 数据来源: {log_url}\n"
-            "📊 环境：生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
         
         messages = []
@@ -670,10 +668,9 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
         footer = (
             "\n──────────────────\n"
             f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 数据来源: {log_url}\n"
-            "📊 环境：生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
         
         # 根据消息类型应用不同的模板
@@ -856,10 +853,9 @@ def send_wechat_markdown(message: str,
             "\n\n"
             "──────────────────\n"
             f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 **数据来源**: [GitHub Actions]({log_url})\n"
-            "📊 **环境**: 生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
         
         # 完整消息
@@ -985,12 +981,12 @@ def test_webhook_connection(webhook: Optional[str] = None) -> bool:
         test_message = (
             "✅ **【测试消息】**\n\n"
             "**状态**: 企业微信Webhook连接测试成功\n"
-            f"**测试时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）\n\n"
+            f"**📅测试时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）\n\n"
             "──────────────────\n"
             f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🕒 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            "📊 **数据来源**: AkShare | **环境**: 生产"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
         
         logger.info("开始测试Webhook连接")

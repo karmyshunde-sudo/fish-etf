@@ -929,6 +929,11 @@ def get_top_rated_etfs(top_n=None,
         score_list = []
         logger.info(f"开始计算 {len(all_codes)} 只ETF的综合评分...")
         
+        # 用于进度跟踪
+        total = len(all_codes)
+        processed = 0
+        last_log_time = time.time()
+        
         for idx, etf_code in enumerate(all_codes):
             try:
                 df = load_etf_daily_data(etf_code)
@@ -946,7 +951,6 @@ def get_top_rated_etfs(top_n=None,
                 
                 # 获取ETF基本信息（从本地元数据获取）
                 size = 0.0
-                # 修复：使用正确的中文列名
                 size_row = metadata_df[metadata_df["ETF代码"] == etf_code]
                 if not size_row.empty and "基金规模" in metadata_df.columns:
                     size = extract_scalar_value(
@@ -963,8 +967,15 @@ def get_top_rated_etfs(top_n=None,
                     if len(recent_30d) > 0:
                         avg_volume = recent_30d[AMOUNT_COL].mean()
                 
-                # 添加进度日志
-                logger.info(f"正在计算ETF {etf_code} ({idx+1}/{len(all_codes)})的评分: {score:.2f} (规模: {size:.2f}亿元, 成交额: {avg_volume:.2f}万元)")
+                # 添加进度日志 - 简化输出
+                processed += 1
+                current_time = time.time()
+                
+                # 每处理100只ETF或每5秒记录一次进度
+                if processed % 100 == 0 or (current_time - last_log_time) >= 5:
+                    progress = (processed / total) * 100
+                    logger.info(f"正在计算ETF评分: {processed}/{total} ({progress:.1f}%)")
+                    last_log_time = current_time
                 
                 # 仅保留满足条件的ETF
                 if size >= min_fund_size and avg_volume >= min_avg_volume:
@@ -975,7 +986,6 @@ def get_top_rated_etfs(top_n=None,
                         "规模": size,
                         "日均成交额": avg_volume
                     })
-                    logger.debug(f"ETF {etf_code} 评分: {score}, 规模: {size}亿元, 日均成交额: {avg_volume}万元")
             except Exception as e:
                 logger.error(f"处理ETF {etf_code} 时发生错误: {str(e)}", exc_info=True)
                 continue
@@ -991,23 +1001,18 @@ def get_top_rated_etfs(top_n=None,
         score_df = pd.DataFrame(score_list).sort_values("评分", ascending=False)
         total_etfs = len(score_df)
         
-        # 计算前X%的ETF数量
-        top_percent = Config.SCORE_TOP_PERCENT
-        top_count = max(10, int(total_etfs * top_percent / 100))
-        
-        # 记录筛选结果
-        logger.info(f"评分完成。共{total_etfs}只ETF评分≥{min_score}，取前{top_percent}%({top_count}只)")
+        # 记录最终结果
+        logger.info(f"评分完成。共{total_etfs}只ETF评分≥{min_score}")
         logger.info(f"应用筛选参数: 规模≥{min_fund_size}亿元, 日均成交额≥{min_avg_volume}万元")
         
         # 返回结果
         if top_n is not None and top_n > 0:
             return score_df.head(top_n)
-        return score_df.head(top_count)
+        return score_df.head(max(10, int(total_etfs * Config.SCORE_TOP_PERCENT / 100)))
     
     except Exception as e:
         error_msg = f"获取高评分ETF列表失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        # 发送错误通知
         send_wechat_message(
             message=error_msg,
             message_type="error"

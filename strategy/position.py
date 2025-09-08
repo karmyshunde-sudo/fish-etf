@@ -304,8 +304,7 @@ def calculate_position_strategy() -> str:
                 message_type="error"
             )
             
-            # 修改：返回包含"失败"关键字的消息，确保main.py能正确识别为错误状态
-            return "仓位策略计算失败：无有效ETF数据，无法生成操作建议"
+            return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
         
         logger.info(f"获取到 {len(top_etfs)} 个高评分ETF")
         
@@ -430,8 +429,7 @@ def calculate_position_strategy() -> str:
             message_type="error"
         )
         
-        # 修改：返回包含"失败"关键字的消息，确保main.py能正确识别为错误状态
-        return f"仓位策略计算失败：{str(e)}"
+        return "【ETF仓位操作提示】\n计算仓位策略时发生错误，请检查日志"
 
 def calculate_single_position_strategy(
     position_type: str,

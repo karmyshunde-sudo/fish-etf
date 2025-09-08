@@ -405,71 +405,65 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    数据清洗和格式化
-    
-    Args:
-        df: 原始DataFrame
-        
-    Returns:
-        pd.DataFrame: 清洗后的DataFrame
+    清洗并格式化数据
     """
-    if df.empty:
-        return df
-    
     try:
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 日期格式转换
+        # 处理日期列
         if "日期" in df.columns:
-            # 转换为datetime
-            df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
-            
-            # 直接处理为日期对象（不使用时区转换，因为ETF数据通常只有日期）
-            df.loc[:, "日期"] = df["日期"].dt.strftime("%Y-%m-%d")
-            
-            # 确保日期列是字符串格式（YYYY-MM-DD）
-            df.loc[:, "日期"] = df["日期"].apply(lambda x: x.strftime("%Y-%m-%d") if not pd.isna(x) else "")
+            # 尝试将日期列转换为datetime类型
+            try:
+                # 先确保是字符串类型，便于处理各种可能的日期格式
+                df["日期"] = df["日期"].astype(str)
+                
+                # 尝试转换为datetime
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                
+                # 检查是否成功转换
+                if pd.api.types.is_datetime64_any_dtype(df["日期"]):
+                    # 格式化为字符串
+                    df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
+                else:
+                    logger.warning("日期列转换为datetime失败，保留原始值")
+            except Exception as e:
+                logger.error(f"日期列处理失败: {str(e)}", exc_info=True)
         
-        # 数值列转换
-        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+        # 确保所有必需列都存在
+        df = ensure_required_columns(df)
+        
+        # 处理数值列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
         for col in numeric_cols:
             if col in df.columns:
                 try:
-                    # 创建副本以避免SettingWithCopyWarning
-                    df = df.copy(deep=True)
-                    
-                    # 处理可能的字符串值（如"-"）
-                    if df[col].dtype == 'object':
-                        df.loc[:, col] = df[col].replace('-', '0')
-                    
-                    # 尝试转换为数值类型
-                    df.loc[:, col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-                    
-                    # 特殊处理：涨跌幅和振幅保留2位小数
-                    if col in ["涨跌幅", "振幅"]:
-                        df.loc[:, col] = df[col].round(2)
-                    # 其他数值列根据需要保留小数位
-                    elif col in ["开盘", "最高", "最低", "收盘"]:
-                        df.loc[:, col] = df[col].round(4)
-                    elif col in ["成交额"]:
-                        # 修复：将成交额从元转换为万元
-                        df.loc[:, col] = df[col] / 10000
-                        df.loc[:, col] = df[col].round(2)  # 保留2位小数
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
                 except Exception as e:
-                    logger.error(f"转换列 {col} 为数值类型时出错: {str(e)}", exc_info=True)
-                    df.loc[:, col] = 0.0
+                    logger.error(f"列 {col} 转换为数值失败: {str(e)}", exc_info=True)
         
-        # 处理重复数据
-        if "日期" in df.columns:
-            df = df.drop_duplicates(subset=["日期"], keep="last")
-            df = df.sort_values("日期", ascending=False)
+        # 计算缺失列
+        if "成交量" in df.columns and "收盘" in df.columns:
+            # 如果有成交量和收盘价，可以计算成交额
+            if "成交额" not in df.columns:
+                df["成交额"] = df["成交量"] * df["收盘"]
         
-        logger.debug("数据清洗和格式化完成")
+        # 计算涨跌幅等
+        if "收盘" in df.columns:
+            if "涨跌幅" not in df.columns:
+                df["涨跌幅"] = df["收盘"].pct_change() * 100
+            if "涨跌额" not in df.columns:
+                df["涨跌额"] = df["收盘"].diff()
+        
+        # 处理NaN值
+        if "日期" in df.columns and "收盘" in df.columns:
+            df = df.dropna(subset=["日期", "收盘"])
+        
         return df
+    
     except Exception as e:
         logger.error(f"数据清洗过程中发生错误: {str(e)}", exc_info=True)
-        return df
+        raise
 
 def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     """

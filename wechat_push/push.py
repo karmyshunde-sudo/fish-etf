@@ -414,20 +414,20 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         # 页脚模板
         footer = (
             "\n──────────────────\n"
-            f"🕒 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
             f"🔗 【GIT：fish-etf】: {log_url}\n"
- 
+            "📊 环境：生产"
         )
         
         messages = []
         
-        # 第1页：封面页（包含风险提示）
+        # 第1页：封面页（不包含风险提示）
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
                 "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
@@ -442,7 +442,9 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page + 2}条消息\n\n"
+            # 第2页开始使用"这是第2条消息"的格式
+            page_num = page + 2
+            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page_num}条消息\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
                 # 先提取ETF代码，避免在日志前缀中使用未定义变量
@@ -458,13 +460,13 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 score = _extract_scalar_value(row.get('综合评分', 0.0), log_prefix=f"ETF {etf_code} 综合评分: ")
                 
                 content += (
-                    f"{i}. {etf_name} ({etf_code})\n"
+                    f"\n{i}. {etf_name} ({etf_code})\n"
                     f"   💹 折价率: {abs(premium_discount):.2f}%\n"
                     f"   📈 市场价格: {market_price:.3f}元\n"
                     f"   📊 IOPV: {iopv:.3f}元\n"
                     f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                     f"   💰 日均成交额: {avg_volume:.2f}万元\n"
-                    f"   ⭐ 综合评分: {score:.1f}\n\n"
+                    f"   ⭐ 综合评分: {score:.1f}"
                 )
             
             # 添加页脚

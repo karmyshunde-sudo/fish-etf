@@ -205,8 +205,25 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，收益评分可能不准确")
         
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
+        # 检查是否包含必要列
+        if CLOSE_COL not in df.columns:
+            logger.error(f"数据中缺少必要列: {CLOSE_COL}")
+            return 50.0
+        
+        # 确保价格列是数值类型
+        if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
+            try:
+                df[CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+                df = df.dropna(subset=[CLOSE_COL])
+            except:
+                logger.error(f"价格列 {CLOSE_COL} 无法转换为数值类型")
+                return 50.0
+        
         # 计算年化收益率
-        if CLOSE_COL in df.columns and len(df) > 1:
+        if len(df) > 1:
             # 计算总收益率
             total_return = (df[CLOSE_COL].iloc[-1] / df[CLOSE_COL].iloc[0]) - 1
             
@@ -217,12 +234,7 @@ def calculate_return_score(df: pd.DataFrame) -> float:
             else:
                 annualized_return = 0
             
-            # 收益率评分标准：
-            # ≤0%: 0分
-            # 0-2%: 0-30分
-            # 2-5%: 30-60分
-            # 5-8%: 60-85分
-            # ≥8%: 85-100分
+            # 收益率评分标准
             if annualized_return <= 0:
                 score = 0.0
             elif annualized_return <= 0.02:
@@ -362,14 +374,8 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         float: 波动率
     """
     try:
-        # 确保使用中文列名
-        try:
-            from utils.file_utils import ensure_chinese_columns
-            df = ensure_chinese_columns(df)
-        except ImportError:
-            # 如果导入失败，尝试使用内置的列名映射
-            logger.warning("无法导入ensure_chinese_columns，尝试使用内置列名映射")
-            # 这里可以添加内置的列名映射逻辑
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
         
         # 检查是否包含必要列
         if CLOSE_COL not in df.columns:
@@ -384,8 +390,7 @@ def calculate_volatility(df: pd.DataFrame) -> float:
                 logger.error(f"收盘价列转换失败: {str(e)}")
                 return 0.2  # 默认波动率
         
-        # 计算日收益率
-        df = df.copy(deep=True)  # 创建副本避免SettingWithCopyWarning
+        # 计算日收益率 - 使用.loc避免SettingWithCopyWarning
         df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
         
         # 处理NaN值
@@ -877,7 +882,7 @@ def get_top_rated_etfs(top_n=None,
                 
                 # 获取ETF基本信息（从本地元数据获取）
                 size = 0.0
-                # 修复：使用正确的列名
+                # 修复：使用正确的中文列名
                 size_row = metadata_df[metadata_df["ETF代码"] == etf_code]
                 if not size_row.empty and "基金规模" in metadata_df.columns:
                     size = extract_scalar_value(

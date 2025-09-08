@@ -255,11 +255,11 @@ def crawl_etf_daily_incremental() -> None:
                     f.write(f"{etf_code}\n")
                 
                 # 限制请求频率
-                time.sleep(3)  # 使用硬编码值代替Config.CRAWL_INTERVAL
+                time.sleep(1)  # 使用硬编码值代替Config.CRAWL_INTERVAL
             
             # 批次间暂停
             if batch_idx < num_batches - 1:
-                batch_pause_seconds = 10  # 硬编码值，10秒
+                batch_pause_seconds = 2  # 硬编码值，10秒
                 logger.info(f"批次处理完成，暂停 {batch_pause_seconds} 秒...")
                 time.sleep(batch_pause_seconds)
     

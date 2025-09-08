@@ -316,18 +316,10 @@ def load_etf_daily_data(etf_code: str, data_dir: Optional[Union[str, Path]] = No
         if "日期" in df.columns:
             df = df.sort_values("日期", ascending=False)
         
-        # 确保"折溢价率"列存在（用于新评分机制）
+        # 不再重新计算折溢价率，直接使用已有数据
+        # 如果确实需要折溢价率但数据中没有，应该在数据爬取阶段确保获取
         if "折溢价率" not in df.columns:
-            logger.debug(f"ETF {etf_code} 日线数据缺少'折溢价率'列，将尝试从其他列计算")
-            # 尝试从其他列计算折溢价率（如果可用）
-            if "市场价格" in df.columns and "IOPV" in df.columns:
-                # 使用.loc避免SettingWithCopyWarning
-                df.loc[:, "折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
-                logger.info(f"已计算ETF {etf_code} 的折溢价率")
-            else:
-                logger.warning(f"ETF {etf_code} 无法计算折溢价率，缺少必要列")
-                # 添加默认折溢价率列
-                df.loc[:, "折溢价率"] = 0.0
+            logger.warning(f"ETF {etf_code} 日线数据缺少'折溢价率'列，应检查数据爬取过程")
         
         return df
     

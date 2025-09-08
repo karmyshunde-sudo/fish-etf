@@ -851,7 +851,8 @@ def get_top_rated_etfs(top_n=None,
             logger.warning("元数据为空，无法获取ETF列表")
             return pd.DataFrame()
         
-        all_codes = metadata_df["ETF代码"].tolist()
+        # 确保ETF代码唯一
+        all_codes = metadata_df["ETF代码"].drop_duplicates().tolist()
         if not all_codes:
             logger.warning("元数据中无ETF代码")
             return pd.DataFrame()
@@ -859,7 +860,7 @@ def get_top_rated_etfs(top_n=None,
         score_list = []
         logger.info(f"开始计算 {len(all_codes)} 只ETF的综合评分...")
         
-        for etf_code in all_codes:
+        for idx, etf_code in enumerate(all_codes):
             try:
                 df = load_etf_daily_data(etf_code)
                 if df.empty:
@@ -876,11 +877,13 @@ def get_top_rated_etfs(top_n=None,
                 
                 # 获取ETF基本信息（从本地元数据获取）
                 size = 0.0
-                # 修复：安全地获取size，避免KeyError
-                if "size" in metadata_df.columns:
-                    size_row = metadata_df[metadata_df["etf_code"] == etf_code]
-                    if not size_row.empty:
-                        size = size_row["size"].iloc[0]
+                # 修复：使用正确的列名
+                size_row = metadata_df[metadata_df["ETF代码"] == etf_code]
+                if not size_row.empty and "基金规模" in metadata_df.columns:
+                    size = extract_scalar_value(
+                        size_row.iloc[0]["基金规模"],
+                        log_prefix=f"ETF {etf_code} 规模: "
+                    )
                 
                 etf_name = get_etf_name(etf_code)
                 
@@ -889,8 +892,10 @@ def get_top_rated_etfs(top_n=None,
                 if AMOUNT_COL in df.columns:
                     recent_30d = df.tail(30)
                     if len(recent_30d) > 0:
-                        # 修复：不再进行单位转换，因为data_crawler中已统一转换为"万元"
                         avg_volume = recent_30d[AMOUNT_COL].mean()
+                
+                # 添加进度日志
+                logger.info(f"正在计算ETF {etf_code} ({idx+1}/{len(all_codes)})的评分: {score:.2f} (规模: {size:.2f}亿元, 成交额: {avg_volume:.2f}万元)")
                 
                 # 仅保留满足条件的ETF
                 if size >= min_fund_size and avg_volume >= min_avg_volume:

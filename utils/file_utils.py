@@ -16,6 +16,8 @@ import pandas as pd
 import numpy as np
 from typing import Any, Dict, List, Optional, Union, TextIO, Tuple
 from datetime import datetime, timedelta, timezone  # 确保timedelta已正确导入
+# 添加缺失的导入
+from utils.date_utils import get_beijing_time, get_utc_time
 from pathlib import Path
 
 # 导入init_dirs函数

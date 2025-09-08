@@ -111,9 +111,15 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
         float: 流动性评分
     """
     try:
+        # 创建DataFrame的深拷贝 - 这是关键修复点
+        df = df.copy(deep=True)
+        
         # 确保有足够数据
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，流动性评分可能不准确")
+        
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
         
         # 计算日均成交额（单位：万元）
         avg_volume = 0.0
@@ -121,6 +127,12 @@ def calculate_liquidity_score(df: pd.DataFrame) -> float:
             # 取最近30天数据
             recent_30d = df.tail(30)
             if len(recent_30d) > 0:
+                # 确保成交额列是数值类型
+                if not pd.api.types.is_numeric_dtype(recent_30d[AMOUNT_COL]):
+                    # 使用.loc确保安全赋值
+                    recent_30d = recent_30d.copy()
+                    recent_30d.loc[:, AMOUNT_COL] = pd.to_numeric(recent_30d[AMOUNT_COL], errors='coerce')
+                
                 avg_volume = recent_30d[AMOUNT_COL].mean()
         
         # 流动性评分标准：
@@ -201,12 +213,15 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         float: 收益能力评分
     """
     try:
+        # 创建DataFrame的深拷贝 - 这是关键修复点
+        df = df.copy(deep=True)
+        
         # 确保有足够数据
         if len(df) < 30:
             logger.warning(f"数据量不足({len(df)}天)，收益评分可能不准确")
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
+        # 确保使用中文列名
+        df = ensure_chinese_columns(df)
         
         # 检查是否包含必要列
         if CLOSE_COL not in df.columns:
@@ -216,7 +231,8 @@ def calculate_return_score(df: pd.DataFrame) -> float:
         # 确保价格列是数值类型
         if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
             try:
-                df[CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+                # 使用.loc确保安全赋值
+                df.loc[:, CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
                 df = df.dropna(subset=[CLOSE_COL])
             except:
                 logger.error(f"价格列 {CLOSE_COL} 无法转换为数值类型")
@@ -374,8 +390,15 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         float: 波动率
     """
     try:
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        # 创建DataFrame的深拷贝 - 这是关键修复点
         df = df.copy(deep=True)
+        
+        # 确保使用中文列名
+        try:
+            from utils.file_utils import ensure_chinese_columns
+            df = ensure_chinese_columns(df)
+        except ImportError:
+            logger.warning("无法导入ensure_chinese_columns，尝试使用内置列名映射")
         
         # 检查是否包含必要列
         if CLOSE_COL not in df.columns:
@@ -385,12 +408,13 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         # 检查收盘价列是否为数值类型
         if not pd.api.types.is_numeric_dtype(df[CLOSE_COL]):
             try:
-                df[CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
+                # 使用.loc确保安全赋值
+                df.loc[:, CLOSE_COL] = pd.to_numeric(df[CLOSE_COL], errors='coerce')
             except Exception as e:
                 logger.error(f"收盘价列转换失败: {str(e)}")
                 return 0.2  # 默认波动率
         
-        # 计算日收益率 - 使用.loc避免SettingWithCopyWarning
+        # 计算日收益率
         df.loc[:, "daily_return"] = df[CLOSE_COL].pct_change()
         
         # 处理NaN值

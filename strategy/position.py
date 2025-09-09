@@ -4,6 +4,7 @@
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
 特别优化了消息推送格式，确保使用统一的消息模板
+本版本专为小资金散户设计，提高值博比和灵活性
 """
 
 import pandas as pd
@@ -22,7 +23,7 @@ from utils.date_utils import (
 )
 from utils.file_utils import load_etf_daily_data, init_dirs
 from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
-from data_crawler.etf_list_manager import load_all_etf_list  # 新增：导入load_all_etf_list
+from data_crawler.etf_list_manager import load_all_etf_list
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -248,7 +249,7 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
         str: 格式化后的策略内容
     """
     content = "【ETF仓位操作提示】\n"
-    content += "（每个仓位仅持有1只ETF，操作建议基于最新数据）\n\n"
+    content += "（小资金高值博比策略：聚焦最强ETF，动态仓位管理）\n\n"
     
     for position_type, strategy in strategies.items():
         # 解析策略内容，提取详细数据
@@ -280,6 +281,13 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
         else:
             # 如果策略内容不符合预期格式，直接显示
             content += f"【{position_type}】\n{strategy}\n\n"
+    
+    # 添加小资金操作提示
+    content += "💡 小资金操作指南：\n"
+    content += "1. 优先交易日成交>1亿的ETF（避免流动性风险）\n"
+    content += "2. 单只ETF仓位≤60%，总仓位80%-100%（集中火力）\n"
+    content += "3. 盈利超8%后，止损上移至成本价（锁定利润）\n"
+    content += "4. 每周一进行ETF轮动（永远持有最强标的）"
     
     return content
 
@@ -447,7 +455,7 @@ def calculate_single_position_strategy(
     is_stable: bool
 ) -> Tuple[str, List[Dict]]:
     """
-    计算单个仓位策略
+    计算单个仓位策略（小资金高值博比优化版）
     
     Args:
         position_type: 仓位类型（稳健仓/激进仓）
@@ -461,19 +469,40 @@ def calculate_single_position_strategy(
         Tuple[str, List[Dict]]: 策略内容和交易动作列表
     """
     try:
-        # 获取最新数据
+        # 1. 检查数据是否足够
+        if etf_df.empty or len(etf_df) < 20:
+            error_msg = f"ETF {target_etf_code} 数据不足，无法计算策略"
+            logger.warning(error_msg)
+            return f"{position_type}：{error_msg}", []
+        
+        # 2. 获取最新数据
         latest_data = etf_df.iloc[-1]
         current_price = latest_data["收盘"]
         
-        # 计算20日均线
-        critical_value = calculate_critical_value(etf_df)
-        deviation = calculate_deviation(current_price, critical_value)
+        # 3. 计算关键指标
+        ma5 = etf_df["收盘"].rolling(5).mean().iloc[-1]
+        ma10 = etf_df["收盘"].rolling(10).mean().iloc[-1]
+        ma20 = etf_df["收盘"].rolling(20).mean().iloc[-1]
+        critical_value = ma20  # 20日均线作为关键值
         
-        # 获取ETF评分信息
+        # 计算偏离率（相对于20日均线）
+        deviation = ((current_price - critical_value) / critical_value) * 100
+        
+        # 计算ATR（平均真实波幅）用于动态止损
+        atr = calculate_atr(etf_df, period=14)
+        
+        # 4. 判断市场状态
+        market_trend = "neutral"
+        if ma5 > ma10 > ma20:
+            market_trend = "strong"
+        elif ma5 < ma10 < ma20:
+            market_trend = "weak"
+        
+        # 5. 获取ETF评分信息
         top_etfs = get_top_rated_etfs(top_n=10)
         etf_info = top_etfs[top_etfs["ETF代码"] == target_etf_code]
         
-        # 构建详细策略内容
+        # 6. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
         strategy_content += f"ETF代码：{target_etf_code}\n"
         strategy_content += f"当前价格：{current_price:.2f}\n"
@@ -489,228 +518,169 @@ def calculate_single_position_strategy(
             strategy_content += "基金规模：N/A\n"
             strategy_content += "日均成交额：N/A\n"
         
-        # 3. 震荡市判断 - 优先级最高
-        is_volatile, cross_count, (min_dev, max_dev) = is_in_volatile_market(etf_df)
-        if is_volatile:
-            # 计算上轨和下轨价格
-            upper_band = critical_value * (1 + max_dev/100)
-            lower_band = critical_value * (1 + min_dev/100)
-            
-            # 震荡市操作
-            if deviation >= max_dev - 1:  # 接近上沿
-                strategy_content += f"操作建议：{position_type}：小幅减仓10%-20%（偏离率{deviation:.2f}%，接近震荡上沿{max_dev:.2f}%）"
-            else:  # 接近下沿
-                strategy_content += f"操作建议：{position_type}：小幅加仓10%-20%（偏离率{deviation:.2f}%，接近震荡下沿{min_dev:.2f}%）"
-            
-            return strategy_content, []
+        # 7. 小资金专属策略逻辑
+        trade_actions = []
         
-        # 1. YES信号：当前价格 ≥ 20日均线
-        if current_price >= critical_value:
-            # 计算连续站上均线的天数
-            consecutive_above = calculate_consecutive_days_above(etf_df, critical_value)
-            # 计算成交量变化
-            volume_change = calculate_volume_change(etf_df)
-            
-            # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
-            if consecutive_above == 1 and volume_change > 20:
-                strategy_content += f"操作建议：{position_type}：新建仓位【{target_etf_name}（{target_etf_code}）】当前价格：{current_price:.2f}元（首次突破，连续{consecutive_above}日站上20日均线，成交量放大{volume_change:.1f}%）"
-                
-                # 生成交易动作
-                trade_actions = [{
-                    "etf_code": target_etf_code,
-                    "etf_name": target_etf_name,
-                    "position_type": position_type,
-                    "action": "新建仓位",
-                    "quantity": "30%" if is_stable else "20%",
-                    "price": current_price,
-                    "reason": "首次突破，连续站上均线"
-                }]
-                
+        # 7.1 检查流动性（小资金核心要求）
+        if "日均成交额" in etf_info.columns and not etf_info.empty:
+            daily_volume = etf_info.iloc[0]["日均成交额"]
+            if daily_volume < 10000:  # 小资金要求日成交>1亿
+                strategy_content += f"操作建议：跳过该ETF（日均成交额{daily_volume:.1f}万元<1亿，流动性不足）"
                 return strategy_content, trade_actions
+        
+        # 7.2 计算动态止损位
+        stop_loss = current_price - 1.5 * atr
+        risk_ratio = (current_price - stop_loss) / current_price
+        
+        # 7.3 判断是否处于趋势中
+        in_trend = (ma5 > ma20) and (current_price > ma20)
+        
+        # 7.4 趋势策略（核心逻辑）
+        if in_trend:
+            # 7.4.1 检查是否是突破信号
+            is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
             
-            # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
-            elif 2 <= consecutive_above <= 3 and volume_change > 20:
-                strategy_content += f"操作建议：{position_type}：新建仓位【{target_etf_name}（{target_etf_code}）】当前价格：{current_price:.2f}元（首次突破确认，连续{consecutive_above}日站上20日均线，成交量放大{volume_change:.1f}%）"
-                
-                # 生成交易动作
-                trade_actions = [{
-                    "etf_code": target_etf_code,
-                    "etf_name": target_etf_name,
-                    "position_type": position_type,
-                    "action": "新建仓位",
-                    "quantity": "50%" if is_stable else "35%",
-                    "price": current_price,
-                    "reason": "首次突破确认，连续站上均线"
-                }]
-                
-                return strategy_content, trade_actions
+            # 7.4.2 检查成交量
+            volume = etf_df["成交量"].iloc[-1]
+            avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+            volume_ok = (volume > avg_volume * 1.1)  # 仅需10%放大
             
-            # 子条件2：持续站稳（价格维持在均线上）
-            else:
-                # 场景A：偏离率≤+5%（趋势稳健）
-                if deviation <= 5.0:
-                    # 添加M头/头肩顶形态检测
-                    pattern_detection = detect_head_and_shoulders(etf_df)
-                    pattern_msg = ""
-                    if pattern_detection["detected"]:
-                        pattern_name = pattern_detection["pattern_type"]
-                        confidence = pattern_detection["confidence"]
-                        if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                            pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
-                        elif confidence >= 0.5:
-                            pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
+            # 7.4.3 趋势确认
+            if is_breakout or (ma5 > ma10 and volume_ok):
+                # 仓位计算（小资金专属）
+                position_size = "100%" if is_stable else "100%"
+                if current_position["持仓数量"] == 0:
+                    # 新建仓位
+                    strategy_content += f"操作建议：{position_type}：新建仓位【{target_etf_name}】{position_size}（突破信号+趋势确认，小资金应集中）\n"
+                    strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）\n"
+                    strategy_content += f"• 值博比：潜在收益 > {3/risk_ratio:.1f}×潜在风险"
                     
-                    strategy_content += f"操作建议：{position_type}：持仓不动（偏离率{deviation:.2f}%，趋势稳健）{pattern_msg}"
-                    
-                    # 无交易动作
-                    return strategy_content, []
-                
-                # 场景B：+5%＜偏离率≤+10%（趋势较强）
-                elif 5.0 < deviation <= 10.0:
-                    # 添加M头/头肩顶形态检测
-                    pattern_detection = detect_head_and_shoulders(etf_df)
-                    pattern_msg = ""
-                    if pattern_detection["detected"]:
-                        pattern_name = pattern_detection["pattern_type"]
-                        confidence = pattern_detection["confidence"]
-                        if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                            pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
-                        elif confidence >= 0.5:
-                            pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                    
-                    strategy_content += f"操作建议：{position_type}：观望（偏离率{deviation:.2f}%，趋势较强）{pattern_msg}"
-                    
-                    # 无交易动作
-                    return strategy_content, []
-                
-                # 场景C：偏离率＞+10%（超买风险）
+                    # 生成交易动作
+                    trade_actions.append({
+                        "etf_code": target_etf_code,
+                        "etf_name": target_etf_name,
+                        "position_type": position_type,
+                        "action": "新建仓位",
+                        "quantity": position_size,
+                        "price": current_price,
+                        "reason": f"突破信号+趋势确认，止损{stop_loss:.2f}"
+                    })
                 else:
-                    # 添加M头/头肩顶形态检测
-                    pattern_detection = detect_head_and_shoulders(etf_df)
-                    pattern_msg = ""
-                    if pattern_detection["detected"]:
-                        pattern_name = pattern_detection["pattern_type"]
-                        confidence = pattern_detection["confidence"]
-                        if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                            pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
-                        elif confidence >= 0.5:
-                            pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓15%-25%"
+                    # 已持仓，检查是否需要加仓
+                    profit_pct = ((current_price - current_position["持仓成本价"]) / 
+                                 current_position["持仓成本价"] * 100)
                     
-                    strategy_content += f"操作建议：{position_type}：逢高减仓20%-30%（偏离率{deviation:.2f}%，超买风险）{pattern_msg}"
+                    # 盈利超8%后，止损上移至成本价
+                    if profit_pct > 8 and stop_loss < current_position["持仓成本价"]:
+                        stop_loss = current_position["持仓成本价"]
+                        risk_ratio = 0
+                        strategy_content += "• 盈利超8%，止损上移至成本价（零风险持仓）\n"
                     
-                    # 生成交易动作
-                    trade_actions = [{
-                        "etf_code": target_etf_code,
-                        "etf_name": target_etf_name,
-                        "position_type": position_type,
-                        "action": "减仓",
-                        "quantity": "20%-30%" if is_stable else "15%-25%",
-                        "price": current_price,
-                        "reason": "超买风险"
-                    }]
-                    
-                    return strategy_content, trade_actions
+                    # 仅在突破新高时加仓
+                    if is_breakout and current_position["持仓数量"] < 100:
+                        strategy_content += f"操作建议：{position_type}：加仓至{position_size}（突破新高，强化趋势）\n"
+                        strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
+                        
+                        trade_actions.append({
+                            "etf_code": target_etf_code,
+                            "etf_name": target_etf_name,
+                            "position_type": position_type,
+                            "action": "加仓",
+                            "quantity": "补足至100%",
+                            "price": current_price,
+                            "reason": "突破新高，强化趋势"
+                        })
+                    else:
+                        strategy_content += f"操作建议：{position_type}：持有（趋势稳健，止损已上移）\n"
+                        strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
         
-        # 2. NO信号：当前价格 ＜ 20日均线
+        # 7.5 无趋势/下跌趋势
         else:
-            # 计算连续跌破均线的天数
-            consecutive_below = calculate_consecutive_days_below(etf_df, critical_value)
-            # 计算成交量变化
-            volume_change = calculate_volume_change(etf_df)
-            # 计算亏损比例
-            loss_percentage = calculate_loss_percentage(etf_df)
+            # 检查是否触发止损
+            need_stop = (current_position["持仓数量"] > 0 and 
+                         current_price <= stop_loss)
             
-            # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
-            if consecutive_below == 1 and volume_change > 20:
-                if loss_percentage > -15.0:  # 亏损<15%
-                    strategy_content += f"操作建议：{position_type}：减仓【{target_etf_name}（{target_etf_code}）】当前价格：{current_price:.2f}元（首次跌破，连续{consecutive_below}日跌破20日均线，成交量放大{volume_change:.1f}%，亏损{loss_percentage:.2f}%）"
-                    
-                    # 生成交易动作
-                    trade_actions = [{
-                        "etf_code": target_etf_code,
-                        "etf_name": target_etf_name,
-                        "position_type": position_type,
-                        "action": "减仓",
-                        "quantity": "50%" if is_stable else "70%-80%",
-                        "price": current_price,
-                        "reason": "首次跌破，亏损<15%"
-                    }]
-                    
-                    return strategy_content, trade_actions
-                else:  # 亏损≥15%
-                    strategy_content += f"操作建议：{position_type}：清仓【{target_etf_name}（{target_etf_code}）】当前价格：{current_price:.2f}元（首次跌破-严重亏损，连续{consecutive_below}日跌破20日均线，成交量放大{volume_change:.1f}%，亏损{loss_percentage:.2f}%）"
-                    
-                    # 生成交易动作
-                    trade_actions = [{
-                        "etf_code": target_etf_code,
-                        "etf_name": target_etf_name,
-                        "position_type": position_type,
-                        "action": "清仓",
-                        "quantity": "100%",
-                        "price": current_price,
-                        "reason": "首次跌破-严重亏损"
-                    }]
-                    
-                    return strategy_content, trade_actions
+            # 检查是否超卖（小资金抄底机会）
+            is_oversold = (deviation < -10 and 
+                          ma5 > ma10 and 
+                          volume > avg_volume * 1.1)
             
-            # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
-            elif consecutive_below == 2 and volume_change > 20:
-                strategy_content += f"操作建议：{position_type}：严格止损清仓【{target_etf_name}（{target_etf_code}）】当前价格：{current_price:.2f}元（首次跌破确认，连续{consecutive_below}日跌破20日均线，成交量放大{volume_change:.1f}%）"
+            if need_stop:
+                # 止损操作
+                loss_pct = ((current_price - current_position["持仓成本价"]) / 
+                           current_position["持仓成本价"] * 100)
+                strategy_content += f"操作建议：{position_type}：止损清仓（价格跌破动态止损位{stop_loss:.2f}，亏损{loss_pct:.2f}%）"
                 
-                # 生成交易动作
-                trade_actions = [{
+                trade_actions.append({
                     "etf_code": target_etf_code,
                     "etf_name": target_etf_name,
                     "position_type": position_type,
-                    "action": "清仓",
+                    "action": "止损",
                     "quantity": "100%",
                     "price": current_price,
-                    "reason": "首次跌破确认"
-                }]
+                    "reason": f"跌破动态止损{stop_loss:.2f}"
+                })
+            elif is_oversold:
+                # 超卖反弹机会
+                strategy_content += f"操作建议：{position_type}：建仓60%（超卖反弹机会，偏离率{deviation:.2f}%）"
                 
-                return strategy_content, trade_actions
-            
-            # 子条件2：持续跌破（价格维持在均线下）
+                trade_actions.append({
+                    "etf_code": target_etf_code,
+                    "etf_name": target_etf_name,
+                    "position_type": position_type,
+                    "action": "建仓",
+                    "quantity": "60%",
+                    "price": current_price,
+                    "reason": "超卖反弹机会"
+                })
             else:
-                # 场景A：偏离率≥-5%（下跌初期）
-                if deviation >= -5.0:
-                    strategy_content += f"操作建议：{position_type}：轻仓观望（偏离率{deviation:.2f}%，下跌初期）"
-                    
-                    # 无交易动作
-                    return strategy_content, []
-                
-                # 场景B：-10%≤偏离率＜-5%（下跌中期）
-                elif -10.0 <= deviation < -5.0:
-                    strategy_content += f"操作建议：{position_type}：空仓为主（偏离率{deviation:.2f}%，下跌中期）"
-                    
-                    # 无交易动作
-                    return strategy_content, []
-                
-                # 场景C：偏离率＜-10%（超卖机会）
-                else:
-                    strategy_content += f"操作建议：{position_type}：小幅加仓10%-15%（偏离率{deviation:.2f}%，超卖机会）"
-                    
-                    # 生成交易动作
-                    trade_actions = [{
-                        "etf_code": target_etf_code,
-                        "etf_name": target_etf_name,
-                        "position_type": position_type,
-                        "action": "加仓",
-                        "quantity": "10%-15%",
-                        "price": current_price,
-                        "reason": "超卖机会"
-                    }]
-                    
-                    return strategy_content, trade_actions
+                # 无操作
+                strategy_content += f"操作建议：{position_type}：空仓观望（趋势未确认）"
         
-        # 默认返回
-        strategy_content += "操作建议：无明确操作建议"
-        return strategy_content, []
+        return strategy_content, trade_actions
     
     except Exception as e:
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
+
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    计算平均真实波幅(ATR)，用于动态止损
+    
+    Args:
+        df: 日线数据
+        period: 计算周期
+    
+    Returns:
+        float: ATR值
+    """
+    try:
+        if len(df) < period + 1:
+            return 0.0
+        
+        # 计算真实波幅(TR)
+        high = df["最高"].values
+        low = df["最低"].values
+        close = df["收盘"].values
+        
+        # TR = max(当日最高 - 当日最低, |当日最高 - 昨日收盘|, |当日最低 - 昨日收盘|)
+        tr1 = high[1:] - low[1:]
+        tr2 = np.abs(high[1:] - close[:-1])
+        tr3 = np.abs(low[1:] - close[:-1])
+        tr = np.max(np.vstack([tr1, tr2, tr3]), axis=0)
+        
+        # 计算ATR（简单移动平均）
+        atr = np.zeros_like(tr)
+        atr[0] = np.mean(tr[:period])
+        for i in range(1, len(atr)):
+            atr[i] = (atr[i-1] * (period-1) + tr[i+period-1]) / period
+        
+        return atr[-1]
+    
+    except Exception as e:
+        logger.error(f"计算ATR失败: {str(e)}", exc_info=True)
+        return 0.0
 
 def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -> Tuple[bool, bool]:
     """

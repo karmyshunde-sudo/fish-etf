@@ -774,25 +774,108 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
 
 def _format_dataframe_as_string(df: pd.DataFrame) -> str:
     """
-    将 DataFrame格式化为更友好的字符串
+    将 DataFrame格式化为更友好的纯文本字符串（完全移除Markdown）
     
     Args:
         df: 要格式化的DataFrame
         
     Returns:
-        str: 格式化后的字符串
+        str: 格式化后的纯文本字符串
     """
     try:
-        # 使用Markdown格式（更易读）
-        return df.to_markdown(index=False)
+        if df.empty:
+            return "没有找到符合条件的数据"
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
+        # 检查是否包含ETF特定列
+        has_etf_info = "ETF代码" in df.columns and "ETF名称" in df.columns
+        has_premium_discount = "折溢价率" in df.columns
+        
+        # 生成消息头
+        if has_etf_info:
+            if has_premium_discount:
+                # 判断是折价还是溢价
+                if df["折溢价率"].min() < 0:
+                    message = "【以下ETF市场价格低于净值】\n\n"
+                else:
+                    message = "【以下ETF市场价格高于净值】\n\n"
+            else:
+                message = f"找到 {len(df)} 只ETF：\n\n"
+        else:
+            message = f"找到 {len(df)} 条数据：\n\n"
+        
+        # 格式化每行数据
+        for i, (_, row) in enumerate(df.iterrows(), 1):
+            if has_etf_info:
+                etf_code = row["ETF代码"]
+                etf_name = row["ETF名称"]
+                message += f"{i}. {etf_name} ({etf_code})\n"
+                
+                # 添加折溢价信息
+                if has_premium_discount:
+                    premium_discount = row["折溢价率"]
+                    if premium_discount < 0:
+                        message += f"   💹 折价率: {abs(premium_discount):.2f}%\n"
+                    else:
+                        message += f"   💹 溢价率: {premium_discount:.2f}%\n"
+                
+                # 添加其他信息
+                if "市场价格" in row:
+                    message += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+                if "IOPV" in row:
+                    message += f"   📊 IOPV: {row['IOPV']:.4f}元\n"
+                if "基金规模" in row:
+                    message += f"   🏦 基金规模: {row['基金规模']:.2f}亿元\n"
+                if "日均成交额" in row:
+                    message += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
+                if "综合评分" in row:
+                    message += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n"
+                
+                message += "\n"
+            else:
+                # 通用格式（不应该在ETF场景中使用）
+                message += f"数据条目 {i}:\n"
+                for col, value in row.items():
+                    # 尝试格式化数值
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        if col == "折溢价率":
+                            message += f"   - {col}: {value:.2%}\n"
+                        elif col in ["市场价格", "IOPV"]:
+                            message += f"   - {col}: {value:.4f}\n"
+                        else:
+                            message += f"   - {col}: {value:.2f}\n"
+                    else:
+                        message += f"   - {col}: {value}\n"
+                message += "\n"
+        
+        # 添加页脚
+        utc_now, beijing_now = get_current_times()
+        log_url = get_github_actions_url()
+        
+        footer = (
+            "\n==================\n"
+            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "==================\n"
+            f"🔗 【GIT：fish-etf】: {log_url}\n"
+            "📊 环境：生产"
+        )
+        
+        return message.strip() + footer
+    
     except Exception as e:
-        logger.warning(f"使用Markdown格式化DataFrame失败: {str(e)}，改用表格格式")
-        try:
-            # 使用表格格式
-            return df.to_string(index=False)
-        except Exception as e:
-            logger.warning(f"使用表格格式化DataFrame失败: {str(e)}，改用简单描述")
-            return f"数据表格（{len(df)}行，{len(df.columns)}列）"
+        logger.error(f"格式化DataFrame为字符串失败: {str(e)}", exc_info=True)
+        return (
+            "数据格式化错误，请检查日志\n\n"
+            "==================\n"
+            f"📅 UTC时间: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "==================\n"
+            "🔗 【GIT：fish-etf】: 无法获取日志链接\n"
+            "📊 环境：生产"
+        )
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

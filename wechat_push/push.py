@@ -647,7 +647,7 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
             "\n==================\n"
             f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "=================="
+            "==================\n"
             f"🔗 数据来源: {log_url}\n"
             "📊 环境：生产"
         )

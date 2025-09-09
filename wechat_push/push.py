@@ -644,11 +644,11 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
         
         # 全局消息脚模板
         footer = (
+            "\n==================\n"
+            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "=================="
-            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}"
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}"
-            "=================="
-            f"🔗 数据来源: {log_url}"
+            f"🔗 数据来源: {log_url}\n"
             "📊 环境：生产"
         )
         
@@ -668,11 +668,11 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
         # 返回一个基本格式的消息
         return (
             f"{message}"
-            "=================="
-            "📅 时间: 无法获取"
-            "=================="
-            "📊 数据来源：AkShare| 环境：生产"
-            "⚠️ 注意: 消息格式化过程中发生错误"
+            "\n==================\n"
+            "📅 时间: 无法获取\n"
+            "\n==================\n"
+            "📊 数据来源：AkShare| 环境：生产\n"
+            "⚠️ 注意: 消息格式化过程中发生错误\n"
         )
 
 def send_wechat_message(message: Union[str, pd.DataFrame, Dict], 
@@ -960,10 +960,10 @@ def test_webhook_connection(webhook: Optional[str] = None) -> bool:
             "✅ **【测试消息】**\n\n"
             "**状态**: 企业微信Webhook连接测试成功\n"
             f"**📅测试时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）\n\n"
-            "──────────────────\n"
+            "\n──────────────────\n"
             f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "──────────────────\n"
+            "\n──────────────────\n"
             f"🔗 【GIT：fish-etf】: {log_url}\n"
         )
         

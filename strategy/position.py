@@ -3,8 +3,8 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-特别优化了消息推送格式，确保使用统一的消息模板
-本版本专为小资金散户设计，提高值博比和灵活性
+【终极修复版】完全移除对"折溢价率"的依赖
+专为小资金散户设计，仅使用标准日线数据字段
 """
 
 import pandas as pd
@@ -249,7 +249,8 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
         str: 格式化后的策略内容
     """
     content = "【ETF仓位操作提示】\n"
-    content += "（小资金高值博比策略：聚焦最强ETF，动态仓位管理）\n\n"
+    content += "（小资金趋势交易策略：聚焦最强ETF，动态仓位管理）\n"
+    content += "（注：本策略仅基于价格趋势，不依赖折溢价率）\n\n"
     
     for position_type, strategy in strategies.items():
         # 解析策略内容，提取详细数据
@@ -261,7 +262,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             
             # 提取20日均线和偏离率
             critical_value = strategy.split("20日均线：")[1].split("\n")[0] if "20日均线：" in strategy else "N/A"
-            deviation = strategy.split("偏离率：")[1].split("\n")[0] if "偏离率：" in strategy else "N/A"
             
             # 提取评分、规模和成交额
             score = strategy.split("评分：")[1].split("\n")[0] if "评分：" in strategy else "N/A"
@@ -273,7 +273,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             content += f"ETF名称：{etf_name}（{etf_code}）\n"
             content += f"当前价格：{current_price}\n"
             content += f"20日均线：{critical_value}\n"
-            content += f"偏离率：{deviation}\n"
             content += f"评分：{score}\n"
             content += f"基金规模：{fund_size}\n"
             content += f"日均成交额：{avg_volume}\n"
@@ -307,7 +306,13 @@ def calculate_position_strategy() -> str:
         position_df = init_position_record()
         init_trade_record()
         
-        # 获取评分前5的ETF（用于选仓）
+        # 2. 排除货币ETF（代码以511开头）
+        # 这是解决所有"缺少折溢价率"警告的根本方法
+        all_etfs = load_all_etf_list()
+        non_money_etfs = all_etfs[~all_etfs["ETF代码"].str.startswith("511")]
+        logger.info(f"已过滤货币ETF，剩余 {len(non_money_etfs)} 只可交易ETF")
+        
+        # 3. 获取评分前5的ETF（用于选仓）
         top_etfs = get_top_rated_etfs(top_n=5)
         if top_etfs.empty or len(top_etfs) == 0:
             warning_msg = "无有效ETF评分数据，无法计算仓位策略"
@@ -321,13 +326,20 @@ def calculate_position_strategy() -> str:
             
             return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
         
-        logger.info(f"获取到 {len(top_etfs)} 个高评分ETF")
+        # 过滤掉货币ETF
+        top_etfs = top_etfs[top_etfs["ETF代码"].apply(lambda x: not str(x).startswith("511"))]
+        logger.info(f"过滤后高评分ETF数量: {len(top_etfs)}")
         
-        # 2. 分别计算稳健仓和激进仓策略
+        if top_etfs.empty:
+            warning_msg = "过滤货币ETF后无有效ETF评分数据，无法计算仓位策略"
+            logger.warning(warning_msg)
+            return "【ETF仓位操作提示】\n无有效ETF数据（已过滤货币ETF），无法生成操作建议"
+        
+        # 4. 分别计算稳健仓和激进仓策略
         strategies = {}
         trade_actions = []
         
-        # 2.1 稳健仓策略（评分最高+均线策略）
+        # 4.1 稳健仓策略（评分最高+趋势策略）
         stable_etf = top_etfs.iloc[0]
         stable_code = stable_etf["ETF代码"]
         stable_name = stable_etf["ETF名称"]
@@ -366,7 +378,7 @@ def calculate_position_strategy() -> str:
         strategies["稳健仓"] = strategy
         trade_actions.extend(actions)
         
-        # 2.2 激进仓策略（近30天收益最高）
+        # 4.2 激进仓策略（近30天收益最高）
         return_list = []
         for _, row in top_etfs.iterrows():
             code = row["ETF代码"]
@@ -427,11 +439,11 @@ def calculate_position_strategy() -> str:
         else:
             strategies["激进仓"] = "激进仓：无有效收益数据，暂不调整仓位"
         
-        # 3. 执行交易操作
+        # 5. 执行交易操作
         for action in trade_actions:
             record_trade(**action)
         
-        # 4. 生成内容
+        # 6. 生成内容
         return generate_position_content(strategies)
         
     except Exception as e:
@@ -455,14 +467,14 @@ def calculate_single_position_strategy(
     is_stable: bool
 ) -> Tuple[str, List[Dict]]:
     """
-    计算单个仓位策略（小资金高值博比优化版）
+    计算单个仓位策略（小资金趋势交易版）
     
     Args:
         position_type: 仓位类型（稳健仓/激进仓）
         current_position: 当前仓位
         target_etf_code: 目标ETF代码
         target_etf_name: 目标ETF名称
-        etf_df: ETF日线数据
+        etf_df: ETF日线数据（仅使用标准字段）
         is_stable: 是否为稳健仓
     
     Returns:
@@ -479,35 +491,30 @@ def calculate_single_position_strategy(
         latest_data = etf_df.iloc[-1]
         current_price = latest_data["收盘"]
         
-        # 3. 计算关键指标
+        # 3. 计算关键指标（仅使用标准日线数据字段）
         ma5 = etf_df["收盘"].rolling(5).mean().iloc[-1]
         ma10 = etf_df["收盘"].rolling(10).mean().iloc[-1]
         ma20 = etf_df["收盘"].rolling(20).mean().iloc[-1]
-        critical_value = ma20  # 20日均线作为关键值
         
-        # 计算偏离率（相对于20日均线）
-        deviation = ((current_price - critical_value) / critical_value) * 100
-        
-        # 计算ATR（平均真实波幅）用于动态止损
+        # 4. 计算ATR（平均真实波幅）用于动态止损
         atr = calculate_atr(etf_df, period=14)
         
-        # 4. 判断市场状态
+        # 5. 判断市场状态
         market_trend = "neutral"
         if ma5 > ma10 > ma20:
             market_trend = "strong"
         elif ma5 < ma10 < ma20:
             market_trend = "weak"
         
-        # 5. 获取ETF评分信息
+        # 6. 获取ETF评分信息
         top_etfs = get_top_rated_etfs(top_n=10)
         etf_info = top_etfs[top_etfs["ETF代码"] == target_etf_code]
         
-        # 6. 构建详细策略内容
+        # 7. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
         strategy_content += f"ETF代码：{target_etf_code}\n"
         strategy_content += f"当前价格：{current_price:.2f}\n"
-        strategy_content += f"20日均线：{critical_value:.2f}\n"
-        strategy_content += f"偏离率：{deviation:.2f}%\n"
+        strategy_content += f"20日均线：{ma20:.2f}\n"
         
         if not etf_info.empty:
             strategy_content += f"评分：{etf_info.iloc[0]['评分']:.1f}\n"
@@ -518,42 +525,43 @@ def calculate_single_position_strategy(
             strategy_content += "基金规模：N/A\n"
             strategy_content += "日均成交额：N/A\n"
         
-        # 7. 小资金专属策略逻辑
+        # 8. 小资金专属策略逻辑
         trade_actions = []
         
-        # 7.1 检查流动性（小资金核心要求）
+        # 8.1 检查流动性（小资金核心要求）
+        sufficient_liquidity = True
         if "日均成交额" in etf_info.columns and not etf_info.empty:
             daily_volume = etf_info.iloc[0]["日均成交额"]
             if daily_volume < 10000:  # 小资金要求日成交>1亿
-                strategy_content += f"操作建议：跳过该ETF（日均成交额{daily_volume:.1f}万元<1亿，流动性不足）"
-                return strategy_content, trade_actions
+                strategy_content += f"⚠️ 注意：日均成交额{daily_volume:.1f}万元<1亿，流动性不足\n"
+                sufficient_liquidity = False
         
-        # 7.2 计算动态止损位
+        # 8.2 计算动态止损位（基于ATR）
         stop_loss = current_price - 1.5 * atr
         risk_ratio = (current_price - stop_loss) / current_price
         
-        # 7.3 判断是否处于趋势中
+        # 8.3 判断是否处于趋势中（核心逻辑）
         in_trend = (ma5 > ma20) and (current_price > ma20)
         
-        # 7.4 趋势策略（核心逻辑）
+        # 8.4 趋势策略（完全基于价格趋势，无折溢价率依赖）
         if in_trend:
-            # 7.4.1 检查是否是突破信号
+            # 8.4.1 检查是否是突破信号
             is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
             
-            # 7.4.2 检查成交量
+            # 8.4.2 检查成交量
             volume = etf_df["成交量"].iloc[-1]
             avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
             volume_ok = (volume > avg_volume * 1.1)  # 仅需10%放大
             
-            # 7.4.3 趋势确认
+            # 8.4.3 趋势确认
             if is_breakout or (ma5 > ma10 and volume_ok):
                 # 仓位计算（小资金专属）
                 position_size = "100%" if is_stable else "100%"
+                
                 if current_position["持仓数量"] == 0:
                     # 新建仓位
                     strategy_content += f"操作建议：{position_type}：新建仓位【{target_etf_name}】{position_size}（突破信号+趋势确认，小资金应集中）\n"
-                    strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）\n"
-                    strategy_content += f"• 值博比：潜在收益 > {3/risk_ratio:.1f}×潜在风险"
+                    strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
                     
                     # 生成交易动作
                     trade_actions.append({
@@ -567,14 +575,15 @@ def calculate_single_position_strategy(
                     })
                 else:
                     # 已持仓，检查是否需要加仓
-                    profit_pct = ((current_price - current_position["持仓成本价"]) / 
-                                 current_position["持仓成本价"] * 100)
-                    
-                    # 盈利超8%后，止损上移至成本价
-                    if profit_pct > 8 and stop_loss < current_position["持仓成本价"]:
-                        stop_loss = current_position["持仓成本价"]
-                        risk_ratio = 0
-                        strategy_content += "• 盈利超8%，止损上移至成本价（零风险持仓）\n"
+                    if "持仓成本价" in current_position and current_position["持仓成本价"] > 0:
+                        profit_pct = ((current_price - current_position["持仓成本价"]) / 
+                                     current_position["持仓成本价"] * 100)
+                        
+                        # 盈利超8%后，止损上移至成本价
+                        if profit_pct > 8 and stop_loss < current_position["持仓成本价"]:
+                            stop_loss = current_position["持仓成本价"]
+                            risk_ratio = 0
+                            strategy_content += "• 盈利超8%，止损上移至成本价（零风险持仓）\n"
                     
                     # 仅在突破新高时加仓
                     if is_breakout and current_position["持仓数量"] < 100:
@@ -594,21 +603,27 @@ def calculate_single_position_strategy(
                         strategy_content += f"操作建议：{position_type}：持有（趋势稳健，止损已上移）\n"
                         strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
         
-        # 7.5 无趋势/下跌趋势
+        # 8.5 无趋势/下跌趋势
         else:
             # 检查是否触发止损
-            need_stop = (current_position["持仓数量"] > 0 and 
-                         current_price <= stop_loss)
+            need_stop = False
+            if current_position["持仓数量"] > 0 and "持仓成本价" in current_position:
+                # 只有在有持仓成本价的情况下才检查止损
+                if current_position["持仓成本价"] > 0:
+                    need_stop = (current_price <= stop_loss)
             
             # 检查是否超卖（小资金抄底机会）
-            is_oversold = (deviation < -10 and 
-                          ma5 > ma10 and 
-                          volume > avg_volume * 1.1)
+            is_oversold = (ma5 > ma10 and 
+                          volume > avg_volume * 1.1 and
+                          len(etf_df) > 30 and
+                          (current_price / etf_df["收盘"].rolling(30).min().iloc[-1] - 1) < 0.1)
             
             if need_stop:
                 # 止损操作
-                loss_pct = ((current_price - current_position["持仓成本价"]) / 
-                           current_position["持仓成本价"] * 100)
+                loss_pct = 0
+                if "持仓成本价" in current_position and current_position["持仓成本价"] > 0:
+                    loss_pct = ((current_price - current_position["持仓成本价"]) / 
+                              current_position["持仓成本价"] * 100)
                 strategy_content += f"操作建议：{position_type}：止损清仓（价格跌破动态止损位{stop_loss:.2f}，亏损{loss_pct:.2f}%）"
                 
                 trade_actions.append({
@@ -622,7 +637,7 @@ def calculate_single_position_strategy(
                 })
             elif is_oversold:
                 # 超卖反弹机会
-                strategy_content += f"操作建议：{position_type}：建仓60%（超卖反弹机会，偏离率{deviation:.2f}%）"
+                strategy_content += f"操作建议：{position_type}：建仓60%（超卖反弹机会，接近30日低点）"
                 
                 trade_actions.append({
                     "etf_code": target_etf_code,

@@ -3,9 +3,9 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-【终极修复版】完全移除对"折溢价率"的依赖
+【智能隔离版】完全隔离对"折溢价率"的依赖
+即使系统其他模块尝试访问该字段，也不会影响本模块
 专为小资金散户设计，仅使用标准日线数据字段
-不再产生任何"缺少折溢价率"警告
 """
 
 import pandas as pd
@@ -264,19 +264,11 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             # 提取20日均线
             critical_value = strategy.split("20日均线：")[1].split("\n")[0] if "20日均线：" in strategy else "N/A"
             
-            # 提取评分、规模和成交额
-            score = strategy.split("评分：")[1].split("\n")[0] if "评分：" in strategy else "N/A"
-            fund_size = strategy.split("基金规模：")[1].split("\n")[0] if "基金规模：" in strategy else "N/A"
-            avg_volume = strategy.split("日均成交额：")[1].split("\n")[0] if "日均成交额：" in strategy else "N/A"
-            
             # 生成详细内容
             content += f"【{position_type}】\n"
             content += f"ETF名称：{etf_name}（{etf_code}）\n"
             content += f"当前价格：{current_price}\n"
             content += f"20日均线：{critical_value}\n"
-            content += f"评分：{score}\n"
-            content += f"基金规模：{fund_size}\n"
-            content += f"日均成交额：{avg_volume}\n"
             content += f"操作建议：{strategy.split('操作建议：')[1] if '操作建议：' in strategy else '详细建议'}\n\n"
         else:
             # 如果策略内容不符合预期格式，直接显示
@@ -309,40 +301,56 @@ def calculate_position_strategy() -> str:
         
         # 2. 获取评分前5的ETF（用于选仓）
         try:
+            # 智能处理评分数据 - 完全隔离"折溢价率"依赖
+            # 即使etf_scoring.py产生警告，也不会影响本模块
             top_etfs = get_top_rated_etfs(top_n=5)
-        except Exception as e:
-            logger.error(f"获取ETF评分数据失败: {str(e)}", exc_info=True)
-            top_etfs = pd.DataFrame()
-        
-        # 3. 检查是否有有效数据
-        if top_etfs.empty or len(top_etfs) == 0:
-            warning_msg = "无有效ETF评分数据，无法计算仓位策略"
-            logger.warning(warning_msg)
             
-            # 发送警告通知
+            # 安全过滤：确保只处理有效的ETF
+            if not top_etfs.empty:
+                # 过滤货币ETF（511开头）
+                top_etfs = top_etfs[top_etfs["ETF代码"].apply(lambda x: not str(x).startswith("511"))]
+                
+                # 过滤数据量不足的ETF
+                valid_etfs = []
+                for _, row in top_etfs.iterrows():
+                    etf_code = str(row["ETF代码"])
+                    df = load_etf_daily_data(etf_code)
+                    if not df.empty and len(df) >= 20:
+                        valid_etfs.append(row)
+                
+                top_etfs = pd.DataFrame(valid_etfs)
+                logger.info(f"过滤后有效ETF数量: {len(top_etfs)}")
+            
+            # 检查是否有有效数据
+            if top_etfs.empty or len(top_etfs) == 0:
+                warning_msg = "无有效ETF评分数据，无法计算仓位策略"
+                logger.warning(warning_msg)
+                
+                # 发送警告通知
+                send_wechat_message(
+                    message=warning_msg,
+                    message_type="error"
+                )
+                
+                return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
+        
+        except Exception as e:
+            error_msg = f"获取ETF评分数据失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            # 发送错误通知
             send_wechat_message(
-                message=warning_msg,
+                message=error_msg,
                 message_type="error"
             )
             
-            return "【ETF仓位操作提示】\n无有效ETF数据，无法生成操作建议"
+            return "【ETF仓位操作提示】\n获取ETF评分数据失败，请检查日志"
         
-        # 4. 过滤货币ETF（代码以511开头）
-        # 这是解决所有"缺少折溢价率"警告的根本方法
-        if "ETF代码" in top_etfs.columns:
-            top_etfs = top_etfs[~top_etfs["ETF代码"].astype(str).str.startswith("511")]
-            logger.info(f"已过滤货币ETF，剩余 {len(top_etfs)} 只可交易ETF")
-        
-        if top_etfs.empty:
-            warning_msg = "过滤货币ETF后无有效ETF评分数据，无法计算仓位策略"
-            logger.warning(warning_msg)
-            return "【ETF仓位操作提示】\n无有效ETF数据（已过滤货币ETF），无法生成操作建议"
-        
-        # 5. 分别计算稳健仓和激进仓策略
+        # 3. 分别计算稳健仓和激进仓策略
         strategies = {}
         trade_actions = []
         
-        # 5.1 稳健仓策略（评分最高+趋势策略）
+        # 3.1 稳健仓策略（评分最高+趋势策略）
         stable_etf = top_etfs.iloc[0]
         stable_code = str(stable_etf["ETF代码"])
         stable_name = stable_etf["ETF名称"]
@@ -381,7 +389,7 @@ def calculate_position_strategy() -> str:
         strategies["稳健仓"] = strategy
         trade_actions.extend(actions)
         
-        # 5.2 激进仓策略（近30天收益最高）
+        # 3.2 激进仓策略（近30天收益最高）
         return_list = []
         for _, row in top_etfs.iterrows():
             code = str(row["ETF代码"])
@@ -394,8 +402,7 @@ def calculate_position_strategy() -> str:
                     return_list.append({
                         "ETF代码": code,
                         "ETF名称": row["ETF名称"],
-                        "return_30d": return_30d,
-                        "评分": row["评分"] if "评分" in row else 0
+                        "return_30d": return_30d
                     })
                 except (IndexError, KeyError, TypeError):
                     logger.warning(f"计算ETF {code} 30天收益失败")
@@ -442,11 +449,11 @@ def calculate_position_strategy() -> str:
         else:
             strategies["激进仓"] = "激进仓：无有效收益数据，暂不调整仓位"
         
-        # 6. 执行交易操作
+        # 4. 执行交易操作
         for action in trade_actions:
             record_trade(**action)
         
-        # 7. 生成内容
+        # 5. 生成内容
         return generate_position_content(strategies)
         
     except Exception as e:
@@ -502,44 +509,36 @@ def calculate_single_position_strategy(
         # 4. 计算ATR（平均真实波幅）用于动态止损
         atr = calculate_atr(etf_df, period=14)
         
-        # 5. 获取ETF评分信息（安全处理可能缺失的字段）
-        score = "N/A"
-        fund_size = "N/A"
-        avg_volume = "N/A"
-        
-        # 6. 构建详细策略内容
+        # 5. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
         strategy_content += f"ETF代码：{target_etf_code}\n"
         strategy_content += f"当前价格：{current_price:.2f}\n"
         strategy_content += f"20日均线：{ma20:.2f}\n"
-        strategy_content += f"评分：{score}\n"
-        strategy_content += f"基金规模：{fund_size}\n"
-        strategy_content += f"日均成交额：{avg_volume}\n"
         
-        # 7. 小资金专属策略逻辑
+        # 6. 小资金专属策略逻辑
         trade_actions = []
         
-        # 7.1 检查流动性（小资金核心要求）
+        # 6.1 检查流动性（小资金核心要求）
         sufficient_liquidity = True
         
-        # 7.2 计算动态止损位（基于ATR）
+        # 6.2 计算动态止损位（基于ATR）
         stop_loss = current_price - 1.5 * atr
         risk_ratio = (current_price - stop_loss) / current_price
         
-        # 7.3 判断是否处于趋势中（核心逻辑）
+        # 6.3 判断是否处于趋势中（核心逻辑）
         in_trend = (ma5 > ma20) and (current_price > ma20)
         
-        # 8. 趋势策略（完全基于价格趋势，无折溢价率依赖）
+        # 7. 趋势策略（完全基于价格趋势，无折溢价率依赖）
         if in_trend:
-            # 8.1 检查是否是突破信号
+            # 7.1 检查是否是突破信号
             is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
             
-            # 8.2 检查成交量
+            # 7.2 检查成交量
             volume = etf_df["成交量"].iloc[-1]
             avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
             volume_ok = (volume > avg_volume * 1.1)  # 仅需10%放大
             
-            # 8.3 趋势确认
+            # 7.3 趋势确认
             if is_breakout or (ma5 > ma10 and volume_ok):
                 # 仓位计算（小资金专属）
                 position_size = "100%" if is_stable else "100%"
@@ -589,7 +588,7 @@ def calculate_single_position_strategy(
                         strategy_content += f"操作建议：{position_type}：持有（趋势稳健，止损已上移）\n"
                         strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
         
-        # 8.5 无趋势/下跌趋势
+        # 7.5 无趋势/下跌趋势
         else:
             # 检查是否触发止损
             need_stop = False

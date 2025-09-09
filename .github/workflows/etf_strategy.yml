@@ -706,6 +706,8 @@ jobs:
           fi
           
       - name: 执行ETF Yes/No策略
+        env:  # 关键：添加环境变量设置
+          WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}  # 这行是必需的
         run: |
           echo "开始执行ETF Yes/No策略..."
           # 创建日志目录

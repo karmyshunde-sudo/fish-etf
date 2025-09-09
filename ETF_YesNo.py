@@ -460,7 +460,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%（如{index_info['etf_code']}）\n"
             f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%（如{index_info['etf_code']}）\n"
             f"  • 总仓位严格控制在≤50%\n"
-            f"⚠️ 避免频繁交易，等待趋势明朗"
+            f"⚠️ 避免频繁交易，等待趋势明朗\n"
         )
         return message
     
@@ -474,7 +474,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 f"  • 核心宽基ETF（{index_info['etf_code']}）立即建仓30%\n"
                 f"  • 卫星行业ETF立即建仓20%\n"
                 f"  • 回调至5日均线（约{current * 0.99:.2f}）可加仓20%\n"
-                f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）"
+                f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）\n"
             )
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
         elif 2 <= consecutive_above <= 3 and volume_change > 20:
@@ -484,7 +484,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 f"  • 核心宽基ETF（{index_info['etf_code']}）可加仓至50%\n"
                 f"  • 卫星行业ETF可加仓至35%\n"
                 f"  • 严格跟踪5日均线作为止损位（约{current * 0.99:.2f}）\n"
-                f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%"
+                f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
             )
         # 子条件2：持续站稳（价格维持在均线上）
         else:
@@ -506,7 +506,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 持仓不动，不新增仓位\n"
                     f"  • 跟踪止损上移至5日均线（约{current * 0.99:.2f}）\n"
                     f"  • 若收盘跌破5日均线，减仓50%\n"
-                    f"{pattern_msg}"
+                    f"{pattern_msg}\n"
                 )
             # 场景B：+5%＜偏离率≤+10%（趋势较强）
             elif 5.0 < deviation <= 10.0:
@@ -526,7 +526,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 观望，不新增仓位\n"
                     f"  • 逢高减仓10%-15%（{index_info['etf_code']}）\n"
                     f"  • 若收盘跌破10日均线，减仓30%\n"
-                    f"{pattern_msg}"
+                    f"{pattern_msg}\n"
                 )
             # 场景C：偏离率＞+10%（超买风险）
             else:
@@ -546,7 +546,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 逢高减仓20%-30%（仅卫星ETF）\n"
                     f"  • 当前价格已处高位，避免新增仓位\n"
                     f"  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回\n"
-                    f"{pattern_msg}"
+                    f"{pattern_msg}\n"
                 )
     
     # 2. NO信号：当前价格 ＜ 20日均线
@@ -563,7 +563,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 核心宽基ETF（{index_info['etf_code']}）立即减仓50%\n"
                     f"  • 卫星行业ETF立即减仓70%-80%\n"
                     f"  • 止损位：20日均线上方5%（约{critical * 1.05:.2f}）\n"
-                    f"⚠️ 若收盘未收回均线，明日继续减仓至20%"
+                    f"⚠️ 若收盘未收回均线，明日继续减仓至20%\n"
                 )
             else:  # 亏损≥15%
                 message = (
@@ -572,7 +572,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 核心宽基ETF（{index_info['etf_code']}）立即清仓\n"
                     f"  • 卫星行业ETF保留20%-30%底仓观察\n"
                     f"  • 严格止损：收盘价站上20日均线才考虑回补\n"
-                    f"⚠️ 重大亏损信号，避免盲目抄底"
+                    f"⚠️ 重大亏损信号，避免盲目抄底\n"
                 )
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
         elif consecutive_below == 2 and volume_change > 20:
@@ -582,7 +582,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 f"  • 核心宽基ETF（{index_info['etf_code']}）严格止损清仓\n"
                 f"  • 卫星行业ETF仅保留20%-30%底仓\n"
                 f"  • 严格止损：20日均线下方5%（约{critical * 0.95:.2f}）\n"
-                f"⚠️ 信号确认，避免侥幸心理"
+                f"⚠️ 信号确认，避免侥幸心理\n"
             )
         # 子条件2：持续跌破（价格维持在均线下）
         else:
@@ -594,7 +594,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 轻仓观望（仓位≤20%）\n"
                     f"  • 反弹至均线附近（约{critical:.2f}）减仓剩余仓位\n"
                     f"  • 暂不考虑新增仓位\n"
-                    f"⚠️ 重点观察：收盘站上5日均线，可轻仓试多"
+                    f"⚠️ 重点观察：收盘站上5日均线，可轻仓试多\n"
                 )
             # 场景B：-10%≤偏离率＜-5%（下跌中期）
             elif -10.0 <= deviation < -5.0:
@@ -604,7 +604,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 空仓为主，避免抄底\n"
                     f"  • 仅核心宽基ETF（{index_info['etf_code']}）可试仓5%-10%\n"
                     f"  • 严格止损：收盘跌破前低即离场\n"
-                    f"⚠️ 重点观察：行业基本面是否有利空，有利空则清仓"
+                    f"⚠️ 重点观察：行业基本面是否有利空，有利空则清仓\n"
                 )
             # 场景C：偏离率＜-10%（超卖机会）
             else:
@@ -614,7 +614,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 核心宽基ETF（{index_info['etf_code']}）小幅加仓10%-15%\n"
                     f"  • 目标价：偏离率≥-5%（约{critical * 0.95:.2f}）\n"
                     f"  • 达到目标即卖出加仓部分\n"
-                    f"⚠️ 重点观察：若跌破前低，立即止损"
+                    f"⚠️ 重点观察：若跌破前低，立即止损\n"
                 )
     
     return message
@@ -639,39 +639,39 @@ def generate_report():
                 logger.warning(f"无数据: {name}({code})")
                 # 即使没有数据，也发送一条消息通知
                 message_lines = []
-                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
-                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
+                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
-                message_lines.append(f"❌ 信号：数据获取失败")
-                message_lines.append("──────────────────")
-                message_lines.append("⚠️ 获取指数数据失败，请检查数据源")
-                message_lines.append("──────────────────")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message_lines.append(f"❌ 信号：数据获取失败\n")
+                message_lines.append("\n──────────────────\n")
+                message_lines.append("⚠️ 获取指数数据失败，请检查数据源\n")
+                message_lines.append("\n──────────────────\n")
+                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
+                message_lines.append("📊 数据来源：GIT：fish-etf\n")
                 
                 message = "\n".join(message_lines)
-                logger.info(f"推送 {name} 策略信号（数据获取失败）")
+                logger.info(f"推送 {name} 策略信号（数据获取失败）\n")
                 send_wechat_message(message)
-                time.sleep(2)
+                time.sleep(1)
                 continue
             
             # 确保有足够数据
             if len(df) < CRITICAL_VALUE_DAYS:
-                logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
+                logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算\n")
                 # 发送数据不足的消息
                 message_lines = []
-                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
-                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
+                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
-                message_lines.append(f"⚠️ 信号：数据不足")
-                message_lines.append("──────────────────")
-                message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天")
-                message_lines.append("──────────────────")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message_lines.append(f"⚠️ 信号：数据不足\n")
+                message_lines.append("\n──────────────────\n")
+                message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n")
+                message_lines.append("\n──────────────────\n")
+                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
+                message_lines.append("📊 数据来源：GIT：fish-etf\n")
                 
                 message = "\n".join(message_lines)
-                logger.info(f"推送 {name} 策略信号（数据不足）")
+                logger.info(f"\n推送 {name} 策略信号（数据不足）\n")
                 send_wechat_message(message)
                 time.sleep(2)
                 continue
@@ -690,14 +690,14 @@ def generate_report():
             
             # 构建消息
             message_lines = []
-            message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
-            message_lines.append(f"📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%")
+            message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+            message_lines.append(f"📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%\n")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）")
-            message_lines.append("──────────────────")
+            message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）\n")
+            message_lines.append("\n──────────────────\n")
             message_lines.append(signal_message)
-            message_lines.append("──────────────────")
+            message_lines.append("\n──────────────────\n")
             
             message = "\n".join(message_lines)
             
@@ -712,20 +712,20 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%"
+            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1
-            time.sleep(2)
+            time.sleep(1)
         
         # 如果有有效的指数数据，发送总结消息
         if valid_indices_count > 0:
             # 构建总结消息
-            summary_message = "\n".join(summary_lines) + "\n***\n──────────────────"
+            summary_message = "\n".join(summary_lines) + "\n***\n──────────────────\n"
             
             logger.info("推送总结消息")
             send_wechat_message(summary_message)
-            time.sleep(2)
+            time.sleep(1)
         
         logger.info(f"所有指数策略报告已成功发送至企业微信（共{valid_indices_count}个有效指数）")
     

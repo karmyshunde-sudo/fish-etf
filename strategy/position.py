@@ -3,8 +3,7 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-【智能隔离版】完全隔离对"折溢价率"的依赖
-即使系统其他模块尝试访问该字段，也不会影响本模块
+【终极修复版】彻底解决ATR计算和变量作用域问题
 专为小资金散户设计，仅使用标准日线数据字段
 """
 
@@ -301,8 +300,7 @@ def calculate_position_strategy() -> str:
         
         # 2. 获取评分前5的ETF（用于选仓）
         try:
-            # 智能处理评分数据 - 完全隔离"折溢价率"依赖
-            # 即使etf_scoring.py产生警告，也不会影响本模块
+            # 智能处理评分数据
             top_etfs = get_top_rated_etfs(top_n=5)
             
             # 安全过滤：确保只处理有效的ETF
@@ -509,36 +507,38 @@ def calculate_single_position_strategy(
         # 4. 计算ATR（平均真实波幅）用于动态止损
         atr = calculate_atr(etf_df, period=14)
         
-        # 5. 构建详细策略内容
+        # 5. 初始化成交量相关变量（关键修复：提前定义，避免作用域问题）
+        volume = 0.0
+        avg_volume = 0.0
+        if not etf_df.empty:
+            volume = etf_df["成交量"].iloc[-1]
+            avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+        
+        # 6. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
         strategy_content += f"ETF代码：{target_etf_code}\n"
         strategy_content += f"当前价格：{current_price:.2f}\n"
         strategy_content += f"20日均线：{ma20:.2f}\n"
         
-        # 6. 小资金专属策略逻辑
+        # 7. 小资金专属策略逻辑
         trade_actions = []
         
-        # 6.1 检查流动性（小资金核心要求）
-        sufficient_liquidity = True
-        
-        # 6.2 计算动态止损位（基于ATR）
+        # 7.1 计算动态止损位（基于ATR）
         stop_loss = current_price - 1.5 * atr
-        risk_ratio = (current_price - stop_loss) / current_price
+        risk_ratio = (current_price - stop_loss) / current_price if current_price > 0 else 0
         
-        # 6.3 判断是否处于趋势中（核心逻辑）
+        # 7.2 判断是否处于趋势中（核心逻辑）
         in_trend = (ma5 > ma20) and (current_price > ma20)
         
-        # 7. 趋势策略（完全基于价格趋势，无折溢价率依赖）
+        # 8. 趋势策略（完全基于价格趋势，无折溢价率依赖）
         if in_trend:
-            # 7.1 检查是否是突破信号
+            # 8.1 检查是否是突破信号
             is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
             
-            # 7.2 检查成交量
-            volume = etf_df["成交量"].iloc[-1]
-            avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+            # 8.2 检查成交量
             volume_ok = (volume > avg_volume * 1.1)  # 仅需10%放大
             
-            # 7.3 趋势确认
+            # 8.3 趋势确认
             if is_breakout or (ma5 > ma10 and volume_ok):
                 # 仓位计算（小资金专属）
                 position_size = "100%" if is_stable else "100%"
@@ -588,7 +588,7 @@ def calculate_single_position_strategy(
                         strategy_content += f"操作建议：{position_type}：持有（趋势稳健，止损已上移）\n"
                         strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}）"
         
-        # 7.5 无趋势/下跌趋势
+        # 8.5 无趋势/下跌趋势
         else:
             # 检查是否触发止损
             need_stop = False
@@ -598,10 +598,13 @@ def calculate_single_position_strategy(
                     need_stop = (current_price <= stop_loss)
             
             # 检查是否超卖（小资金抄底机会）
-            is_oversold = (ma5 > ma10 and 
-                          volume > avg_volume * 1.1 and
-                          len(etf_df) > 30 and
-                          (current_price / etf_df["收盘"].rolling(30).min().iloc[-1] - 1) < 0.1)
+            is_oversold = False
+            if len(etf_df) > 30:
+                min_30d = etf_df["收盘"].rolling(30).min().iloc[-1]
+                if min_30d > 0:  # 避免除零错误
+                    is_oversold = (ma5 > ma10 and 
+                                  volume > avg_volume * 1.1 and
+                                  (current_price / min_30d - 1) < 0.1)
             
             if need_stop:
                 # 止损操作
@@ -656,7 +659,9 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         float: ATR值
     """
     try:
+        # 检查数据量是否足够
         if len(df) < period + 1:
+            logger.warning(f"数据量不足，无法计算ATR（需要至少{period+1}条数据，实际{len(df)}条）")
             return 0.0
         
         # 计算真实波幅(TR)
@@ -670,11 +675,18 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         tr3 = np.abs(low[1:] - close[:-1])
         tr = np.max(np.vstack([tr1, tr2, tr3]), axis=0)
         
-        # 计算ATR（简单移动平均）
-        atr = np.zeros_like(tr)
-        atr[0] = np.mean(tr[:period])
-        for i in range(1, len(atr)):
-            atr[i] = (atr[i-1] * (period-1) + tr[i+period-1]) / period
+        # 计算ATR（指数移动平均）
+        n = len(tr)
+        if n < period:
+            return 0.0
+            
+        atr = np.zeros(n)
+        # 第一个ATR值使用简单移动平均
+        atr[period-1] = np.mean(tr[:period])
+        
+        # 后续ATR值使用指数移动平均
+        for i in range(period, n):
+            atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
         
         return atr[-1]
     

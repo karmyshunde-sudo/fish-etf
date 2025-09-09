@@ -15,16 +15,17 @@ on:
         required: true
         type: choice
         options:
-          - 'crawl_etf_daily'
-          - 'calculate_arbitrage'
-          - 'calculate_position'
-          - 'update_etf_list'
+          - 'update_etf_list'      #更新ETF列表
+          - 'etf_yesno'            # 新增：鱼盆指数yesno
+          - 'crawl_etf_daily'      #更新ETF日线
+          - 'calculate_arbitrage'  #套利计算
+          - 'calculate_position'   #激进、稳健仓计算
           - 'clean_daily_data'
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
           - 'clean_numeric_csv'
           - 'show_akshare_info'  # 新增：显示AkShare信息
-          - 'etf_yesno'  # 新增：鱼盆指数yesno
+          
       interface_name:
         description: 'AkShare接口名称（可选）'
         required: false

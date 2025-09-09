@@ -27,13 +27,90 @@ def load_all_etf_list() -> pd.DataFrame:
     if (_etf_list_cache is not None and 
         _last_load_time is not None and 
         (datetime.now() - _last_load_time).total_seconds() < 300):
-        logger.debug("使用缓存的ETF列表")
-        return _etf_list_cache.copy()
+        
+        # 严格验证缓存数据
+        if not isinstance(_etf_list_cache, pd.DataFrame):
+            logger.warning("ETF列表缓存不是DataFrame类型，将重新加载")
+        elif _etf_list_cache.empty:
+            logger.warning("ETF列表缓存为空，将重新加载")
+        elif "ETF代码" not in _etf_list_cache.columns:
+            logger.warning("ETF列表缓存缺少必要列: ETF代码，将重新加载")
+        else:
+            logger.debug(f"使用缓存的ETF列表 (共{_etf_list_cache.shape[0]}条记录)")
+            # 创建深拷贝并确保ETF代码格式正确
+            cached_df = _etf_list_cache.copy(deep=True)
+            
+            # 确保ETF代码是字符串类型且格式正确
+            if "ETF代码" in cached_df.columns:
+                # 检查列是否包含非字符串值
+                has_non_string = cached_df["ETF代码"].apply(lambda x: not isinstance(x, str)).any()
+                
+                # 如果列包含非字符串值，或者列是数值类型，则进行转换
+                if has_non_string or pd.api.types.is_numeric_dtype(cached_df["ETF代码"]):
+                    cached_df.loc[:, "ETF代码"] = cached_df["ETF代码"].astype(str)
+                
+                # 确保ETF代码是6位数字
+                cached_df.loc[:, "ETF代码"] = cached_df["ETF代码"].str.strip().str.zfill(6)
+            
+            return cached_df
     
     # 更新ETF列表
-    _etf_list_cache = update_all_etf_list()
-    _last_load_time = datetime.now()
-    return _etf_list_cache.copy() if _etf_list_cache is not None else pd.DataFrame()
+    try:
+        new_etf_list = update_all_etf_list()
+        
+        # 严格验证新获取的数据
+        if not isinstance(new_etf_list, pd.DataFrame):
+            logger.error("update_all_etf_list() 返回的不是DataFrame类型")
+            _etf_list_cache = pd.DataFrame()
+        elif new_etf_list.empty:
+            logger.warning("update_all_etf_list() 返回空DataFrame")
+            _etf_list_cache = pd.DataFrame()
+        else:
+            # 创建深拷贝避免SettingWithCopyWarning
+            _etf_list_cache = new_etf_list.copy(deep=True)
+            
+            # 确保包含必要列
+            required_columns = ["ETF代码", "ETF名称", "基金规模"]
+            missing_columns = [col for col in required_columns if col not in _etf_list_cache.columns]
+            
+            if missing_columns:
+                logger.error(f"ETF列表缺少必要列: {', '.join(missing_columns)}")
+                logger.debug(f"实际列名: {list(_etf_list_cache.columns)}")
+                # 尝试修复缺失的列
+                for col in missing_columns:
+                    if col == "ETF代码" and "代码" in _etf_list_cache.columns:
+                        _etf_list_cache.rename(columns={"代码": "ETF代码"}, inplace=True)
+                    elif col == "ETF名称" and "名称" in _etf_list_cache.columns:
+                        _etf_list_cache.rename(columns={"名称": "ETF名称"}, inplace=True)
+                    else:
+                        _etf_list_cache[col] = "" if col != "基金规模" else 0.0
+            
+            # 确保ETF代码是字符串类型且格式正确
+            if "ETF代码" in _etf_list_cache.columns:
+                # 检查列是否包含非字符串值
+                has_non_string = _etf_list_cache["ETF代码"].apply(lambda x: not isinstance(x, str)).any()
+                
+                # 如果列包含非字符串值，或者列是数值类型，则进行转换
+                if has_non_string or pd.api.types.is_numeric_dtype(_etf_list_cache["ETF代码"]):
+                    _etf_list_cache.loc[:, "ETF代码"] = _etf_list_cache["ETF代码"].astype(str)
+                
+                # 确保ETF代码是6位数字
+                _etf_list_cache.loc[:, "ETF代码"] = _etf_list_cache["ETF代码"].str.strip().str.zfill(6)
+                
+                # 过滤无效的ETF代码（非6位数字）
+                _etf_list_cache = _etf_list_cache[
+                    _etf_list_cache["ETF代码"].str.match(r'^\d{6}$')
+                ].copy()
+            
+            logger.info(f"成功加载ETF列表，共{_etf_list_cache.shape[0]}条有效记录")
+        
+        _last_load_time = datetime.now()
+        return _etf_list_cache.copy() if _etf_list_cache is not None else pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"加载ETF列表时发生异常: {str(e)}", exc_info=True)
+        # 尝试返回空DataFrame而不是抛出异常
+        return pd.DataFrame()
 
 def update_all_etf_list() -> pd.DataFrame:
     """更新ETF列表（优先使用本地文件，若需更新则从网络获取）

@@ -734,7 +734,9 @@ jobs:
           if [ -n "$WECOM_WEBHOOK" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             UTC_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')
-            
+
+             TASK_STATUS=$(cat $GITHUB_OUTPUT | grep "task_status=" | cut -d'=' -f2)
+             
             # 构建消息内容
             if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
               payload="{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF Yes/No策略】执行成功\\nUTC时间: ${UTC_TIME}\\n北京时间: ${BEIJING_TIME}\"}}"

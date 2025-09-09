@@ -729,7 +729,7 @@ jobs:
           
       - name: 发送策略结果通知
         env:
-          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
         run: |
           if [ -n "$WECOM_WEBHOOK" ]; then
             BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')

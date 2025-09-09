@@ -643,9 +643,9 @@ def generate_report():
                 message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"❌ 信号：数据获取失败\n")
-                message_lines.append("\n──────────────────\n")
+                message_lines.append("──────────────────\n")
                 message_lines.append("⚠️ 获取指数数据失败，请检查数据源\n")
-                message_lines.append("\n──────────────────\n")
+                message_lines.append("──────────────────\n")
                 message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
                 message_lines.append("📊 数据来源：GIT：fish-etf\n")
                 
@@ -664,9 +664,9 @@ def generate_report():
                 message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"⚠️ 信号：数据不足\n")
-                message_lines.append("\n──────────────────\n")
+                message_lines.append("──────────────────\n")
                 message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n")
-                message_lines.append("\n──────────────────\n")
+                message_lines.append("──────────────────\n")
                 message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
                 message_lines.append("📊 数据来源：GIT：fish-etf\n")
                 
@@ -695,9 +695,9 @@ def generate_report():
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）\n")
-            message_lines.append("\n──────────────────\n")
+            message_lines.append("──────────────────\n")
             message_lines.append(signal_message)
-            message_lines.append("\n──────────────────\n")
+            message_lines.append("──────────────────\n")
             
             message = "\n".join(message_lines)
             

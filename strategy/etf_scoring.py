@@ -536,9 +536,14 @@ def get_etf_basic_info(etf_code: str) -> float:
         # 创建副本避免SettingWithCopyWarning
         etf_list = etf_list.copy(deep=True)
         
-        # 修复：只在列不是字符串类型时才转换
-        if not pd.api.types.is_string_dtype(etf_list[ETF_CODE_COL]):
-            etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str)
+        # 修复：更安全的类型转换方法
+        if ETF_CODE_COL in etf_list.columns:
+            # 检查列是否包含非字符串值
+            has_non_string = etf_list[ETF_CODE_COL].apply(lambda x: not isinstance(x, str)).any()
+            
+            # 如果列包含非字符串值，或者列是数值类型，则进行转换
+            if has_non_string or pd.api.types.is_numeric_dtype(etf_list[ETF_CODE_COL]):
+                etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].astype(str)
         
         # 确保ETF列表中的ETF代码也是6位数字
         etf_list.loc[:, ETF_CODE_COL] = etf_list[ETF_CODE_COL].str.strip().str.zfill(6)

@@ -432,7 +432,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            content = f"【现价比净值低，买入。分页 {page+1}/{total_pages}】\n"
+            content = f"【现价比净值低，买入。 {page+1}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), start_idx + 1):
                 etf_code = str(row.get('ETF代码', '未知'))
@@ -511,7 +511,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            content = f"【现价比净值高，卖出。分页 {page+1}/{total_pages}】\n"
+            content = f"【现价比净值高，卖出。 {page+1}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), start_idx + 1):
                 etf_code = str(row.get('ETF代码', '未知'))

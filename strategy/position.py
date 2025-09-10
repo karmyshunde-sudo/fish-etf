@@ -218,11 +218,16 @@ def init_position_record() -> pd.DataFrame:
                 "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
                 "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
             ]
+            
+            # 添加缺失的列
             for col in required_columns:
                 if col not in position_df.columns:
-                    logger.warning(f"仓位记录缺少必要列: {col}")
-                    # 重新初始化
-                    return create_default_position_record()
+                    logger.warning(f"仓位记录缺少必要列: {col}，正在添加")
+                    position_df[col] = ""
+                    if col in ["持仓成本价", "持仓数量", "持仓天数"]:
+                        position_df[col] = 0
+                    elif col in ["创建时间", "更新时间"]:
+                        position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # 确保包含稳健仓和激进仓
             if "稳健仓" not in position_df["仓位类型"].values:
@@ -384,6 +389,7 @@ def init_performance_record() -> None:
                 "calmar_ratio": 0.0
             }
             with open(PERFORMANCE_RECORD_PATH, 'w', encoding='utf-8') as f:
+                import json  # 确保在此处导入json
                 json.dump(performance_data, f, ensure_ascii=False, indent=4)
             logger.info("已创建策略表现记录文件")
         else:

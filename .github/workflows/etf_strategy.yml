@@ -48,11 +48,11 @@ jobs:
           echo "正在执行通用任务流程"
           echo "事件类型: ${{ github.event_name }}"
           echo "触发任务: ${{ github.event.inputs.task || '定时任务' }}"
-      
+
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
+
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -60,17 +60,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
+
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
+
       - name: 确定任务类型
         id: set_task
         run: |
@@ -92,23 +92,21 @@ jobs:
           fi
           echo "TASK=$TASK" >> $GITHUB_ENV
           echo "执行任务: $TASK (触发方式: $TRIGGER_TYPE)"
-      
+
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs,arbitrage} && chmod -R 777 data/
-      
+
       - name: 检查是否为需要跳过的任务
         id: check_skip_task
         run: |
           SKIP_TASK="false"
-          if [ "$TASK" = "clean_daily_data" ] || [ "$TASK" = "clean_arbitrage_data" ] || \
-             [ "$TASK" = "clean_trade_records" ] || [ "$TASK" = "clean_numeric_csv" ] || \
-             [ "$TASK" = "show_akshare_info" ] || [ "$TASK" = "stock_fourty" ]; then
+          if [ "$TASK" = "clean_daily_data" ] || [ "$TASK" = "clean_arbitrage_data" ] || [ "$TASK" = "clean_trade_records" ] || [ "$TASK" = "clean_numeric_csv" ] || [ "$TASK" = "show_akshare_info" ] || [ "$TASK" = "stock_fourty" ]; then
             echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
           else
             echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: 检查交易日（日线爬取）
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'
         id: check_trading_day
@@ -116,7 +114,7 @@ jobs:
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
           echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
+
       - name: 检查推送标志
         id: check_flags
         run: |
@@ -126,23 +124,23 @@ jobs:
           else
             echo "position_pushed=false" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: 跳过非交易日
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule' && steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 跳过已推送任务
         if: env.TRIGGER_TYPE == 'schedule' && steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 跳过特殊任务
         if: steps.check_skip_task.outputs.SKIP_TASK == 'true'
         run: |
           echo "任务 $TASK 属于特殊任务类型，将跳过执行（由通用任务流程）"
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 执行任务
         id: execute_task
         if: env.skip_execution != 'true'
@@ -190,13 +188,13 @@ jobs:
           fi
           
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
+
       - name: 拉取最新代码
         if: env.skip_execution != 'true'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git pull origin main --rebase --autostash || echo "拉取代码失败"
-      
+
       - name: 提交数据变更
         if: >-
           env.skip_execution != 'true' && 
@@ -225,7 +223,7 @@ jobs:
               git commit -m "自动更新策略标志文件 [$TRIGGER_TYPE]" && git push origin main
               ;;
           esac
-      
+
       - name: 任务完成通知
         if: always()
         run: |
@@ -236,7 +234,7 @@ jobs:
           else
             echo "【GIT-fish-etf】[${{ env.TASK }}]执行失败"
           fi
-      
+
       - name: 失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |

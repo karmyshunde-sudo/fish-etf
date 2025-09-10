@@ -2,12 +2,12 @@ name: ETF仓位折溢套利
 
 on:
   schedule:
-    - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
-    - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
-    - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (仓位策略)
-    - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
-    - cron: '0 9 * * *'       # UTC 09:00 = 北京时间 17:00 (ETF Yes/No)
-    - cron: '0 10 * * 1-5'    # UTC 10:00 = 北京时间 18:00 (个股趋势策略)
+    - cron: '0 14 * * 1-5'
+    - cron: '*/5 2-7 * * 1-5'
+    - cron: '30 5 * * 1-5'
+    - cron: '0 1 * * 0'
+    - cron: '0 9 * * *'
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
       task:
@@ -48,11 +48,11 @@ jobs:
           echo "正在执行通用任务流程"
           echo "事件类型: ${{ github.event_name }}"
           echo "触发任务: ${{ github.event.inputs.task || '定时任务' }}"
-      
+
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
+
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -60,23 +60,22 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: 配置Python环境
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
+
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
+
       - name: 确定任务类型
         id: set_task
         run: |
           TRIGGER_TYPE="${{ github.event_name == 'schedule' && 'schedule' || 'manual' }}"
           echo "TRIGGER_TYPE=$TRIGGER_TYPE" >> $GITHUB_ENV
-          
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             case "${{ github.event.schedule }}" in
               "0 14 * * 1-5") TASK="crawl_etf_daily" ;;
@@ -92,24 +91,21 @@ jobs:
           fi
           echo "TASK=$TASK" >> $GITHUB_ENV
           echo "执行任务: $TASK (触发方式: $TRIGGER_TYPE)"
-      
+
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs,arbitrage} && chmod -R 777 data/
-      
+
       - name: 检查是否为需要跳过的任务
         id: check_skip_task
         run: |
           SKIP_TASK="false"
-          case "$TASK" in
-            "clean_daily_data"|"clean_arbitrage_data"|"clean_trade_records"|"clean_numeric_csv"|"show_akshare_info"|"stock_fourty")
-              echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
-              ;;
-            *)
-              echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
-              ;;
-          esac
-      
+          if [ "$TASK" = "clean_daily_data" ] || [ "$TASK" = "clean_arbitrage_data" ] || [ "$TASK" = "clean_trade_records" ] || [ "$TASK" = "clean_numeric_csv" ] || [ "$TASK" = "show_akshare_info" ] || [ "$TASK" = "stock_fourty" ]; then
+            echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
+          else
+            echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: 检查交易日（日线爬取）
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'
         id: check_trading_day
@@ -117,7 +113,7 @@ jobs:
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
           echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
+
       - name: 检查推送标志
         id: check_flags
         run: |
@@ -127,23 +123,23 @@ jobs:
           else
             echo "position_pushed=false" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: 跳过非交易日
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule' && steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 跳过已推送任务
         if: env.TRIGGER_TYPE == 'schedule' && steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 跳过特殊任务
         if: steps.check_skip_task.outputs.SKIP_TASK == 'true'
         run: |
           echo "任务 $TASK 属于特殊任务类型，将跳过执行（由通用任务流程）"
           echo "skip_execution=true" >> $GITHUB_ENV
-      
+
       - name: 执行任务
         id: execute_task
         if: env.skip_execution != 'true'
@@ -154,8 +150,6 @@ jobs:
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/task_${TASK}_${BEIJING_TIME}.log"
           echo "日志文件: $LOG_FILE"
-          
-          # 根据任务类型执行对应操作
           case "$TASK" in
             crawl_etf_daily)
               echo "正在执行: 日线数据爬取"
@@ -182,27 +176,27 @@ jobs:
               exit 1
               ;;
           esac
-          
-          # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
+
       - name: 拉取最新代码
         if: env.skip_execution != 'true'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git pull origin main --rebase --autostash || echo "拉取代码失败"
-      
+
       - name: 提交数据变更
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success' && (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list' || env.TASK == 'calculate_arbitrage' || env.TASK == 'calculate_position')
+        if: >-
+          env.skip_execution != 'true' && 
+          steps.execute_task.outputs.task_status == 'success' &&
+          (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list' || 
+           env.TASK == 'calculate_arbitrage' || env.TASK == 'calculate_position')
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          
           case "$TASK" in
             crawl_etf_daily)
               git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
@@ -222,7 +216,7 @@ jobs:
               git commit -m "自动更新策略标志文件 [$TRIGGER_TYPE]" && git push origin main
               ;;
           esac
-      
+
       - name: 任务完成通知
         if: always()
         run: |
@@ -233,14 +227,13 @@ jobs:
           else
             echo "【GIT-fish-etf】[${{ env.TASK }}]执行失败"
           fi
-      
+
       - name: 失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
-          || echo "企业微信通知发送失败"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【GIT-fish-etf】[${{ env.TASK }}]执行失败\\n北京时间: ${BEIJING_TIME}\"}}" || echo "企业微信通知发送失败"
 
   manual-clean-daily-data:
     name: 手动清理日线数据
@@ -250,7 +243,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 手动清理日线数据"
+        run: |
+          echo "正在执行: 手动清理日线数据"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -280,7 +274,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 手动清理套利数据"
+        run: |
+          echo "正在执行: 手动清理套利数据"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -310,7 +305,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 手动清理交易记录"
+        run: |
+          echo "正在执行: 手动清理交易记录"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -340,7 +336,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 手动清理纯数字CSV"
+        run: |
+          echo "正在执行: 手动清理纯数字CSV"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -370,7 +367,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 显示AkShare信息"
+        run: |
+          echo "正在执行: 显示AkShare信息"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -403,7 +401,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: ETF Yes/No 策略"
+        run: |
+          echo "正在执行: ETF Yes/No 策略"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -419,8 +418,6 @@ jobs:
           LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
           echo "日志文件: $LOG_FILE"
           python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
-          
-          # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
@@ -435,7 +432,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 个股趋势策略 (TickTen)"
+        run: |
+          echo "正在执行: 个股趋势策略 (TickTen)"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -449,8 +447,6 @@ jobs:
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
-          
-          # 执行策略
           if [ -f "strategy/stock_tickten.py" ]; then
             echo "找到策略文件: strategy/stock_tickten.py"
             python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
@@ -458,8 +454,6 @@ jobs:
             echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
             exit 1
           fi
-          
-          # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
@@ -474,7 +468,8 @@ jobs:
       contents: write
     steps:
       - name: 显示任务信息
-        run: echo "正在执行: 个股趋势策略 (TickTen) - 定时"
+        run: |
+          echo "正在执行: 个股趋势策略 (TickTen) - 定时"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -513,8 +508,6 @@ jobs:
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
-          
-          # 执行策略
           if [ -f "strategy/stock_tickten.py" ]; then
             echo "找到策略文件: strategy/stock_tickten.py"
             python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
@@ -522,8 +515,6 @@ jobs:
             echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
             exit 1
           fi
-          
-          # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else

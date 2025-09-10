@@ -348,7 +348,7 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     if missing_columns:
         logger.error(f"❌ 数据源缺少必需列：{', '.join(missing_columns)}，将尝试修复")
     
-    # 为缺失的必需列计算值
+    # 为缺失的必需列计算值 - 特别修复折溢价率
     if "折溢价率" in missing_columns or "折溢价率" not in df.columns:
         try:
             logger.info("尝试计算折溢价率...")

@@ -411,16 +411,6 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         # 生成GitHub日志链接
         log_url = get_github_actions_url()
         
-        # 页脚模板
-        footer = (
-            "\n==================\n"
-            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "==================\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
-            "📊 环境：生产"
-        )
-        
         messages = []
         
         # 第1页：封面页（不包含风险提示）
@@ -434,7 +424,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 f"🎯 折价阈值：折价率超过{Config.DISCOUNT_THRESHOLD*100:.2f}%\n"
                 f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
             )
-            messages.append(page1 + footer)
+            messages.append(page1)
         
         # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
@@ -470,9 +460,8 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                     
                 )
             
-            # 添加页脚
-            content += footer
-            messages.append(content)
+            # 整合消息
+            messages.append(page1 + content)
         
         return messages
     

@@ -2,7 +2,7 @@ name: ETF仓位折溢套利
 on:
   schedule:
     - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
-    - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
+    - cron: '*/35 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (仓位策略)
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
     - cron: '0 9 * * *'       # UTC 09:00 = 北京时间 17:00 (ETF Yes/No)
@@ -109,7 +109,7 @@ jobs:
   calculate-arbitrage-schedule:
     name: 套利计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '*/5 2-7 * * 1-5'
+    if: github.event_name == 'schedule' && github.event.schedule == '*/35 2-7 * * 1-5'
     permissions:
       contents: write
     steps:

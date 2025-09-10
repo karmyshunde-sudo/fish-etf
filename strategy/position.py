@@ -714,14 +714,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     # 添加市场分析
     content += "🔍 数据验证：当前市场处于调整阶段，建议保持观望等待明确信号。\n"
     
-    # 添加时间戳和数据来源
-    content += "==================\n"
-    content += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    content += f"📅 北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    content += "📊 策略版本: TrendStrategy v2.3.1\n"
-    content += "🔗 详细分析: https://github.com/karmyshunde-sudo/fish-etf/actions/runs/17605215706\n"
-    content += "📊 环境：生产\n"
-    
     return content
 
 def calculate_position_strategy() -> str:

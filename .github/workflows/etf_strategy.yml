@@ -2,7 +2,7 @@ name: ETF仓位折溢套利
 
 on:
   schedule:
-    - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取1-5)
+    - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
     - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (仓位策略)
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
@@ -197,11 +197,13 @@ jobs:
     name: 手动清理日线数据
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_daily_data'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理日线数据
@@ -222,11 +224,13 @@ jobs:
     name: 手动清理套利数据
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_arbitrage_data'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理套利数据
@@ -247,11 +251,13 @@ jobs:
     name: 手动清理交易记录
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_trade_records'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理交易记录
@@ -272,11 +278,13 @@ jobs:
     name: 手动清理纯数字CSV
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_numeric_csv'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理纯数字CSV
@@ -297,11 +305,13 @@ jobs:
     name: 显示AkShare信息
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 获取AkShare信息
@@ -326,15 +336,18 @@ jobs:
     name: ETF Yes/No 策略
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'etf_yesno'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 执行ETF策略
-        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}}
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
         run: |
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
@@ -354,15 +367,18 @@ jobs:
     name: 个股趋势策略 (TickTen)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_fourty'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 执行个股策略
-        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}}
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
@@ -382,11 +398,13 @@ jobs:
     name: 个股趋势策略 (TickTen) - 定时
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' && github.event.schedule == '0 10 * * 1-5'
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       
@@ -415,7 +433,8 @@ jobs:
       - name: 执行个股策略
         id: execute_task
         if: env.skip_execution != 'true'
-        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}}
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')

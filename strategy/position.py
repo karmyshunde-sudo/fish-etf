@@ -12,7 +12,6 @@ import os
 import numpy as np
 import logging
 import sys
-import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from config import Config
@@ -20,8 +19,7 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated,
-    get_last_trading_day
+    is_file_outdated
 )
 from utils.file_utils import load_etf_daily_data, init_dirs
 from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
@@ -55,7 +53,7 @@ def init_position_record() -> pd.DataFrame:
             # 确保包含所有必要列
             required_columns = [
                 "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
-                "最新操作", "操作日期", "创建时间", "更新时间", "持仓天数"
+                "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
             ]
             for col in required_columns:
                 if col not in position_df.columns:
@@ -881,7 +879,17 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         position_df.loc[mask, '持仓数量'] = quantity
         position_df.loc[mask, '最新操作'] = action
         position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        position_df.loc[mask, '持仓天数'] = 1 if quantity > 0 else 0
+        
+        # 更新持仓天数
+        if quantity > 0:
+            # 如果有持仓，天数+1
+            if position_df.loc[mask, '持仓天数'].values[0] > 0:
+                position_df.loc[mask, '持仓天数'] = position_df.loc[mask, '持仓天数'] + 1
+            else:
+                position_df.loc[mask, '持仓天数'] = 1
+        else:
+            position_df.loc[mask, '持仓天数'] = 0
+            
         position_df.loc[mask, '更新时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 保存更新后的记录

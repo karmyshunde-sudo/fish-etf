@@ -3,7 +3,7 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-【专业重构版】分离核心逻辑，强化数据验证，实现真实回测
+【终极自包含版】所有计算在position.py内部完成，无外部依赖
 专为小资金散户设计，仅使用标准日线数据字段
 """
 
@@ -21,9 +21,6 @@ from utils.date_utils import (
     get_utc_time,
     is_file_outdated
 )
-from utils.file_utils import load_etf_daily_data, init_dirs
-from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
-from data_crawler.etf_list_manager import load_all_etf_list
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -33,6 +30,172 @@ logger = logging.getLogger(__name__)
 POSITION_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "position_record.csv")
 TRADE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "trade_records.csv")
 PERFORMANCE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "strategy_performance.json")
+
+def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
+    """
+    内部实现的ETF日线数据加载函数（不依赖utils.file_utils）
+    
+    Args:
+        etf_code: ETF代码
+    
+    Returns:
+        pd.DataFrame: ETF日线数据
+    """
+    try:
+        # 构建文件路径
+        file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.warning(f"ETF {etf_code} 日线数据文件不存在: {file_path}")
+            return pd.DataFrame()
+        
+        # 读取CSV文件
+        df = pd.read_csv(file_path, encoding="utf-8")
+        
+        # 内部列名标准化
+        df = internal_ensure_chinese_columns(df)
+        
+        # 检查必需列（不再检查"折溢价率"）
+        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            return pd.DataFrame()
+        
+        # 确保日期列为datetime类型
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+        
+        # 按日期排序
+        df = df.sort_values("日期")
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    内部实现的列名标准化函数（不依赖utils.file_utils）
+    
+    Args:
+        df: 原始DataFrame
+    
+    Returns:
+        pd.DataFrame: 使用中文列名的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    # 列名映射字典（移除了所有与"折溢价率"相关的映射）
+    column_mapping = {
+        # 日期列
+        'date': '日期',
+        'trade_date': '日期',
+        'dt': '日期',
+        'date_time': '日期',
+        
+        # 价格列
+        'open': '开盘',
+        'open_price': '开盘',
+        'openprice': '开盘',
+        'openprice_': '开盘',
+        
+        'high': '最高',
+        'high_price': '最高',
+        'highprice': '最高',
+        
+        'low': '最低',
+        'low_price': '最低',
+        'lowprice': '最低',
+        
+        'close': '收盘',
+        'close_price': '收盘',
+        'closeprice': '收盘',
+        'last_price': '收盘',
+        
+        # 成交量列
+        'volume': '成交量',
+        'vol': '成交量',
+        'amount': '成交量',
+        'volume_': '成交量',
+        'vol_': '成交量',
+        
+        # 成交额列
+        'amount': '成交额',
+        'turnover': '成交额',
+        'money': '成交额',
+        'amount_': '成交额',
+        
+        # 其他技术指标
+        'amplitude': '振幅',
+        'amplitude_percent': '振幅',
+        'amplitude%': '振幅',
+        
+        'percent': '涨跌幅',
+        'change_rate': '涨跌幅',
+        'pct_chg': '涨跌幅',
+        'percent_change': '涨跌幅',
+        
+        'change': '涨跌额',
+        'price_change': '涨跌额',
+        'change_amount': '涨跌额',
+        
+        'turnover_rate': '换手率',
+        'turnoverratio': '换手率',
+        'turnover_rate_': '换手率',
+        
+        # 净值列（仅用于内部计算，不作为输出列）
+        'net_value': '净值',
+        'iopv': 'IOPV',
+        'estimate_value': '净值'
+    }
+    
+    # 重命名列
+    df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+    
+    # 确保日期列存在
+    if '日期' not in df.columns and 'date' in df.columns:
+        df = df.rename(columns={'date': '日期'})
+    
+    return df
+
+def internal_validate_etf_data(df: pd.DataFrame) -> bool:
+    """
+    内部实现的数据验证函数（不依赖utils.file_utils）
+    
+    Args:
+        df: ETF日线数据DataFrame
+    
+    Returns:
+        bool: 数据是否完整有效
+    """
+    if df.empty:
+        logger.warning("ETF数据为空")
+        return False
+    
+    # 仅检查真正必需的列（不再包含"折溢价率"）
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        logger.warning(f"ETF数据缺少必要列: {', '.join(missing_columns)}")
+        return False
+    
+    # 检查数据量
+    if len(df) < 20:
+        logger.warning(f"ETF数据量不足({len(df)}天)，需要至少20天数据")
+        return False
+    
+    # 检查数据连续性
+    df = df.sort_values("日期")
+    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
+    max_gap = date_diff.max()
+    if max_gap > 3:
+        logger.info(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")
+    
+    return True
 
 def init_position_record() -> pd.DataFrame:
     """
@@ -297,41 +460,6 @@ def record_trade(**kwargs):
             message=error_msg,
             message_type="error"
         )
-
-def validate_etf_data(df: pd.DataFrame) -> bool:
-    """
-    验证ETF数据完整性
-    
-    Args:
-        df: ETF日线数据DataFrame
-    
-    Returns:
-        bool: 数据是否完整有效
-    """
-    if df.empty:
-        logger.warning("ETF数据为空")
-        return False
-    
-    # 检查必需列（不再包含"折溢价率"）
-    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        logger.warning(f"ETF数据缺少必要列: {', '.join(missing_columns)}")
-        return False
-    
-    # 检查数据量
-    if len(df) < 20:
-        logger.warning(f"ETF数据量不足({len(df)}天)，需要至少20天数据")
-        return False
-    
-    # 检查数据连续性
-    df = df.sort_values("日期")
-    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
-    max_gap = date_diff.max()
-    if max_gap > 3:
-        logger.warning(f"ETF数据存在较大间隔({max_gap}天)，可能影响分析结果")
-    
-    return True
 
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
     """
@@ -654,7 +782,7 @@ def calculate_strategy_performance() -> Dict[str, float]:
         annualized_return *= 100  # 转换为百分比
         
         # 计算沪深300收益
-        hs300_df = load_etf_daily_data("510300")
+        hs300_df = internal_load_etf_daily_data("510300")
         hs300_return = 0.0
         if not hs300_df.empty and len(hs300_df) >= 20:
             # 计算最近6个月收益
@@ -732,6 +860,74 @@ def get_strategy_performance() -> Dict[str, float]:
         logger.error(f"获取策略表现失败，尝试重新计算: {str(e)}", exc_info=True)
         return calculate_strategy_performance()
 
+def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
+    """
+    获取评分前N的ETF列表（内部实现，不依赖etf_scoring模块）
+    
+    Args:
+        top_n: 获取前N名
+    
+    Returns:
+        pd.DataFrame: 评分前N的ETF列表
+    """
+    try:
+        # 获取ETF列表文件
+        etf_list_path = os.path.join(Config.DATA_DIR, "etf_list.csv")
+        
+        # 检查文件是否存在
+        if not os.path.exists(etf_list_path):
+            logger.warning("ETF列表文件不存在，无法获取评分前N的ETF")
+            return pd.DataFrame()
+        
+        # 读取ETF列表
+        etf_list = pd.read_csv(etf_list_path, encoding="utf-8")
+        
+        # 确保包含必要列
+        required_columns = ["ETF代码", "ETF名称", "基金规模"]
+        for col in required_columns:
+            if col not in etf_list.columns:
+                logger.warning(f"ETF列表缺少必要列: {col}")
+                return pd.DataFrame()
+        
+        # 按基金规模筛选（简化处理）
+        etf_list = etf_list[etf_list["基金规模"] >= 10.0]  # 仅保留规模大于10亿元的ETF
+        
+        # 为每只ETF计算评分（简化实现）
+        etf_list["评分"] = 0.0
+        for i, row in etf_list.iterrows():
+            etf_code = str(row["ETF代码"])
+            df = internal_load_etf_daily_data(etf_code)
+            
+            if not internal_validate_etf_data(df):
+                continue
+                
+            # 计算基础评分（简化实现）
+            ma_bullish, _ = calculate_ma_signal(df)
+            volume_ok = calculate_volume_signal(df)
+            adx = calculate_adx(df, 14)
+            
+            score = 0.0
+            if ma_bullish:
+                score += 30.0
+            if volume_ok:
+                score += 20.0
+            if adx > 20:
+                score += 30.0
+            if df["成交量"].iloc[-1] > 10000000:
+                score += 20.0
+                
+            etf_list.at[i, "评分"] = score
+        
+        # 按评分排序
+        etf_list = etf_list.sort_values("评分", ascending=False)
+        
+        # 返回前top_n只ETF
+        return etf_list.head(top_n)
+    
+    except Exception as e:
+        logger.error(f"获取评分前N的ETF失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
 def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
     """
     筛选有效的ETF（数据完整、符合交易条件）
@@ -746,7 +942,7 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
     
     for _, row in top_etfs.iterrows():
         etf_code = str(row["ETF代码"])
-        df = load_etf_daily_data(etf_code)
+        df = internal_load_etf_daily_data(etf_code)
         
         # 使用内部验证函数
         if not internal_validate_etf_data(df):
@@ -781,130 +977,6 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
     
     logger.info(f"筛选后有效ETF数量: {len(valid_etfs)}")
     return valid_etfs
-
-def generate_signal(etf_code: str, etf_df: pd.DataFrame, position_type: str) -> Tuple[str, str, float, float, float]:
-    """
-    生成交易信号
-    
-    Args:
-        etf_code: ETF代码
-        etf_df: ETF日线数据
-        position_type: 仓位类型（稳健仓/激进仓）
-    
-    Returns:
-        Tuple[str, str, float, float, float]: (操作类型, 原因, 价格, 止损位, 止盈位)
-    """
-    try:
-        # 获取最新数据
-        latest_data = etf_df.iloc[-1]
-        current_price = latest_data["收盘"]
-        
-        # 计算关键指标
-        ma5 = etf_df["收盘"].rolling(5).mean().iloc[-1]
-        ma10 = etf_df["收盘"].rolling(10).mean().iloc[-1]
-        ma20 = etf_df["收盘"].rolling(20).mean().iloc[-1]
-        volume = etf_df["成交量"].iloc[-1]
-        avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
-        volume_ratio = volume / avg_volume if avg_volume > 0 else 0
-        adx = calculate_adx(etf_df, 14)
-        
-        # 计算ATR
-        atr = calculate_atr(etf_df, 14)
-        
-        # 判断是否处于趋势中
-        in_trend = (ma5 > ma20) and (current_price > ma20)
-        
-        # 计算动态止损
-        stop_loss_factor = 1.5 if position_type == "稳健仓" else 2.0
-        stop_loss = current_price - stop_loss_factor * atr
-        
-        # 计算止盈位
-        take_profit = current_price + 2.0 * atr
-        
-        # 交易信号生成
-        if in_trend:
-            # 检查是否是突破信号
-            is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
-            # 检查成交量
-            volume_ok = (volume > avg_volume * 1.1)
-            
-            # 趋势确认
-            if is_breakout or (ma5 > ma10 and volume_ok):
-                return "买入", "突破信号+趋势确认", current_price, stop_loss, take_profit
-            elif ma5 > ma10 and volume_ok:
-                return "持有", "趋势持续", current_price, stop_loss, take_profit
-        
-        # 检查是否触发止损
-        if current_price <= stop_loss:
-            return "卖出", "触发止损", current_price, stop_loss, take_profit
-        
-        # 检查是否超卖（小资金抄底机会）
-        if len(etf_df) > 30:
-            min_30d = etf_df["收盘"].rolling(30).min().iloc[-1]
-            if min_30d > 0:
-                price_deviation = (current_price / min_30d - 1)
-                if price_deviation < 0.05 and volume > avg_volume * 1.2:
-                    return "买入", "超卖反弹机会", current_price, stop_loss, take_profit
-        
-        return "观望", "趋势未确认", current_price, stop_loss, take_profit
-    
-    except Exception as e:
-        logger.error(f"生成交易信号失败: {str(e)}", exc_info=True)
-        return "观望", "数据异常", 0.0, 0.0, 0.0
-
-def update_position_record(position_type: str, etf_code: str, etf_name: str, 
-                          cost_price: float, current_price: float, 
-                          quantity: int, action: str) -> None:
-    """
-    更新仓位记录
-    
-    Args:
-        position_type: 仓位类型
-        etf_code: ETF代码
-        etf_name: ETF名称
-        cost_price: 持仓成本价
-        current_price: 当前价格
-        quantity: 持仓数量
-        action: 操作类型
-    """
-    try:
-        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
-        
-        # 更新指定仓位类型的数据
-        mask = position_df['仓位类型'] == position_type
-        position_df.loc[mask, 'ETF代码'] = etf_code
-        position_df.loc[mask, 'ETF名称'] = etf_name
-        position_df.loc[mask, '持仓成本价'] = cost_price
-        position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
-        position_df.loc[mask, '持仓数量'] = quantity
-        position_df.loc[mask, '最新操作'] = action
-        position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 更新持仓天数
-        if quantity > 0:
-            # 如果有持仓，天数+1
-            if position_df.loc[mask, '持仓天数'].values[0] > 0:
-                position_df.loc[mask, '持仓天数'] = position_df.loc[mask, '持仓天数'] + 1
-            else:
-                position_df.loc[mask, '持仓天数'] = 1
-        else:
-            position_df.loc[mask, '持仓天数'] = 0
-            
-        position_df.loc[mask, '更新时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 保存更新后的记录
-        position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
-        logger.info(f"已更新{position_type}仓位记录: {etf_code} {action}")
-    
-    except Exception as e:
-        error_msg = f"更新{position_type}仓位记录失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
 
 def calculate_dynamic_stop_loss(current_price: float, etf_df: pd.DataFrame, 
                               position_type: str) -> Tuple[float, float]:
@@ -1049,6 +1121,60 @@ def calculate_strategy_score(etf_df: pd.DataFrame, position_type: str) -> int:
         logger.error(f"计算策略评分失败: {str(e)}")
         return 50  # 默认评分
 
+def update_position_record(position_type: str, etf_code: str, etf_name: str, 
+                          cost_price: float, current_price: float, 
+                          quantity: int, action: str) -> None:
+    """
+    更新仓位记录
+    
+    Args:
+        position_type: 仓位类型
+        etf_code: ETF代码
+        etf_name: ETF名称
+        cost_price: 持仓成本价
+        current_price: 当前价格
+        quantity: 持仓数量
+        action: 操作类型
+    """
+    try:
+        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+        
+        # 更新指定仓位类型的数据
+        mask = position_df['仓位类型'] == position_type
+        position_df.loc[mask, 'ETF代码'] = etf_code
+        position_df.loc[mask, 'ETF名称'] = etf_name
+        position_df.loc[mask, '持仓成本价'] = cost_price
+        position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
+        position_df.loc[mask, '持仓数量'] = quantity
+        position_df.loc[mask, '最新操作'] = action
+        position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 更新持仓天数
+        if quantity > 0:
+            # 如果有持仓，天数+1
+            if position_df.loc[mask, '持仓天数'].values[0] > 0:
+                position_df.loc[mask, '持仓天数'] = position_df.loc[mask, '持仓天数'] + 1
+            else:
+                position_df.loc[mask, '持仓天数'] = 1
+        else:
+            position_df.loc[mask, '持仓天数'] = 0
+            
+        position_df.loc[mask, '更新时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 保存更新后的记录
+        position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
+        logger.info(f"已更新{position_type}仓位记录: {etf_code} {action}")
+    
+    except Exception as e:
+        error_msg = f"更新{position_type}仓位记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+
 def generate_position_content(strategies: Dict[str, str]) -> str:
     """
     生成仓位策略内容（基于真实计算指标）
@@ -1074,7 +1200,7 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             etf_code = strategy.split("ETF代码：")[1].split("\n")[0]
             
             # 加载ETF日线数据
-            etf_df = load_etf_daily_data(etf_code)
+            etf_df = internal_load_etf_daily_data(etf_code)
             if etf_df.empty or len(etf_df) < 20:
                 content += f"【{position_type}】\n{etf_name}({etf_code}) 数据不足，无法生成详细分析\n\n"
                 continue
@@ -1234,7 +1360,7 @@ def calculate_position_strategy() -> str:
                 valid_etfs = []
                 for _, row in top_etfs.iterrows():
                     etf_code = str(row["ETF代码"])
-                    df = load_etf_daily_data(etf_code)
+                    df = internal_load_etf_daily_data(etf_code)
                     if not df.empty and len(df) >= 20:
                         valid_etfs.append(row)
                 
@@ -1624,37 +1750,48 @@ def calculate_single_position_strategy(
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
 
-def internal_validate_etf_data(df: pd.DataFrame) -> bool:
-    """
-    内部数据验证函数，不依赖utils.file_utils
+# 模块初始化
+try:
+    # 确保必要的目录存在
+    Config.init_dirs()
     
-    Args:
-        df: ETF日线数据DataFrame
+    # 初始化日志
+    logger.info("仓位管理模块初始化完成")
     
-    Returns:
-        bool: 数据是否完整有效
-    """
-    if df.empty:
-        logger.warning("ETF数据为空")
-        return False
+    # 检查ETF列表是否过期
+    etf_list_path = os.path.join(Config.DATA_DIR, "etf_list.csv")
+    if os.path.exists(etf_list_path) and is_file_outdated(etf_list_path, Config.ETF_LIST_UPDATE_INTERVAL):
+        warning_msg = "ETF列表已过期，请及时更新"
+        logger.warning(warning_msg)
+        
+        # 发送警告通知
+        send_wechat_message(
+            message=warning_msg,
+            message_type="error"
+        )
     
-    # 仅检查真正必需的列（不再包含"折溢价率"）
-    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        logger.error(f"ETF数据缺少真正必需列: {', '.join(missing_columns)}，无法继续")
-        return False
+except Exception as e:
+    error_msg = f"仓位管理模块初始化失败: {str(e)}"
+    logger.error(error_msg, exc_info=True)
     
-    # 检查数据量
-    if len(df) < 20:
-        logger.warning(f"ETF数据量不足({len(df)}天)，需要至少20天数据")
-        return False
+    try:
+        # 退回到基础日志配置
+        import logging
+        logging.basicConfig(
+            level="INFO",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler()]
+        )
+        logging.error(error_msg)
+    except Exception as basic_log_error:
+        print(f"基础日志配置失败: {str(basic_log_error)}")
+        print(error_msg)
     
-    # 检查数据连续性
-    df = df.sort_values("日期")
-    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
-    max_gap = date_diff.max()
-    if max_gap > 3:
-        logger.info(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")
-    
-    return True
+    # 发送错误通知
+    try:
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+    except Exception as send_error:
+        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

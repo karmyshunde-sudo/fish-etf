@@ -34,16 +34,7 @@ on:
 
 jobs:
   run_etf_task:
-    if: >-
-      (github.event_name == 'schedule') || 
-      (github.event_name == 'workflow_dispatch' && 
-       github.event.inputs.task != '' &&
-       github.event.inputs.task != 'clean_daily_data' &&
-       github.event.inputs.task != 'clean_arbitrage_data' &&
-       github.event.inputs.task != 'clean_trade_records' &&
-       github.event.inputs.task != 'clean_numeric_csv' &&
-       github.event.inputs.task != 'show_akshare_info' &&
-       github.event.inputs.task != 'stock_fourty')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task != '')
     runs-on: ubuntu-latest
     timeout-minutes: 1000
     permissions:
@@ -106,6 +97,17 @@ jobs:
         run: |
           mkdir -p data/{etf_daily,flags,logs,arbitrage} && chmod -R 777 data/
       
+      - name: 检查是否为需要跳过的任务
+        id: check_skip_task
+        run: |
+          SKIP_TASK="false"
+          if [[ "$TASK" == "clean_daily_data" || "$TASK" == "clean_arbitrage_data" || "$TASK" == "clean_trade_records" || \
+                "$TASK" == "clean_numeric_csv" || "$TASK" == "show_akshare_info" || "$TASK" == "stock_fourty" ]]; then
+            echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
+          else
+            echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: 检查交易日（日线爬取）
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'
         id: check_trading_day
@@ -132,6 +134,12 @@ jobs:
       - name: 跳过已推送任务
         if: env.TRIGGER_TYPE == 'schedule' && steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position'
         run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
+      
+      - name: 跳过特殊任务
+        if: steps.check_skip_task.outputs.SKIP_TASK == 'true'
+        run: |
+          echo "任务 $TASK 属于特殊任务类型，将跳过执行（由通用任务流程）"
           echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 执行任务
@@ -167,17 +175,8 @@ jobs:
               echo "正在执行: ETF Yes/No 策略"
               python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
               ;;
-            stock_fourty)
-              echo "正在执行: 个股趋势策略 (TickTen)"
-              if [ -f "strategy/stock_tickten.py" ]; then
-                python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
-              else
-                echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
-                exit 1
-              fi
-              ;;
             *)
-              echo "未知任务: $TASK"
+              echo "未知任务或特殊任务: $TASK"
               exit 1
               ;;
           esac

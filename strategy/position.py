@@ -225,23 +225,16 @@ def init_position_record() -> pd.DataFrame:
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
             try:
-                # 读取现有记录 - 关键修复：指定数据类型
-                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", 
-                                         dtype={
-                                             "ETF代码": str,
-                                             "ETF名称": str,
-                                             "持仓成本价": float,
-                                             "持仓数量": int,
-                                             "持仓天数": int
-                                         })
+                # 读取现有记录
+                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
                 
-                # 确保包含所有必要列
+                # 定义代码期望的完整列结构
                 required_columns = [
-                    "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
-                    "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
+                    "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", 
+                    "持仓数量", "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
                 ]
                 
-                # 添加缺失的列
+                # 检查并添加缺失的列
                 for col in required_columns:
                     if col not in position_df.columns:
                         logger.warning(f"仓位记录缺少必要列: {col}，正在添加")
@@ -252,13 +245,6 @@ def init_position_record() -> pd.DataFrame:
                             position_df[col] = ""
                         else:
                             position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                # 确保正确的数据类型
-                position_df["ETF代码"] = position_df["ETF代码"].astype(str)
-                position_df["ETF名称"] = position_df["ETF名称"].astype(str)
-                position_df["持仓成本价"] = position_df["持仓成本价"].astype(float)
-                position_df["持仓数量"] = position_df["持仓数量"].astype(int)
-                position_df["持仓天数"] = position_df["持仓天数"].astype(int)
                 
                 # 确保包含稳健仓和激进仓
                 if "稳健仓" not in position_df["仓位类型"].values:
@@ -916,11 +902,9 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         # 直接使用已加载的ETF列表
         from data_crawler.etf_list_manager import load_all_etf_list
         logger.info("正在从内存中获取ETF列表...")
+        etf_list = load_all_etf_list()
         
-        # 关键修复：读取时指定ETF代码列为字符串类型
-        etf_list = load_all_etf_list(dtype={"ETF代码": str})
-        
-        # 确保ETF代码是字符串类型
+        # 在这里处理数据类型，而不是在函数调用时
         if not etf_list.empty and "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         

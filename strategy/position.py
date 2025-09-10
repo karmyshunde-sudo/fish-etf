@@ -210,63 +210,69 @@ def init_position_record() -> pd.DataFrame:
         
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
-            # 读取现有记录
-            position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
-            
-            # 确保包含所有必要列
-            required_columns = [
-                "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
-                "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
-            ]
-            
-            # 添加缺失的列
-            for col in required_columns:
-                if col not in position_df.columns:
-                    logger.warning(f"仓位记录缺少必要列: {col}，正在添加")
-                    position_df[col] = ""
-                    if col in ["持仓成本价", "持仓数量", "持仓天数"]:
-                        position_df[col] = 0
-                    elif col in ["创建时间", "更新时间"]:
-                        position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # 确保包含稳健仓和激进仓
-            if "稳健仓" not in position_df["仓位类型"].values:
-                position_df = pd.concat([position_df, pd.DataFrame([{
-                    "仓位类型": "稳健仓",
-                    "ETF代码": "",
-                    "ETF名称": "",
-                    "持仓成本价": 0.0,
-                    "持仓日期": "",
-                    "持仓数量": 0,
-                    "最新操作": "未持仓",
-                    "操作日期": "",
-                    "持仓天数": 0,
-                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }])], ignore_index=True)
-            
-            if "激进仓" not in position_df["仓位类型"].values:
-                position_df = pd.concat([position_df, pd.DataFrame([{
-                    "仓位类型": "激进仓",
-                    "ETF代码": "",
-                    "ETF名称": "",
-                    "持仓成本价": 0.0,
-                    "持仓日期": "",
-                    "持仓数量": 0,
-                    "最新操作": "未持仓",
-                    "操作日期": "",
-                    "持仓天数": 0,
-                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }])], ignore_index=True)
-            
-            # 保存更新后的记录
-            position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
-            
-            logger.info(f"已加载仓位记录，共 {len(position_df)} 条")
-            return position_df
+            try:
+                # 读取现有记录
+                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+                
+                # 确保包含所有必要列
+                required_columns = [
+                    "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
+                    "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
+                ]
+                
+                # 添加缺失的列
+                for col in required_columns:
+                    if col not in position_df.columns:
+                        logger.warning(f"仓位记录缺少必要列: {col}，正在添加")
+                        # 根据列类型设置默认值
+                        if col in ["持仓成本价", "持仓数量", "持仓天数"]:
+                            position_df[col] = 0.0
+                        elif col in ["ETF代码", "ETF名称", "最新操作"]:
+                            position_df[col] = ""
+                        else:
+                            position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 确保包含稳健仓和激进仓
+                if "稳健仓" not in position_df["仓位类型"].values:
+                    position_df = pd.concat([position_df, pd.DataFrame([{
+                        "仓位类型": "稳健仓",
+                        "ETF代码": "",
+                        "ETF名称": "",
+                        "持仓成本价": 0.0,
+                        "持仓日期": "",
+                        "持仓数量": 0,
+                        "最新操作": "未持仓",
+                        "操作日期": "",
+                        "持仓天数": 0,
+                        "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }])], ignore_index=True)
+                
+                if "激进仓" not in position_df["仓位类型"].values:
+                    position_df = pd.concat([position_df, pd.DataFrame([{
+                        "仓位类型": "激进仓",
+                        "ETF代码": "",
+                        "ETF名称": "",
+                        "持仓成本价": 0.0,
+                        "持仓日期": "",
+                        "持仓数量": 0,
+                        "最新操作": "未持仓",
+                        "操作日期": "",
+                        "持仓天数": 0,
+                        "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }])], ignore_index=True)
+                
+                # 保存更新后的记录
+                position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
+                
+                logger.info(f"已加载仓位记录，共 {len(position_df)} 条")
+                return position_df
+                
+            except Exception as e:
+                logger.warning(f"读取仓位记录文件失败: {str(e)}，将创建新文件")
         
-        # 创建默认仓位记录
+        # 如果文件不存在或读取失败，创建默认仓位记录
         return create_default_position_record()
     
     except Exception as e:
@@ -389,7 +395,7 @@ def init_performance_record() -> None:
                 "calmar_ratio": 0.0
             }
             with open(PERFORMANCE_RECORD_PATH, 'w', encoding='utf-8') as f:
-                import json  # 确保在此处导入json
+                import json
                 json.dump(performance_data, f, ensure_ascii=False, indent=4)
             logger.info("已创建策略表现记录文件")
         else:
@@ -1352,7 +1358,25 @@ def calculate_position_strategy() -> str:
         init_trade_record()
         init_performance_record()
         
-        # 2. 获取评分前5的ETF（用于选仓）
+        # 2. 确保ETF列表存在
+        etf_list_path = os.path.join(Config.DATA_DIR, "etf_list.csv")
+        if not os.path.exists(etf_list_path):
+            logger.warning(f"ETF列表文件不存在: {etf_list_path}")
+            # 尝试重新加载ETF列表
+            try:
+                from data_crawler.etf_list_manager import update_all_etf_list
+                logger.info("正在尝试重新加载ETF列表...")
+                etf_list = update_all_etf_list()
+                if etf_list.empty:
+                    logger.error("ETF列表加载失败，无法计算仓位策略")
+                    return "【ETF仓位操作提示】ETF列表加载失败，请检查数据源"
+                logger.info(f"成功重新加载ETF列表，共 {len(etf_list)} 条记录")
+            except Exception as e:
+                error_msg = f"重新加载ETF列表失败: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                return "【ETF仓位操作提示】ETF列表文件不存在，无法计算仓位策略"
+        
+        # 3. 获取评分前5的ETF（用于选仓）
         try:
             # 智能处理评分数据
             top_etfs = get_top_rated_etfs(top_n=5)
@@ -1366,7 +1390,7 @@ def calculate_position_strategy() -> str:
                 valid_etfs = []
                 for _, row in top_etfs.iterrows():
                     etf_code = str(row["ETF代码"])
-                    df = internal_load_etf_daily_data(etf_code)
+                    df = load_etf_daily_data(etf_code)
                     if not df.empty and len(df) >= 20:
                         valid_etfs.append(row)
                 

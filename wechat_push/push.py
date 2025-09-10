@@ -394,8 +394,8 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
+        # 按折价率降序排序（最高折价优先）
+        df = df.sort_values(by='折溢价率', ascending=True).reset_index(drop=True)
         
         if df.empty:
             return ["【折价机会】\n未发现有效折价套利机会"]
@@ -417,7 +417,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1/{total_pages}条消息\n\n"
                 "💡 说明：当ETF市场价格低于IOPV（基金份额参考净值）时，表明ETF折价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
@@ -432,10 +432,9 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            page_num = page + 1  # 包括封面页在内的总页数
-            content = f"【现价比净值低，买入。分页 {page_num}/{total_pages}】\n"
+            content = f"【现价比净值低，买入。分页 {page+1}/{total_pages}】\n"
             
-            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), start_idx + 1):
                 etf_code = str(row.get('ETF代码', '未知'))
                 etf_name = str(row.get('ETF名称', '未知'))
                 
@@ -448,12 +447,12 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.2f}分】"
-                    f"   💹 折价率:【 {abs(premium_discount):.2f}%】\n"
-                    f"   📈 市场价格:【 {market_price:.3f}元】"
-                    f"   📊 IOPV:【 {iopv:.3f}元】\n"
-                    f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
-                    f"   💰 日均成交额:【 {avg_volume:.2f}万元】\n"
+                    f"   ⭐ 综合评分: {score:.2f}分\n"
+                    f"   💹 折价率: {abs(premium_discount):.2f}%\n"
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
                 )
             
             messages.append(content)
@@ -465,6 +464,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         logger.error(error_msg, exc_info=True)
         return [f"【折价策略】生成消息内容时发生错误，请检查日志"]
 
+# 溢价消息函数同步修改
 def _format_premium_message(df: pd.DataFrame) -> List[str]:
     """
     格式化溢价机会消息，分页处理
@@ -476,8 +476,8 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
+        # 按溢价率降序排序（最高溢价优先）
+        df = df.sort_values(by='折溢价率', ascending=False).reset_index(drop=True)
         
         if df.empty:
             return ["【溢价机会】\n未发现有效溢价套利机会"]
@@ -496,7 +496,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格高于净值，可以考虑卖出】\n\n"
-                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第一条消息\n\n"
+                f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第1/{total_pages}条消息\n\n"
                 "💡 说明：当ETF市场价格高于IOPV（基金份额参考净值）时，表明ETF溢价交易\n"
                 f"📊 筛选条件：基金规模≥{Config.GLOBAL_MIN_FUND_SIZE}亿元，日均成交额≥{Config.GLOBAL_MIN_AVG_VOLUME}万元\n"
                 f"💰 交易成本：{Config.TRADE_COST_RATE*100:.2f}%（含印花税和佣金）\n"
@@ -511,10 +511,9 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            page_num = page + 1  # 包括封面页在内的总页数
-            content = f"【现价比净值高，卖出。分页 {page_num}/{total_pages}】\n"
+            content = f"【现价比净值高，卖出。分页 {page+1}/{total_pages}】\n"
             
-            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
+            for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), start_idx + 1):
                 etf_code = str(row.get('ETF代码', '未知'))
                 etf_name = str(row.get('ETF名称', '未知'))
                 
@@ -527,12 +526,12 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.2f}分】"
-                    f"   💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
-                    f"   📈 市场价格:【 {market_price:.3f}元】"
-                    f"   📊 IOPV:【 {iopv:.3f}元】\n"
-                    f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
-                    f"   💰 日均成交额:【 {avg_volume:.2f}万元】\n"
+                    f"   ⭐ 综合评分: {score:.2f}分\n"
+                    f"   💹 溢价率: {abs(premium_discount):.2f}%\n"
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
                 )
             
             messages.append(content)

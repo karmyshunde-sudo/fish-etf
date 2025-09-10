@@ -101,12 +101,14 @@ jobs:
         id: check_skip_task
         run: |
           SKIP_TASK="false"
-          if [[ "$TASK" == "clean_daily_data" || "$TASK" == "clean_arbitrage_data" || "$TASK" == "clean_trade_records" || \
-                "$TASK" == "clean_numeric_csv" || "$TASK" == "show_akshare_info" || "$TASK" == "stock_fourty" ]]; then
-            echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
-          else
-            echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
-          fi
+          case "$TASK" in
+            "clean_daily_data"|"clean_arbitrage_data"|"clean_trade_records"|"clean_numeric_csv"|"show_akshare_info"|"stock_fourty")
+              echo "SKIP_TASK=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "SKIP_TASK=false" >> $GITHUB_OUTPUT
+              ;;
+          esac
       
       - name: 检查交易日（日线爬取）
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'

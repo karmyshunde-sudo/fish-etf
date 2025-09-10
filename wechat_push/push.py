@@ -448,8 +448,8 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.1f}】"
-                    f"      💹 折价率:【 {abs(premium_discount):.2f}%】\n"
+                    f"   ⭐ 综合评分:【 {score:.2f}分】"
+                    f"   💹 折价率:【 {abs(premium_discount):.2f}%】\n"
                     f"   📈 市场价格:【 {market_price:.3f}元】"
                     f"   📊 IOPV:【 {iopv:.3f}元】\n"
                     f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
@@ -527,8 +527,8 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.1f}】"
-                    f"      💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
+                    f"   ⭐ 综合评分:【 {score:.2f}分】"
+                    f"   💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
                     f"   📈 市场价格:【 {market_price:.3f}元】"
                     f"   📊 IOPV:【 {iopv:.3f}元】\n"
                     f"   🏦 基金规模:【 {fund_size:.2f}亿元】"

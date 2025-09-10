@@ -748,8 +748,8 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
         etf_code = str(row["ETF代码"])
         df = load_etf_daily_data(etf_code)
         
-        # 检查数据完整性
-        if not validate_etf_data(df):
+        # 使用内部验证函数
+        if not internal_validate_etf_data(df):
             logger.debug(f"ETF {etf_code} 数据不完整，跳过")
             continue
         
@@ -1393,9 +1393,9 @@ def calculate_single_position_strategy(
         Tuple[str, List[Dict]]: 策略内容和交易动作列表
     """
     try:
-        # 1. 检查数据是否足够
-        if etf_df.empty or len(etf_df) < 20:
-            error_msg = f"ETF {target_etf_code} 数据不足，无法计算策略"
+        # 1. 使用内部验证函数检查数据
+        if not internal_validate_etf_data(etf_df):
+            error_msg = f"ETF {target_etf_code} 数据验证失败，无法计算策略"
             logger.warning(error_msg)
             return f"{position_type}：{error_msg}", []
         
@@ -1411,12 +1411,9 @@ def calculate_single_position_strategy(
         # 4. 计算ATR（平均真实波幅）用于动态止损
         atr = calculate_atr(etf_df, period=14)
         
-        # 5. 初始化成交量相关变量（关键修复：提前定义，避免作用域问题）
-        volume = 0.0
-        avg_volume = 0.0
-        if not etf_df.empty:
-            volume = etf_df["成交量"].iloc[-1]
-            avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+        # 5. 初始化成交量相关变量
+        volume = etf_df["成交量"].iloc[-1]
+        avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
         
         # 6. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
@@ -1626,3 +1623,38 @@ def calculate_single_position_strategy(
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
+
+def internal_validate_etf_data(df: pd.DataFrame) -> bool:
+    """
+    内部数据验证函数，不依赖utils.file_utils
+    
+    Args:
+        df: ETF日线数据DataFrame
+    
+    Returns:
+        bool: 数据是否完整有效
+    """
+    if df.empty:
+        logger.warning("ETF数据为空")
+        return False
+    
+    # 仅检查真正必需的列（不再包含"折溢价率"）
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        logger.error(f"ETF数据缺少真正必需列: {', '.join(missing_columns)}，无法继续")
+        return False
+    
+    # 检查数据量
+    if len(df) < 20:
+        logger.warning(f"ETF数据量不足({len(df)}天)，需要至少20天数据")
+        return False
+    
+    # 检查数据连续性
+    df = df.sort_values("日期")
+    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
+    max_gap = date_diff.max()
+    if max_gap > 3:
+        logger.info(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")
+    
+    return True

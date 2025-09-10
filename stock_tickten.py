@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 个股趋势跟踪策略（TickTen策略）
-基于流动性、波动率、市值筛选优质个股，计算趋势信号并推送微信通知
+基于akshare实时爬取个股数据，应用流动性、波动率、市值三重过滤，筛选优质个股
+按板块分类推送，每个板块最多10只，共40只
 """
 
 import os
@@ -10,24 +11,16 @@ import logging
 import pandas as pd
 import numpy as np
 import time
+import akshare as ak
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 from config import Config
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
-    get_utc_time,
-    is_file_outdated
+    get_utc_time
 )
-from utils.file_utils import (
-    load_etf_daily_data,
-    init_dirs,
-    load_stock_daily_data
-)
-from data_crawler.stock_list_manager import load_all_stock_list
-from data_crawler.akshare_crawler import fetch_stock_data
 from wechat_push.push import send_wechat_message
-from strategy.etf_scoring import get_top_rated_etfs
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -37,16 +30,146 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+"""
+==========================================
+【用户可配置区】
+以下参数可根据个人风险偏好调整
+==========================================
+"""
+
+# 板块定义
+MARKET_SECTIONS = {
+    "沪市主板": {"prefix": ["60"], "min_market_cap": 200, "min_daily_volume": 100000000, "max_volatility": 0.4},
+    "深市主板": {"prefix": ["00"], "min_market_cap": 200, "min_daily_volume": 100000000, "max_volatility": 0.4},
+    "创业板": {"prefix": ["30"], "min_market_cap": 100, "min_daily_volume": 80000000, "max_volatility": 0.5},
+    "科创板": {"prefix": ["688"], "min_market_cap": 80, "min_daily_volume": 50000000, "max_volatility": 0.6}
+}
+
 # 策略参数（针对个股优化）
-CRITICAL_VALUE_DAYS = 40  # 临界值计算周期（40日均线，原ETF策略为20日）
-DEVIATION_THRESHOLD = 0.08  # 偏离阈值（8%，原ETF策略为2%）
-VOLUME_CHANGE_THRESHOLD = 0.35  # 成交量变化阈值（35%，原ETF策略为20%）
-MIN_CONSECUTIVE_DAYS = 3  # 最小连续站上/跌破天数（原ETF策略为1-2天）
+CRITICAL_VALUE_DAYS = 40  # 临界值计算周期（40日均线）
+DEVIATION_THRESHOLD = 0.08  # 偏离阈值（8%）
+VOLUME_CHANGE_THRESHOLD = 0.35  # 成交量变化阈值（35%）
+MIN_CONSECUTIVE_DAYS = 3  # 最小连续站上/跌破天数
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
-MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%，原ETF策略为30%-50%）
-MIN_MARKET_CAP = 200  # 最小市值（200亿元）
-MIN_DAILY_VOLUME = 100000000  # 最小日均成交额（1亿元）
-MAX_ANNUAL_VOLATILITY = 0.4  # 最大年化波动率（40%）
+MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%）
+
+# 其他参数
+MIN_DATA_DAYS = 100  # 最小数据天数（用于计算波动率等）
+MAX_STOCKS_TO_ANALYZE = 500  # 每次分析的最大股票数量（避免请求过多）
+MAX_STOCKS_PER_SECTION = 10  # 每个板块最多报告的股票数量
+DATA_FETCH_DELAY = 0.5  # 数据请求间隔（秒），避免被AkShare限制
+
+"""
+==========================================
+【策略实现区】
+以下为策略核心代码
+==========================================
+"""
+
+def get_stock_section(stock_code: str) -> str:
+    """
+    判断股票所属板块
+    
+    Args:
+        stock_code: 股票代码（不带市场前缀）
+    
+    Returns:
+        str: 板块名称
+    """
+    for section, config in MARKET_SECTIONS.items():
+        for prefix in config["prefix"]:
+            if stock_code.startswith(prefix):
+                return section
+    return "其他板块"
+
+def fetch_stock_list() -> pd.DataFrame:
+    """
+    从AkShare获取全市场股票列表
+    
+    Returns:
+        pd.DataFrame: 股票列表（代码、名称、所属板块等）
+    """
+    try:
+        logger.info("从AkShare获取全市场股票列表...")
+        
+        # 获取A股股票列表
+        stock_list = ak.stock_info_a_code_name()
+        
+        if stock_list.empty:
+            logger.error("获取股票列表失败：返回为空")
+            return pd.DataFrame()
+        
+        # 添加所属板块列
+        stock_list["板块"] = stock_list["code"].apply(get_stock_section)
+        
+        logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
+        return stock_list
+    
+    except Exception as e:
+        logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
+    """
+    从AkShare获取个股历史数据
+    
+    Args:
+        stock_code: 股票代码（不带市场前缀）
+        days: 获取最近多少天的数据
+    
+    Returns:
+        pd.DataFrame: 个股日线数据
+    """
+    try:
+        # 确定市场前缀
+        section = get_stock_section(stock_code)
+        if section == "沪市主板" or section == "科创板":
+            market_prefix = "sh"
+        else:  # 深市主板、创业板
+            market_prefix = "sz"
+        
+        full_code = f"{market_prefix}{stock_code}"
+        
+        # 计算日期范围
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        
+        logger.debug(f"从AkShare获取股票 {full_code} 数据，时间范围: {start_date} 至 {end_date}")
+        
+        # 使用AkShare获取股票数据
+        df = ak.stock_zh_a_hist(
+            symbol=full_code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust="qfq"
+        )
+        
+        if df.empty:
+            logger.warning(f"获取股票 {full_code} 数据为空")
+            return pd.DataFrame()
+        
+        # 标准化列名
+        df = df.rename(columns={
+            "日期": "日期",
+            "开盘": "开盘",
+            "最高": "最高",
+            "最低": "最低",
+            "收盘": "收盘",
+            "成交量": "成交量"
+        })
+        
+        # 确保日期列是datetime类型
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"])
+            df = df.sort_values("日期", ascending=True)
+        
+        logger.debug(f"成功获取股票 {full_code} 数据，共 {len(df)} 条记录")
+        return df
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def calculate_critical_value(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> float:
     """计算临界值（40日均线）"""
@@ -133,31 +256,34 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     
     return 0.0
 
-def calculate_market_cap(stock_code: str) -> float:
-    """获取市值（亿元）"""
+def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
+    """估算市值（亿元）"""
     try:
-        # 这里简化处理，实际应从数据源获取
-        # 可以使用akshare或其他数据源
-        df = load_stock_daily_data(stock_code)
-        if not df.empty:
-            latest = df.iloc[-1]
-            # 假设我们有总股本数据，这里简化为收盘价 * 总股本
-            # 实际应用中需要从基本面数据获取
-            return latest["收盘"] * 10  # 模拟值，单位：亿元
-        return 0.0
+        if df.empty:
+            return 0.0
+        
+        # 从AkShare获取流通股本（简化处理，实际应使用更准确的数据源）
+        # 这里用最后一天的收盘价和假设的流通股本估算
+        latest = df.iloc[-1]
+        close_price = latest["收盘"]
+        
+        # 根据板块不同，使用不同的流通股本估算方法
+        section = get_stock_section(stock_code)
+        
+        # 简化处理：假设流通股本在1-10亿股之间
+        if section == "科创板":
+            base_shares = 1.0  # 科创板通常流通股本较小
+        elif section == "创业板":
+            base_shares = 2.0
+        else:
+            base_shares = 5.0  # 主板通常流通股本较大
+        
+        # 假设市值 = 收盘价 * 流通股本（单位：亿元）
+        market_cap = close_price * base_shares
+        return market_cap
+    
     except Exception as e:
-        logger.error(f"获取{stock_code}市值失败: {str(e)}", exc_info=True)
-        return 0.0
-
-def calculate_daily_volume(stock_code: str) -> float:
-    """获取日均成交额（元）"""
-    try:
-        df = load_stock_daily_data(stock_code)
-        if not df.empty and len(df) >= 20:
-            return df["成交量"].iloc[-20:].mean() * df["收盘"].iloc[-20:].mean()
-        return 0.0
-    except Exception as e:
-        logger.error(f"获取{stock_code}日均成交失败: {str(e)}", exc_info=True)
+        logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
         return 0.0
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
@@ -172,19 +298,30 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         bool: 是否适合策略
     """
     try:
-        # 1. 流动性过滤（日均成交>1亿）
-        daily_volume = calculate_daily_volume(stock_code)
-        if daily_volume < MIN_DAILY_VOLUME:
+        if df.empty or len(df) < MIN_DATA_DAYS:
             return False
         
-        # 2. 波动率过滤（年化波动率<40%）
+        # 获取股票所属板块
+        section = get_stock_section(stock_code)
+        if section == "其他板块" or section not in MARKET_SECTIONS:
+            return False
+        
+        # 获取板块配置
+        section_config = MARKET_SECTIONS[section]
+        
+        # 1. 流动性过滤（日均成交>设定阈值）
+        daily_volume = df["成交量"].iloc[-20:].mean() * df["收盘"].iloc[-20:].mean()
+        if daily_volume < section_config["min_daily_volume"]:
+            return False
+        
+        # 2. 波动率过滤（年化波动率<设定阈值）
         annual_volatility = calculate_annual_volatility(df)
-        if annual_volatility > MAX_ANNUAL_VOLATILITY:
+        if annual_volatility > section_config["max_volatility"]:
             return False
         
-        # 3. 市值过滤（市值>200亿）
-        market_cap = calculate_market_cap(stock_code)
-        if market_cap < MIN_MARKET_CAP:
+        # 3. 市值过滤（市值>设定阈值）
+        market_cap = calculate_market_cap(df, stock_code)
+        if market_cap < section_config["min_market_cap"]:
             return False
         
         return True
@@ -236,9 +373,16 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         if consecutive_days >= MIN_CONSECUTIVE_DAYS:
             confirmation_score += 15
         
-        # 3. 历史回测得分（30%权重）
+        # 3. 历史表现得分（30%权重）
         # 这里简化处理，实际应进行历史回测
-        historical_score = 25  # 默认值
+        # 根据偏离率和信号稳定性打分
+        historical_score = 0.0
+        if current >= critical:
+            # 上涨趋势中，偏离率越小，历史表现越好
+            historical_score = max(0, 30 - abs(deviation) * 1.5)
+        else:
+            # 下跌趋势中，超卖程度越大，反弹概率越高
+            historical_score = max(0, 15 + abs(min(deviation, -10)) * 1.0)
         
         # 综合得分
         total_score = base_score * 0.4 + confirmation_score * 0.3 + historical_score * 0.3
@@ -261,7 +405,7 @@ def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -
     close_prices = df["收盘"].values
     ma_values = df["收盘"].rolling(window=period).mean().values
     
-    # 检查是否连续10天在均线附近波动（-8%~+8%）
+    # 检查是否连续10天在均线附近波动
     last_10_days = df.tail(10)
     deviations = []
     for i in range(len(last_10_days)):
@@ -270,7 +414,14 @@ def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -
             continue
             
         deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
-        if abs(deviation) > 8.0:  # 个股波动更大，阈值提高到8%
+        # 根据板块不同，设置不同的震荡阈值
+        section = get_stock_section(df.attrs.get("stock_code", ""))
+        if section in ["科创板", "创业板"]:
+            max_deviation = 10.0  # 科创板、创业板波动更大
+        else:
+            max_deviation = 8.0   # 主板波动较小
+        
+        if abs(deviation) > max_deviation:
             return False, 0, (0, 0)
         deviations.append(deviation)
     
@@ -330,13 +481,13 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
         peak2_idx, peak2_price = peaks[-1]
         
         # 检查第二个高点是否低于第一个
-        if peak2_price < peak1_price and peak2_price > peak1_price * 0.92:  # 个股波动大，阈值放宽
+        if peak2_price < peak1_price and peak2_price > peak1_price * 0.92:
             # 检查中间是否有明显低点
             trough_idx = peak1_idx + np.argmin(close_prices[peak1_idx:peak2_idx])
             trough_price = close_prices[trough_idx]
             
             # 检查低点是否明显
-            if trough_price < peak1_price * 0.95 and trough_price < peak2_price * 0.95:  # 阈值放宽
+            if trough_price < peak1_price * 0.95 and trough_price < peak2_price * 0.95:
                 m_top_detected = True
                 # 计算置信度
                 price_diff = (peak1_price - peak2_price) / peak1_price
@@ -365,7 +516,7 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
             neckline_price = (close_prices[trough1_idx] + close_prices[trough2_idx]) / 2
             
             # 检查头肩比例是否合理
-            if shoulder_similarity > 0.8 and head_price > neckline_price * 1.1:  # 阈值放宽
+            if shoulder_similarity > 0.8 and head_price > neckline_price * 1.1:
                 head_and_shoulders_detected = True
                 # 计算置信度
                 shoulder_diff = 1 - shoulder_similarity
@@ -396,16 +547,22 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
             "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
 
-def calculate_stock_stop_loss(current_price: float, signal: str, deviation: float) -> float:
+def calculate_stock_stop_loss(current_price: float, signal: str, deviation: float, section: str) -> float:
     """计算个股止损位"""
+    # 根据板块不同，设置不同的止损幅度
+    if section in ["科创板", "创业板"]:
+        stop_loss_pct = 0.10  # 科创板、创业板止损10%
+    else:
+        stop_loss_pct = 0.08  # 主板止损8%
+    
     if signal == "YES":
         # 上涨趋势中，止损设在5日均线下方
-        return current_price * 0.92  # 8%止损
+        return current_price * (1 - stop_loss_pct)
     else:
         # 下跌趋势中，止损设在前高上方
-        return current_price * 1.05  # 5%止损
+        return current_price * (1 + 0.05)
 
-def calculate_stock_take_profit(current_price: float, signal: str, deviation: float) -> float:
+def calculate_stock_take_profit(current_price: float, signal: str, deviation: float, section: str) -> float:
     """计算个股止盈位"""
     if signal == "YES":
         # 上涨趋势中，止盈设在偏离率+15%处
@@ -417,6 +574,10 @@ def calculate_stock_take_profit(current_price: float, signal: str, deviation: fl
 def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame, 
                                  current: float, critical: float, deviation: float) -> str:
     """生成个股策略信号消息"""
+    stock_code = stock_info["code"]
+    stock_name = stock_info["name"]
+    section = get_stock_section(stock_code)
+    
     # 计算连续站上/跌破均线的天数
     consecutive = calculate_consecutive_days_above(df, critical) if current >= critical \
                  else calculate_consecutive_days_below(df, critical)
@@ -434,12 +595,20 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
         upper_band = critical * (1 + max_dev/100)
         lower_band = critical * (1 + min_dev/100)
         
+        # 根据板块调整操作建议
+        if section in ["科创板", "创业板"]:
+            position_pct = 10
+            max_position = 30
+        else:
+            position_pct = 15
+            max_position = 40
+        
         message = (
-            f"【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
+            f"【震荡市】{section} | 连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
             f"✅ 操作建议：\n"
-            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-15%\n"
-            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-15%\n"
-            f"  • 总仓位严格控制在≤40%\n"
+            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓{position_pct}%-{position_pct+5}%\n"
+            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓{position_pct}%-{position_pct+5}%\n"
+            f"  • 总仓位严格控制在≤{max_position}%\n"
             f"⚠️ 避免频繁交易，等待趋势明朗\n"
         )
         return message
@@ -448,20 +617,32 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
     if current >= critical:
         # 子条件1：首次突破（价格刚站上均线，连续3-4日站稳+成交量放大35%+）
         if consecutive == 1 and volume_change > 35:
+            # 根据板块调整仓位
+            if section in ["科创板", "创业板"]:
+                position_pct = 8
+            else:
+                position_pct = 12
+            
             message = (
-                f"【首次突破】连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次突破】{section} | 连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 建仓{int(MAX_STOCK_POSITION * 100)}%（单一个股上限{int(MAX_STOCK_POSITION * 100)}%）\n"
-                f"  • 止损位：{calculate_stock_stop_loss(current, 'YES', deviation):.2f}（-8%）\n"
-                f"  • 目标位：{calculate_stock_take_profit(current, 'YES', deviation):.2f}（+15%）\n"
+                f"  • 建仓{position_pct}%（单一个股上限{int(MAX_STOCK_POSITION * 100)}%）\n"
+                f"  • 止损位：{calculate_stock_stop_loss(current, 'YES', deviation, section):.2f}（-{int((1-calculate_stock_stop_loss(current, 'YES', deviation, section)/current)*100)}%）\n"
+                f"  • 目标位：{calculate_stock_take_profit(current, 'YES', deviation, section):.2f}（+15%）\n"
                 f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
             )
         # 子条件1：首次突破（价格刚站上均线，连续3-4日站稳+成交量放大35%+）
         elif 2 <= consecutive <= 4 and volume_change > 35:
+            # 根据板块调整仓位
+            if section in ["科创板", "创业板"]:
+                position_pct = 8
+            else:
+                position_pct = 12
+            
             message = (
-                f"【首次突破确认】连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次突破确认】{section} | 连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 可加仓至{int(MAX_STOCK_POSITION * 100)}%\n"
+                f"  • 可加仓至{position_pct}%\n"
                 f"  • 止损位上移至5日均线（约{current * 0.95:.2f}）\n"
                 f"  • 若收盘跌破5日均线，减仓50%\n"
                 f"⚠️ 注意：偏离率>10%时考虑部分止盈\n"
@@ -481,7 +662,7 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
                 
                 message = (
-                    f"【趋势稳健】连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
+                    f"【趋势稳健】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 持仓不动，不新增仓位\n"
                     f"  • 跟踪止损上移至5日均线（约{current * 0.95:.2f}）\n"
@@ -501,7 +682,7 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
                 
                 message = (
-                    f"【趋势较强】连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
+                    f"【趋势较强】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 观望，不新增仓位\n"
                     f"  • 逢高减仓10%-15%\n"
@@ -521,7 +702,7 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓15%-25%"
                 
                 message = (
-                    f"【超买风险】连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
+                    f"【超买风险】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 逢高减仓20%-30%\n"
                     f"  • 当前价格已处高位，避免新增仓位\n"
@@ -533,19 +714,33 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
     else:
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
         if consecutive == 1 and volume_change > 35:
+            # 根据板块调整仓位
+            if section in ["科创板", "创业板"]:
+                reduce_pct = 80
+                target_pct = 20
+            else:
+                reduce_pct = 70
+                target_pct = 30
+            
             message = (
-                f"【首次跌破】连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次跌破】{section} | 连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 立即减仓{int(MAX_STOCK_POSITION * 100 * 0.7)}%\n"
+                f"  • 立即减仓{reduce_pct}%\n"
                 f"  • 止损位：40日均线上方5%（约{critical * 1.05:.2f}）\n"
-                f"⚠️ 若收盘未收回均线，明日继续减仓至{int(MAX_STOCK_POSITION * 100 * 0.3)}%\n"
+                f"⚠️ 若收盘未收回均线，明日继续减仓至{target_pct}%\n"
             )
         # 子条件1：首次跌破（价格刚跌穿均线，连续2-3日未收回+成交量放大）
         elif 2 <= consecutive <= 3 and volume_change > 35:
+            # 根据板块调整仓位
+            if section in ["科创板", "创业板"]:
+                target_pct = 20
+            else:
+                target_pct = 30
+            
             message = (
-                f"【首次跌破确认】连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次跌破确认】{section} | 连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 严格止损，仓位降至{int(MAX_STOCK_POSITION * 100 * 0.3)}%\n"
+                f"  • 严格止损，仓位降至{target_pct}%\n"
                 f"  • 止损位：40日均线下方5%（约{critical * 0.95:.2f}）\n"
                 f"⚠️ 信号确认，避免侥幸心理\n"
             )
@@ -553,30 +748,48 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
         else:
             # 场景A：偏离率≥-8%（下跌初期）
             if deviation >= -8.0:
+                # 根据板块调整仓位
+                if section in ["科创板", "创业板"]:
+                    max_position = 20
+                else:
+                    max_position = 30
+                
                 message = (
-                    f"【下跌初期】连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
+                    f"【下跌初期】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 轻仓观望（仓位≤{int(MAX_STOCK_POSITION * 100 * 0.3)}%）\n"
+                    f"  • 轻仓观望（仓位≤{max_position}%）\n"
                     f"  • 反弹至均线附近（约{critical:.2f}）减仓剩余仓位\n"
                     f"  • 暂不考虑新增仓位\n"
                     f"⚠️ 重点观察：收盘站上5日均线，可轻仓试多\n"
                 )
             # 场景B：-15%≤偏离率＜-8%（下跌中期）
             elif -15.0 <= deviation < -8.0:
+                # 根据板块调整仓位
+                if section in ["科创板", "创业板"]:
+                    test_pct = 5
+                else:
+                    test_pct = 10
+                
                 message = (
-                    f"【下跌中期】连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
+                    f"【下跌中期】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 空仓为主，避免抄底\n"
-                    f"  • 仅可试仓{int(MAX_STOCK_POSITION * 100 * 0.1)}%\n"
+                    f"  • 仅可试仓{test_pct}%\n"
                     f"  • 严格止损：收盘跌破前低即离场\n"
                     f"⚠️ 重点观察：行业基本面是否有利空\n"
                 )
             # 场景C：偏离率＜-15%（超卖机会）
             else:
+                # 根据板块调整仓位
+                if section in ["科创板", "创业板"]:
+                    add_pct = 8
+                else:
+                    add_pct = 10
+                
                 message = (
-                    f"【超卖机会】连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
+                    f"【超卖机会】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 小幅加仓{int(MAX_STOCK_POSITION * 100 * 0.1)}%\n"
+                    f"  • 小幅加仓{add_pct}%\n"
                     f"  • 目标价：偏离率≥-8%（约{critical * 0.92:.2f}）\n"
                     f"  • 达到目标即卖出加仓部分\n"
                     f"⚠️ 重点观察：若跌破前低，立即止损\n"
@@ -584,58 +797,255 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
     
     return message
 
-def get_top_stocks_for_strategy(n: int = 10) -> List[Dict]:
+def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     """
-    获取适合策略的前n只股票
-    
-    Args:
-        n: 返回股票数量
+    按板块获取适合策略的股票
     
     Returns:
-        List[Dict]: 股票信息列表
+        Dict[str, List[Dict]]: 按板块组织的股票信息
     """
     try:
         # 1. 获取全市场股票列表
-        all_stocks = load_all_stock_list()
-        logger.info(f"获取全市场股票列表，共 {len(all_stocks)} 只股票")
+        stock_list = fetch_stock_list()
+        if stock_list.empty:
+            logger.error("获取股票列表失败，无法继续")
+            return {}
         
-        # 2. 筛选符合条件的股票
-        suitable_stocks = []
-        for _, stock in all_stocks.iterrows():
-            stock_code = str(stock["股票代码"])
-            stock_name = stock["股票名称"]
+        logger.info(f"筛选前 {len(stock_list)} 只股票")
+        
+        # 2. 按板块分组处理
+        section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
+        analyzed_count = 0
+        
+        for _, stock in stock_list.iterrows():
+            if analyzed_count >= MAX_STOCKS_TO_ANALYZE:
+                break
+                
+            stock_code = str(stock["code"])
+            stock_name = stock["name"]
             
-            # 加载日线数据
-            df = load_stock_daily_data(stock_code)
-            if df.empty or len(df) < CRITICAL_VALUE_DAYS + 30:
+            # 跳过ST股票
+            if "ST" in stock_name:
                 continue
+            
+            # 获取板块
+            section = get_stock_section(stock_code)
+            if section not in MARKET_SECTIONS:
+                continue
+            
+            logger.debug(f"正在分析股票: {stock_name}({stock_code}) | {section}")
+            
+            # 获取日线数据
+            df = fetch_stock_data(stock_code)
+            if df.empty or len(df) < MIN_DATA_DAYS:
+                logger.debug(f"股票 {stock_name}({stock_code}) 数据不足，跳过")
+                continue
+            
+            # 设置股票代码属性，便于后续识别
+            df.attrs["stock_code"] = stock_code
             
             # 检查是否适合策略
             if is_stock_suitable(stock_code, df):
                 # 计算策略得分
                 score = calculate_stock_strategy_score(stock_code, df)
                 if score > 0:
-                    suitable_stocks.append({
+                    section_stocks[section].append({
                         "code": stock_code,
                         "name": stock_name,
                         "score": score,
-                        "df": df
+                        "df": df,
+                        "section": section
                     })
+                    logger.debug(f"股票 {stock_name}({stock_code}) 适合策略，得分: {score:.2f}")
             
             # 限制请求频率
-            time.sleep(0.1)
+            time.sleep(DATA_FETCH_DELAY)
+            analyzed_count += 1
         
-        logger.info(f"筛选后符合条件的股票数量: {len(suitable_stocks)}")
+        # 3. 对每个板块的股票按得分排序，并取前N只
+        top_stocks_by_section = {}
+        for section, stocks in section_stocks.items():
+            if stocks:
+                stocks.sort(key=lambda x: x["score"], reverse=True)
+                top_stocks_by_section[section] = stocks[:MAX_STOCKS_PER_SECTION]
+                logger.info(f"板块 {section} 筛选后符合条件的股票数量: {len(stocks)} (取前{MAX_STOCKS_PER_SECTION}只)")
+            else:
+                logger.info(f"板块 {section} 无符合条件的股票")
         
-        # 3. 按策略得分排序
-        suitable_stocks.sort(key=lambda x: x["score"], reverse=True)
-        
-        # 4. 返回前n只
-        return suitable_stocks[:n]
+        return top_stocks_by_section
     
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)
-        return []
+        return {}
+
+def generate_section_report(section: str, stocks: List[Dict]):
+    """
+    生成单个板块的策略报告
+    
+    Args:
+        section: 板块名称
+        stocks: 该板块的股票列表
+    """
+    if not stocks:
+        return
+    
+    logger.info(f"生成 {section} 板块策略报告")
+    
+    # 1. 生成板块筛选条件说明
+    section_config = MARKET_SECTIONS[section]
+    conditions = (
+        f"【{section} 板块筛选条件】\n"
+        f"• 市值 > {section_config['min_market_cap']}亿元\n"
+        f"• 日均成交 > {section_config['min_daily_volume']/1000000:.0f}百万\n"
+        f"• 年化波动率 < {section_config['max_volatility']*100:.0f}%\n"
+        "──────────────────\n"
+    )
+    
+    # 2. 生成每只股票的策略信号
+    stock_reports = []
+    for stock in stocks:
+        stock_code = stock["code"]
+        stock_name = stock["name"]
+        df = stock["df"]
+        
+        # 计算最新数据
+        latest_data = df.iloc[-1]
+        close_price = latest_data["收盘"]
+        critical_value = calculate_critical_value(df)
+        deviation = calculate_deviation(close_price, critical_value)
+        
+        # 状态判断（收盘价在临界值之上为YES，否则为NO）
+        status = "YES" if close_price >= critical_value else "NO"
+        
+        # 生成详细策略信号
+        signal_message = generate_stock_signal_message(
+            {"code": stock_code, "name": stock_name}, 
+            df, 
+            close_price, 
+            critical_value, 
+            deviation
+        )
+        
+        # 构建消息
+        message_lines = []
+        message_lines.append(f"{stock_name}({stock_code})\n")
+        message_lines.append(f"📊 当前：{close_price:.2f} | 40日均线：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
+        # 根据信号类型选择正确的符号
+        signal_symbol = "✅" if status == "YES" else "❌"
+        message_lines.append(f"{signal_symbol} 信号：{status}\n")
+        message_lines.append("──────────────────\n")
+        message_lines.append(signal_message)
+        message_lines.append("──────────────────\n")
+        
+        message = "\n".join(message_lines)
+        stock_reports.append({
+            "stock": f"{stock_name}({stock_code})",
+            "message": message,
+            "status": status,
+            "deviation": deviation
+        })
+        
+        # 发送单只股票消息
+        logger.info(f"推送 {section} - {stock_name}({stock_code}) 策略信号")
+        send_wechat_message(message)
+        time.sleep(1)
+    
+    # 3. 生成板块总结消息
+    summary_lines = [
+        f"【{section} 板块策略总结】\n",
+        conditions,
+        "──────────────────\n"
+    ]
+    
+    # 按信号类型分类
+    yes_signals = [r for r in stock_reports if r["status"] == "YES"]
+    no_signals = [r for r in stock_reports if r["status"] == "NO"]
+    
+    # 添加YES信号股票
+    if yes_signals:
+        summary_lines.append("✅ 上涨趋势 (YES信号):\n")
+        for r in yes_signals:
+            summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
+        summary_lines.append("\n")
+    
+    # 添加NO信号股票
+    if no_signals:
+        summary_lines.append("❌ 下跌趋势 (NO信号):\n")
+        for r in no_signals:
+            summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
+        summary_lines.append("\n")
+    
+    summary_lines.append("──────────────────\n")
+    summary_lines.append("💡 操作指南:\n")
+    summary_lines.append("1. YES信号: 可持仓或建仓，严格止损\n")
+    summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底\n")
+    summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位\n")
+    summary_lines.append(f"4. 单一个股仓位≤{int(MAX_STOCK_POSITION * 100)}%，分散投资\n")
+    if section in ["科创板", "创业板"]:
+        summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
+    summary_lines.append("──────────────────\n")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)\n")
+    
+    summary_message = "\n".join(summary_lines)
+    
+    # 4. 发送板块总结消息
+    logger.info(f"推送 {section} 板块策略总结消息")
+    send_wechat_message(summary_message)
+    time.sleep(1)
+
+def generate_overall_summary(top_stocks_by_section: Dict[str, List[Dict]]):
+    """生成整体总结报告"""
+    try:
+        utc_now, beijing_now = get_current_times()
+        
+        summary_lines = [
+            "【全市场个股趋势策略总结】\n",
+            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n",
+            "📊 各板块筛选条件:\n"
+        ]
+        
+        # 添加各板块筛选条件
+        for section, config in MARKET_SECTIONS.items():
+            summary_lines.append(
+                f"  • {section}: 市值>{config['min_market_cap']}亿 | "
+                f"日均成交>{config['min_daily_volume']/1000000:.0f}百万 | "
+                f"波动率<{config['max_volatility']*100:.0f}%\n"
+            )
+        
+        summary_lines.append("\n──────────────────\n")
+        
+        # 按板块统计
+        total_stocks = 0
+        for section, stocks in top_stocks_by_section.items():
+            if stocks:
+                yes_count = sum(1 for s in stocks if "YES" in s["message"])
+                no_count = len(stocks) - yes_count
+                summary_lines.append(f"📌 {section} ({len(stocks)}只):\n")
+                summary_lines.append(f"  • 上涨趋势: {yes_count}只\n")
+                summary_lines.append(f"  • 下跌趋势: {no_count}只\n\n")
+                total_stocks += len(stocks)
+        
+        summary_lines.append(f"📊 总计: {total_stocks}只股票（每板块最多{MAX_STOCKS_PER_SECTION}只）\n")
+        summary_lines.append("──────────────────\n")
+        
+        # 添加操作指南
+        summary_lines.append("💡 操作指南:\n")
+        summary_lines.append("1. YES信号: 可持仓或建仓，严格止损\n")
+        summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底\n")
+        summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位≤40%\n")
+        summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只\n")
+        summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
+        summary_lines.append("──────────────────\n")
+        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)\n")
+        
+        summary_message = "\n".join(summary_lines)
+        
+        # 发送整体总结消息
+        logger.info("推送全市场策略总结消息")
+        send_wechat_message(summary_message)
+    
+    except Exception as e:
+        logger.error(f"生成整体总结失败: {str(e)}", exc_info=True)
 
 def generate_report():
     """生成个股策略报告并推送微信"""
@@ -644,105 +1054,19 @@ def generate_report():
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始生成个股策略报告 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 1. 获取适合策略的前10只股票
-        top_stocks = get_top_stocks_for_strategy(n=10)
-        if not top_stocks:
-            warning_msg = "无符合条件的个股，无法生成策略报告"
-            logger.warning(warning_msg)
-            send_wechat_message(warning_msg, message_type="error")
-            return
+        # 1. 获取按板块分类的优质股票
+        top_stocks_by_section = get_top_stocks_for_strategy()
         
-        # 2. 生成每只股票的策略信号
-        stock_reports = []
-        for stock in top_stocks:
-            stock_code = stock["code"]
-            stock_name = stock["name"]
-            df = stock["df"]
-            
-            # 计算最新数据
-            latest_data = df.iloc[-1]
-            close_price = latest_data["收盘"]
-            critical_value = calculate_critical_value(df)
-            deviation = calculate_deviation(close_price, critical_value)
-            
-            # 状态判断（收盘价在临界值之上为YES，否则为NO）
-            status = "YES" if close_price >= critical_value else "NO"
-            
-            # 生成详细策略信号
-            signal_message = generate_stock_signal_message(
-                {"code": stock_code, "name": stock_name}, 
-                df, 
-                close_price, 
-                critical_value, 
-                deviation
-            )
-            
-            # 构建消息
-            message_lines = []
-            message_lines.append(f"{stock_name}({stock_code})\n")
-            message_lines.append(f"📊 当前：{close_price:.2f} | 40日均线：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
-            # 根据信号类型选择正确的符号
-            signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status}\n")
-            message_lines.append("──────────────────\n")
-            message_lines.append(signal_message)
-            message_lines.append("──────────────────\n")
-            
-            message = "\n".join(message_lines)
-            stock_reports.append({
-                "stock": f"{stock_name}({stock_code})",
-                "message": message,
-                "status": status,
-                "deviation": deviation
-            })
-            
-            # 发送单只股票消息
-            logger.info(f"推送 {stock_name}({stock_code}) 策略信号")
-            send_wechat_message(message)
-            time.sleep(1)
+        # 2. 生成每个板块的报告
+        for section, stocks in top_stocks_by_section.items():
+            if stocks:
+                generate_section_report(section, stocks)
+                time.sleep(2)
         
-        # 3. 生成总结消息
-        summary_lines = [
-            "【今日个股趋势策略总结】\n",
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n",
-            f"📊 策略筛选: 流动性>1亿 | 波动率<40% | 市值>200亿\n",
-            "──────────────────\n"
-        ]
+        # 3. 生成整体总结
+        generate_overall_summary(top_stocks_by_section)
         
-        # 按信号类型分类
-        yes_signals = [r for r in stock_reports if r["status"] == "YES"]
-        no_signals = [r for r in stock_reports if r["status"] == "NO"]
-        
-        # 添加YES信号股票
-        if yes_signals:
-            summary_lines.append("✅ 上涨趋势 (YES信号):\n")
-            for r in yes_signals:
-                summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
-            summary_lines.append("\n")
-        
-        # 添加NO信号股票
-        if no_signals:
-            summary_lines.append("❌ 下跌趋势 (NO信号):\n")
-            for r in no_signals:
-                summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
-            summary_lines.append("\n")
-        
-        summary_lines.append("──────────────────\n")
-        summary_lines.append("💡 操作指南:\n")
-        summary_lines.append("1. YES信号: 可持仓或建仓，严格止损\n")
-        summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底\n")
-        summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位≤40%\n")
-        summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只\n")
-        summary_lines.append("──────────────────\n")
-        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)\n")
-        
-        summary_message = "\n".join(summary_lines)
-        
-        # 4. 发送总结消息
-        logger.info("推送个股策略总结消息")
-        send_wechat_message(summary_message)
-        
-        logger.info(f"个股策略报告已成功发送至企业微信（共{len(top_stocks)}只股票）")
+        logger.info(f"个股策略报告已成功发送至企业微信")
     
     except Exception as e:
         error_msg = f"个股策略执行失败: {str(e)}"

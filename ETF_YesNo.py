@@ -26,6 +26,41 @@ logger.addHandler(handler)
 
 # 指定计算的指数列表（硬编码，包含完整策略信息）
 INDICES = [
+    # 新增的4个ETF放在最前面
+    {
+        "code": "^NDX",
+        "name": "纳斯达克100",
+        "akshare_code": "^NDX",
+        "etf_code": "159892",
+        "etf_name": "华夏纳斯达克100ETF",
+        "description": "跟踪纳斯达克100指数，美股科技龙头"
+    },
+    {
+        "code": "^NDX",
+        "name": "纳斯达克100",
+        "akshare_code": "^NDX",
+        "etf_code": "513100",
+        "etf_name": "国泰纳斯达克100ETF",
+        "description": "跟踪纳斯达克100指数，美股科技龙头"
+    },
+    {
+        "code": "H30533.CSI",
+        "name": "中证海外中国互联网",
+        "akshare_code": "H30533.CSI",
+        "etf_code": "513500",
+        "etf_name": "易方达中概互联网ETF",
+        "description": "跟踪中证海外中国互联网指数，涵盖海外上市中概股"
+    },
+    {
+        "code": "HSNDXIT.HI",
+        "name": "恒生互联网科技业",
+        "akshare_code": "HSNDXIT.HI",
+        "etf_code": "513400",
+        "etf_name": "华夏恒生互联网ETF",
+        "description": "跟踪恒生互联网科技业指数，港股互联网龙头"
+    },
+    
+    # 原有ETF列表，保持完全不变
     {
         "code": "000300",
         "name": "沪深300",
@@ -155,27 +190,45 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         logger.info(f"从AkShare获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
-        # 使用AkShare获取指数数据
-        df = ak.index_zh_a_hist(
-            symbol=index_code,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date
-        )
+        # 根据指数类型使用不同的数据接口
+        if index_code.startswith('^'):
+            # 纳斯达克100指数等美股指数
+            df = ak.index_us_stock_considering_currency(index=index_code, start_date=start_date, end_date=end_date)
+        elif index_code.endswith('.CSI'):
+            # 中证系列指数
+            df = ak.index_stock_zh_sina(index_code=index_code.replace('.CSI', ''), start_date=start_date, end_date=end_date)
+        elif index_code.endswith('.HI'):
+            # 恒生系列指数
+            df = ak.index_hk_hist(index_code=index_code.replace('.HI', ''))
+        else:
+            # A股指数
+            df = ak.index_zh_a_hist(
+                symbol=index_code,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
         
         if df.empty:
             logger.warning(f"获取指数 {index_code} 数据为空")
             return pd.DataFrame()
         
         # 标准化列名
-        df = df.rename(columns={
-            "日期": "日期",
-            "开盘": "开盘",
-            "最高": "最高",
-            "最低": "最低",
-            "收盘": "收盘",
-            "成交量": "成交量"
-        })
+        if 'date' in df.columns:
+            df = df.rename(columns={
+                "date": "日期",
+                "close": "收盘",
+                "volume": "成交量"
+            })
+        else:
+            df = df.rename(columns={
+                "日期": "日期",
+                "开盘": "开盘",
+                "最高": "最高",
+                "最低": "最低",
+                "收盘": "收盘",
+                "成交量": "成交量"
+            })
         
         # 确保日期列是datetime类型
         if "日期" in df.columns:

@@ -197,7 +197,7 @@ def internal_validate_etf_data(df: pd.DataFrame) -> bool:
     if max_gap > 7:  # 从3天增加到7天，减少日志量
         logger.warning(f"ETF数据存在较大间隔({max_gap}天)，可能影响分析结果")
     elif max_gap > 3:
-        logger.info(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")
+        logger.debug(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")  # 从INFO降级为DEBUG
     else:
         logger.debug(f"ETF数据间隔正常，最大间隔{max_gap}天")
     
@@ -237,6 +237,12 @@ def init_position_record() -> pd.DataFrame:
                             position_df[col] = ""
                         else:
                             position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 确保正确的数据类型
+                position_df["ETF代码"] = position_df["ETF代码"].astype(str)
+                position_df["持仓成本价"] = position_df["持仓成本价"].astype(float)
+                position_df["持仓数量"] = position_df["持仓数量"].astype(int)
+                position_df["持仓天数"] = position_df["持仓天数"].astype(int)
                 
                 # 确保包含稳健仓和激进仓
                 if "稳健仓" not in position_df["仓位类型"].values:
@@ -401,7 +407,7 @@ def init_performance_record() -> None:
                 "calmar_ratio": 0.0
             }
             with open(PERFORMANCE_RECORD_PATH, 'w', encoding='utf-8') as f:
-                import json
+                import json  # 确保在此处导入json
                 json.dump(performance_data, f, ensure_ascii=False, indent=4)
             logger.info("已创建策略表现记录文件")
         else:
@@ -416,6 +422,30 @@ def init_performance_record() -> None:
             message=error_msg,
             message_type="error"
         )
+
+def get_strategy_performance() -> Dict[str, float]:
+    """
+    获取策略表现（优先从记录文件读取）
+    
+    Returns:
+        Dict[str, float]: 策略表现指标
+    """
+    try:
+        if os.path.exists(PERFORMANCE_RECORD_PATH):
+            with open(PERFORMANCE_RECORD_PATH, 'r', encoding='utf-8') as f:
+                import json  # 确保在此处导入json
+                performance_data = json.load(f)
+                # 检查是否需要更新（超过1天）
+                last_update = datetime.strptime(performance_data["last_update"], "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - last_update).days > 0:
+                    return calculate_strategy_performance()
+                return performance_data
+        else:
+            return calculate_strategy_performance()
+    
+    except Exception as e:
+        logger.error(f"获取策略表现失败，尝试重新计算: {str(e)}", exc_info=True)
+        return calculate_strategy_performance()
 
 def record_trade(**kwargs):
     """
@@ -437,18 +467,20 @@ def record_trade(**kwargs):
             "操作类型": kwargs.get("action", ""),
             "ETF代码": kwargs.get("etf_code", ""),
             "ETF名称": kwargs.get("etf_name", ""),
-            "价格": kwargs.get("price", 0.0),
-            "数量": kwargs.get("quantity", 0),
-            "金额": kwargs.get("price", 0.0) * kwargs.get("quantity", 0),
-            "持仓天数": kwargs.get("holding_days", 0),
-            "收益率": kwargs.get("return_rate", 0.0),
-            "持仓成本价": kwargs.get("cost_price", 0.0),
-            "当前价格": kwargs.get("current_price", 0.0),
-            "止损位": kwargs.get("stop_loss", 0.0),
-            "止盈位": kwargs.get("take_profit", 0.0),
+            "价格": float(kwargs.get("price", 0.0)),
+            "数量": int(kwargs.get("quantity", 0)) if kwargs.get("quantity", "0").isdigit() else 0,
+            "持仓天数": int(kwargs.get("holding_days", 0)),
+            "收益率": float(kwargs.get("return_rate", 0.0)),
+            "持仓成本价": float(kwargs.get("cost_price", 0.0)),
+            "当前价格": float(kwargs.get("current_price", 0.0)),
+            "止损位": float(kwargs.get("stop_loss", 0.0)),
+            "止盈位": float(kwargs.get("take_profit", 0.0)),
             "原因": kwargs.get("reason", ""),
             "操作状态": kwargs.get("status", "已完成")
         }
+        
+        # 计算金额（确保数量是数值类型）
+        trade_record["金额"] = trade_record["价格"] * trade_record["数量"]
         
         # 读取现有交易记录
         if os.path.exists(TRADE_RECORD_PATH):
@@ -855,28 +887,6 @@ def calculate_strategy_performance() -> Dict[str, float]:
             "calmar_ratio": 0.0
         }
 
-def get_strategy_performance() -> Dict[str, float]:
-    """
-    获取策略表现（优先从记录文件读取）
-    
-    Returns:
-        Dict[str, float]: 策略表现指标
-    """
-    try:
-        if os.path.exists(PERFORMANCE_RECORD_PATH):
-            with open(PERFORMANCE_RECORD_PATH, 'r', encoding='utf-8') as f:
-                performance_data = json.load(f)
-                # 检查是否需要更新（超过1天）
-                last_update = datetime.strptime(performance_data["last_update"], "%Y-%m-%d %H:%M:%S")
-                if (datetime.now() - last_update).days > 0:
-                    return calculate_strategy_performance()
-                return performance_data
-        else:
-            return calculate_strategy_performance()
-    
-    except Exception as e:
-        logger.error(f"获取策略表现失败，尝试重新计算: {str(e)}", exc_info=True)
-        return calculate_strategy_performance()
 
 def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
     """
@@ -971,7 +981,7 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
             logger.debug(f"ETF {etf_code} 数据不完整，跳过")
             continue
         
-        # 额外检查数据量
+        # 额外检查数据量 - 提高要求到30天
         if len(df) < 30:
             logger.warning(f"ETF {etf_code} 数据量不足(仅{len(df)}天)，跳过")
             continue

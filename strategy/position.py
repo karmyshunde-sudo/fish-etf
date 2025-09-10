@@ -217,8 +217,8 @@ def init_position_record() -> pd.DataFrame:
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
             try:
-                # 读取现有记录
-                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+                # 读取现有记录，确保ETF代码列为字符串
+                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
                 
                 # 确保包含所有必要列
                 required_columns = [
@@ -463,28 +463,26 @@ def record_trade(**kwargs):
             "交易日期": beijing_now.strftime("%Y-%m-%d"),
             "交易时间": beijing_now.strftime("%H:%M:%S"),
             "UTC时间": utc_now.strftime("%Y-%m-%d %H:%M:%S"),
-            "持仓类型": kwargs.get("position_type", ""),
-            "操作类型": kwargs.get("action", ""),
-            "ETF代码": kwargs.get("etf_code", ""),
-            "ETF名称": kwargs.get("etf_name", ""),
+            "持仓类型": str(kwargs.get("position_type", "")),
+            "操作类型": str(kwargs.get("action", "")),
+            "ETF代码": str(kwargs.get("etf_code", "")),
+            "ETF名称": str(kwargs.get("etf_name", "")),
             "价格": float(kwargs.get("price", 0.0)),
-            "数量": int(kwargs.get("quantity", 0)) if kwargs.get("quantity", "0").isdigit() else 0,
+            "数量": int(kwargs.get("quantity", 0)),
+            "金额": float(kwargs.get("price", 0.0)) * int(kwargs.get("quantity", 0)),
             "持仓天数": int(kwargs.get("holding_days", 0)),
             "收益率": float(kwargs.get("return_rate", 0.0)),
             "持仓成本价": float(kwargs.get("cost_price", 0.0)),
             "当前价格": float(kwargs.get("current_price", 0.0)),
             "止损位": float(kwargs.get("stop_loss", 0.0)),
             "止盈位": float(kwargs.get("take_profit", 0.0)),
-            "原因": kwargs.get("reason", ""),
-            "操作状态": kwargs.get("status", "已完成")
+            "原因": str(kwargs.get("reason", "")),
+            "操作状态": str(kwargs.get("status", "已完成"))
         }
-        
-        # 计算金额（确保数量是数值类型）
-        trade_record["金额"] = trade_record["价格"] * trade_record["数量"]
         
         # 读取现有交易记录
         if os.path.exists(TRADE_RECORD_PATH):
-            trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8")
+            trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
         else:
             columns = [
                 "交易日期", "交易时间", "UTC时间", "持仓类型", "操作类型", 
@@ -1158,8 +1156,8 @@ def calculate_strategy_score(etf_df: pd.DataFrame, position_type: str) -> int:
         logger.error(f"计算策略评分失败: {str(e)}")
         return 50  # 默认评分
 
-def update_position_record(position_type: str, etf_code: str, etf_name: str, 
-                          cost_price: float, current_price: float, 
+def update_position_record(position_type: str, etf_code: str, etf_name: str,
+                          cost_price: float, current_price: float,
                           quantity: int, action: str) -> None:
     """
     更新仓位记录
@@ -1174,23 +1172,27 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         action: 操作类型
     """
     try:
-        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
+        
+        # 确保ETF代码列是字符串类型
+        if "ETF代码" in position_df.columns:
+            position_df["ETF代码"] = position_df["ETF代码"].astype(str)
         
         # 更新指定仓位类型的数据
         mask = position_df['仓位类型'] == position_type
-        position_df.loc[mask, 'ETF代码'] = etf_code
-        position_df.loc[mask, 'ETF名称'] = etf_name
-        position_df.loc[mask, '持仓成本价'] = cost_price
+        position_df.loc[mask, 'ETF代码'] = str(etf_code)  # 确保转换为字符串
+        position_df.loc[mask, 'ETF名称'] = str(etf_name)
+        position_df.loc[mask, '持仓成本价'] = float(cost_price)
         position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
-        position_df.loc[mask, '持仓数量'] = quantity
-        position_df.loc[mask, '最新操作'] = action
+        position_df.loc[mask, '持仓数量'] = int(quantity)
+        position_df.loc[mask, '最新操作'] = str(action)
         position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 更新持仓天数
         if quantity > 0:
             # 如果有持仓，天数+1
             if position_df.loc[mask, '持仓天数'].values[0] > 0:
-                position_df.loc[mask, '持仓天数'] = position_df.loc[mask, '持仓天数'] + 1
+                position_df.loc[mask, '持仓天数'] = int(position_df.loc[mask, '持仓天数']) + 1
             else:
                 position_df.loc[mask, '持仓天数'] = 1
         else:

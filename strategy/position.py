@@ -222,29 +222,52 @@ def init_position_record() -> pd.DataFrame:
         # 确保目录存在
         os.makedirs(os.path.dirname(POSITION_RECORD_PATH), exist_ok=True)
         
+        # 定义明确的数据类型映射
+        dtype_mapping = {
+            "仓位类型": "string",
+            "ETF代码": "string",
+            "ETF名称": "string",
+            "持仓成本价": "float64",
+            "持仓日期": "string",
+            "持仓数量": "int64",
+            "最新操作": "string",
+            "操作日期": "string",
+            "持仓天数": "int64",
+            "创建时间": "string",
+            "更新时间": "string"
+        }
+        
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
             try:
-                # 读取现有记录
-                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+                # 关键修复：读取时明确指定数据类型
+                position_df = pd.read_csv(
+                    POSITION_RECORD_PATH, 
+                    encoding="utf-8",
+                    dtype=dtype_mapping
+                )
                 
-                # 定义代码期望的完整列结构
-                required_columns = [
-                    "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", 
-                    "持仓数量", "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
-                ]
+                # 确保所有列都有正确的数据类型
+                for col, dtype in dtype_mapping.items():
+                    if col in position_df.columns:
+                        if dtype == "string":
+                            position_df[col] = position_df[col].astype(str).fillna("")
+                        elif dtype == "int64":
+                            position_df[col] = pd.to_numeric(position_df[col], errors='coerce').fillna(0).astype(int)
+                        elif dtype == "float64":
+                            position_df[col] = pd.to_numeric(position_df[col], errors='coerce').fillna(0.0)
                 
-                # 检查并添加缺失的列
+                # 确保包含所有必要列
+                required_columns = list(dtype_mapping.keys())
                 for col in required_columns:
                     if col not in position_df.columns:
                         logger.warning(f"仓位记录缺少必要列: {col}，正在添加")
-                        # 根据列类型设置默认值
-                        if col in ["持仓成本价", "持仓数量", "持仓天数"]:
-                            position_df[col] = 0.0
-                        elif col in ["ETF代码", "ETF名称", "最新操作"]:
+                        if dtype_mapping[col] == "string":
                             position_df[col] = ""
-                        else:
-                            position_df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        elif dtype_mapping[col] == "int64":
+                            position_df[col] = 0
+                        elif dtype_mapping[col] == "float64":
+                            position_df[col] = 0.0
                 
                 # 确保包含稳健仓和激进仓
                 if "稳健仓" not in position_df["仓位类型"].values:
@@ -470,8 +493,8 @@ def record_trade(**kwargs):
             "ETF代码": str(kwargs.get("etf_code", "")),
             "ETF名称": str(kwargs.get("etf_name", "")),
             "价格": float(kwargs.get("price", 0.0)),
-            "数量": int(kwargs.get("quantity", 0)),
-            "金额": float(kwargs.get("price", 0.0)) * int(kwargs.get("quantity", 0)),
+            # 关键修复：将数量保持为字符串，不尝试转换为int
+            "数量": str(kwargs.get("quantity", "0")),
             "持仓天数": int(kwargs.get("holding_days", 0)),
             "收益率": float(kwargs.get("return_rate", 0.0)),
             "持仓成本价": float(kwargs.get("cost_price", 0.0)),
@@ -482,9 +505,20 @@ def record_trade(**kwargs):
             "操作状态": str(kwargs.get("status", "已完成"))
         }
         
-        # 读取现有交易记录
+        # 计算金额
+        try:
+            quantity = kwargs.get("quantity", "0")
+            if isinstance(quantity, str) and quantity.endswith("%"):
+                quantity_value = float(quantity.replace("%", "")) / 100
+            else:
+                quantity_value = float(quantity)
+            trade_record["金额"] = trade_record["价格"] * quantity_value
+        except (ValueError, TypeError):
+            trade_record["金额"] = 0.0
+        
+        # 读取现有交易记录，明确指定数据类型
         if os.path.exists(TRADE_RECORD_PATH):
-            trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
+            trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8")
         else:
             columns = [
                 "交易日期", "交易时间", "UTC时间", "持仓类型", "操作类型", 

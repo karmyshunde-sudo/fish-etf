@@ -312,7 +312,7 @@ def validate_etf_data(df: pd.DataFrame) -> bool:
         logger.warning("ETF数据为空")
         return False
     
-    # 检查必需列
+    # 检查必需列（不再包含"折溢价率"）
     required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
@@ -1626,48 +1626,3 @@ def calculate_single_position_strategy(
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
-
-# 模块初始化
-try:
-    # 确保必要的目录存在
-    Config.init_dirs()
-    
-    # 初始化日志
-    logger.info("仓位管理模块初始化完成")
-    
-    # 检查ETF列表是否过期
-    if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        warning_msg = "ETF列表已过期，请及时更新"
-        logger.warning(warning_msg)
-        
-        # 发送警告通知
-        send_wechat_message(
-            message=warning_msg,
-            message_type="error"
-        )
-    
-except Exception as e:
-    error_msg = f"仓位管理模块初始化失败: {str(e)}"
-    logger.error(error_msg, exc_info=True)
-    
-    try:
-        # 退回到基础日志配置
-        import logging
-        logging.basicConfig(
-            level="INFO",
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[logging.StreamHandler()]
-        )
-        logging.error(error_msg)
-    except Exception as basic_log_error:
-        print(f"基础日志配置失败: {str(basic_log_error)}")
-        print(error_msg)
-    
-    # 发送错误通知
-    try:
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-    except Exception as send_error:
-        logger.error(f"发送错误通知失败: {str(send_error)}", exc_info=True)

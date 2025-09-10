@@ -75,9 +75,9 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
-        # 确保日期列为datetime类型
+        # 确保日期列为字符串格式，避免混合格式问题
         if "日期" in df.columns:
-            # 先转换为字符串，再转换为datetime，避免混合格式问题
+            # 先转换为字符串，再转换为datetime，最后再转回字符串格式
             df["日期"] = pd.to_datetime(df["日期"].astype(str)).dt.strftime("%Y-%m-%d")
         
         # 按日期排序并去重
@@ -109,11 +109,18 @@ def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     
     # 列名映射字典
     column_mapping = {
-        # 日期列
+        # 日期列 - 仅将交易日期列重命名为"日期"
         'date': '日期',
         'trade_date': '日期',
         'dt': '日期',
         'date_time': '日期',
+        'trading_date': '日期',
+        
+        # 爬取时间列 - 保持原名或重命名为"爬取时间"
+        'crawl_time': '爬取时间',
+        'fetch_time': '爬取时间',
+        'scrape_time': '爬取时间',
+        'update_time': '爬取时间',
         
         # 价格列
         'open': '开盘',
@@ -181,6 +188,22 @@ def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     if '日期' not in df.columns and 'date' in df.columns:
         df = df.rename(columns={'date': '日期'})
     
+    # 如果有"爬取时间"列，确保它不被误认为是"日期"列
+    if '爬取时间' in df.columns and '日期' in df.columns:
+        # 确保"日期"列是交易日期
+        try:
+            # 尝试将"日期"列转换为datetime
+            df["日期"] = pd.to_datetime(df["日期"])
+            # 确保"爬取时间"列是字符串类型
+            df["爬取时间"] = df["爬取时间"].astype(str)
+        except:
+            # 如果"日期"列转换失败，尝试从"爬取时间"中提取
+            try:
+                # 尝试从"爬取时间"中提取交易日期
+                df["日期"] = pd.to_datetime(df["爬取时间"]).dt.strftime("%Y-%m-%d")
+            except:
+                logger.warning("无法正确解析日期列，可能数据格式有问题")
+    
     return df
 
 def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> bool:
@@ -209,18 +232,29 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
         logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，需要至少20天数据。数据文件: {file_path}")
         return False
     
+    # 确保"日期"列是字符串格式
+    if "日期" in df.columns:
+        # 转换为字符串格式
+        df["日期"] = df["日期"].astype(str)
+    
     # 检查数据连续性
     df = df.sort_values("日期")
-    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
-    max_gap = date_diff.max()
     
-    if max_gap > 7:
-        file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
-        logger.warning(f"ETF {etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}")
-    elif max_gap > 3:
-        logger.debug(f"ETF {etf_code} 数据存在间隔({max_gap}天)，但不影响核心计算")
-    else:
-        logger.debug(f"ETF {etf_code} 数据间隔正常，最大间隔{max_gap}天")
+    # 确保日期格式正确
+    try:
+        dates = pd.to_datetime(df["日期"]).dt.date
+        date_diff = (dates.diff().dt.days.fillna(0))
+        max_gap = date_diff.max()
+        
+        if max_gap > 7:
+            file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
+            logger.warning(f"ETF {etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}")
+        elif max_gap > 3:
+            logger.debug(f"ETF {etf_code} 数据存在间隔({max_gap}天)，但不影响核心计算")
+        else:
+            logger.debug(f"ETF {etf_code} 数据间隔正常，最大间隔{max_gap}天")
+    except Exception as e:
+        logger.warning(f"ETF {etf_code} 日期格式验证失败: {str(e)}")
     
     return True
 
@@ -1687,8 +1721,11 @@ def calculate_single_position_strategy(
         
         # 计算长期趋势（60日均线向上）
         in_long_term_trend = False
-        if len(ma60) >= 61 and not np.isnan(ma60.iloc[-2]):
-            in_long_term_trend = current_ma60 > ma60.iloc[-2]
+        if len(ma60) >= 61:
+            try:
+                in_long_term_trend = current_ma60 > ma60.iloc[-2]
+            except:
+                in_long_term_trend = False
         
         # 计算短期趋势（5日>10日>20日）
         in_short_term_trend = current_ma5 > current_ma10 > current_ma20
@@ -1715,8 +1752,11 @@ def calculate_single_position_strategy(
         # 5. 突破信号确认
         is_breakout = False
         if len(etf_df) >= 21:
-            max_20d = etf_df["收盘"].rolling(20).max().iloc[-2]
-            is_breakout = (current_price > max_20d) and volume_ok
+            try:
+                max_20d = etf_df["收盘"].rolling(20).max().iloc[-2]
+                is_breakout = (current_price > max_20d) and volume_ok
+            except:
+                is_breakout = False
         
         # 6. 超卖信号确认
         is_oversold = False

@@ -232,70 +232,21 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         )
         
         # ========== 以下是关键修改 ==========
-        # 根据实际返回的列名进行映射
-        expected_columns = {
-            "日期": "date",
-            "股票代码": "symbol",
-            "开盘": "open",
-            "收盘": "close",
-            "最高": "high",
-            "最低": "low",
-            "成交量": "volume",
-            "成交额": "amount",
-            "振幅": "amplitude",
-            "涨跌幅": "change_pct",
-            "涨跌额": "change_amount",
-            "换手率": "turnover_rate"
-        }
-        
-        # 检查实际返回的列名
-        actual_columns = df.columns.tolist()
-        logger.debug(f"股票 {full_code} 返回的列名: {actual_columns}")
-        
-        # 根据实际列名进行映射
-        column_mapping = {}
-        for expected_col, internal_col in expected_columns.items():
-            for actual_col in actual_columns:
-                if expected_col in actual_col or actual_col in expected_col:
-                    column_mapping[actual_col] = internal_col
-                    break
-        
-        # 如果没有找到匹配的列名，使用默认映射
-        if not column_mapping:
-            logger.warning(f"股票 {full_code} 返回的列名与预期不符，尝试使用默认映射")
-            column_mapping = {
-                "日期": "date",
-                "股票代码": "symbol",
-                "开盘": "open",
-                "收收": "close",  # 修正"收盘"可能被写为"收收"的问题
-                "最高": "high",
-                "最低": "low",
-                "成交量": "volume",
-                "成交额": "amount",
-                "振幅": "amplitude",
-                "涨跌幅": "change_pct",
-                "涨跌额": "change_amount",
-                "换手率": "turnover_rate"
-            }
-        
-        # 重命名列
-        df = df.rename(columns=column_mapping)
-        
-        # 确保必要的列存在
-        required_columns = ["date", "open", "close", "high", "low", "volume"]
-        if not all(col in df.columns for col in required_columns):
-            logger.warning(f"股票 {full_code} 数据缺少必要列，返回空DataFrame")
+        # 直接使用AkShare返回的列名，不做任何映射
+        # 根据实际返回的列名进行处理
+        if df.empty:
+            logger.warning(f"获取股票 {full_code} 数据为空")
             return pd.DataFrame()
         
-        # 标准化列名
-        df = df.rename(columns={
-            "date": "日期",
-            "open": "开盘",
-            "close": "收盘",
-            "high": "最高",
-            "low": "最低",
-            "volume": "成交量"
-        })
+        # 确保列名正确
+        expected_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
+                           "振幅", "涨跌幅", "涨跌额", "换手率"]
+        
+        # 检查是否有必要的列
+        missing_columns = [col for col in expected_columns if col not in df.columns]
+        if missing_columns:
+            logger.warning(f"股票 {full_code} 数据缺少必要列: {missing_columns}")
+            return pd.DataFrame()
         
         # 确保日期列是datetime类型
         if "日期" in df.columns:

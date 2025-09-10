@@ -874,7 +874,7 @@ def get_strategy_performance() -> Dict[str, float]:
 
 def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
     """
-    获取评分前N的ETF列表（内部实现，不依赖etf_scoring模块）
+    获取评分前N的ETF列表（使用已加载的ETF列表）
     
     Args:
         top_n: 获取前N名
@@ -883,16 +883,15 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         pd.DataFrame: 评分前N的ETF列表
     """
     try:
-        # 获取ETF列表文件
-        etf_list_path = os.path.join(Config.DATA_DIR, "etf_list.csv")
+        # 直接使用已加载的ETF列表（避免重复读取文件）
+        from data_crawler.etf_list_manager import load_all_etf_list
+        logger.info("正在从内存中获取ETF列表...")
+        etf_list = load_all_etf_list()
         
-        # 检查文件是否存在
-        if not os.path.exists(etf_list_path):
-            logger.warning("ETF列表文件不存在，无法获取评分前N的ETF")
+        # 检查ETF列表是否有效
+        if etf_list.empty:
+            logger.error("ETF列表为空，无法获取评分前N的ETF")
             return pd.DataFrame()
-        
-        # 读取ETF列表
-        etf_list = pd.read_csv(etf_list_path, encoding="utf-8")
         
         # 确保包含必要列
         required_columns = ["ETF代码", "ETF名称", "基金规模"]
@@ -904,7 +903,7 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         # 按基金规模筛选（简化处理）
         etf_list = etf_list[etf_list["基金规模"] >= 10.0]  # 仅保留规模大于10亿元的ETF
         
-        # 为每只ETF计算评分（简化实现）
+        # 为每只ETF计算评分
         etf_list["评分"] = 0.0
         for i, row in etf_list.iterrows():
             etf_code = str(row["ETF代码"])
@@ -913,7 +912,7 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
             if not internal_validate_etf_data(df):
                 continue
                 
-            # 计算基础评分（简化实现）
+            # 计算基础评分
             ma_bullish, _ = calculate_ma_signal(df)
             volume_ok = calculate_volume_signal(df)
             adx = calculate_adx(df, 14)
@@ -934,6 +933,7 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         etf_list = etf_list.sort_values("评分", ascending=False)
         
         # 返回前top_n只ETF
+        logger.info(f"成功获取评分前{top_n}的ETF列表，共 {len(etf_list)} 条记录")
         return etf_list.head(top_n)
     
     except Exception as e:

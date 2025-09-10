@@ -1,5 +1,4 @@
 name: ETF仓位折溢套利
-
 on:
   schedule:
     - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
@@ -31,24 +30,21 @@ on:
         required: false
         type: string
         default: ''
-
 jobs:
   # ========================
   # 定时任务 - 每个任务都有独立Job
   # ========================
-
   # 日线数据爬取（定时）
   crawl-etf-daily-schedule:
     name: 日线数据爬取（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 14 * * 1-5'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '14 * * 1-5')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -56,33 +52,27 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
-      
       - name: 检查交易日
         id: check_trading_day
         run: |
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
           echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
       - name: 跳过非交易日
         if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行日线数据爬取
         if: env.skip_execution != 'true'
         env:
@@ -94,23 +84,19 @@ jobs:
           echo "正在执行: 日线数据爬取"
           echo "日志文件: $LOG_FILE"
           python main.py crawl_etf_daily 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
           git commit -m "自动更新ETF日线数据 [定时]" && git push origin main
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -122,14 +108,13 @@ jobs:
   calculate-arbitrage-schedule:
     name: 套利计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '*/5 2-7 * * 1-5'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '2-7 * * 1-5')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -137,21 +122,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{arbitrage,flags,logs} && chmod -R 777 data/
-      
       - name: 执行套利计算
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -162,16 +143,13 @@ jobs:
           echo "正在执行: 套利计算"
           echo "日志文件: $LOG_FILE"
           python main.py calculate_arbitrage 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
@@ -179,7 +157,6 @@ jobs:
           git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
           [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
           git commit -m "自动更新套利数据 [定时]" && git push origin main
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -191,14 +168,13 @@ jobs:
   calculate-position-schedule:
     name: 仓位策略计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '30 5 * * 1-5'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '30 5 * * 1-5')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -206,32 +182,26 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 检查推送标志
         id: check_flags
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "position_pushed=$( [ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
-      
       - name: 跳过已推送任务
         if: steps.check_flags.outputs.position_pushed == 'true'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行仓位策略计算
         if: env.skip_execution != 'true'
         env:
@@ -243,16 +213,13 @@ jobs:
           echo "正在执行: 仓位策略计算"
           echo "日志文件: $LOG_FILE"
           python main.py calculate_position 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
@@ -261,7 +228,6 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
           git commit -m "仓位策略已推送标志 [定时]" && git push origin main
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -273,14 +239,13 @@ jobs:
   update-etf-list-schedule:
     name: ETF列表更新（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 1 * * 0'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '1 * * 0')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -288,21 +253,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 执行ETF列表更新
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -313,23 +274,19 @@ jobs:
           echo "正在执行: ETF列表更新"
           echo "日志文件: $LOG_FILE"
           python main.py update_etf_list 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/all_etfs.csv && [ -n "$(git diff --cached --name-only data/all_etfs.csv)" ] && 
           git commit -m "自动更新ETF列表 [定时]" && git push origin main
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -341,14 +298,13 @@ jobs:
   etf-yesno-schedule:
     name: ETF Yes/No 策略（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * *'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '9 * * *')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -356,21 +312,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 执行ETF Yes/No 策略
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
@@ -381,16 +333,13 @@ jobs:
           echo "正在执行: ETF Yes/No 策略"
           echo "日志文件: $LOG_FILE"
           python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -402,14 +351,13 @@ jobs:
   stock-fourty-schedule:
     name: 个股趋势策略 (TickTen) - 定时
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 10 * * 1-5'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '10 * * 1-5')
     permissions:
       contents: write
     steps:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -417,43 +365,35 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 检查交易日
         id: check_trading_day
         run: |
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
-      
       - name: 检查推送标志
         id: check_flags
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "stock_tickten_pushed=$( [ -f "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
-      
       - name: 跳过非交易日
         if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 跳过已推送任务
         if: steps.check_flags.outputs.stock_tickten_pushed == 'true'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行个股策略
         if: env.skip_execution != 'true'
         env:
@@ -464,7 +404,6 @@ jobs:
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
           echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
-          
           # 执行策略
           if [ -f "stock_tickten.py" ]; then
             echo "找到策略文件: stock_tickten.py"
@@ -473,14 +412,12 @@ jobs:
             echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
             exit 1
           fi
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
@@ -489,7 +426,6 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
           git commit -m "个股趋势策略已推送标志 [定时]" && git push origin main
-      
       - name: 发送策略通知
         if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
         run: |
@@ -502,7 +438,6 @@ jobs:
   # ========================
   # 手动任务 - 每个任务都有独立Job
   # ========================
-
   # ETF列表更新（手动）
   update-etf-list-manual:
     name: ETF列表更新
@@ -514,7 +449,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -522,21 +456,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 执行ETF列表更新
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -547,30 +477,25 @@ jobs:
           echo "正在执行: ETF列表更新"
           echo "日志文件: $LOG_FILE"
           python main.py update_etf_list 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/all_etfs.csv && [ -n "$(git diff --cached --name-only data/all_etfs.csv)" ] && 
           git commit -m "手动更新ETF列表" && git push origin main
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF列表更新】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -589,7 +514,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -597,21 +521,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 执行ETF Yes/No 策略
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
@@ -622,23 +542,19 @@ jobs:
           echo "正在执行: ETF Yes/No 策略"
           echo "日志文件: $LOG_FILE"
           python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF Yes/No 策略】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -657,7 +573,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -665,21 +580,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 执行个股策略
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -689,7 +600,6 @@ jobs:
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
           echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
-          
           # 执行策略（stock_tickten.py在根目录）
           if [ -f "stock_tickten.py" ]; then
             echo "找到策略文件: stock_tickten.py"
@@ -698,14 +608,12 @@ jobs:
             echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
             exit 1
           fi
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      
       - name: 发送策略通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -726,7 +634,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -734,33 +641,27 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
-      
       - name: 检查交易日
         id: check_trading_day
         run: |
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
           echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
       - name: 跳过非交易日
         if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行日线数据爬取
         if: env.skip_execution != 'true'
         env:
@@ -772,30 +673,25 @@ jobs:
           echo "正在执行: 日线数据爬取"
           echo "日志文件: $LOG_FILE"
           python main.py crawl_etf_daily 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
           git commit -m "手动更新ETF日线数据" && git push origin main
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【日线数据爬取】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -814,7 +710,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -822,21 +717,17 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{arbitrage,flags,logs} && chmod -R 777 data/
-      
       - name: 执行套利计算
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -847,16 +738,13 @@ jobs:
           echo "正在执行: 套利计算"
           echo "日志文件: $LOG_FILE"
           python main.py calculate_arbitrage 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
@@ -864,14 +752,12 @@ jobs:
           git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
           [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
           git commit -m "手动更新套利数据" && git push origin main
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【套利计算】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -890,7 +776,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -898,32 +783,26 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
-      
       - name: 检查推送标志
         id: check_flags
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "position_pushed=$( [ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
-      
       - name: 跳过已推送任务
         if: steps.check_flags.outputs.position_pushed == 'true'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行仓位策略计算
         if: env.skip_execution != 'true'
         env:
@@ -935,16 +814,13 @@ jobs:
           echo "正在执行: 仓位策略计算"
           echo "日志文件: $LOG_FILE"
           python main.py calculate_position 2>&1 | tee "$LOG_FILE"
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
@@ -953,14 +829,12 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
           git commit -m "仓位策略已推送标志 [手动]" && git push origin main
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【仓位策略计算】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
-      
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -971,7 +845,6 @@ jobs:
   # ========================
   # 清理任务 - 每个任务都有独立Job
   # ========================
-
   # 手动清理日线数据
   manual-clean-daily-data:
     name: 手动清理日线数据
@@ -983,7 +856,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -991,17 +863,14 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 清理日线数据
         run: |
           echo "删除 data/etf_daily/*.csv"
           rm -rf data/etf_daily/*.csv
-      
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/etf_daily/ && git commit -m "【手动清理】清除ETF日线数据文件" && git push origin main
-      
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -1020,7 +889,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -1028,17 +896,14 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 清理套利数据
         run: |
           echo "删除 data/arbitrage/*.csv"
           rm -rf data/arbitrage/*.csv
-      
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/arbitrage/ && git commit -m "【手动清理】清除套利数据文件" && git push origin main
-      
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -1057,7 +922,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -1065,17 +929,14 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 清理交易记录
         run: |
           echo "删除 data/trade_records.csv"
           rm -f data/trade_records.csv
-      
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/trade_records.csv && git commit -m "【手动清理】清除交易记录文件" && git push origin main
-      
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -1094,7 +955,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -1102,17 +962,14 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 清理纯数字CSV
         run: |
           echo "删除纯数字CSV文件"
           find data/ -type f -name '[0-9]*.csv' -delete
-      
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add -u data/ && git commit -m "【手动清理】清除纯数字CSV文件" && git push origin main
-      
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -1131,7 +988,6 @@ jobs:
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -1139,27 +995,22 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-      
       - name: 安装依赖包
         run: |
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
-      
       - name: 获取AkShare信息
         run: |
           INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
           python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
-      
       - name: 提交信息文件
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main
-      
       - name: 发送完成通知
         if: env.WECOM_WEBHOOK
         run: |

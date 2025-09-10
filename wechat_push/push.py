@@ -413,7 +413,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         
         messages = []
         
-        # 第1页：封面页（不包含风险提示）
+        # 第1页：封面页
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格低于净值，可以考虑买入】\n\n"
@@ -432,16 +432,13 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            # 第2页开始使用"这是第2条消息"的格式
-            page_num = page + 2
-            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page_num}条消息\n"
+            page_num = page + 1  # 包括封面页在内的总页数
+            content = f"【分页 {page_num}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
-                # 先提取ETF代码，避免在日志前缀中使用未定义变量
-                etf_code = _extract_scalar_value(row.get('ETF代码', ''), log_prefix=f"ETF {row.get('ETF代码', '未知')} 代码: ")
+                etf_code = str(row.get('ETF代码', '未知'))
+                etf_name = str(row.get('ETF名称', '未知'))
                 
-                # 使用辅助函数安全提取标量值
-                etf_name = _extract_scalar_value(row.get('ETF名称', ''), log_prefix=f"ETF {etf_code} 名称: ")
                 premium_discount = _extract_scalar_value(row.get('折溢价率', 0.0), log_prefix=f"ETF {etf_code} 折溢价率: ")
                 market_price = _extract_scalar_value(row.get('市场价格', 0.0), log_prefix=f"ETF {etf_code} 市场价格: ")
                 iopv = _extract_scalar_value(row.get('IOPV', 0.0), log_prefix=f"ETF {etf_code} IOPV: ")
@@ -451,17 +448,15 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.1f}】"
+                    f"   ⭐ 综合评分: {score:.1f}\n"
                     f"   💹 折价率: {abs(premium_discount):.2f}%\n"
-                    f"   📈 市场价格:【 {market_price:.3f}元】"
-                    f"   📊 IOPV:【 {iopv:.3f}元】\n"
-                    f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
-                    f"   💰 日均成交额:【 {avg_volume:.2f}万元】\n"
-                    
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
                 )
             
-            # 整合消息
-            messages.append(page1 + content)
+            messages.append(content)
         
         return messages
     
@@ -495,22 +490,9 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         
-        # 生成GitHub日志链接
-        log_url = get_github_actions_url()
-        
-        # 页脚模板
-        footer = (
-            "\n==================\n"
-            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "==================\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
-            "📊 环境：生产"
-        )
-        
         messages = []
         
-        # 第1页：封面页（不包含风险提示）
+        # 第1页：封面页
         if total_pages > 0:
             page1 = (
                 "【以下ETF市场价格高于净值，可以考虑卖出】\n\n"
@@ -521,7 +503,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 f"🎯 溢价阈值：溢价率超过{Config.PREMIUM_THRESHOLD*100:.2f}%\n"
                 f"⭐ 综合评分：≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}"
             )
-            messages.append(page1 + footer)
+            messages.append(page1)
         
         # 后续页：ETF详情（每页5只ETF）
         for page in range(total_pages):
@@ -529,16 +511,13 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             end_idx = min(start_idx + ETFS_PER_PAGE, total_etfs)
             
             # 生成当前页的ETF详情
-            # 第2页开始使用"这是第2条消息"的格式
-            page_num = page + 2
-            content = f"💓共{total_etfs}只ETF，分{total_pages}条消息推送，这是第{page_num}条消息\n"
+            page_num = page + 1  # 包括封面页在内的总页数
+            content = f"【分页 {page_num}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
-                # 先提取ETF代码，避免在日志前缀中使用未定义变量
-                etf_code = _extract_scalar_value(row.get('ETF代码', ''), log_prefix=f"ETF {row.get('ETF代码', '未知')} 代码: ")
+                etf_code = str(row.get('ETF代码', '未知'))
+                etf_name = str(row.get('ETF名称', '未知'))
                 
-                # 使用辅助函数安全提取标量值
-                etf_name = _extract_scalar_value(row.get('ETF名称', ''), log_prefix=f"ETF {etf_code} 名称: ")
                 premium_discount = _extract_scalar_value(row.get('折溢价率', 0.0), log_prefix=f"ETF {etf_code} 折溢价率: ")
                 market_price = _extract_scalar_value(row.get('市场价格', 0.0), log_prefix=f"ETF {etf_code} 市场价格: ")
                 iopv = _extract_scalar_value(row.get('IOPV', 0.0), log_prefix=f"ETF {etf_code} IOPV: ")
@@ -548,17 +527,14 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分:【 {score:.1f}】"
-                    f"   💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
-                    f"   📈 市场价格:【 {market_price:.3f}元】"
-                    f"   📊 IOPV:【 {iopv:.3f}元】\n"
-                    f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
-                    f"   💰 日均成交额:【 {avg_volume:.2f}万元】\n"
-                    
+                    f"   ⭐ 综合评分: {score:.1f}\n"
+                    f"   💹 溢价率: {abs(premium_discount):.2f}%\n"
+                    f"   📈 市场价格: {market_price:.3f}元\n"
+                    f"   📊 IOPV: {iopv:.3f}元\n"
+                    f"   🏦 基金规模: {fund_size:.2f}亿元\n"
+                    f"   💰 日均成交额: {avg_volume:.2f}万元\n"
                 )
             
-            # 添加页脚
-            content += footer
             messages.append(content)
         
         return messages

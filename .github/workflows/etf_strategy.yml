@@ -49,6 +49,12 @@ jobs:
       pull-requests: write
     
     steps:
+      - name: 显示任务信息
+        run: |
+          echo "正在执行通用任务流程"
+          echo "事件类型: ${{ github.event_name }}"
+          echo "触发任务: ${{ github.event.inputs.task || '定时任务' }}"
+      
       - name: 验证时区设置
         run: |
           echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
@@ -136,8 +142,50 @@ jobs:
           LOG_FILE="data/logs/task_${TASK}_${BEIJING_TIME}.log"
           echo "日志文件: $LOG_FILE"
           
-          python main.py $TASK 2>&1 | tee "$LOG_FILE"
-          echo "task_status=${PIPESTATUS[0] == 0 && 'success' || 'failed'}" >> $GITHUB_OUTPUT
+          # 根据任务类型执行对应操作
+          case "$TASK" in
+            crawl_etf_daily)
+              echo "正在执行: 日线数据爬取"
+              python main.py $TASK 2>&1 | tee "$LOG_FILE"
+              ;;
+            update_etf_list)
+              echo "正在执行: ETF列表更新"
+              python main.py $TASK 2>&1 | tee "$LOG_FILE"
+              ;;
+            calculate_arbitrage)
+              echo "正在执行: 套利计算"
+              python main.py $TASK 2>&1 | tee "$LOG_FILE"
+              ;;
+            calculate_position)
+              echo "正在执行: 仓位策略计算"
+              python main.py $TASK 2>&1 | tee "$LOG_FILE"
+              ;;
+            etf_yesno)
+              echo "正在执行: ETF Yes/No 策略"
+              python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
+              ;;
+            stock_fourty)
+              echo "正在执行: 个股趋势策略 (TickTen)"
+              if [ -f "strategy/stock_tickten.py" ]; then
+                python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
+              else
+                echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "未知任务: $TASK"
+              exit 1
+              ;;
+          esac
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+          
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
       - name: 拉取最新代码
@@ -200,6 +248,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 手动清理日线数据"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -208,6 +258,7 @@ jobs:
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理日线数据
         run: |
+          echo "删除 data/etf_daily/*.csv"
           rm -rf data/etf_daily/*.csv
       - name: 提交清理变更
         run: |
@@ -227,6 +278,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 手动清理套利数据"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -235,6 +288,7 @@ jobs:
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理套利数据
         run: |
+          echo "删除 data/arbitrage/*.csv"
           rm -rf data/arbitrage/*.csv
       - name: 提交清理变更
         run: |
@@ -254,6 +308,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 手动清理交易记录"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -262,6 +318,7 @@ jobs:
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理交易记录
         run: |
+          echo "删除 data/trade_records.csv"
           rm -f data/trade_records.csv
       - name: 提交清理变更
         run: |
@@ -281,6 +338,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 手动清理纯数字CSV"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -289,6 +348,7 @@ jobs:
           pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理纯数字CSV
         run: |
+          echo "删除纯数字CSV文件"
           find data/ -type f -name '[0-9]*.csv' -delete
       - name: 提交清理变更
         run: |
@@ -308,6 +368,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 显示AkShare信息"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -339,6 +401,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: ETF Yes/No 策略"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -352,16 +416,15 @@ jobs:
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
+          echo "日志文件: $LOG_FILE"
           python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
-          echo "task_status=${PIPESTATUS[0] == 0 && 'success' || 'failed'}" >> $GITHUB_OUTPUT
-      - name: 发送策略通知
-        if: env.WECOM_WEBHOOK
-        run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
-          EMOJI=${STATUS == 'success' && '✅' || '❌'}
-          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【ETF Yes/No策略】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
 
   stock_fourty:
     name: 个股趋势策略 (TickTen)
@@ -370,6 +433,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 个股趋势策略 (TickTen)"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -383,16 +448,22 @@ jobs:
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
-          python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
-          echo "task_status=${PIPESTATUS[0] == 0 && 'success' || 'failed'}" >> $GITHUB_OUTPUT
-      - name: 发送策略通知
-        if: env.WECOM_WEBHOOK
-        run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
-          EMOJI=${STATUS == 'success' && '✅' || '❌'}
-          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+          
+          # 执行策略
+          if [ -f "strategy/stock_tickten.py" ]; then
+            echo "找到策略文件: strategy/stock_tickten.py"
+            python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
+          else
+            echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
+            exit 1
+          fi
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
 
   schedule-stock_fourty:
     name: 个股趋势策略 (TickTen) - 定时
@@ -401,6 +472,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 显示任务信息
+        run: echo "正在执行: 个股趋势策略 (TickTen) - 定时"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -439,8 +512,22 @@ jobs:
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
-          python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
-          echo "task_status=${PIPESTATUS[0] == 0 && 'success' || 'failed'}" >> $GITHUB_OUTPUT
+          
+          # 执行策略
+          if [ -f "strategy/stock_tickten.py" ]; then
+            echo "找到策略文件: strategy/stock_tickten.py"
+            python strategy/stock_tickten.py 2>&1 | tee "$LOG_FILE"
+          else
+            echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
+            exit 1
+          fi
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
       
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'

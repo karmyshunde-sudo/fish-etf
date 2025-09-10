@@ -2,12 +2,12 @@ name: ETF仓位折溢套利
 
 on:
   schedule:
-    - cron: '0 14 * * 1-5'     # UTC 14:00 = 北京时间 22:00 (日线爬取)
-    - cron: '*/5 2-7 * * 1-5'  # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
-    - cron: '30 5 * * 1-5'     # UTC 05:30 = 北京时间 13:30 (仓位策略)
-    - cron: '0 1 * * 0'        # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
-    - cron: '0 9 * * *'        # UTC 09:00 = 北京时间 17:00 (ETF Yes/No)
-    - cron: '0 10 * * 1-5'     # UTC 10:00 = 北京时间 18:00 (个股趋势策略)
+    - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
+    - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
+    - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (仓位策略)
+    - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
+    - cron: '0 9 * * *'       # UTC 09:00 = 北京时间 17:00 (ETF Yes/No)
+    - cron: '0 10 * * 1-5'    # UTC 10:00 = 北京时间 18:00 (个股趋势策略)
   workflow_dispatch:
     inputs:
       task:
@@ -68,7 +68,8 @@ jobs:
           cache: 'pip'
       
       - name: 安装依赖包
-        run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       
       - name: 确定任务类型
         id: set_task
@@ -93,7 +94,8 @@ jobs:
           echo "执行任务: $TASK (触发方式: $TRIGGER_TYPE)"
       
       - name: 创建数据目录
-        run: mkdir -p data/{etf_daily,flags,logs,arbitrage} && chmod -R 777 data/
+        run: |
+          mkdir -p data/{etf_daily,flags,logs,arbitrage} && chmod -R 777 data/
       
       - name: 检查交易日（日线爬取）
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule'
@@ -115,11 +117,13 @@ jobs:
       
       - name: 跳过非交易日
         if: env.TASK == 'crawl_etf_daily' && env.TRIGGER_TYPE == 'schedule' && steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
-        run: echo "skip_execution=true" >> $GITHUB_ENV
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 跳过已推送任务
         if: env.TRIGGER_TYPE == 'schedule' && steps.check_flags.outputs.position_pushed == 'true' && env.TASK == 'calculate_position'
-        run: echo "skip_execution=true" >> $GITHUB_ENV
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 执行任务
         id: execute_task
@@ -138,7 +142,9 @@ jobs:
       
       - name: 拉取最新代码
         if: env.skip_execution != 'true'
-        run: git pull origin main --rebase --autostash || echo "拉取代码失败"
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git pull origin main --rebase --autostash || echo "拉取代码失败"
       
       - name: 提交数据变更
         if: >-
@@ -196,9 +202,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理日线数据
-        run: rm -rf data/etf_daily/*.csv
+        run: |
+          rm -rf data/etf_daily/*.csv
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
@@ -219,9 +227,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理套利数据
-        run: rm -rf data/arbitrage/*.csv
+        run: |
+          rm -rf data/arbitrage/*.csv
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
@@ -242,9 +252,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理交易记录
-        run: rm -f data/trade_records.csv
+        run: |
+          rm -f data/trade_records.csv
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
@@ -265,9 +277,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 清理纯数字CSV
-        run: find data/ -type f -name '[0-9]*.csv' -delete
+        run: |
+          find data/ -type f -name '[0-9]*.csv' -delete
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
@@ -288,7 +302,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 获取AkShare信息
         run: |
           INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
@@ -316,7 +331,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 执行ETF策略
         env: {WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}}
         run: |
@@ -343,7 +359,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 执行个股策略
         env: {WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}}
         run: |
@@ -370,7 +387,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       
       - name: 检查交易日
         id: check_trading_day
@@ -386,11 +404,13 @@ jobs:
       
       - name: 跳过非交易日
         if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
-        run: echo "skip_execution=true" >> $GITHUB_ENV
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 跳过已推送任务
         if: steps.check_flags.outputs.stock_tickten_pushed == 'true'
-        run: echo "skip_execution=true" >> $GITHUB_ENV
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 执行个股策略
         id: execute_task

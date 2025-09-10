@@ -38,8 +38,7 @@ jobs:
       (github.event_name == 'schedule') || 
       (github.event_name == 'workflow_dispatch' && 
        github.event.inputs.task != '' &&
-       !contains(fromJSON('["clean_daily_data", "clean_arbitrage_data", "clean_trade_records", 
-                          "clean_numeric_csv", "etf_yesno", "show_akshare_info", "stock_fourty"]'), 
+       !contains(fromJSON('["clean_daily_data", "clean_arbitrage_data", "clean_trade_records", "clean_numeric_csv", "show_akshare_info", "stock_fourty"]'), 
                 github.event.inputs.task))
     runs-on: ubuntu-latest
     timeout-minutes: 1000

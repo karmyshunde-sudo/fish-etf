@@ -786,84 +786,27 @@ def _format_dataframe_as_string(df: pd.DataFrame) -> str:
         if df.empty:
             return "没有找到符合条件的数据"
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
         # 检查是否包含ETF特定列
         has_etf_info = "ETF代码" in df.columns and "ETF名称" in df.columns
         has_premium_discount = "折溢价率" in df.columns
         
-        # 生成消息头
-        if has_etf_info:
-            if has_premium_discount:
-                # 判断是折价还是溢价
-                if df["折溢价率"].min() < 0:
-                    message = "【以下ETF市场价格低于净值】\n\n"
-                else:
-                    message = "【以下ETF市场价格高于净值】\n\n"
+        if has_etf_info and has_premium_discount:
+            # 直接调用已定义的专用格式化函数，而不是重复定义格式
+            if df["折溢价率"].min() < 0:
+                # 使用已定义的折扣消息格式化函数
+                messages = _format_discount_message(df)
+                # 只返回第一部分（标题+页脚），因为其他部分是分页内容
+                return messages[0] if messages else "格式化消息失败"
             else:
-                message = f"找到 {len(df)} 只ETF：\n\n"
-        else:
-            message = f"找到 {len(df)} 条数据：\n\n"
+                # 使用已定义的溢价消息格式化函数
+                messages = _format_premium_message(df)
+                # 只返回第一部分（标题+页脚），因为其他部分是分页内容
+                return messages[0] if messages else "格式化消息失败"
         
-        # 格式化每行数据
-        for i, (_, row) in enumerate(df.iterrows(), 1):
-            if has_etf_info:
-                etf_code = row["ETF代码"]
-                etf_name = row["ETF名称"]
-                message += f"{i}. {etf_name} ({etf_code})\n"
-                
-                # 添加折溢价信息
-                if has_premium_discount:
-                    premium_discount = row["折溢价率"]
-                    if premium_discount < 0:
-                        message += f"   💹 折价率: {abs(premium_discount):.2f}%\n"
-                    else:
-                        message += f"   💹 溢价率: {premium_discount:.2f}%\n"
-                
-                # 添加其他信息
-                if "市场价格" in row:
-                    message += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
-                if "IOPV" in row:
-                    message += f"   📊 IOPV: {row['IOPV']:.4f}元\n"
-                if "基金规模" in row:
-                    message += f"   🏦 基金规模: {row['基金规模']:.2f}亿元\n"
-                if "日均成交额" in row:
-                    message += f"   💰 日均成交额: {row['日均成交额']:.2f}万元\n"
-                if "综合评分" in row:
-                    message += f"   ⭐ 综合评分: {row['综合评分']:.1f}\n"
-                
-                message += "\n"
-            else:
-                # 通用格式（不应该在ETF场景中使用）
-                message += f"数据条目 {i}:\n"
-                for col, value in row.items():
-                    # 尝试格式化数值
-                    if isinstance(value, (int, float)) and not isinstance(value, bool):
-                        if col == "折溢价率":
-                            message += f"   - {col}: {value:.2%}\n"
-                        elif col in ["市场价格", "IOPV"]:
-                            message += f"   - {col}: {value:.4f}\n"
-                        else:
-                            message += f"   - {col}: {value:.2f}\n"
-                    else:
-                        message += f"   - {col}: {value}\n"
-                message += "\n"
-        
-        # 添加页脚
-        utc_now, beijing_now = get_current_times()
-        log_url = get_github_actions_url()
-        
-        footer = (
-            "\n==================\n"
-            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "==================\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
-            "📊 环境：生产"
-        )
-        
-        return message.strip() + footer
+        # 对于非ETF场景，可以调用通用格式化函数
+        # 但根据项目需求，这种情况不应该发生
+        logger.warning("尝试格式化非ETF数据，这可能表示代码逻辑有误")
+        return f"找到 {len(df)} 条数据，但不是ETF数据格式"
     
     except Exception as e:
         logger.error(f"格式化DataFrame为字符串失败: {str(e)}", exc_info=True)

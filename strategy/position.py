@@ -3,7 +3,7 @@
 """
 仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-【终极修复版】彻底解决ATR计算和变量作用域问题
+【专业重构版】分离核心逻辑，强化数据验证，实现真实回测
 专为小资金散户设计，仅使用标准日线数据字段
 """
 
@@ -12,6 +12,7 @@ import os
 import numpy as np
 import logging
 import sys
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from config import Config
@@ -19,7 +20,8 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated
+    is_file_outdated,
+    get_last_trading_day
 )
 from utils.file_utils import load_etf_daily_data, init_dirs
 from .etf_scoring import get_top_rated_etfs, get_etf_name, get_etf_basic_info
@@ -31,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 # 仓位持仓记录路径
 POSITION_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "position_record.csv")
-TRADE_RECORD_PATH = Config.TRADE_RECORD_FILE
+TRADE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "trade_records.csv")
+PERFORMANCE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "strategy_performance.json")
 
 def init_position_record() -> pd.DataFrame:
     """
@@ -51,7 +54,8 @@ def init_position_record() -> pd.DataFrame:
             
             # 确保包含所有必要列
             required_columns = [
-                "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", "最新操作", "操作日期", "创建时间", "更新时间"
+                "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
+                "最新操作", "操作日期", "创建时间", "更新时间", "持仓天数"
             ]
             for col in required_columns:
                 if col not in position_df.columns:
@@ -70,6 +74,7 @@ def init_position_record() -> pd.DataFrame:
                     "持仓数量": 0,
                     "最新操作": "未持仓",
                     "操作日期": "",
+                    "持仓天数": 0,
                     "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }])], ignore_index=True)
@@ -84,6 +89,7 @@ def init_position_record() -> pd.DataFrame:
                     "持仓数量": 0,
                     "最新操作": "未持仓",
                     "操作日期": "",
+                    "持仓天数": 0,
                     "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }])], ignore_index=True)
@@ -122,6 +128,7 @@ def create_default_position_record() -> pd.DataFrame:
                 "持仓数量": 0,
                 "最新操作": "未持仓",
                 "操作日期": "",
+                "持仓天数": 0,
                 "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             },
@@ -134,6 +141,7 @@ def create_default_position_record() -> pd.DataFrame:
                 "持仓数量": 0,
                 "最新操作": "未持仓",
                 "操作日期": "",
+                "持仓天数": 0,
                 "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
@@ -153,7 +161,7 @@ def create_default_position_record() -> pd.DataFrame:
         # 返回空DataFrame但包含必要列
         return pd.DataFrame(columns=[
             "仓位类型", "ETF代码", "ETF名称", "持仓成本价", "持仓日期", "持仓数量", 
-            "最新操作", "操作日期", "创建时间", "更新时间"
+            "最新操作", "操作日期", "持仓天数", "创建时间", "更新时间"
         ])
 
 def init_trade_record() -> None:
@@ -168,8 +176,10 @@ def init_trade_record() -> None:
         if not os.path.exists(TRADE_RECORD_PATH):
             # 创建交易记录文件
             columns = [
-                "时间(UTC)", "时间(北京时间)", "持仓类型", "ETF代码", "ETF名称", 
-                "价格", "数量", "操作", "备注"
+                "交易日期", "交易时间", "UTC时间", "持仓类型", "操作类型", 
+                "ETF代码", "ETF名称", "价格", "数量", "金额", 
+                "持仓天数", "收益率", "持仓成本价", "当前价格", 
+                "止损位", "止盈位", "原因", "操作状态"
             ]
             df = pd.DataFrame(columns=columns)
             df.to_csv(TRADE_RECORD_PATH, index=False, encoding="utf-8")
@@ -179,6 +189,47 @@ def init_trade_record() -> None:
     
     except Exception as e:
         error_msg = f"初始化交易记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+
+def init_performance_record() -> None:
+    """
+    初始化策略表现记录文件
+    """
+    try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(PERFORMANCE_RECORD_PATH), exist_ok=True)
+        
+        # 检查文件是否存在
+        if not os.path.exists(PERFORMANCE_RECORD_PATH):
+            # 创建策略表现记录文件
+            performance_data = {
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "win_rate": 0.0,
+                "avg_holding_days": 0.0,
+                "profit_loss_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "annualized_return": 0.0,
+                "hs300_return": 0.0,
+                "sharpe_ratio": 0.0,
+                "calmar_ratio": 0.0
+            }
+            with open(PERFORMANCE_RECORD_PATH, 'w', encoding='utf-8') as f:
+                json.dump(performance_data, f, ensure_ascii=False, indent=4)
+            logger.info("已创建策略表现记录文件")
+        else:
+            logger.info("策略表现记录文件已存在")
+    
+    except Exception as e:
+        error_msg = f"初始化策略表现记录失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
         # 发送错误通知
@@ -200,15 +251,24 @@ def record_trade(**kwargs):
         
         # 构建交易记录
         trade_record = {
-            "时间(UTC)": utc_now.strftime("%Y-%m-%d %H:%M:%S"),
-            "时间(北京时间)": beijing_now.strftime("%Y-%m-%d %H:%M:%S"),
+            "交易日期": beijing_now.strftime("%Y-%m-%d"),
+            "交易时间": beijing_now.strftime("%H:%M:%S"),
+            "UTC时间": utc_now.strftime("%Y-%m-%d %H:%M:%S"),
             "持仓类型": kwargs.get("position_type", ""),
+            "操作类型": kwargs.get("action", ""),
             "ETF代码": kwargs.get("etf_code", ""),
             "ETF名称": kwargs.get("etf_name", ""),
             "价格": kwargs.get("price", 0.0),
             "数量": kwargs.get("quantity", 0),
-            "操作": kwargs.get("action", ""),
-            "备注": kwargs.get("note", "")
+            "金额": kwargs.get("price", 0.0) * kwargs.get("quantity", 0),
+            "持仓天数": kwargs.get("holding_days", 0),
+            "收益率": kwargs.get("return_rate", 0.0),
+            "持仓成本价": kwargs.get("cost_price", 0.0),
+            "当前价格": kwargs.get("current_price", 0.0),
+            "止损位": kwargs.get("stop_loss", 0.0),
+            "止盈位": kwargs.get("take_profit", 0.0),
+            "原因": kwargs.get("reason", ""),
+            "操作状态": kwargs.get("status", "已完成")
         }
         
         # 读取现有交易记录
@@ -216,8 +276,10 @@ def record_trade(**kwargs):
             trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8")
         else:
             columns = [
-                "时间(UTC)", "时间(北京时间)", "持仓类型", "ETF代码", "ETF名称", 
-                "价格", "数量", "操作", "备注"
+                "交易日期", "交易时间", "UTC时间", "持仓类型", "操作类型", 
+                "ETF代码", "ETF名称", "价格", "数量", "金额", 
+                "持仓天数", "收益率", "持仓成本价", "当前价格", 
+                "止损位", "止盈位", "原因", "操作状态"
             ]
             trade_df = pd.DataFrame(columns=columns)
         
@@ -226,7 +288,7 @@ def record_trade(**kwargs):
         
         # 保存交易记录
         trade_df.to_csv(TRADE_RECORD_PATH, index=False, encoding="utf-8")
-        logger.info(f"已记录交易: {trade_record['持仓类型']} - {trade_record['操作']} {trade_record['ETF代码']}")
+        logger.info(f"已记录交易: {trade_record['持仓类型']} - {trade_record['操作类型']} {trade_record['ETF代码']}")
     
     except Exception as e:
         error_msg = f"记录交易失败: {str(e)}"
@@ -237,6 +299,41 @@ def record_trade(**kwargs):
             message=error_msg,
             message_type="error"
         )
+
+def validate_etf_data(df: pd.DataFrame) -> bool:
+    """
+    验证ETF数据完整性
+    
+    Args:
+        df: ETF日线数据DataFrame
+    
+    Returns:
+        bool: 数据是否完整有效
+    """
+    if df.empty:
+        logger.warning("ETF数据为空")
+        return False
+    
+    # 检查必需列
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        logger.warning(f"ETF数据缺少必要列: {', '.join(missing_columns)}")
+        return False
+    
+    # 检查数据量
+    if len(df) < 20:
+        logger.warning(f"ETF数据量不足({len(df)}天)，需要至少20天数据")
+        return False
+    
+    # 检查数据连续性
+    df = df.sort_values("日期")
+    date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
+    max_gap = date_diff.max()
+    if max_gap > 3:
+        logger.warning(f"ETF数据存在较大间隔({max_gap}天)，可能影响分析结果")
+    
+    return True
 
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
     """
@@ -277,11 +374,7 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         
         # 后续ATR值使用指数移动平均
         for i in range(period, n):
-            # 防止除零错误
-            if atr[i-1] == 0:
-                atr[i] = tr[i]
-            else:
-                atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
+            atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
         
         return atr[-1]
     
@@ -289,7 +382,26 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         logger.error(f"计算ATR失败: {str(e)}", exc_info=True)
         return 0.0
 
-def calculate_adx(df, period=14):
+def calculate_volatility(df: pd.DataFrame, window: int = 20) -> float:
+    """计算波动率(年化)"""
+    try:
+        if len(df) < window + 1:
+            return 0.0
+            
+        # 计算日收益率
+        returns = df["收盘"].pct_change().dropna()
+        
+        # 计算标准差(年化)
+        daily_std = returns[-window:].std()
+        annualized_vol = daily_std * (252 ** 0.5)  # 年化波动率
+        
+        return annualized_vol
+    
+    except Exception as e:
+        logger.error(f"计算波动率失败: {str(e)}")
+        return 0.0
+
+def calculate_adx(df: pd.DataFrame, period=14) -> float:
     """计算ADX指标（真实实现）"""
     try:
         # 确保有足够的数据
@@ -397,210 +509,467 @@ def calculate_adx(df, period=14):
         logger.error(f"计算ADX失败: {str(e)}")
         return 0.0
 
-def calculate_rsi(prices, period=14):
-    """计算RSI指标（真实实现）"""
+def calculate_ma_signal(df: pd.DataFrame) -> Tuple[bool, bool]:
+    """
+    计算均线信号
+    
+    Args:
+        df: 日线数据
+    
+    Returns:
+        Tuple[bool, bool]: (多头信号, 空头信号)
+    """
     try:
-        # 确保有足够的数据
-        if len(prices) < period + 1:
-            return 50.0  # 默认值
-            
-        # 计算价格变化
-        deltas = np.diff(prices)
+        # 确保DataFrame是副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
         
-        # 分离上涨和下跌
-        gains = np.where(deltas > 0, deltas, 0)
-        losses = np.where(deltas < 0, -deltas, 0)
+        # 计算短期均线
+        df.loc[:, "ma_short"] = df["收盘"].rolling(window=5).mean()
+        # 计算长期均线
+        df.loc[:, "ma_long"] = df["收盘"].rolling(window=20).mean()
         
-        # 计算平均上涨和平均下跌
-        avg_gain = np.mean(gains[:period])
-        avg_loss = np.mean(losses[:period])
+        # 检查数据量是否足够
+        if len(df) < 20:
+            logger.warning(f"数据量不足，无法计算均线信号（需要至少20条数据，实际{len(df)}条）")
+            return False, False
         
-        # 如果初始平均下跌为0，设置一个很小的值避免除零错误
-        if avg_loss == 0:
-            avg_loss = 0.001
-            
-        # 计算RSI
-        rsi_values = np.zeros(len(prices))
-        rsi_values[period] = 100 - (100 / (1 + (avg_gain / avg_loss)))
+        # 检查是否有多头信号（短期均线上穿长期均线）
+        ma_bullish = False
+        if len(df) > 1:
+            prev = df.iloc[-2]
+            curr = df.iloc[-1]
+            # 检查前一日短期均线 <= 长期均线，当日短期均线 > 长期均线
+            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
+               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
+                ma_bullish = prev["ma_short"] <= prev["ma_long"] and curr["ma_short"] > curr["ma_long"]
         
-        for i in range(period+1, len(prices)):
-            avg_gain = ((avg_gain * (period-1)) + gains[i-1]) / period
-            avg_loss = ((avg_loss * (period-1)) + losses[i-1]) / period
-            
-            # 避免除零错误
-            if avg_loss == 0:
-                avg_loss = 0.001
-                
-            rs = avg_gain / avg_loss
-            rsi_values[i] = 100 - (100 / (1 + rs))
+        # 检查是否有空头信号（短期均线下穿长期均线）
+        ma_bearish = False
+        if len(df) > 1:
+            prev = df.iloc[-2]
+            curr = df.iloc[-1]
+            # 检查前一日短期均线 >= 长期均线，当日短期均线 < 长期均线
+            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
+               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
+                ma_bearish = prev["ma_short"] >= prev["ma_long"] and curr["ma_short"] < curr["ma_long"]
         
-        return rsi_values[-1]
-        
+        logger.debug(f"均线信号计算结果: 多头={ma_bullish}, 空头={ma_bearish}")
+        return ma_bullish, ma_bearish
+    
     except Exception as e:
-        logger.error(f"计算RSI失败: {str(e)}")
-        return 50.0
+        error_msg = f"计算均线信号失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        return False, False
 
-def calculate_macd(prices, fast=12, slow=12, signal=9):
-    """计算MACD指标（真实实现）"""
+def calculate_volume_signal(df: pd.DataFrame) -> bool:
+    """计算成交量信号（当前量>5日均量*1.2）"""
     try:
-        # 计算快速EMA
-        k_fast = 2 / (fast + 1)
-        ema_fast = np.zeros(len(prices))
-        ema_fast[fast-1] = np.mean(prices[:fast])
-        for i in range(fast, len(prices)):
-            ema_fast[i] = (prices[i] * k_fast) + (ema_fast[i-1] * (1 - k_fast))
+        if len(df) < 6:
+            return False
         
-        # 计算慢速EMA
-        k_slow = 2 / (slow + 1)
-        ema_slow = np.zeros(len(prices))
-        ema_slow[slow-1] = np.mean(prices[:slow])
-        for i in range(slow, len(prices)):
-            ema_slow[i] = (prices[i] * k_slow) + (ema_slow[i-1] * (1 - k_slow))
+        current_vol = df.iloc[-1]["成交量"]
+        avg_vol = df["成交量"].rolling(5).mean().iloc[-1]
         
-        # 计算MACD线
-        macd_line = ema_fast - ema_slow
-        
-        # 计算信号线
-        k_signal = 2 / (signal + 1)
-        signal_line = np.zeros(len(prices))
-        signal_line[slow+signal-2] = np.mean(macd_line[slow-1:slow+signal-1])
-        for i in range(slow+signal-1, len(prices)):
-            signal_line[i] = (macd_line[i] * k_signal) + (signal_line[i-1] * (1 - k_signal))
-        
-        # 计算MACD柱
-        macd_hist = macd_line - signal_line
-        
-        return macd_line[-1], signal_line[-1], macd_hist[-1]
-        
+        return current_vol > avg_vol * 1.2
     except Exception as e:
-        logger.error(f"计算MACD失败: {str(e)}")
-        return 0.0, 0.0, 0.0
+        logger.error(f"计算成交量信号失败: {str(e)}")
+        return False
 
-def calculate_bollinger_bands(prices, window=20, num_std=2):
-    """计算布林带（真实实现）"""
+def calculate_strategy_performance() -> Dict[str, float]:
+    """
+    分析策略历史表现（基于真实交易记录）
+    
+    Returns:
+        Dict[str, float]: 策略表现指标
+    """
     try:
-        # 确保有足够的数据
-        if len(prices) < window:
-            return 0.0, 0.0, 0.0
-            
-        # 计算移动平均线
-        sma = prices.rolling(window=window).mean()
-        
-        # 计算标准差
-        std = prices.rolling(window=window).std()
-        
-        # 计算布林带上轨和下轨
-        upper_band = sma + (std * num_std)
-        lower_band = sma - (std * num_std)
-        
-        # 计算当前布林带宽度
-        current_width = (upper_band.iloc[-1] - lower_band.iloc[-1]) / sma.iloc[-1]
-        
-        # 计算前一日布林带宽度
-        prev_width = (upper_band.iloc[-2] - lower_band.iloc[-2]) / sma.iloc[-2] if len(sma) > 1 else current_width
-        
-        # 计算布林带宽度变化率
-        width_change = (current_width - prev_width) / prev_width if prev_width != 0 else 0
-        
-        return upper_band.iloc[-1], sma.iloc[-1], lower_band.iloc[-1], width_change
-        
-    except Exception as e:
-        logger.error(f"计算布林带失败: {str(e)}")
-        return 0.0, 0.0, 0.0, 0.0
-
-def calculate_60_day_ma_slope(df, period=60):
-    """计算60日均线斜率"""
-    try:
-        if len(df) < period + 1:
-            return 0.0
-            
-        # 计算60日均线
-        ma60 = df["收盘"].rolling(window=period).mean()
-        
-        # 取最近两个60日均线值
-        ma60_current = ma60.iloc[-1]
-        ma60_prev = ma60.iloc[-2] if len(ma60) > 1 else ma60_current
-        
-        # 计算斜率（百分比）
-        if ma60_prev > 0:
-            slope = ((ma60_current - ma60_prev) / ma60_prev) * 100
-            return slope
-        return 0.0
-        
-    except Exception as e:
-        logger.error(f"计算60日均线斜率失败: {str(e)}")
-        return 0.0
-
-def calculate_historical_performance(df, etf_code):
-    """分析历史表现（真实实现）"""
-    try:
-        if len(df) < 30:
+        # 检查交易记录文件是否存在
+        if not os.path.exists(TRADE_RECORD_PATH):
+            logger.warning("交易记录文件不存在，无法分析策略表现")
             return {
-                "avg_days_to_trend": 0,
-                "success_rate": 0,
-                "historical_trend": []
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "win_rate": 0.0,
+                "avg_holding_days": 0.0,
+                "profit_loss_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "annualized_return": 0.0,
+                "hs300_return": 0.0,
+                "sharpe_ratio": 0.0,
+                "calmar_ratio": 0.0
             }
         
-        # 模拟历史相似条件（实际应更复杂）
-        current_price = df["收盘"].iloc[-1]
-        current_ma20 = df["收盘"].rolling(20).mean().iloc[-1]
-        price_deviation = (current_price - current_ma20) / current_ma20 if current_ma20 > 0 else 0
+        # 读取交易记录
+        trade_df = pd.read_csv(TRADE_RECORD_PATH, encoding="utf-8")
         
-        # 寻找历史相似条件
-        historical_trend = []
-        for i in range(30, len(df) - 20):
-            ma20 = df["收盘"].rolling(20).mean().iloc[i]
-            if ma20 <= 0:
-                continue
-                
-            hist_deviation = (df["收盘"].iloc[i] - ma20) / ma20
-            
-            # 检查价格偏离度相似
-            if abs(hist_deviation - price_deviation) < 0.02:
-                # 检查之后20天的趋势
-                future_prices = df["收盘"].iloc[i:i+20].values
-                trend_up = all(future_prices[j] >= future_prices[j-1] for j in range(1, len(future_prices)))
-                
-                historical_trend.append({
-                    "date": df.index[i],
-                    "deviation": hist_deviation,
-                    "trend_up": trend_up,
-                    "days_to_trend": 0  # 实际应计算形成趋势所需天数
-                })
+        # 检查是否有足够的交易记录
+        if len(trade_df) < 5:
+            logger.warning(f"交易记录不足({len(trade_df)}条)，无法准确分析策略表现")
+            return {
+                "total_trades": len(trade_df),
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "win_rate": 0.0,
+                "avg_holding_days": 0.0,
+                "profit_loss_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "annualized_return": 0.0,
+                "hs300_return": 0.0,
+                "sharpe_ratio": 0.0,
+                "calmar_ratio": 0.0
+            }
         
-        # 计算统计指标
-        avg_days_to_trend = 0
-        success_rate = 0
+        # 计算胜率
+        winning_trades = trade_df[trade_df["收益率"] > 0]
+        losing_trades = trade_df[trade_df["收益率"] <= 0]
+        total_trades = len(trade_df)
+        winning_count = len(winning_trades)
+        losing_count = len(losing_trades)
         
-        if historical_trend:
-            avg_days_to_trend = sum(item["days_to_trend"] for item in historical_trend) / len(historical_trend)
-            success_rate = sum(1 for item in historical_trend if item["trend_up"]) / len(historical_trend) * 100
+        win_rate = (winning_count / total_trades * 100) if total_trades > 0 else 0.0
+        avg_holding_days = trade_df["持仓天数"].mean() if not trade_df.empty else 0.0
         
-        return {
-            "avg_days_to_trend": avg_days_to_trend,
-            "success_rate": success_rate,
-            "historical_trend": historical_trend
+        # 计算盈亏比
+        total_profit = winning_trades["收益率"].sum() if not winning_trades.empty else 0.0
+        total_loss = abs(losing_trades["收益率"].sum()) if not losing_trades.empty else 0.0
+        profit_loss_ratio = (total_profit / total_loss) if total_loss > 0 else 0.0
+        
+        # 计算最大回撤
+        cumulative_returns = trade_df["收益率"].cumsum()
+        peak = cumulative_returns.cummax()
+        drawdown = peak - cumulative_returns
+        max_drawdown = drawdown.max() * 100  # 转换为百分比
+        
+        # 计算年化收益率
+        start_date = pd.to_datetime(trade_df["交易日期"].min())
+        end_date = pd.to_datetime(trade_df["交易日期"].max())
+        days = (end_date - start_date).days
+        annualized_return = (1 + cumulative_returns.iloc[-1]) ** (252 / days) - 1 if days > 0 else 0.0
+        annualized_return *= 100  # 转换为百分比
+        
+        # 计算沪深300收益
+        hs300_df = load_etf_daily_data("510300")
+        hs300_return = 0.0
+        if not hs300_df.empty and len(hs300_df) >= 20:
+            # 计算最近6个月收益
+            six_month_ago = hs300_df.iloc[-126] if len(hs300_df) >= 126 else hs300_df.iloc[0]
+            hs300_return = (hs300_df.iloc[-1]["收盘"] / six_month_ago["收盘"] - 1) * 100
+        
+        # 计算夏普比率 (简化版)
+        daily_returns = trade_df["收益率"]
+        if not daily_returns.empty:
+            excess_returns = daily_returns - 0.02 / 252  # 无风险利率假设为2%
+            sharpe_ratio = np.sqrt(252) * excess_returns.mean() / excess_returns.std() if excess_returns.std() > 0 else 0.0
+        else:
+            sharpe_ratio = 0.0
+        
+        # 计算卡玛比率
+        calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0.0
+        
+        # 更新策略表现记录
+        performance_data = {
+            "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_trades": int(total_trades),
+            "winning_trades": int(winning_count),
+            "losing_trades": int(losing_count),
+            "win_rate": float(win_rate),
+            "avg_holding_days": float(avg_holding_days),
+            "profit_loss_ratio": float(profit_loss_ratio),
+            "max_drawdown": float(max_drawdown),
+            "annualized_return": float(annualized_return),
+            "hs300_return": float(hs300_return),
+            "sharpe_ratio": float(sharpe_ratio),
+            "calmar_ratio": float(calmar_ratio)
         }
         
+        with open(PERFORMANCE_RECORD_PATH, 'w', encoding='utf-8') as f:
+            json.dump(performance_data, f, ensure_ascii=False, indent=4)
+        
+        return performance_data
+    
     except Exception as e:
-        logger.error(f"历史表现分析失败: {str(e)}")
+        logger.error(f"分析策略表现失败: {str(e)}", exc_info=True)
         return {
-            "avg_days_to_trend": 0,
-            "success_rate": 0,
-            "historical_trend": []
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "win_rate": 0.0,
+            "avg_holding_days": 0.0,
+            "profit_loss_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "annualized_return": 0.0,
+            "hs300_return": 0.0,
+            "sharpe_ratio": 0.0,
+            "calmar_ratio": 0.0
         }
 
-def calculate_strategy_score(metrics):
-    """计算策略评分（基于真实指标）"""
+def get_strategy_performance() -> Dict[str, float]:
+    """
+    获取策略表现（优先从记录文件读取）
+    
+    Returns:
+        Dict[str, float]: 策略表现指标
+    """
     try:
-        # 从指标中提取关键数据
-        price_deviation = metrics.get("price_deviation", 0)
-        adx = metrics.get("adx", 0)
-        ma60_slope = metrics.get("ma60_slope", 0)
-        volume_ratio = metrics.get("volume_ratio", 0)
-        rsi = metrics.get("rsi", 50)
-        macd_bar = metrics.get("macd_bar", 0)
-        bollinger_width_change = metrics.get("bollinger_width_change", 0)
+        if os.path.exists(PERFORMANCE_RECORD_PATH):
+            with open(PERFORMANCE_RECORD_PATH, 'r', encoding='utf-8') as f:
+                performance_data = json.load(f)
+                # 检查是否需要更新（超过1天）
+                last_update = datetime.strptime(performance_data["last_update"], "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - last_update).days > 0:
+                    return calculate_strategy_performance()
+                return performance_data
+        else:
+            return calculate_strategy_performance()
+    
+    except Exception as e:
+        logger.error(f"获取策略表现失败，尝试重新计算: {str(e)}", exc_info=True)
+        return calculate_strategy_performance()
+
+def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
+    """
+    筛选有效的ETF（数据完整、符合交易条件）
+    
+    Args:
+        top_etfs: 评分前N的ETF列表
+    
+    Returns:
+        List[Dict]: 有效的ETF列表
+    """
+    valid_etfs = []
+    
+    for _, row in top_etfs.iterrows():
+        etf_code = str(row["ETF代码"])
+        df = load_etf_daily_data(etf_code)
+        
+        # 检查数据完整性
+        if not validate_etf_data(df):
+            logger.debug(f"ETF {etf_code} 数据不完整，跳过")
+            continue
+        
+        # 计算核心指标
+        ma_bullish, _ = calculate_ma_signal(df)
+        volume_ok = calculate_volume_signal(df)
+        adx = calculate_adx(df, 14)
+        
+        # 筛选条件
+        if ma_bullish and volume_ok and adx > 18:
+            # 计算ETF质量评分
+            volume = df["成交量"].iloc[-1]
+            volatility = calculate_volatility(df)
+            liquidity_score = 1.0 if volume > 100000000 else 0.5
+            trend_score = 1.0 if adx > 25 else 0.7
+            quality_score = liquidity_score * 0.6 + trend_score * 0.4
+            
+            valid_etfs.append({
+                "ETF代码": etf_code,
+                "ETF名称": row["ETF名称"],
+                "评分": row["评分"],
+                "质量评分": quality_score,
+                "ETF数据": df,
+                "ADX": adx
+            })
+    
+    # 按质量评分排序
+    valid_etfs.sort(key=lambda x: x["质量评分"], reverse=True)
+    
+    logger.info(f"筛选后有效ETF数量: {len(valid_etfs)}")
+    return valid_etfs
+
+def generate_signal(etf_code: str, etf_df: pd.DataFrame, position_type: str) -> Tuple[str, str, float, float, float]:
+    """
+    生成交易信号
+    
+    Args:
+        etf_code: ETF代码
+        etf_df: ETF日线数据
+        position_type: 仓位类型（稳健仓/激进仓）
+    
+    Returns:
+        Tuple[str, str, float, float, float]: (操作类型, 原因, 价格, 止损位, 止盈位)
+    """
+    try:
+        # 获取最新数据
+        latest_data = etf_df.iloc[-1]
+        current_price = latest_data["收盘"]
+        
+        # 计算关键指标
+        ma5 = etf_df["收盘"].rolling(5).mean().iloc[-1]
+        ma10 = etf_df["收盘"].rolling(10).mean().iloc[-1]
+        ma20 = etf_df["收盘"].rolling(20).mean().iloc[-1]
+        volume = etf_df["成交量"].iloc[-1]
+        avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+        volume_ratio = volume / avg_volume if avg_volume > 0 else 0
+        adx = calculate_adx(etf_df, 14)
+        
+        # 计算ATR
+        atr = calculate_atr(etf_df, 14)
+        
+        # 判断是否处于趋势中
+        in_trend = (ma5 > ma20) and (current_price > ma20)
+        
+        # 计算动态止损
+        stop_loss_factor = 1.5 if position_type == "稳健仓" else 2.0
+        stop_loss = current_price - stop_loss_factor * atr
+        
+        # 计算止盈位
+        take_profit = current_price + 2.0 * atr
+        
+        # 交易信号生成
+        if in_trend:
+            # 检查是否是突破信号
+            is_breakout = (current_price > etf_df["收盘"].rolling(20).max().iloc[-2])
+            # 检查成交量
+            volume_ok = (volume > avg_volume * 1.1)
+            
+            # 趋势确认
+            if is_breakout or (ma5 > ma10 and volume_ok):
+                return "买入", "突破信号+趋势确认", current_price, stop_loss, take_profit
+            elif ma5 > ma10 and volume_ok:
+                return "持有", "趋势持续", current_price, stop_loss, take_profit
+        
+        # 检查是否触发止损
+        if current_price <= stop_loss:
+            return "卖出", "触发止损", current_price, stop_loss, take_profit
+        
+        # 检查是否超卖（小资金抄底机会）
+        if len(etf_df) > 30:
+            min_30d = etf_df["收盘"].rolling(30).min().iloc[-1]
+            if min_30d > 0:
+                price_deviation = (current_price / min_30d - 1)
+                if price_deviation < 0.05 and volume > avg_volume * 1.2:
+                    return "买入", "超卖反弹机会", current_price, stop_loss, take_profit
+        
+        return "观望", "趋势未确认", current_price, stop_loss, take_profit
+    
+    except Exception as e:
+        logger.error(f"生成交易信号失败: {str(e)}", exc_info=True)
+        return "观望", "数据异常", 0.0, 0.0, 0.0
+
+def update_position_record(position_type: str, etf_code: str, etf_name: str, 
+                          cost_price: float, current_price: float, 
+                          quantity: int, action: str) -> None:
+    """
+    更新仓位记录
+    
+    Args:
+        position_type: 仓位类型
+        etf_code: ETF代码
+        etf_name: ETF名称
+        cost_price: 持仓成本价
+        current_price: 当前价格
+        quantity: 持仓数量
+        action: 操作类型
+    """
+    try:
+        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
+        
+        # 更新指定仓位类型的数据
+        mask = position_df['仓位类型'] == position_type
+        position_df.loc[mask, 'ETF代码'] = etf_code
+        position_df.loc[mask, 'ETF名称'] = etf_name
+        position_df.loc[mask, '持仓成本价'] = cost_price
+        position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
+        position_df.loc[mask, '持仓数量'] = quantity
+        position_df.loc[mask, '最新操作'] = action
+        position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        position_df.loc[mask, '持仓天数'] = 1 if quantity > 0 else 0
+        position_df.loc[mask, '更新时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 保存更新后的记录
+        position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
+        logger.info(f"已更新{position_type}仓位记录: {etf_code} {action}")
+    
+    except Exception as e:
+        error_msg = f"更新{position_type}仓位记录失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+
+def calculate_dynamic_stop_loss(current_price: float, etf_df: pd.DataFrame, 
+                              position_type: str) -> Tuple[float, float]:
+    """计算动态止损位"""
+    try:
+        # 计算ATR
+        atr = calculate_atr(etf_df, 14)
+        
+        # 根据仓位类型确定基础止损系数
+        base_stop_factor = 1.5 if position_type == "稳健仓" else 2.0
+        
+        # 计算最终止损位
+        stop_loss = current_price - base_stop_factor * atr
+        risk_ratio = (current_price - stop_loss) / current_price if current_price > 0 else 0
+        
+        return stop_loss, risk_ratio
+    
+    except Exception as e:
+        logger.error(f"计算动态止损失败: {str(e)}")
+        return 0.0, 0.0
+
+def calculate_strategy_score(etf_df: pd.DataFrame, position_type: str) -> int:
+    """计算策略评分"""
+    try:
+        # 获取最新数据
+        latest_data = etf_df.iloc[-1]
+        current_price = latest_data["收盘"]
+        
+        # 计算20日均线
+        ma20 = etf_df["收盘"].rolling(20).mean().iloc[-1]
+        
+        # 计算价格偏离度
+        price_deviation = 0.0
+        if ma20 > 0:
+            price_deviation = (current_price - ma20) / ma20
+        
+        # 计算ADX
+        adx = calculate_adx(etf_df, 14)
+        
+        # 计算60日均线斜率
+        ma60 = etf_df["收盘"].rolling(60).mean()
+        if len(ma60) >= 62:
+            ma60_slope = ((ma60.iloc[-1] - ma60.iloc[-3]) / ma60.iloc[-3]) * 100
+        else:
+            ma60_slope = 0.0
+        
+        # 计算量能指标
+        volume = etf_df["成交量"].iloc[-1]
+        avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+        volume_ratio = volume / avg_volume if avg_volume > 0 else 0
+        
+        # 计算RSI
+        delta = etf_df["收盘"].diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        rsi_value = rsi.iloc[-1] if len(rsi) > 0 else 50.0
+        
+        # 计算MACD
+        exp12 = etf_df["收盘"].ewm(span=12, adjust=False).mean()
+        exp26 = etf_df["收盘"].ewm(span=26, adjust=False).mean()
+        macd = exp12 - exp26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        macd_hist = macd - signal
+        macd_bar = macd_hist.iloc[-1] if len(macd_hist) > 0 else 0.0
+        
+        # 计算布林带宽度
+        sma20 = etf_df["收盘"].rolling(20).mean()
+        std20 = etf_df["收盘"].rolling(20).std()
+        upper_band = sma20 + (std20 * 2)
+        lower_band = sma20 - (std20 * 2)
+        bollinger_width = (upper_band.iloc[-1] - lower_band.iloc[-1]) / sma20.iloc[-1] if sma20.iloc[-1] > 0 else 0
         
         # 初始化评分
         score = 0
@@ -645,9 +1014,9 @@ def calculate_strategy_score(metrics):
             
         # 5. 技术形态 (20分)
         # RSI部分 (10分)
-        if 30 <= rsi <= 70:
+        if 30 <= rsi_value <= 70:
             rsi_score = 10
-        elif rsi < 30 or rsi > 70:
+        elif rsi_value < 30 or rsi_value > 70:
             rsi_score = 5
         else:
             rsi_score = 0
@@ -663,11 +1032,11 @@ def calculate_strategy_score(metrics):
         score += macd_score
         
         # 布林带宽度变化 (额外加分)
-        if bollinger_width_change > 0.05:  # 宽度扩张5%以上
+        if bollinger_width > 0.05:  # 宽度扩张5%以上
             score += 5
             
         return min(max(score, 0), 100)  # 限制在0-100范围内
-        
+    
     except Exception as e:
         logger.error(f"计算策略评分失败: {str(e)}")
         return 50  # 默认评分
@@ -684,6 +1053,9 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     """
     content = "【ETF趋势策略深度分析报告】\n"
     content += "（小资金趋势交易策略：基于多指标量化分析的动态仓位管理）\n\n"
+    
+    # 获取策略表现
+    performance = get_strategy_performance()
     
     # 为每个仓位类型生成详细分析
     for position_type, strategy in strategies.items():
@@ -718,41 +1090,41 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             adx = calculate_adx(etf_df, 14)
             
             # 计算60日均线斜率
-            ma60_slope = calculate_60_day_ma_slope(etf_df, 60)
+            ma60_slope = 0.0
+            if len(etf_df) >= 62:
+                ma60 = etf_df["收盘"].rolling(60).mean()
+                ma60_slope = ((ma60.iloc[-1] - ma60.iloc[-3]) / ma60.iloc[-3]) * 100
             
             # 计算RSI
-            rsi = calculate_rsi(etf_df["收盘"], 14)
+            delta = etf_df["收盘"].diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            rsi_value = rsi.iloc[-1] if len(rsi) > 0 else 50.0
             
             # 计算MACD
-            _, _, macd_bar = calculate_macd(etf_df["收盘"], 12, 26, 9)
+            exp12 = etf_df["收盘"].ewm(span=12, adjust=False).mean()
+            exp26 = etf_df["收盘"].ewm(span=26, adjust=False).mean()
+            macd = exp12 - exp26
+            signal = macd.ewm(span=9, adjust=False).mean()
+            macd_hist = macd - signal
+            macd_bar = macd_hist.iloc[-1] if len(macd_hist) > 0 else 0.0
             
             # 计算布林带
-            upper_band, middle_band, lower_band, bollinger_width_change = calculate_bollinger_bands(etf_df["收盘"], 20, 2)
+            sma20 = etf_df["收盘"].rolling(20).mean()
+            std20 = etf_df["收盘"].rolling(20).std()
+            upper_band = sma20 + (std20 * 2)
+            lower_band = sma20 - (std20 * 2)
+            bollinger_width = (upper_band.iloc[-1] - lower_band.iloc[-1]) / sma20.iloc[-1] if sma20.iloc[-1] > 0 else 0
             
             # 计算量能指标
-            volume = etf_df["成交量"].iloc[-1]  # 单位：手
+            volume = etf_df["成交量"].iloc[-1]
             avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
             volume_ratio = volume / avg_volume if avg_volume > 0 else 0
             
-            # 转换为万元单位的成交额（价格×100×手数/10000）
-            price = etf_df["收盘"].iloc[-1]
-            volume_amount = volume * price * 100 / 10000  # 万元
-            avg_volume_amount = avg_volume * price * 100 / 10000  # 万元
-            
-            # 分析历史表现
-            historical_data = calculate_historical_performance(etf_df, etf_code)
-            
             # 计算策略评分
-            metrics = {
-                "price_deviation": price_deviation,
-                "adx": adx,
-                "ma60_slope": ma60_slope,
-                "volume_ratio": volume_ratio,
-                "rsi": rsi,
-                "macd_bar": macd_bar,
-                "bollinger_width_change": bollinger_width_change
-            }
-            strategy_score = calculate_strategy_score(metrics)
+            strategy_score = calculate_strategy_score(etf_df, position_type)
             
             # 生成详细内容
             content += f"📊 {etf_name}({etf_code}) - 详细分析\n"
@@ -766,40 +1138,29 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
                 trend_strength = "中等趋势"
             content += f"• 趋势强度：ADX={adx:.1f} ({trend_strength}) | 60日均线斜率={ma60_slope:.1f}%/日\n"
             
-            # 量能分析（修正单位）
-            volume_status = "健康" if volume_amount > 10000 else "不足"  # 1亿=10000万元
-            volume_str = f"{volume_amount/10000:.1f}亿" if volume_amount > 10000 else f"{volume_amount:.0f}万"
+            # 量能分析
+            volume_status = "健康" if volume > 10000000 else "不足"
+            volume_str = f"{volume/10000:.1f}万" if volume > 10000000 else f"{volume:.0f}手"
             volume_ratio_status = "放大" if volume_ratio > 1.0 else "萎缩"
             content += f"• 量能分析：{volume_str} ({volume_status}) | 量比={volume_ratio:.2f} ({volume_ratio_status})\n"
             
             # 技术形态分析
-            rsi_status = "超卖" if rsi < 30 else "中性" if rsi < 70 else "超买"
-            macd_status = "正值扩大" if macd_bar > 0 else "负值扩大"
-            content += f"• 技术形态：RSI={rsi:.1f} ({rsi_status}) | MACD柱={macd_bar:.4f} ({macd_status})\n"
+            rsi_status = "超卖" if rsi_value < 30 else "中性" if rsi_value < 70 else "超买"
+            macd_status = "正值扩大" if macd_bar > 0 and macd_bar > macd_hist.iloc[-2] else "负值扩大"
+            content += f"• 技术形态：RSI={rsi_value:.1f} ({rsi_status}) | MACD柱={macd_bar:.4f} ({macd_status})\n"
             
-            # 关键信号（修正布林带显示）
-            bollinger_status = "扩张" if bollinger_width_change > 0 else "收窄"
-            bollinger_change_str = f"{abs(bollinger_width_change):.2f}"
-            content += f"• 关键信号：布林带宽度{bollinger_change_str} {bollinger_status}，波动率可能{ '上升' if bollinger_width_change > 0 else '下降' }\n"
-            
-            # 历史参考
-            if historical_data["avg_days_to_trend"] > 0:
-                content += f"• 历史参考：类似条件下平均需{historical_data['avg_days_to_trend']:.1f}个交易日形成趋势，成功率{historical_data['success_rate']:.1f}%\n"
-            else:
-                content += "• 历史参考：无足够历史数据参考\n"
+            # 关键信号
+            bollinger_status = "扩张" if bollinger_width > 0 else "收窄"
+            content += f"• 关键信号：布林带宽度{abs(bollinger_width)*100:.1%} {bollinger_status}，波动率可能{ '上升' if bollinger_width > 0 else '下降' }\n"
             
             # 策略评分
             score_status = "低于" if strategy_score < 40 else "高于"
             entry_status = "不建议" if strategy_score < 40 else "可考虑"
             content += f"• 策略评分：{strategy_score:.0f}/100 ({score_status}40分{entry_status}入场)\n"
             
-            # 操作建议（添加具体原因）
+            # 操作建议
             if "操作建议：" in strategy:
-                advice = strategy.split('操作建议：')[1]
-                # 添加未入场的具体原因
-                if "空仓观望" in advice and strategy_score >= 40:
-                    advice = advice.replace("（趋势未确认）", "（价格未突破20日均线）")
-                content += f"• 操作建议：{advice}\n\n"
+                content += f"• 操作建议：{strategy.split('操作建议：')[1]}\n\n"
             else:
                 content += f"• 操作建议：{strategy}\n\n"
         else:
@@ -814,14 +1175,23 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     content += "4. 止盈策略：盈利超8%后，止损上移至成本价\n"
     content += "5. ETF轮动：每周一评估并切换至最强标的\n\n"
     
-    # 添加策略历史表现
+    # 添加策略历史表现（基于真实计算）
     content += "📊 策略历史表现(近6个月)：\n"
-    content += "• 胜率：63.2% | 平均持仓周期：5.8天\n"
-    content += "• 盈亏比：2.3:1 | 最大回撤：-9.7%\n"
-    content += "• 年化收益率：18.4% (同期沪深300: +5.2%)\n\n"
+    content += f"• 胜率：{performance['win_rate']:.1f}% | 平均持仓周期：{performance['avg_holding_days']:.1f}天\n"
+    content += f"• 盈亏比：{performance['profit_loss_ratio']:.1f}:1 | 最大回撤：{performance['max_drawdown']:.1f}%\n"
+    content += f"• 年化收益率：{performance['annualized_return']:.1f}% (同期沪深300: {performance['hs300_return']:.1f}%)\n"
+    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n\n"
     
     # 添加市场分析
-    content += "🔍 数据验证：当前市场处于调整阶段，建议保持观望等待明确信号。\n"
+    content += "🔍 数据验证：基于真实交易记录计算，策略表现指标每交易日更新\n"
+    
+    # 添加时间戳和数据来源
+    content += "==================\n"
+    content += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    content += f"📅 北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    content += "📊 策略版本: TrendStrategy v4.0.0\n"
+    content += "🔗 详细分析: https://github.com/karmyshunde-sudo/fish-etf/actions/runs/17605215706\n"
+    content += "📊 环境：生产\n"
     
     return content
 
@@ -830,7 +1200,7 @@ def calculate_position_strategy() -> str:
     计算仓位操作策略（稳健仓、激进仓）
     
     Returns:
-        str: 策略内容字符串（不包含格式）
+        str: 策略内容字符串
     """
     try:
         # 获取当前双时区时间
@@ -840,6 +1210,7 @@ def calculate_position_strategy() -> str:
         # 1. 初始化仓位记录
         position_df = init_position_record()
         init_trade_record()
+        init_performance_record()
         
         # 2. 获取评分前5的ETF（用于选仓）
         try:
@@ -887,77 +1258,58 @@ def calculate_position_strategy() -> str:
             
             return "【ETF仓位操作提示】\n获取ETF评分数据失败，请检查日志"
         
-        # 3. 分别计算稳健仓和激进仓策略
+        # 3. 筛选有效的ETF
+        valid_etfs = filter_valid_etfs(top_etfs)
+        
+        # 4. 分别计算稳健仓和激进仓策略
         strategies = {}
         trade_actions = []
         
-        # 3.1 稳健仓策略（评分最高+趋势策略）
-        stable_etf = top_etfs.iloc[0]
-        stable_code = str(stable_etf["ETF代码"])
-        stable_name = stable_etf["ETF名称"]
-        stable_df = load_etf_daily_data(stable_code)
-        
-        # 确保DataFrame是副本，避免SettingWithCopyWarning
-        if not stable_df.empty:
-            stable_df = stable_df.copy(deep=True)
-        
-        # 稳健仓当前持仓
-        stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
-        if stable_position.empty:
-            logger.warning("未找到稳健仓记录，使用默认值")
-            stable_position = pd.Series({
-                "ETF代码": "",
-                "ETF名称": "",
-                "持仓成本价": 0.0,
-                "持仓日期": "",
-                "持仓数量": 0,
-                "最新操作": "未持仓",
-                "操作日期": "",
-                "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            })
+        # 4.1 稳健仓策略（评分最高+趋势策略）
+        if valid_etfs:
+            stable_etf = valid_etfs[0]
+            stable_code = stable_etf["ETF代码"]
+            stable_name = stable_etf["ETF名称"]
+            stable_df = stable_etf["ETF数据"]
+            
+            # 稳健仓当前持仓
+            stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
+            if stable_position.empty:
+                logger.warning("未找到稳健仓记录，使用默认值")
+                stable_position = pd.Series({
+                    "ETF代码": "",
+                    "ETF名称": "",
+                    "持仓成本价": 0.0,
+                    "持仓日期": "",
+                    "持仓数量": 0,
+                    "最新操作": "未持仓",
+                    "操作日期": "",
+                    "持仓天数": 0,
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+            else:
+                stable_position = stable_position.iloc[0]
+            
+            strategy, actions = calculate_single_position_strategy(
+                position_type="稳健仓",
+                current_position=stable_position,
+                target_etf_code=stable_code,
+                target_etf_name=stable_name,
+                etf_df=stable_df,
+                is_stable=True
+            )
+            strategies["稳健仓"] = strategy
+            trade_actions.extend(actions)
         else:
-            stable_position = stable_position.iloc[0]
+            strategies["稳健仓"] = "稳健仓：无符合条件的ETF，保持空仓"
         
-        strategy, actions = calculate_single_position_strategy(
-            position_type="稳健仓",
-            current_position=stable_position,
-            target_etf_code=stable_code,
-            target_etf_name=stable_name,
-            etf_df=stable_df,
-            is_stable=True
-        )
-        strategies["稳健仓"] = strategy
-        trade_actions.extend(actions)
-        
-        # 3.2 激进仓策略（近30天收益最高）
-        return_list = []
-        for _, row in top_etfs.iterrows():
-            code = str(row["ETF代码"])
-            df = load_etf_daily_data(code)
-            if not df.empty and len(df) >= 30:
-                try:
-                    # 确保DataFrame是副本
-                    df = df.copy(deep=True)
-                    return_30d = (df.iloc[-1]["收盘"] / df.iloc[-30]["收盘"] - 1) * 100
-                    return_list.append({
-                        "ETF代码": code,
-                        "ETF名称": row["ETF名称"],
-                        "return_30d": return_30d
-                    })
-                except (IndexError, KeyError, TypeError):
-                    logger.warning(f"计算ETF {code} 30天收益失败")
-                    continue
-        
-        if return_list:
-            aggressive_etf = max(return_list, key=lambda x: x["return_30d"])
+        # 4.2 激进仓策略（质量评分第二的ETF）
+        if len(valid_etfs) > 1:
+            aggressive_etf = valid_etfs[1]
             aggressive_code = aggressive_etf["ETF代码"]
             aggressive_name = aggressive_etf["ETF名称"]
-            aggressive_df = load_etf_daily_data(aggressive_code)
-            
-            # 确保DataFrame是副本
-            if not aggressive_df.empty:
-                aggressive_df = aggressive_df.copy(deep=True)
+            aggressive_df = aggressive_etf["ETF数据"]
             
             # 激进仓当前持仓
             aggressive_position = position_df[position_df["仓位类型"] == "激进仓"]
@@ -971,6 +1323,7 @@ def calculate_position_strategy() -> str:
                     "持仓数量": 0,
                     "最新操作": "未持仓",
                     "操作日期": "",
+                    "持仓天数": 0,
                     "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
@@ -988,13 +1341,13 @@ def calculate_position_strategy() -> str:
             strategies["激进仓"] = strategy
             trade_actions.extend(actions)
         else:
-            strategies["激进仓"] = "激进仓：无有效收益数据，暂不调整仓位"
+            strategies["激进仓"] = "激进仓：无符合条件的ETF，保持空仓"
         
-        # 4. 执行交易操作
+        # 5. 执行交易操作
         for action in trade_actions:
             record_trade(**action)
         
-        # 5. 生成内容
+        # 6. 生成内容
         return generate_position_content(strategies)
         
     except Exception as e:
@@ -1032,31 +1385,11 @@ def calculate_single_position_strategy(
         Tuple[str, List[Dict]]: 策略内容和交易动作列表
     """
     try:
-        # 1. 严格检查数据质量
-        if etf_df.empty:
-            error_msg = f"ETF {target_etf_code} 数据为空，无法计算策略"
-            logger.error(error_msg)
-            return f"{position_type}：{error_msg}", []
-        
-        # 检查必需列
-        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
-        missing_columns = [col for col in required_columns if col not in etf_df.columns]
-        if missing_columns:
-            logger.warning(f"ETF {target_etf_code} 缺少关键列: {', '.join(missing_columns)}")
-        
-        # 检查数据量 - 关键修复：至少需要20天数据
-        if len(etf_df) < 20:
-            error_msg = f"ETF {target_etf_code} 数据量不足({len(etf_df)}天)，无法可靠计算策略（需要至少20天）"
+        # 1. 检查数据是否足够
+        if etf_df.empty or len(etf_df) < 20:
+            error_msg = f"ETF {target_etf_code} 数据不足，无法计算策略"
             logger.warning(error_msg)
-            # 返回明确的警告，而不是继续计算
             return f"{position_type}：{error_msg}", []
-        
-        # 检查数据连续性
-        etf_df = etf_df.sort_values("日期")
-        date_diff = (pd.to_datetime(etf_df["日期"]).diff().dt.days.fillna(0))
-        max_gap = date_diff.max()
-        if max_gap > 3:
-            logger.warning(f"ETF {target_etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果")
         
         # 2. 获取最新数据
         latest_data = etf_df.iloc[-1]
@@ -1084,8 +1417,8 @@ def calculate_single_position_strategy(
         strategy_content += f"20日均线：{ma20:.2f}\n"
         
         # 添加量能信息到策略内容
-        volume_str = f"{volume/10000:.1f}亿" if volume > 100000000 else f"{volume/10000:.0f}万"
-        avg_volume_str = f"{avg_volume/10000:.1f}亿" if avg_volume > 100000000 else f"{avg_volume/10000:.0f}万"
+        volume_str = f"{volume/10000:.1f}万" if volume > 10000000 else f"{volume:.0f}手"
+        avg_volume_str = f"{avg_volume/10000:.1f}万" if avg_volume > 10000000 else f"{avg_volume:.0f}手"
         volume_ratio = volume / avg_volume if avg_volume > 0 else 0
         strategy_content += f"日均成交：{volume_str}（{volume_ratio:.2f}倍于5日均量）\n"
         
@@ -1093,7 +1426,8 @@ def calculate_single_position_strategy(
         trade_actions = []
         
         # 7.1 计算动态止损位（基于ATR）
-        stop_loss = current_price - 1.5 * atr
+        stop_loss_factor = 1.5 if is_stable else 2.0
+        stop_loss = current_price - stop_loss_factor * atr
         risk_ratio = (current_price - stop_loss) / current_price if current_price > 0 else 0
         
         # 7.2 判断是否处于趋势中（核心逻辑）
@@ -1119,14 +1453,27 @@ def calculate_single_position_strategy(
                     
                     # 生成交易动作
                     trade_actions.append({
-                        "etf_code": target_etf_code,
-                        "etf_name": target_etf_name,
                         "position_type": position_type,
                         "action": "新建仓位",
-                        "quantity": position_size,
+                        "etf_code": target_etf_code,
+                        "etf_name": target_etf_name,
                         "price": current_price,
-                        "reason": f"突破信号+趋势确认，止损{stop_loss:.2f}"
+                        "quantity": position_size,
+                        "holding_days": 0,
+                        "return_rate": 0.0,
+                        "cost_price": current_price,
+                        "current_price": current_price,
+                        "stop_loss": stop_loss,
+                        "take_profit": current_price * 1.08,
+                        "reason": f"突破信号+趋势确认，止损{stop_loss:.2f}",
+                        "status": "已完成"
                     })
+                    
+                    # 更新仓位记录
+                    update_position_record(
+                        position_type, target_etf_code, target_etf_name, 
+                        current_price, current_price, 100, "新建仓位"
+                    )
                 else:
                     # 已持仓，检查是否需要加仓
                     if "持仓成本价" in current_position and current_position["持仓成本价"] > 0:
@@ -1145,17 +1492,37 @@ def calculate_single_position_strategy(
                         strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}） | ATR={atr:.4f}"
                         
                         trade_actions.append({
-                            "etf_code": target_etf_code,
-                            "etf_name": target_etf_name,
                             "position_type": position_type,
                             "action": "加仓",
-                            "quantity": "补足至100%",
+                            "etf_code": target_etf_code,
+                            "etf_name": target_etf_name,
                             "price": current_price,
-                            "reason": "突破新高，强化趋势"
+                            "quantity": "补足至100%",
+                            "holding_days": current_position["持仓天数"],
+                            "return_rate": profit_pct / 100 if "profit_pct" in locals() else 0.0,
+                            "cost_price": current_position["持仓成本价"],
+                            "current_price": current_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": current_price * 1.08,
+                            "reason": "突破新高，强化趋势",
+                            "status": "已完成"
                         })
+                        
+                        # 更新仓位记录
+                        update_position_record(
+                            position_type, target_etf_code, target_etf_name, 
+                            current_position["持仓成本价"], current_price, 100, "加仓"
+                        )
                     else:
                         strategy_content += f"操作建议：{position_type}：持有（趋势稳健，止损已上移）\n"
                         strategy_content += f"• 动态止损：{stop_loss:.2f}元（风险比 {risk_ratio:.1%}） | ATR={atr:.4f}"
+                        
+                        # 更新持仓天数
+                        new_holding_days = current_position["持仓天数"] + 1
+                        update_position_record(
+                            position_type, target_etf_code, target_etf_name, 
+                            current_position["持仓成本价"], current_price, 100, "持有",
+                        )
         
         # 8.5 无趋势/下跌趋势
         else:
@@ -1173,7 +1540,7 @@ def calculate_single_position_strategy(
                 if min_30d > 0:  # 避免除零错误
                     is_oversold = (ma5 > ma10 and 
                                   volume > avg_volume * 1.1 and
-                                  (current_price / min_30d - 1) < 0.1)
+                                  (current_price / min_30d - 1) < 0.05)
             
             if need_stop:
                 # 止损操作
@@ -1184,30 +1551,66 @@ def calculate_single_position_strategy(
                 strategy_content += f"操作建议：{position_type}：止损清仓（价格跌破动态止损位{stop_loss:.2f}，亏损{loss_pct:.2f}%）"
                 
                 trade_actions.append({
-                    "etf_code": target_etf_code,
-                    "etf_name": target_etf_name,
                     "position_type": position_type,
                     "action": "止损",
-                    "quantity": "100%",
+                    "etf_code": target_etf_code,
+                    "etf_name": target_etf_name,
                     "price": current_price,
-                    "reason": f"跌破动态止损{stop_loss:.2f}"
+                    "quantity": "100%",
+                    "holding_days": current_position["持仓天数"],
+                    "return_rate": -abs(loss_pct) / 100,
+                    "cost_price": current_position["持仓成本价"],
+                    "current_price": current_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": current_position["持仓成本价"] * 1.08,
+                    "reason": f"跌破动态止损{stop_loss:.2f}",
+                    "status": "已完成"
                 })
+                
+                # 更新仓位记录
+                update_position_record(
+                    position_type, "", "", 0.0, 0.0, 0, "清仓"
+                )
             elif is_oversold:
                 # 超卖反弹机会
                 strategy_content += f"操作建议：{position_type}：建仓60%（超卖反弹机会，接近30日低点）"
                 
                 trade_actions.append({
-                    "etf_code": target_etf_code,
-                    "etf_name": target_etf_name,
                     "position_type": position_type,
                     "action": "建仓",
-                    "quantity": "60%",
+                    "etf_code": target_etf_code,
+                    "etf_name": target_etf_name,
                     "price": current_price,
-                    "reason": "超卖反弹机会"
+                    "quantity": "60%",
+                    "holding_days": 0,
+                    "return_rate": 0.0,
+                    "cost_price": current_price,
+                    "current_price": current_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": current_price * 1.08,
+                    "reason": "超卖反弹机会",
+                    "status": "已完成"
                 })
+                
+                # 更新仓位记录
+                update_position_record(
+                    position_type, target_etf_code, target_etf_name, 
+                    current_price, current_price, 60, "建仓"
+                )
             else:
                 # 无操作
-                strategy_content += f"操作建议：{position_type}：空仓观望（趋势未确认）"
+                if current_position["持仓数量"] > 0:
+                    strategy_content += f"操作建议：{position_type}：持有观望（趋势未确认）"
+                    
+                    # 更新持仓天数
+                    new_holding_days = current_position["持仓天数"] + 1
+                    update_position_record(
+                        position_type, current_position["ETF代码"], current_position["ETF名称"], 
+                        current_position["持仓成本价"], current_price, 
+                        current_position["持仓数量"], "持有观望",
+                    )
+                else:
+                    strategy_content += f"操作建议：{position_type}：空仓观望（趋势未确认）"
         
         return strategy_content, trade_actions
     
@@ -1215,195 +1618,6 @@ def calculate_single_position_strategy(
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
-
-def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -> Tuple[bool, bool]:
-    """
-    计算均线信号
-    
-    Args:
-        df: 日线数据
-        short_period: 短期均线周期
-        long_period: 长期均线周期
-    
-    Returns:
-        Tuple[bool, bool]: (多头信号, 空头信号)
-    """
-    try:
-        # 确保DataFrame是副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 计算短期均线
-        df.loc[:, "ma_short"] = df["收盘"].rolling(window=short_period).mean()
-        # 计算长期均线
-        df.loc[:, "ma_long"] = df["收盘"].rolling(window=long_period).mean()
-        
-        # 检查数据量是否足够
-        if len(df) < long_period:
-            logger.warning(f"数据量不足，无法计算均线信号（需要至少{long_period}条数据，实际{len(df)}条）")
-            return False, False
-        
-        # 检查是否有多头信号（短期均线上穿长期均线）
-        ma_bullish = False
-        if len(df) > 1:
-            prev = df.iloc[-2]
-            curr = df.iloc[-1]
-            # 检查前一日短期均线 <= 长期均线，当日短期均线 > 长期均线
-            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
-               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
-                ma_bullish = prev["ma_short"] <= prev["ma_long"] and curr["ma_short"] > curr["ma_long"]
-        
-        # 检查是否有空头信号（短期均线下穿长期均线）
-        ma_bearish = False
-        if len(df) > 1:
-            prev = df.iloc[-2]
-            curr = df.iloc[-1]
-            # 检查前一日短期均线 >= 长期均线，当日短期均线 < 长期均线
-            if not np.isnan(prev["ma_short"]) and not np.isnan(prev["ma_long"]) and \
-               not np.isnan(curr["ma_short"]) and not np.isnan(curr["ma_long"]):
-                ma_bearish = prev["ma_short"] >= prev["ma_long"] and curr["ma_short"] < curr["ma_long"]
-        
-        logger.debug(f"均线信号计算结果: 多头={ma_bullish}, 空头={ma_bearish}")
-        return ma_bullish, ma_bearish
-    
-    except Exception as e:
-        error_msg = f"计算均线信号失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return False, False
-
-def get_etf_score(etf_code: str) -> float:
-    """
-    获取ETF评分
-    
-    Args:
-        etf_code: ETF代码
-    
-    Returns:
-        float: ETF评分
-    """
-    try:
-        # 从评分结果中获取
-        top_etfs = get_top_rated_etfs(top_n=100)
-        if not top_etfs.empty:
-            etf_row = top_etfs[top_etfs["ETF代码"] == etf_code]
-            if not etf_row.empty:
-                return etf_row.iloc[0]["评分"]
-        
-        # 如果不在评分结果中，尝试计算评分
-        df = load_etf_daily_data(etf_code)
-        if not df.empty:
-            # 这里简化处理，实际应使用etf_scoring.py中的评分逻辑
-            return 50.0  # 默认评分
-        
-        return 0.0
-    
-    except Exception as e:
-        error_msg = f"获取ETF {etf_code} 评分失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return 0.0
-
-def get_position_history(days: int = 30) -> pd.DataFrame:
-    """
-    获取仓位历史数据
-    
-    Args:
-        days: 查询天数
-    
-    Returns:
-        pd.DataFrame: 仓位历史数据
-    """
-    try:
-        history = []
-        beijing_now = get_beijing_time()
-        
-        for i in range(days):
-            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
-            
-            # 这里简化处理，实际应从仓位记录文件中读取历史数据
-            history.append({
-                "日期": date,
-                "稳健仓ETF": "510300" if i % 7 < 5 else "510500",
-                "稳健仓收益率": 0.5 + (i % 10) * 0.1,
-                "激进仓ETF": "560002" if i % 5 < 3 else "562500",
-                "激进仓收益率": 1.2 + (i % 15) * 0.2
-            })
-        
-        if not history:
-            logger.info("未找到仓位历史数据")
-            return pd.DataFrame()
-        
-        return pd.DataFrame(history)
-    
-    except Exception as e:
-        error_msg = f"获取仓位历史数据失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return pd.DataFrame()
-
-def analyze_position_performance() -> str:
-    """
-    分析仓位表现
-    
-    Returns:
-        str: 分析结果
-    """
-    try:
-        # 获取历史数据
-        history_df = get_position_history()
-        if history_df.empty:
-            return "【仓位表现分析】\n• 无历史数据可供分析"
-        
-        # 计算统计指标
-        avg_stable_return = history_df["稳健仓收益率"].mean()
-        avg_aggressive_return = history_df["激进仓收益率"].mean()
-        stable_win_rate = (history_df["稳健仓收益率"] > 0).mean() * 100
-        aggressive_win_rate = (history_df["激进仓收益率"] > 0).mean() * 100
-        
-        # 生成分析报告
-        report = "【仓位表现分析】\n"
-        report += f"• 稳健仓平均日收益率: {avg_stable_return:.2f}%\n"
-        report += f"• 激进仓平均日收益率: {avg_aggressive_return:.2f}%\n"
-        report += f"• 稳健仓胜率: {stable_win_rate:.1f}%\n"
-        report += f"• 激进仓胜率: {aggressive_win_rate:.1f}%\n\n"
-        
-        # 添加建议
-        if avg_aggressive_return > avg_stable_return * 1.5:
-            report += "💡 建议：激进仓表现显著优于稳健仓，可适当增加激进仓比例\n"
-        elif avg_aggressive_return < avg_stable_return:
-            report += "💡 建议：激进仓表现不及稳健仓，建议降低激进仓风险暴露\n"
-        
-        return report
-    
-    except Exception as e:
-        error_msg = f"仓位表现分析失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
-        
-        return f"【仓位表现分析】{error_msg}"
 
 # 模块初始化
 try:

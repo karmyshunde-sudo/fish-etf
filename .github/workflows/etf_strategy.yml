@@ -38,7 +38,7 @@ jobs:
   crawl-etf-daily-schedule:
     name: 日线数据爬取（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '14 * * 1-5')
+    if: github.event_name == 'schedule' && github.event.schedule == '0 14 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -78,12 +78,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'crawl_etf_daily'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/crawl_etf_daily_${BEIJING_TIME}.log"
           echo "正在执行: 日线数据爬取"
           echo "日志文件: $LOG_FILE"
-          python main.py crawl_etf_daily 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -108,7 +109,7 @@ jobs:
   calculate-arbitrage-schedule:
     name: 套利计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '2-7 * * 1-5')
+    if: github.event_name == 'schedule' && github.event.schedule == '*/5 2-7 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -137,12 +138,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'calculate_arbitrage'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_arbitrage_${BEIJING_TIME}.log"
           echo "正在执行: 套利计算"
           echo "日志文件: $LOG_FILE"
-          python main.py calculate_arbitrage 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -168,7 +170,7 @@ jobs:
   calculate-position-schedule:
     name: 仓位策略计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '30 5 * * 1-5')
+    if: github.event_name == 'schedule' && github.event.schedule == '30 5 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -207,12 +209,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'calculate_position'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_position_${BEIJING_TIME}.log"
           echo "正在执行: 仓位策略计算"
           echo "日志文件: $LOG_FILE"
-          python main.py calculate_position 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -239,7 +242,7 @@ jobs:
   update-etf-list-schedule:
     name: ETF列表更新（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '1 * * 0')
+    if: github.event_name == 'schedule' && github.event.schedule == '0 1 * * 0'
     permissions:
       contents: write
     steps:
@@ -268,12 +271,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'update_etf_list'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/update_etf_list_${BEIJING_TIME}.log"
           echo "正在执行: ETF列表更新"
           echo "日志文件: $LOG_FILE"
-          python main.py update_etf_list 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -298,7 +302,7 @@ jobs:
   etf-yesno-schedule:
     name: ETF Yes/No 策略（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '9 * * *')
+    if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * *'
     permissions:
       contents: write
     steps:
@@ -327,12 +331,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
           TZ: Asia/Shanghai
+          TASK: 'etf_yesno'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
           echo "正在执行: ETF Yes/No 策略"
           echo "日志文件: $LOG_FILE"
-          python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -351,7 +356,7 @@ jobs:
   stock-fourty-schedule:
     name: 个股趋势策略 (TickTen) - 定时
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '10 * * 1-5')
+    if: github.event_name == 'schedule' && github.event.schedule == '0 10 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -471,12 +476,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'update_etf_list'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/update_etf_list_${BEIJING_TIME}.log"
           echo "正在执行: ETF列表更新"
           echo "日志文件: $LOG_FILE"
-          python main.py update_etf_list 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -536,12 +542,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
           TZ: Asia/Shanghai
+          TASK: 'etf_yesno'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
           echo "正在执行: ETF Yes/No 策略"
           echo "日志文件: $LOG_FILE"
-          python ETF_YesNo.py 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -667,12 +674,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'crawl_etf_daily'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/crawl_etf_daily_${BEIJING_TIME}.log"
           echo "正在执行: 日线数据爬取"
           echo "日志文件: $LOG_FILE"
-          python main.py crawl_etf_daily 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -732,12 +740,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'calculate_arbitrage'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_arbitrage_${BEIJING_TIME}.log"
           echo "正在执行: 套利计算"
           echo "日志文件: $LOG_FILE"
-          python main.py calculate_arbitrage 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -808,12 +817,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
+          TASK: 'calculate_position'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_position_${BEIJING_TIME}.log"
           echo "正在执行: 仓位策略计算"
           echo "日志文件: $LOG_FILE"
-          python main.py calculate_position 2>&1 | tee "$LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT

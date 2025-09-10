@@ -238,11 +238,63 @@ def record_trade(**kwargs):
             message_type="error"
         )
 
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    计算平均真实波幅(ATR)，用于动态止损
+    
+    Args:
+        df: 日线数据
+        period: 计算周期
+    
+    Returns:
+        float: ATR值
+    """
+    try:
+        # 检查数据量是否足够
+        if len(df) < period + 1:
+            logger.warning(f"数据量不足，无法计算ATR（需要至少{period+1}条数据，实际{len(df)}条）")
+            return 0.0
+        
+        # 计算真实波幅(TR)
+        high = df["最高"].values
+        low = df["最低"].values
+        close = df["收盘"].values
+        
+        # TR = max(当日最高 - 当日最低, |当日最高 - 昨日收盘|, |当日最低 - 昨日收盘|)
+        tr1 = high[1:] - low[1:]
+        tr2 = np.abs(high[1:] - close[:-1])
+        tr3 = np.abs(low[1:] - close[:-1])
+        tr = np.max(np.vstack([tr1, tr2, tr3]), axis=0)
+        
+        # 计算ATR（指数移动平均）
+        n = len(tr)
+        if n < period:
+            return 0.0
+            
+        atr = np.zeros(n)
+        # 第一个ATR值使用简单移动平均
+        atr[period-1] = np.mean(tr[:period])
+        
+        # 后续ATR值使用指数移动平均
+        for i in range(period, n):
+            # 防止除零错误
+            if atr[i-1] == 0:
+                atr[i] = tr[i]
+            else:
+                atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
+        
+        return atr[-1]
+    
+    except Exception as e:
+        logger.error(f"计算ATR失败: {str(e)}", exc_info=True)
+        return 0.0
+
 def calculate_adx(df, period=14):
     """计算ADX指标（真实实现）"""
     try:
         # 确保有足够的数据
         if len(df) < period + 1:
+            logger.warning(f"ADX计算失败：数据量不足（需要{period+1}条，实际{len(df)}条）")
             return 0.0
             
         # 计算真实波幅(TR)
@@ -269,31 +321,78 @@ def calculate_adx(df, period=14):
         plus_dm_smooth = np.zeros(len(plus_dm))
         minus_dm_smooth = np.zeros(len(minus_dm))
         
+        # 检查初始数据是否有效
+        valid_initial = np.sum(tr[:period] > 0)
+        if valid_initial < period * 0.7:  # 如果70%以上的初始数据无效
+            logger.warning(f"ADX计算失败：初始数据质量差（有效数据{valid_initial}/{period}）")
+            return 0.0
+            
         tr_smooth[period-1] = np.sum(tr[:period])
         plus_dm_smooth[period-1] = np.sum(plus_dm[:period])
         minus_dm_smooth[period-1] = np.sum(minus_dm[:period])
         
+        # 检查初始值是否为零
+        if tr_smooth[period-1] == 0:
+            logger.warning("ADX计算失败：初始TR值为零")
+            return 0.0
+            
         for i in range(period, len(tr)):
-            tr_smooth[i] = tr_smooth[i-1] - (tr_smooth[i-1]/period) + tr[i]
-            plus_dm_smooth[i] = plus_dm_smooth[i-1] - (plus_dm_smooth[i-1]/period) + plus_dm[i]
-            minus_dm_smooth[i] = minus_dm_smooth[i-1] - (minus_dm_smooth[i-1]/period) + minus_dm[i]
+            # 添加边界检查
+            if tr_smooth[i-1] == 0:
+                tr_smooth[i] = tr[i]
+            else:
+                tr_smooth[i] = tr_smooth[i-1] - (tr_smooth[i-1]/period) + tr[i]
+                
+            if plus_dm_smooth[i-1] == 0:
+                plus_dm_smooth[i] = plus_dm[i]
+            else:
+                plus_dm_smooth[i] = plus_dm_smooth[i-1] - (plus_dm_smooth[i-1]/period) + plus_dm[i]
+                
+            if minus_dm_smooth[i-1] == 0:
+                minus_dm_smooth[i] = minus_dm[i]
+            else:
+                minus_dm_smooth[i] = minus_dm_smooth[i-1] - (minus_dm_smooth[i-1]/period) + minus_dm[i]
         
         # 计算+DI和-DI
-        plus_di = 100 * (plus_dm_smooth / tr_smooth)
-        minus_di = 100 * (minus_dm_smooth / tr_smooth)
+        plus_di = np.zeros(len(tr_smooth))
+        minus_di = np.zeros(len(tr_smooth))
+        
+        # 避免除零错误
+        for i in range(period-1, len(tr_smooth)):
+            if tr_smooth[i] > 0:
+                plus_di[i] = 100 * (plus_dm_smooth[i] / tr_smooth[i])
+                minus_di[i] = 100 * (minus_dm_smooth[i] / tr_smooth[i])
+            else:
+                plus_di[i] = 0
+                minus_di[i] = 0
         
         # 计算DX
-        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+        dx = np.zeros(len(plus_di))
+        for i in range(period-1, len(plus_di)):
+            sum_di = plus_di[i] + minus_di[i]
+            if sum_di > 0:
+                dx[i] = 100 * np.abs(plus_di[i] - minus_di[i]) / sum_di
+            else:
+                dx[i] = 0
         
         # 计算ADX
         adx = np.zeros(len(dx))
-        adx[period*2-1] = np.mean(dx[period-1:period*2-1])
+        valid_adx_start = period * 2 - 1
         
-        for i in range(period*2, len(dx)):
-            adx[i] = ((period-1) * adx[i-1] + dx[i]) / period
-        
-        return adx[-1] if len(adx) > 0 else 0.0
-        
+        if valid_adx_start < len(dx) and np.sum(dx[period-1:valid_adx_start] > 0) > 0:
+            adx[valid_adx_start] = np.mean(dx[period-1:valid_adx_start])
+            
+            for i in range(valid_adx_start+1, len(dx)):
+                if adx[i-1] > 0:
+                    adx[i] = ((period-1) * adx[i-1] + dx[i]) / period
+                else:
+                    adx[i] = dx[i]
+            
+            return adx[-1] if len(adx) > 0 else 0.0
+        else:
+            logger.warning("ADX计算失败：无法计算有效ADX值")
+            return 0.0
+            
     except Exception as e:
         logger.error(f"计算ADX失败: {str(e)}")
         return 0.0
@@ -933,11 +1032,31 @@ def calculate_single_position_strategy(
         Tuple[str, List[Dict]]: 策略内容和交易动作列表
     """
     try:
-        # 1. 检查数据是否足够
-        if etf_df.empty or len(etf_df) < 20:
-            error_msg = f"ETF {target_etf_code} 数据不足，无法计算策略"
-            logger.warning(error_msg)
+        # 1. 严格检查数据质量
+        if etf_df.empty:
+            error_msg = f"ETF {target_etf_code} 数据为空，无法计算策略"
+            logger.error(error_msg)
             return f"{position_type}：{error_msg}", []
+        
+        # 检查必需列
+        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
+        missing_columns = [col for col in required_columns if col not in etf_df.columns]
+        if missing_columns:
+            logger.warning(f"ETF {target_etf_code} 缺少关键列: {', '.join(missing_columns)}")
+        
+        # 检查数据量 - 关键修复：至少需要20天数据
+        if len(etf_df) < 20:
+            error_msg = f"ETF {target_etf_code} 数据量不足({len(etf_df)}天)，无法可靠计算策略（需要至少20天）"
+            logger.warning(error_msg)
+            # 返回明确的警告，而不是继续计算
+            return f"{position_type}：{error_msg}", []
+        
+        # 检查数据连续性
+        etf_df = etf_df.sort_values("日期")
+        date_diff = (pd.to_datetime(etf_df["日期"]).diff().dt.days.fillna(0))
+        max_gap = date_diff.max()
+        if max_gap > 3:
+            logger.warning(f"ETF {target_etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果")
         
         # 2. 获取最新数据
         latest_data = etf_df.iloc[-1]
@@ -1096,53 +1215,6 @@ def calculate_single_position_strategy(
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
-
-def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
-    """
-    计算平均真实波幅(ATR)，用于动态止损
-    
-    Args:
-        df: 日线数据
-        period: 计算周期
-    
-    Returns:
-        float: ATR值
-    """
-    try:
-        # 检查数据量是否足够
-        if len(df) < period + 1:
-            logger.warning(f"数据量不足，无法计算ATR（需要至少{period+1}条数据，实际{len(df)}条）")
-            return 0.0
-        
-        # 计算真实波幅(TR)
-        high = df["最高"].values
-        low = df["最低"].values
-        close = df["收盘"].values
-        
-        # TR = max(当日最高 - 当日最低, |当日最高 - 昨日收盘|, |当日最低 - 昨日收盘|)
-        tr1 = high[1:] - low[1:]
-        tr2 = np.abs(high[1:] - close[:-1])
-        tr3 = np.abs(low[1:] - close[:-1])
-        tr = np.max(np.vstack([tr1, tr2, tr3]), axis=0)
-        
-        # 计算ATR（指数移动平均）
-        n = len(tr)
-        if n < period:
-            return 0.0
-            
-        atr = np.zeros(n)
-        # 第一个ATR值使用简单移动平均
-        atr[period-1] = np.mean(tr[:period])
-        
-        # 后续ATR值使用指数移动平均
-        for i in range(period, n):
-            atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
-        
-        return atr[-1]
-    
-    except Exception as e:
-        logger.error(f"计算ATR失败: {str(e)}", exc_info=True)
-        return 0.0
 
 def calculate_ma_signal(df: pd.DataFrame, short_period: int, long_period: int) -> Tuple[bool, bool]:
     """

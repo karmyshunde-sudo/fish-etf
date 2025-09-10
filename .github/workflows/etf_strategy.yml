@@ -38,8 +38,12 @@ jobs:
       (github.event_name == 'schedule') || 
       (github.event_name == 'workflow_dispatch' && 
        github.event.inputs.task != '' &&
-       !contains(fromJSON('["clean_daily_data","clean_arbitrage_data","clean_trade_records","clean_numeric_csv","show_akshare_info","stock_fourty"]'), 
-                github.event.inputs.task))
+       github.event.inputs.task != 'clean_daily_data' &&
+       github.event.inputs.task != 'clean_arbitrage_data' &&
+       github.event.inputs.task != 'clean_trade_records' &&
+       github.event.inputs.task != 'clean_numeric_csv' &&
+       github.event.inputs.task != 'show_akshare_info' &&
+       github.event.inputs.task != 'stock_fourty')
     runs-on: ubuntu-latest
     timeout-minutes: 1000
     permissions:
@@ -197,7 +201,8 @@ jobs:
         if: >-
           env.skip_execution != 'true' && 
           steps.execute_task.outputs.task_status == 'success' &&
-          contains(fromJSON('["crawl_etf_daily","update_etf_list","calculate_arbitrage","calculate_position"]'), env.TASK)
+          (env.TASK == 'crawl_etf_daily' || env.TASK == 'update_etf_list' || 
+           env.TASK == 'calculate_arbitrage' || env.TASK == 'calculate_position')
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           

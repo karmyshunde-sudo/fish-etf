@@ -50,8 +50,16 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             logger.warning(f"ETF {etf_code} 日线数据文件不存在: {file_path}")
             return pd.DataFrame()
         
-        # 读取CSV文件
-        df = pd.read_csv(file_path, encoding="utf-8")
+        # 读取CSV文件 - 关键修复：指定数据类型
+        df = pd.read_csv(file_path, encoding="utf-8", dtype={
+            "日期": str,
+            "开盘": float,
+            "最高": float,
+            "最低": float,
+            "收盘": float,
+            "成交量": float,
+            "成交额": float
+        })
         
         # 内部列名标准化
         df = internal_ensure_chinese_columns(df)
@@ -217,8 +225,15 @@ def init_position_record() -> pd.DataFrame:
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
             try:
-                # 读取现有记录，确保ETF代码列为字符串
-                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
+                # 读取现有记录 - 关键修复：指定数据类型
+                position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", 
+                                         dtype={
+                                             "ETF代码": str,
+                                             "ETF名称": str,
+                                             "持仓成本价": float,
+                                             "持仓数量": int,
+                                             "持仓天数": int
+                                         })
                 
                 # 确保包含所有必要列
                 required_columns = [
@@ -240,6 +255,7 @@ def init_position_record() -> pd.DataFrame:
                 
                 # 确保正确的数据类型
                 position_df["ETF代码"] = position_df["ETF代码"].astype(str)
+                position_df["ETF名称"] = position_df["ETF名称"].astype(str)
                 position_df["持仓成本价"] = position_df["持仓成本价"].astype(float)
                 position_df["持仓数量"] = position_df["持仓数量"].astype(int)
                 position_df["持仓天数"] = position_df["持仓天数"].astype(int)
@@ -900,7 +916,9 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         # 直接使用已加载的ETF列表
         from data_crawler.etf_list_manager import load_all_etf_list
         logger.info("正在从内存中获取ETF列表...")
-        etf_list = load_all_etf_list()
+        
+        # 关键修复：读取时指定ETF代码列为字符串类型
+        etf_list = load_all_etf_list(dtype={"ETF代码": str})
         
         # 确保ETF代码是字符串类型
         if not etf_list.empty and "ETF代码" in etf_list.columns:
@@ -1156,8 +1174,8 @@ def calculate_strategy_score(etf_df: pd.DataFrame, position_type: str) -> int:
         logger.error(f"计算策略评分失败: {str(e)}")
         return 50  # 默认评分
 
-def update_position_record(position_type: str, etf_code: str, etf_name: str,
-                          cost_price: float, current_price: float,
+def update_position_record(position_type: str, etf_code: str, etf_name: str, 
+                          cost_price: float, current_price: float, 
                           quantity: int, action: str) -> None:
     """
     更新仓位记录
@@ -1172,15 +1190,26 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         action: 操作类型
     """
     try:
-        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", dtype={"ETF代码": str})
+        # 读取现有记录 - 关键修复：指定数据类型
+        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8", 
+                                 dtype={
+                                     "ETF代码": str,
+                                     "ETF名称": str,
+                                     "持仓成本价": float,
+                                     "持仓数量": int,
+                                     "持仓天数": int
+                                 })
         
-        # 确保ETF代码列是字符串类型
-        if "ETF代码" in position_df.columns:
-            position_df["ETF代码"] = position_df["ETF代码"].astype(str)
+        # 确保正确的数据类型
+        position_df["ETF代码"] = position_df["ETF代码"].astype(str)
+        position_df["ETF名称"] = position_df["ETF名称"].astype(str)
+        position_df["持仓成本价"] = position_df["持仓成本价"].astype(float)
+        position_df["持仓数量"] = position_df["持仓数量"].astype(int)
+        position_df["持仓天数"] = position_df["持仓天数"].astype(int)
         
         # 更新指定仓位类型的数据
         mask = position_df['仓位类型'] == position_type
-        position_df.loc[mask, 'ETF代码'] = str(etf_code)  # 确保转换为字符串
+        position_df.loc[mask, 'ETF代码'] = str(etf_code)
         position_df.loc[mask, 'ETF名称'] = str(etf_name)
         position_df.loc[mask, '持仓成本价'] = float(cost_price)
         position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
@@ -1191,8 +1220,9 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         # 更新持仓天数
         if quantity > 0:
             # 如果有持仓，天数+1
-            if position_df.loc[mask, '持仓天数'].values[0] > 0:
-                position_df.loc[mask, '持仓天数'] = int(position_df.loc[mask, '持仓天数']) + 1
+            current_days = position_df.loc[mask, '持仓天数'].values[0]
+            if current_days > 0:
+                position_df.loc[mask, '持仓天数'] = int(current_days) + 1
             else:
                 position_df.loc[mask, '持仓天数'] = 1
         else:
@@ -1385,8 +1415,8 @@ def calculate_position_strategy() -> str:
         init_trade_record()
         init_performance_record()
         
-        # 2. 确保ETF列表存在
-        etf_list_path = os.path.join(Config.DATA_DIR, "etf_list.csv")
+        # 2. 确保ETF列表存在 - 修复：使用正确的ETF列表路径
+        etf_list_path = Config.ALL_ETFS_PATH  # 使用Config.ALL_ETFS_PATH，不是"etf_list.csv"
         if not os.path.exists(etf_list_path):
             logger.warning(f"ETF列表文件不存在: {etf_list_path}")
             # 尝试重新加载ETF列表
@@ -1417,7 +1447,6 @@ def calculate_position_strategy() -> str:
                 valid_etfs = []
                 for _, row in top_etfs.iterrows():
                     etf_code = str(row["ETF代码"])
-                    # 关键修复：使用 internal_load_etf_daily_data 而不是 load_etf_daily_data
                     df = internal_load_etf_daily_data(etf_code)
                     if not df.empty and len(df) >= 30:  # 要求至少30天数据
                         valid_etfs.append(row)

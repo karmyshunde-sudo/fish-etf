@@ -433,7 +433,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
             
             # 生成当前页的ETF详情
             page_num = page + 1  # 包括封面页在内的总页数
-            content = f"【分页 {page_num}/{total_pages}】\n"
+            content = f"【现价比净值低，买入。分页 {page_num}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
                 etf_code = str(row.get('ETF代码', '未知'))
@@ -449,7 +449,7 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
                     f"   ⭐ 综合评分:【 {score:.1f}】"
-                    f"   💹 折价率:【 {abs(premium_discount):.2f}%】\n"
+                    f"      💹 折价率:【 {abs(premium_discount):.2f}%】\n"
                     f"   📈 市场价格:【 {market_price:.3f}元】"
                     f"   📊 IOPV:【 {iopv:.3f}元】\n"
                     f"   🏦 基金规模:【 {fund_size:.2f}亿元】"
@@ -512,7 +512,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
             
             # 生成当前页的ETF详情
             page_num = page + 1  # 包括封面页在内的总页数
-            content = f"【分页 {page_num}/{total_pages}】\n"
+            content = f"【现价比净值高，卖出。分页 {page_num}/{total_pages}】\n"
             
             for i, (_, row) in enumerate(df.iloc[start_idx:end_idx].iterrows(), 1):
                 etf_code = str(row.get('ETF代码', '未知'))
@@ -528,7 +528,7 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
                     f"   ⭐ 综合评分:【 {score:.1f}】"
-                    f"   💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
+                    f"      💹 溢价率:【 {abs(premium_discount):.2f}%】\n"
                     f"   📈 市场价格:【 {market_price:.3f}元】"
                     f"   📊 IOPV:【 {iopv:.3f}元】\n"
                     f"   🏦 基金规模:【 {fund_size:.2f}亿元】"

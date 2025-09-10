@@ -202,13 +202,14 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / valid_opportunities["IOPV"]
         ) * 100
         
-        # 4. 限制折溢价率在合理范围内
-        MAX_DISCOUNT = -30.0  # 最大折价率（-30%）
-        MAX_PREMIUM = 30.0    # 最大溢价率（30%）
-        valid_opportunities["折溢价率"] = valid_opportunities["折溢价率"].clip(
-            lower=MAX_DISCOUNT, 
-            upper=MAX_PREMIUM
-        )
+        # 检查并记录异常折溢价率（不修改原始数据）
+        abnormal_discount = valid_opportunities[valid_opportunities["折溢价率"] < -15.0]
+        abnormal_premium = valid_opportunities[valid_opportunities["折溢价率"] > 15.0]
+        
+        if not abnormal_discount.empty:
+            logger.warning(f"发现 {len(abnormal_discount)} 个异常折价率（<-15%）: {abnormal_discount[['ETF代码', '折溢价率']].to_dict()}")
+        if not abnormal_premium.empty:
+            logger.warning(f"发现 {len(abnormal_premium)} 个异常溢价率（>15%）: {abnormal_premium[['ETF代码', '折溢价率']].to_dict()}")
         
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(valid_opportunities)}，折溢价率范围: {valid_opportunities['折溢价率'].min():.2f}% ~ {valid_opportunities['折溢价率'].max():.2f}%")
@@ -444,10 +445,11 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")
             avg_volume = extract_scalar_value(row["日均成交额"], log_prefix=f"ETF {etf_code} 日均成交额: ")
             
-            # 限制在合理范围内
-            MAX_DISCOUNT = -20.0  # 最大折价率（-20%）
-            MAX_PREMIUM = 20.0    # 最大溢价率（20%）
-            premium_discount = max(min(premium_discount, MAX_PREMIUM), MAX_DISCOUNT)
+            # 检查异常折溢价率（不修改原始值）
+            if premium_discount < -15.0:
+                logger.warning(f"ETF {etf_code} 折价率异常低: {premium_discount:.2f}%")
+            elif premium_discount > 15.0:
+                logger.warning(f"ETF {etf_code} 溢价率异常高: {premium_discount:.2f}%")
             
             # 记录实际使用的值（用于调试）
             logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")

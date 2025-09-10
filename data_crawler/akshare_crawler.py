@@ -190,22 +190,32 @@ def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: st
 def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     尝试使用 fund_etf_hist_em 接口
-    
     Args:
         etf_code: ETF代码
         start_date: 开始日期
         end_date: 结束日期
-        
     Returns:
         pd.DataFrame: 获取到的DataFrame
     """
     try:
         logger.debug(f"尝试使用 fund_etf_hist_em 接口获取ETF {etf_code} 数据")
         df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-        
         if not df.empty:
             # 记录返回的列名，用于调试
             logger.info(f"📊 fund_etf_hist_em 接口返回的原始列名: {list(df.columns)}")
+            
+            # 添加净值列（如果存在）
+            if "net_value" in df.columns:
+                df["净值"] = df["net_value"]
+            elif "iopv" in df.columns:
+                df["IOPV"] = df["iopv"]
+                
+            # 尝试从其他列名映射净值
+            for col in df.columns:
+                if "净值" in col or "net" in col.lower():
+                    df["净值"] = df[col]
+                elif "iopv" in col.lower():
+                    df["IOPV"] = df[col]
         return df
     except Exception as e:
         # 不再捕获所有异常，让网络错误可以触发重试机制
@@ -215,10 +225,8 @@ def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
 def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
     """
     尝试使用 fund_etf_hist_sina 接口
-    
     Args:
         etf_code: ETF代码
-        
     Returns:
         pd.DataFrame: 获取到的DataFrame
     """
@@ -226,12 +234,10 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
         logger.debug(f"尝试使用 fund_etf_hist_sina 接口获取ETF {etf_code} 数据")
         symbol = get_symbol_with_market_prefix(etf_code)
         df = ak.fund_etf_hist_sina(symbol=symbol)
-        
         # 新浪接口返回的数据可能需要特殊处理
         if not df.empty:
             # 记录返回的列名，用于调试
             logger.info(f"📊 fund_etf_hist_sina 接口返回的原始列名: {list(df.columns)}")
-            
             # 新浪接口返回的列名可能是英文，需要转换为中文
             column_mapping = {
                 'date': '日期',
@@ -255,16 +261,15 @@ def try_fund_etf_hist_sina(etf_code: str) -> pd.DataFrame:
                 'amplitude_percent': '振幅',
                 'pct_chg': '涨跌幅',
                 'price_change': '涨跌额',
-                'turnover_ratio': '换手率'
+                'turnover_ratio': '换手率',
+                'net_value': '净值',
+                'iopv': 'IOPV'
             }
-            
             # 重命名列
             df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
-            
             # 确保日期列存在
             if '日期' not in df.columns and 'date' in df.columns:
                 df = df.rename(columns={'date': '日期'})
-                
         return df
     except Exception as e:
         logger.warning(f"fund_etf_hist_sina 接口调用失败: {str(e)}", exc_info=True)
@@ -329,35 +334,46 @@ def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
 def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     确保DataFrame包含所有必需的交易数据列，缺失的列用默认值填充
-    
     Args:
         df: 原始DataFrame
-        
     Returns:
         pd.DataFrame: 包含所有必需列的DataFrame
     """
     if df.empty:
         return df
-    
-    # 定义数据源必需列（基础交易数据）
-    data_source_required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-    
+    # 定义数据源必需列（基础交易数据 + 折溢价率）
+    data_source_required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
     # 检查必需列是否存在
     missing_columns = [col for col in data_source_required_columns if col not in df.columns]
-    
     if missing_columns:
-        logger.error(f"❌ 数据源缺少必需列：{', '.join(missing_columns)}，无法继续")
-        return pd.DataFrame()  # 必需列缺失，返回空DataFrame
+        logger.error(f"❌ 数据源缺少必需列：{', '.join(missing_columns)}，将尝试修复")
+    
+    # 为缺失的必需列计算值
+    if "折溢价率" in missing_columns or "折溢价率" not in df.columns:
+        try:
+            logger.info("尝试计算折溢价率...")
+            if "净值" in df.columns and "收盘" in df.columns:
+                # 折溢价率 = (收盘价 - 净值) / 净值 * 100%
+                df["折溢价率"] = ((df["收盘"] - df["净值"]) / df["净值"] * 100).round(2)
+                logger.info("✅ 成功计算折溢价率")
+            else:
+                # 尝试从其他列推导净值
+                if "IOPV" in df.columns and "收盘" in df.columns:
+                    df["折溢价率"] = ((df["收盘"] - df["IOPV"]) / df["IOPV"] * 100).round(2)
+                    logger.info("✅ 通过IOPV成功计算折溢价率")
+                else:
+                    logger.warning("⚠️ 无法计算折溢价率，将使用0填充")
+                    df["折溢价率"] = 0.0
+        except Exception as e:
+            logger.error(f"计算折溢价率失败: {str(e)}，使用0填充", exc_info=True)
+            df["折溢价率"] = 0.0
     
     # 定义可计算的衍生列
     derived_columns = ["成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-    
     # 检查衍生列是否存在
     missing_derived_columns = [col for col in derived_columns if col not in df.columns]
-    
     if missing_derived_columns:
         logger.warning(f"⚠️ 数据源缺少可计算列：{', '.join(missing_derived_columns)}，将尝试计算")
-        
         # 为缺失的衍生列计算值
         for col in missing_derived_columns:
             try:
@@ -401,6 +417,12 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 logger.error(f"计算列 {col} 时发生错误: {str(e)}", exc_info=True)
                 df[col] = 0.0
     
+    # 再次检查必需列是否存在
+    missing_required_columns = [col for col in data_source_required_columns if col not in df.columns]
+    if missing_required_columns:
+        logger.error(f"❌ 修复后仍缺少必需列：{', '.join(missing_required_columns)}")
+        return pd.DataFrame()  # 仍缺少必需列，返回空DataFrame
+    
     return df
 
 def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -410,17 +432,14 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
     try:
         # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
         df = df.copy(deep=True)
-        
         # 处理日期列
         if "日期" in df.columns:
             # 尝试将日期列转换为datetime类型
             try:
                 # 先确保是字符串类型，便于处理各种可能的日期格式
                 df["日期"] = df["日期"].astype(str)
-                
                 # 尝试转换为datetime
                 df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-                
                 # 检查是否成功转换
                 if pd.api.types.is_datetime64_any_dtype(df["日期"]):
                     # 格式化为字符串
@@ -429,38 +448,31 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
                     logger.warning("日期列转换为datetime失败，保留原始值")
             except Exception as e:
                 logger.error(f"日期列处理失败: {str(e)}", exc_info=True)
-        
         # 确保所有必需列都存在
         df = ensure_required_columns(df)
-        
         # 处理数值列
-        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
         for col in numeric_cols:
             if col in df.columns:
                 try:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
                 except Exception as e:
                     logger.error(f"列 {col} 转换为数值失败: {str(e)}", exc_info=True)
-        
         # 计算缺失列
         if "成交量" in df.columns and "收盘" in df.columns:
             # 如果有成交量和收盘价，可以计算成交额
             if "成交额" not in df.columns:
                 df["成交额"] = df["成交量"] * df["收盘"]
-        
         # 计算涨跌幅等
         if "收盘" in df.columns:
             if "涨跌幅" not in df.columns:
                 df["涨跌幅"] = df["收盘"].pct_change() * 100
             if "涨跌额" not in df.columns:
                 df["涨跌额"] = df["收盘"].diff()
-        
         # 处理NaN值
         if "日期" in df.columns and "收盘" in df.columns:
             df = df.dropna(subset=["日期", "收盘"])
-        
         return df
-    
     except Exception as e:
         logger.error(f"数据清洗过程中发生错误: {str(e)}", exc_info=True)
         raise

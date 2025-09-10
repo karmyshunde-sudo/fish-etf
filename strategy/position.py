@@ -164,7 +164,7 @@ def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def internal_validate_etf_data(df: pd.DataFrame) -> bool:
     """
-    内部实现的数据验证函数（不依赖utils.file_utils）
+    内部数据验证函数，不依赖utils.file_utils
     
     Args:
         df: ETF日线数据DataFrame
@@ -192,8 +192,14 @@ def internal_validate_etf_data(df: pd.DataFrame) -> bool:
     df = df.sort_values("日期")
     date_diff = (pd.to_datetime(df["日期"]).diff().dt.days.fillna(0))
     max_gap = date_diff.max()
-    if max_gap > 3:
+    
+    # 仅当间隔过大时记录警告
+    if max_gap > 7:  # 从3天增加到7天，减少日志量
+        logger.warning(f"ETF数据存在较大间隔({max_gap}天)，可能影响分析结果")
+    elif max_gap > 3:
         logger.info(f"ETF数据存在间隔({max_gap}天)，但不影响核心计算")
+    else:
+        logger.debug(f"ETF数据间隔正常，最大间隔{max_gap}天")
     
     return True
 
@@ -883,10 +889,14 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         pd.DataFrame: 评分前N的ETF列表
     """
     try:
-        # 直接使用已加载的ETF列表（避免重复读取文件）
+        # 直接使用已加载的ETF列表
         from data_crawler.etf_list_manager import load_all_etf_list
         logger.info("正在从内存中获取ETF列表...")
         etf_list = load_all_etf_list()
+        
+        # 确保ETF代码是字符串类型
+        if not etf_list.empty and "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         
         # 检查ETF列表是否有效
         if etf_list.empty:
@@ -906,7 +916,7 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         # 为每只ETF计算评分
         etf_list["评分"] = 0.0
         for i, row in etf_list.iterrows():
-            etf_code = str(row["ETF代码"])
+            etf_code = str(row["ETF代码"])  # 确保ETF代码是字符串
             df = internal_load_etf_daily_data(etf_code)
             
             if not internal_validate_etf_data(df):
@@ -961,6 +971,11 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
             logger.debug(f"ETF {etf_code} 数据不完整，跳过")
             continue
         
+        # 额外检查数据量
+        if len(df) < 30:
+            logger.warning(f"ETF {etf_code} 数据量不足(仅{len(df)}天)，跳过")
+            continue
+            
         # 计算核心指标
         ma_bullish, _ = calculate_ma_signal(df)
         volume_ok = calculate_volume_signal(df)
@@ -1390,8 +1405,9 @@ def calculate_position_strategy() -> str:
                 valid_etfs = []
                 for _, row in top_etfs.iterrows():
                     etf_code = str(row["ETF代码"])
-                    df = load_etf_daily_data(etf_code)
-                    if not df.empty and len(df) >= 20:
+                    # 关键修复：使用 internal_load_etf_daily_data 而不是 load_etf_daily_data
+                    df = internal_load_etf_daily_data(etf_code)
+                    if not df.empty and len(df) >= 30:  # 要求至少30天数据
                         valid_etfs.append(row)
                 
                 top_etfs = pd.DataFrame(valid_etfs)

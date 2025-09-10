@@ -59,7 +59,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
@@ -130,7 +140,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{arbitrage,flags,logs} && chmod -R 777 data/
@@ -191,7 +211,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -263,7 +293,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -323,7 +363,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -377,7 +427,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -468,7 +528,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -534,7 +604,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -594,7 +674,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -655,7 +745,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
@@ -732,7 +832,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{arbitrage,flags,logs} && chmod -R 777 data/
@@ -799,7 +909,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 创建数据目录
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
@@ -1012,7 +1132,17 @@ jobs:
           cache: 'pip'
       - name: 安装依赖包
         run: |
-          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
       - name: 获取AkShare信息
         run: |
           INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
@@ -1021,12 +1151,4 @@ jobs:
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main
-      - name: 发送完成通知
-        if: env.WECOM_WEBHOOK
-        run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          MSG="✅ AkShare信息已生成"
-          [ -n "$INTERFACE_NAME" ] && MSG="✅ 已查询AkShare接口信息: $INTERFACE_NAME"
-          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+     

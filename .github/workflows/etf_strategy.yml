@@ -345,7 +345,7 @@ jobs:
         with: {python-version: '3.10'}
       - run: pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
       - name: 执行个股策略
-        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_STOCKTICKTEN }}}
+        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}}
         run: |
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
@@ -395,7 +395,7 @@ jobs:
       - name: 执行个股策略
         id: execute_task
         if: env.skip_execution != 'true'
-        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_STOCKTICKTEN }}}
+        env: {WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}}
         run: |
           mkdir -p data/logs
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')

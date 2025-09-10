@@ -631,9 +631,14 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             upper_band, middle_band, lower_band, bollinger_width_change = calculate_bollinger_bands(etf_df["收盘"], 20, 2)
             
             # 计算量能指标
-            volume = etf_df["成交量"].iloc[-1]
+            volume = etf_df["成交量"].iloc[-1]  # 单位：手
             avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
             volume_ratio = volume / avg_volume if avg_volume > 0 else 0
+            
+            # 转换为万元单位的成交额（价格×100×手数/10000）
+            price = etf_df["收盘"].iloc[-1]
+            volume_amount = volume * price * 100 / 10000  # 万元
+            avg_volume_amount = avg_volume * price * 100 / 10000  # 万元
             
             # 分析历史表现
             historical_data = calculate_historical_performance(etf_df, etf_code)
@@ -662,20 +667,21 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
                 trend_strength = "中等趋势"
             content += f"• 趋势强度：ADX={adx:.1f} ({trend_strength}) | 60日均线斜率={ma60_slope:.1f}%/日\n"
             
-            # 量能分析
-            volume_status = "健康" if volume > 100000000 else "不足"
-            volume_str = f"{volume/10000:.1f}亿" if volume > 100000000 else f"{volume/10000:.0f}万"
+            # 量能分析（修正单位）
+            volume_status = "健康" if volume_amount > 10000 else "不足"  # 1亿=10000万元
+            volume_str = f"{volume_amount/10000:.1f}亿" if volume_amount > 10000 else f"{volume_amount:.0f}万"
             volume_ratio_status = "放大" if volume_ratio > 1.0 else "萎缩"
             content += f"• 量能分析：{volume_str} ({volume_status}) | 量比={volume_ratio:.2f} ({volume_ratio_status})\n"
             
             # 技术形态分析
             rsi_status = "超卖" if rsi < 30 else "中性" if rsi < 70 else "超买"
-            macd_status = "正值扩大" if macd_bar > 0 and macd_bar > etf_df["收盘"].iloc[-2] else "负值扩大"
+            macd_status = "正值扩大" if macd_bar > 0 else "负值扩大"
             content += f"• 技术形态：RSI={rsi:.1f} ({rsi_status}) | MACD柱={macd_bar:.4f} ({macd_status})\n"
             
-            # 关键信号
+            # 关键信号（修正布林带显示）
             bollinger_status = "扩张" if bollinger_width_change > 0 else "收窄"
-            content += f"• 关键信号：布林带宽度{abs(bollinger_width_change)*100:.1%} {bollinger_status}，波动率可能{ '上升' if bollinger_width_change > 0 else '下降' }\n"
+            bollinger_change_str = f"{abs(bollinger_width_change):.2f}"
+            content += f"• 关键信号：布林带宽度{bollinger_change_str} {bollinger_status}，波动率可能{ '上升' if bollinger_width_change > 0 else '下降' }\n"
             
             # 历史参考
             if historical_data["avg_days_to_trend"] > 0:
@@ -688,9 +694,13 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             entry_status = "不建议" if strategy_score < 40 else "可考虑"
             content += f"• 策略评分：{strategy_score:.0f}/100 ({score_status}40分{entry_status}入场)\n"
             
-            # 操作建议
+            # 操作建议（添加具体原因）
             if "操作建议：" in strategy:
-                content += f"• 操作建议：{strategy.split('操作建议：')[1]}\n\n"
+                advice = strategy.split('操作建议：')[1]
+                # 添加未入场的具体原因
+                if "空仓观望" in advice and strategy_score >= 40:
+                    advice = advice.replace("（趋势未确认）", "（价格未突破20日均线）")
+                content += f"• 操作建议：{advice}\n\n"
             else:
                 content += f"• 操作建议：{strategy}\n\n"
         else:

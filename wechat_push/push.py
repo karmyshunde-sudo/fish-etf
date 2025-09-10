@@ -669,24 +669,25 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
                 logger.warning("尝试发送空DataFrame，已忽略")
                 return False
             # 转换为字符串（使用更友好的格式）
-            message = _format_dataframe_as_string(message)
+            messages = _format_dataframe_as_string(message)
         elif isinstance(message, dict):
             # 如果是字典，检查是否为空
             if not message:
                 logger.warning("尝试发送空字典，已忽略")
                 return False
-        elif not isinstance(message, str):
-            message = str(message)
+            messages = [str(message)]
+        else:
+            messages = [str(message)]
         
         # 检查是否为空字符串
-        if not message.strip():
+        if not any(msg.strip() for msg in messages):
             logger.warning("尝试发送空字符串消息，已忽略")
             return False
         
         # 特殊处理错误消息，避免频繁发送
         if message_type == "error":
             # 提取错误类型（例如"KeyError: 'fundamental'"）
-            error_type = _extract_error_type(message)
+            error_type = _extract_error_type(messages[0])
             
             # 检查是否在冷却期内
             if not _should_send_error(error_type):
@@ -700,38 +701,33 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
             logger.error("企业微信Webhook未配置，无法发送消息")
             return False
             
-        # 应用消息模板
-        full_message = _apply_message_template(message, message_type)
-        
-        # 检查full_message是否为消息列表
-        messages_to_send = []
-        if isinstance(full_message, list):
-            messages_to_send = full_message
-        else:
+        # 应用消息模板并发送所有分页消息
+        all_success = True
+        for msg in messages:
+            full_message = _apply_message_template(msg, message_type)
+            
             # 检查消息长度并进行分片
             messages_to_send = _check_message_length(full_message)
-        
-        # 发送所有消息
-        all_success = True
-        for i, msg in enumerate(messages_to_send):
-            # 速率限制
-            _rate_limit()
             
-            # 重试机制
-            success = False
-            for retry in range(_MAX_RETRIES):
-                if _send_single_message(webhook, msg, retry):
-                    success = True
-                    break
-                else:
-                    if retry < _MAX_RETRIES - 1:
-                        delay = _RETRY_DELAYS[retry]
-                        logger.warning(f"发送失败，{delay}秒后重试 ({retry+1}/{_MAX_RETRIES})")
-                        time.sleep(delay)
-                        
-            if not success:
-                logger.error(f"消息分片 {i+1} 发送失败，已达最大重试次数")
-                all_success = False
+            for i, msg_part in enumerate(messages_to_send):
+                # 速率限制
+                _rate_limit()
+                
+                # 重试机制
+                success = False
+                for retry in range(_MAX_RETRIES):
+                    if _send_single_message(webhook, msg_part, retry):
+                        success = True
+                        break
+                    else:
+                        if retry < _MAX_RETRIES - 1:
+                            delay = _RETRY_DELAYS[retry]
+                            logger.warning(f"发送失败，{delay}秒后重试 ({retry+1}/{_MAX_RETRIES})")
+                            time.sleep(delay)
+                            
+                if not success:
+                    logger.error(f"消息分片 {i+1} 发送失败，已达最大重试次数")
+                    all_success = False
                 
         return all_success
         
@@ -739,53 +735,38 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
         logger.error(f"发送微信消息时发生未预期错误: {str(e)}", exc_info=True)
         return False
 
-def _format_dataframe_as_string(df: pd.DataFrame) -> str:
+def _format_dataframe_as_string(df: pd.DataFrame) -> List[str]:
     """
-    将 DataFrame格式化为更友好的纯文本字符串（完全移除Markdown）
+    将 DataFrame格式化为多条消息（每条不超过2000字符）
     
     Args:
         df: 要格式化的DataFrame
         
     Returns:
-        str: 格式化后的纯文本字符串
+        List[str]: 分页后的消息列表
     """
     try:
         if df.empty:
-            return "没有找到符合条件的数据"
+            return ["没有找到符合条件的数据"]
         
         # 检查是否包含ETF特定列
         has_etf_info = "ETF代码" in df.columns and "ETF名称" in df.columns
         has_premium_discount = "折溢价率" in df.columns
         
         if has_etf_info and has_premium_discount:
-            # 直接调用已定义的专用格式化函数，而不是重复定义格式
+            # 直接调用已定义的专用格式化函数
             if df["折溢价率"].min() < 0:
-                # 使用已定义的折扣消息格式化函数
-                messages = _format_discount_message(df)
-                # 只返回第一部分（标题+页脚），因为其他部分是分页内容
-                return messages[0] if messages else "格式化消息失败"
+                return _format_discount_message(df)
             else:
-                # 使用已定义的溢价消息格式化函数
-                messages = _format_premium_message(df)
-                # 只返回第一部分（标题+页脚），因为其他部分是分页内容
-                return messages[0] if messages else "格式化消息失败"
+                return _format_premium_message(df)
         
-        # 对于非ETF场景，可以调用通用格式化函数
-        # 但根据项目需求，这种情况不应该发生
+        # 非ETF场景
         logger.warning("尝试格式化非ETF数据，这可能表示代码逻辑有误")
-        return f"找到 {len(df)} 条数据，但不是ETF数据格式"
+        return [f"找到 {len(df)} 条数据，但不是ETF数据格式"]
     
     except Exception as e:
         logger.error(f"格式化DataFrame为字符串失败: {str(e)}", exc_info=True)
-        return (
-            "数据格式化错误，请检查日志\n\n"
-            "==================\n"
-            f"📅 UTC时间: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📅 北京时间: {datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "==================\n"
-            "🔗 【GIT：fish-etf】: 无法获取日志链接\n"
-            "📊 环境：生产"
-        )
+        return ["数据格式化错误，请检查日志"]
 
 def send_wechat_markdown(message: str, 
                         message_type: str = "default",

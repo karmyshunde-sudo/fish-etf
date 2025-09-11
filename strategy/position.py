@@ -65,12 +65,15 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             }
         )
         
-        # 确保只使用"日期"列作为交易日期，完全忽略"爬取时间"列
+        # 【关键修复】明确移除爬取时间列，避免混淆
         if "爬取时间" in df.columns:
             df = df.drop(columns=["爬取时间"])
         
-        # 检查必需列
+        # 【关键修复】确保只保留我们需要的列
         required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+        df = df[[col for col in required_columns if col in df.columns]]
+        
+        # 检查必需列
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
@@ -215,41 +218,75 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
         bool: 数据是否完整有效
     """
     if df.empty:
-        logger.warning(f"ETF {etf_code} 数据为空")
+        error_msg = f"ETF {etf_code} 数据为空"
+        logger.error(error_msg)
         return False
     
-    # 检查必需列
+    # 仅检查真正必需的列
     required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
-        logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
+        error_msg = f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}"
+        logger.error(error_msg)
         return False
     
     # 检查数据量
     if len(df) < 20:
         file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
-        logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，需要至少20天数据。数据文件: {file_path}")
+        error_msg = f"ETF {etf_code} 数据量不足({len(df)}天)，需要至少20天数据。数据文件: {file_path}"
+        logger.error(error_msg)
         return False
     
-    # 检查数据连续性 - 仅基于"日期"列
-    df = df.sort_values("日期")
-    dates = pd.to_datetime(df["日期"]).dt.date
-    date_diff = dates.diff().dt.days.fillna(0).iloc[1:]  # 跳过第一个NaN
+    # 确保"日期"列是字符串格式
+    if "日期" in df.columns:
+        # 转换为字符串格式
+        df["日期"] = df["日期"].astype(str)
     
-    if len(date_diff) > 0:
-        max_gap = date_diff.max()
+    # 检查数据连续性
+    df = df.sort_values("日期")
+    
+    # 确保日期格式正确
+    try:
+        # 严格转换为日期格式
+        dates = pd.to_datetime(df["日期"], format="%Y-%m-%d", errors="raise").dt.date
+        date_diff = dates.diff().dt.days.fillna(0)
         
-        # 中国股市正常交易日间隔：周末1-2天，小长假3-7天
-        # 9天的间隔可能是节假日，不应该警告
-        if max_gap > 30:  # 只有超过30天的间隔才警告
-            file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
-            logger.warning(f"ETF {etf_code} 数据存在极大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}")
-        elif max_gap > 7:  # 7-30天的间隔是正常节假日，只记录info
-            logger.info(f"ETF {etf_code} 数据存在节假日间隔({max_gap}天)，不影响核心计算")
+        # 只考虑有效的日期差
+        valid_diff = date_diff[date_diff > 0]
+        
+        if len(valid_diff) > 0:
+            max_gap = valid_diff.max()
+            
+            # 中国股市正常交易日间隔：周末1-2天，小长假3-7天
+            if max_gap > 7:  # 只有超过7天的间隔才警告
+                file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
+                error_msg = f"ETF {etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}"
+                logger.error(error_msg)
+                return False
+            else:
+                logger.debug(f"ETF {etf_code} 数据间隔正常，最大间隔{max_gap}天")
         else:
-            logger.debug(f"ETF {etf_code} 数据间隔正常，最大间隔{max_gap}天")
-    else:
-        logger.debug(f"ETF {etf_code} 数据不足2条，无法检查间隔")
+            logger.debug(f"ETF {etf_code} 数据不足2条，无法检查间隔")
+    except Exception as e:
+        error_msg = f"ETF {etf_code} 日期格式验证失败: {str(e)}"
+        logger.error(error_msg)
+        return False
+    
+    # 额外验证：检查价格数据是否合理
+    try:
+        if df["收盘"].min() <= 0 or df["开盘"].min() <= 0 or df["最高"].min() <= 0 or df["最低"].min() <= 0:
+            error_msg = f"ETF {etf_code} 价格数据包含非正数，数据无效"
+            logger.error(error_msg)
+            return False
+        
+        if (df["最高"] < df["最低"]).any():
+            error_msg = f"ETF {etf_code} 存在最高价低于最低价的数据，数据无效"
+            logger.error(error_msg)
+            return False
+    except Exception as e:
+        error_msg = f"ETF {etf_code} 价格数据验证失败: {str(e)}"
+        logger.error(error_msg)
+        return False
     
     return True
 
@@ -1098,16 +1135,6 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         scored_df = pd.DataFrame(scored_etfs).sort_values("评分", ascending=False)
         logger.info(f"成功获取评分前{top_n}的ETF列表，共 {len(scored_df)} 条记录")
         
-        # 推送所有评分ETF到微信（用于调试）
-        etf_list_str = "\n".join([
-            f"{i+1}. {item['ETF名称']}({item['ETF代码']}): {item['评分']:.1f}分 (ADX: {item['ADX']:.1f}, ATR: {item['ATR']:.4f})"
-            for i, item in enumerate(scored_df.to_dict('records')[:10])  # 只推送前10个
-        ])
-        send_wechat_message(
-            message=f"【评分ETF列表】\n{etf_list_str}",
-            message_type="info"
-        )
-        
         return scored_df.head(top_n)
         
     except Exception as e:
@@ -1374,6 +1401,64 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
             message_type="error"
         )
 
+def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    计算相对强弱指数(RSI) - 严格真实计算，不使用任何默认值
+    
+    Args:
+        df: ETF日线数据DataFrame
+        period: RSI计算周期，默认14
+    
+    Returns:
+        float: RSI值，计算失败时抛出异常
+    
+    Raises:
+        ValueError: 当数据不足或计算失败时抛出异常
+    """
+    if df.empty or len(df) < period + 1:
+        raise ValueError(f"RSI计算失败：数据量不足（需要{period + 1}天，实际{len(df)}天）")
+    
+    # 计算价格变动
+    delta = df['收盘'].diff()
+    
+    # 分离上涨和下跌
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    # 检查是否有有效数据
+    if gain.isna().all() or loss.isna().all():
+        raise ValueError("RSI计算失败：价格数据无效")
+    
+    # 计算平均涨跌幅
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    
+    # 检查初始值
+    if pd.isna(avg_gain.iloc[period-1]) or pd.isna(avg_loss.iloc[period-1]):
+        # 尝试使用前period天的数据计算初始值
+        initial_gain = gain[1:period+1].mean()
+        initial_loss = loss[1:period+1].mean()
+        
+        if pd.isna(initial_gain) or pd.isna(initial_loss):
+            raise ValueError("RSI计算失败：初始值计算失败")
+        
+        avg_gain.iloc[period-1] = initial_gain
+        avg_loss.iloc[period-1] = initial_loss
+    
+    # 检查是否可以计算RS
+    if avg_loss.iloc[-1] <= 0:
+        raise ValueError("RSI计算失败：平均跌幅为零或负值")
+    
+    # 计算RS和RSI
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    # 检查最终结果是否有效
+    if pd.isna(rsi.iloc[-1]) or not (0 <= rsi.iloc[-1] <= 100):
+        raise ValueError(f"RSI计算失败：结果无效({rsi.iloc[-1]})")
+    
+    return rsi.iloc[-1]
+        
 def generate_position_content(strategies: Dict[str, str]) -> str:
     """
     生成仓位策略内容（基于真实计算指标）
@@ -1689,75 +1774,140 @@ def calculate_single_position_strategy(
     
     Returns:
         Tuple[str, List[Dict]]: 策略内容和交易动作列表
+    
+    Raises:
+        ValueError: 当关键指标计算失败时抛出异常
     """
     try:
         # 1. 严格检查数据质量
         if not internal_validate_etf_data(etf_df, target_etf_code):
             error_msg = f"ETF {target_etf_code} 数据验证失败，无法计算策略"
-            logger.warning(error_msg)
-            return f"{position_type}：{error_msg}", []
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # 2. 获取最新数据
         latest_data = etf_df.iloc[-1]
         current_price = latest_data["收盘"]
         
-        # 3. 计算关键指标
-        # 确保ma60是Series，不是单个数值
-        ma5 = etf_df["收盘"].rolling(5).mean()
-        ma10 = etf_df["收盘"].rolling(10).mean()
-        ma20 = etf_df["收盘"].rolling(20).mean()
-        ma60 = etf_df["收盘"].rolling(60).mean()
+        # 3. 计算关键指标 - 严格验证每一步
+        try:
+            # 确保ma60是Series，不是单个数值
+            ma5 = etf_df["收盘"].rolling(5).mean()
+            ma10 = etf_df["收盘"].rolling(10).mean()
+            ma20 = etf_df["收盘"].rolling(20).mean()
+            ma60 = etf_df["收盘"].rolling(60).mean()
+            
+            # 获取最新值
+            if len(ma5) < 5 or len(ma10) < 10 or len(ma20) < 20 or len(ma60) < 60:
+                raise ValueError("均线计算失败：数据量不足")
+                
+            current_ma5 = ma5.iloc[-1]
+            current_ma10 = ma10.iloc[-1]
+            current_ma20 = ma20.iloc[-1]
+            current_ma60 = ma60.iloc[-1]
+            
+            # 检查是否为有效数值
+            for val in [current_ma5, current_ma10, current_ma20, current_ma60]:
+                if pd.isna(val) or not np.isfinite(val):
+                    raise ValueError("均线计算失败：结果无效")
+        except Exception as e:
+            error_msg = f"均线计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
-        # 获取最新值
-        current_ma5 = ma5.iloc[-1] if len(ma5) >= 5 else 0
-        current_ma10 = ma10.iloc[-1] if len(ma10) >= 10 else 0
-        current_ma20 = ma20.iloc[-1] if len(ma20) >= 20 else 0
-        current_ma60 = ma60.iloc[-1] if len(ma60) >= 60 else 0
-        
-        # 计算长期趋势（60日均线向上）
+        # 计算长期趋势
         in_long_term_trend = False
-        if len(ma60) >= 61:
-            try:
+        try:
+            if len(ma60) >= 61:
                 in_long_term_trend = current_ma60 > ma60.iloc[-2]
-            except:
-                in_long_term_trend = False
+                if not isinstance(in_long_term_trend, bool):
+                    raise ValueError("长期趋势判断失败：结果类型错误")
+        except Exception as e:
+            error_msg = f"长期趋势计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
-        # 计算短期趋势（5日>10日>20日）
-        in_short_term_trend = current_ma5 > current_ma10 > current_ma20
+        # 计算短期趋势
+        try:
+            in_short_term_trend = current_ma5 > current_ma10 > current_ma20
+            if not isinstance(in_short_term_trend, bool):
+                raise ValueError("短期趋势判断失败：结果类型错误")
+        except Exception as e:
+            error_msg = f"短期趋势计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # 计算成交量
-        volume = etf_df["成交量"].iloc[-1]
-        avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
-        volume_ok = volume > avg_volume * 1.5  # 要求1.5倍均量
+        try:
+            volume = etf_df["成交量"].iloc[-1]
+            avg_volume = etf_df["成交量"].rolling(5).mean().iloc[-1]
+            
+            # 检查是否为有效数值
+            if pd.isna(volume) or pd.isna(avg_volume) or not np.isfinite(volume) or not np.isfinite(avg_volume):
+                raise ValueError("成交量计算失败：结果无效")
+                
+            volume_ok = volume > avg_volume * 1.5  # 要求1.5倍均量
+            if not isinstance(volume_ok, bool):
+                raise ValueError("成交量信号判断失败：结果类型错误")
+        except Exception as e:
+            error_msg = f"成交量计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # 计算ADX和ATR
-        adx = calculate_adx(etf_df, 14)
-        atr = calculate_atr(etf_df, 14)
+        try:
+            adx = calculate_adx(etf_df, 14)
+            if adx < 0 or adx > 100:
+                raise ValueError(f"ADX计算失败：结果超出范围({adx})")
+                
+            atr = calculate_atr(etf_df, 14)
+            if atr <= 0:
+                raise ValueError(f"ATR计算失败：结果无效({atr})")
+        except Exception as e:
+            error_msg = f"ADX/ATR计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # 4. 动态止损计算（确保ATR有效）
-        if atr <= 0:
-            error_msg = f"ETF {target_etf_code} ATR计算无效，无法设置有效止损，放弃交易"
+        try:
+            stop_loss_factor = 1.5 if is_stable else 2.0
+            stop_loss = current_price - stop_loss_factor * atr
+            risk_ratio = (current_price - stop_loss) / current_price
+            
+            # 检查止损位是否合理
+            if stop_loss >= current_price or risk_ratio <= 0 or risk_ratio > 0.15:
+                raise ValueError(f"止损计算失败：风险比例不合理({risk_ratio:.2%})")
+        except Exception as e:
+            error_msg = f"止损计算失败: {str(e)}"
             logger.error(error_msg)
-            return f"{position_type}：{error_msg}", []
-        
-        stop_loss_factor = 1.5 if is_stable else 2.0
-        stop_loss = current_price - stop_loss_factor * atr
-        risk_ratio = (current_price - stop_loss) / current_price if current_price > 0 else 0
+            raise ValueError(error_msg)
         
         # 5. 突破信号确认
         is_breakout = False
-        if len(etf_df) >= 21:
-            try:
+        try:
+            if len(etf_df) >= 21:
                 max_20d = etf_df["收盘"].rolling(20).max().iloc[-2]
                 is_breakout = (current_price > max_20d) and volume_ok
-            except:
-                is_breakout = False
+                if not isinstance(is_breakout, bool):
+                    raise ValueError("突破信号判断失败：结果类型错误")
+        except Exception as e:
+            error_msg = f"突破信号计算失败: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
-        # 6. 超卖信号确认
+        # 6. 超卖信号确认 - 严格计算，不使用默认值
         is_oversold = False
-        rsi = calculate_rsi(etf_df, 14)
-        if rsi < 30 and volume > avg_volume * 1.2:
-            is_oversold = True
+        rsi = None
+        try:
+            rsi = calculate_rsi(etf_df, 14)
+            is_oversold = rsi < 30 and volume > avg_volume * 1.2
+            if not isinstance(is_oversold, bool):
+                raise ValueError("超卖信号判断失败：结果类型错误")
+        except Exception as e:
+            error_msg = f"RSI计算失败: {str(e)}"
+            logger.error(error_msg)
+            # 不使用默认值，直接抛出异常
+            raise ValueError(error_msg)
         
         # 7. 构建详细策略内容
         strategy_content = f"ETF名称：{target_etf_name}\n"
@@ -1970,10 +2120,33 @@ def calculate_single_position_strategy(
         
         return strategy_content, trade_actions
     
+    except ValueError as e:
+        # 明确记录错误，不掩盖问题
+        error_msg = f"计算{position_type}策略失败（关键指标计算失败）: {str(e)}"
+        logger.error(error_msg)
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        # 返回明确的错误信息，不使用默认值
+        return f"{position_type}：{error_msg}", []
+    
     except Exception as e:
-        error_msg = f"计算{position_type}策略失败: {str(e)}"
+        # 未知错误，同样不掩盖
+        error_msg = f"计算{position_type}策略失败（系统错误）: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return f"{position_type}：计算策略时发生致命错误，请检查日志", []
+        
+        # 发送错误通知
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        
+        # 返回明确的错误信息
+        return f"{position_type}：{error_msg}", []
 
 # 模块初始化
 try:

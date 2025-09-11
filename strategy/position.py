@@ -65,8 +65,9 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             }
         )
         
-        # 内部列名标准化
-        df = internal_ensure_chinese_columns(df)
+        # 确保只使用"日期"列作为交易日期，完全忽略"爬取时间"列
+        if "爬取时间" in df.columns:
+            df = df.drop(columns=["爬取时间"])
         
         # 检查必需列
         required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
@@ -75,10 +76,8 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
-        # 确保日期列为字符串格式，避免混合格式问题
-        if "日期" in df.columns:
-            # 先转换为字符串，再转换为datetime，最后再转回字符串格式
-            df["日期"] = pd.to_datetime(df["日期"].astype(str)).dt.strftime("%Y-%m-%d")
+        # 确保日期列为标准格式
+        df["日期"] = df["日期"].astype(str)
         
         # 按日期排序并去重
         df = df.sort_values("日期").drop_duplicates(subset=["日期"], keep="last")
@@ -219,7 +218,7 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
         logger.warning(f"ETF {etf_code} 数据为空")
         return False
     
-    # 仅检查真正必需的列
+    # 检查必需列
     required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
@@ -232,29 +231,25 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
         logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，需要至少20天数据。数据文件: {file_path}")
         return False
     
-    # 确保"日期"列是字符串格式
-    if "日期" in df.columns:
-        # 转换为字符串格式
-        df["日期"] = df["日期"].astype(str)
-    
-    # 检查数据连续性
+    # 检查数据连续性 - 仅基于"日期"列
     df = df.sort_values("日期")
+    dates = pd.to_datetime(df["日期"]).dt.date
+    date_diff = dates.diff().dt.days.fillna(0).iloc[1:]  # 跳过第一个NaN
     
-    # 确保日期格式正确
-    try:
-        dates = pd.to_datetime(df["日期"]).dt.date
-        date_diff = (dates.diff().dt.days.fillna(0))
+    if len(date_diff) > 0:
         max_gap = date_diff.max()
         
-        if max_gap > 7:
+        # 中国股市正常交易日间隔：周末1-2天，小长假3-7天
+        # 9天的间隔可能是节假日，不应该警告
+        if max_gap > 30:  # 只有超过30天的间隔才警告
             file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
-            logger.warning(f"ETF {etf_code} 数据存在较大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}")
-        elif max_gap > 3:
-            logger.debug(f"ETF {etf_code} 数据存在间隔({max_gap}天)，但不影响核心计算")
+            logger.warning(f"ETF {etf_code} 数据存在极大间隔({max_gap}天)，可能影响分析结果。数据文件: {file_path}")
+        elif max_gap > 7:  # 7-30天的间隔是正常节假日，只记录info
+            logger.info(f"ETF {etf_code} 数据存在节假日间隔({max_gap}天)，不影响核心计算")
         else:
             logger.debug(f"ETF {etf_code} 数据间隔正常，最大间隔{max_gap}天")
-    except Exception as e:
-        logger.warning(f"ETF {etf_code} 日期格式验证失败: {str(e)}")
+    else:
+        logger.debug(f"ETF {etf_code} 数据不足2条，无法检查间隔")
     
     return True
 

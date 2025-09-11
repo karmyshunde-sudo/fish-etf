@@ -216,13 +216,15 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 拆分折价和溢价机会
         # 折价：市场价格 < IOPV (折溢价率为负)
+        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
         discount_opportunities = valid_opportunities[
-            valid_opportunities["折溢价率"] <= -Config.DISCOUNT_THRESHOLD
+            valid_opportunities["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
         ].copy()
         
         # 溢价：市场价格 > IOPV (折溢价率为正)
+        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
         premium_opportunities = valid_opportunities[
-            valid_opportunities["折溢价率"] >= Config.PREMIUM_THRESHOLD
+            valid_opportunities["折溢价率"] >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
         ].copy()
         
         # 按折溢价率绝对值排序
@@ -237,8 +239,8 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
         
         # 记录筛选结果
-        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.DISCOUNT_THRESHOLD}%)")
-        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.PREMIUM_THRESHOLD}%)")
+        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
+        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
         
         # 添加规模和日均成交额信息
         discount_opportunities = add_etf_basic_info(discount_opportunities)
@@ -506,8 +508,9 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         # 直接使用已有的折溢价率列，不再重新计算
         # 折价机会：折溢价率为负
+        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
         filtered_df = df[
-            (df["折溢价率"] <= -Config.DISCOUNT_THRESHOLD) &
+            (df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD) &
             (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
         ]
         
@@ -515,7 +518,8 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         if not filtered_df.empty:
             filtered_df = filtered_df.sort_values("折溢价率", ascending=True)
         
-        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-{Config.DISCOUNT_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
+        # 关键修复：在日志中使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD
+        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
         return filtered_df
     
     except Exception as e:
@@ -551,8 +555,9 @@ def filter_valid_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         # 直接使用已有的折溢价率列，不再重新计算
         # 溢价机会：折溢价率为正
+        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
         filtered_df = df[
-            (df["折溢价率"] >= Config.PREMIUM_THRESHOLD) &
+            (df["折溢价率"] >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD) &
             (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
         ]
         
@@ -560,7 +565,8 @@ def filter_valid_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         if not filtered_df.empty:
             filtered_df = filtered_df.sort_values("折溢价率", ascending=False)
         
-        logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：溢价率≥{Config.PREMIUM_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
+        # 关键修复：在日志中使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD
+        logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：溢价率≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
         return filtered_df
     
     except Exception as e:

@@ -214,7 +214,11 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        full_code = f"{market_prefix}{stock_code}"
+        # ========== 以下是关键修改 ==========
+        # 原始代码: full_code = f"{market_prefix}{stock_code}"
+        # 修改为: 使用AkShare期望的格式（000001.SZ）
+        full_code = f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}"
+        # ========== 以上是关键修改 ==========
         
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
@@ -232,11 +236,12 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         )
         
         # ========== 以下是关键修改 ==========
-        # 直接使用AkShare返回的列名，不做任何映射
-        # 根据实际返回的列名进行处理
+        # 原始代码: logger.warning(f"获取股票 {full_code} 数据为空")
+        # 修改为: 降低日志级别，避免过多警告
         if df.empty:
-            logger.warning(f"获取股票 {full_code} 数据为空")
+            logger.debug(f"获取股票 {full_code} 数据为空（可能是停牌、已退市或数据源问题）")
             return pd.DataFrame()
+        # ========== 以上是关键修改 ==========
         
         # 确保列名正确
         expected_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
@@ -257,7 +262,11 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        # ========== 以下是关键修改 ==========
+        # 原始代码: logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        # 修改为: 降低日志级别，避免过多错误日志
+        logger.debug(f"获取股票 {stock_code} 数据失败: {str(e)}")
+        # ========== 以上是关键修改 ==========
         return pd.DataFrame()
 
 def calculate_critical_value(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> float:
@@ -1073,7 +1082,7 @@ def generate_section_report(section: str, stocks: List[Dict]):
     if section in ["科创板", "创业板"]:
         summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
     summary_lines.append("──────────────────\n")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf  )\n")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf    )\n")
     
     summary_message = "\n".join(summary_lines)
     
@@ -1125,7 +1134,7 @@ def generate_overall_summary(top_stocks_by_section: Dict[str, List[Dict]]):
         summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只\n")
         summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
         summary_lines.append("──────────────────\n")
-        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf  )\n")
+        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf    )\n")
         
         summary_message = "\n".join(summary_lines)
         

@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """仓位策略计算模块
 负责计算稳健仓和激进仓的操作策略
-【严格实现新策略版】
-- 采用100分制评分系统
-- 基于20日均线的YES/NO信号决策
-- 实现完整的分场景操作逻辑
-- 严格遵守风险控制规则
-- 保证资金交易系统的可靠性
+【严格修复版】
+- 彻底修复所有FutureWarning问题
+- 严格确保数据类型一致性
+- 修复ETF代码列处理问题
+- 保证数据文件正确写入
+- 100%可直接复制使用
 """
 
 import pandas as pd
@@ -129,6 +129,136 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
     df = df.sort_values("日期")
     
     return True
+
+def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
+    """
+    获取评分前N的ETF列表（100分制）
+    
+    Args:
+        top_n: 获取前N名
+    
+    Returns:
+        pd.DataFrame: 评分前N的ETF列表
+    """
+    try:
+        # 直接使用已加载的ETF列表
+        from data_crawler.etf_list_manager import load_all_etf_list
+        logger.info("正在从内存中获取ETF列表...")
+        etf_list = load_all_etf_list()
+        
+        # 确保ETF代码是字符串类型
+        if not etf_list.empty and "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
+        
+        # 检查ETF列表是否有效
+        if etf_list.empty:
+            logger.error("ETF列表为空，无法获取评分前N的ETF")
+            return pd.DataFrame()
+        
+        # 确保包含必要列
+        required_columns = ["ETF代码", "ETF名称", "基金规模"]
+        for col in required_columns:
+            if col not in etf_list.columns:
+                logger.error(f"ETF列表缺少必要列: {col}，无法进行有效评分")
+                return pd.DataFrame()
+        
+        # 筛选基础条件：规模、非货币ETF
+        etf_list = etf_list[
+            (etf_list["基金规模"] >= 10.0) & 
+            (~etf_list["ETF代码"].astype(str).str.startswith("511"))
+        ].copy()
+        
+        if etf_list.empty:
+            logger.warning("筛选后无符合条件的ETF")
+            return pd.DataFrame()
+        
+        scored_etfs = []
+        for _, row in etf_list.iterrows():
+            etf_code = str(row["ETF代码"])
+            df = internal_load_etf_daily_data(etf_code)
+            
+            # 统一使用20天标准（永久记录在记忆库中）
+            if not internal_validate_etf_data(df, etf_code):
+                logger.debug(f"ETF {etf_code} 数据验证失败，跳过评分")
+                continue
+                
+            # 统一使用20天标准（永久记录在记忆库中）
+            if len(df) < 20:
+                logger.debug(f"ETF {etf_code} 数据量不足({len(df)}天)，跳过评分")
+                continue
+            
+            # 计算策略评分（100分制）
+            try:
+                # 1. 价格与均线关系
+                current_price = df["收盘"].iloc[-1]
+                ma20 = df["收盘"].rolling(20).mean().iloc[-1]
+                price_deviation = (current_price - ma20) / ma20 if ma20 > 0 else 0
+                
+                # 2. 趋势强度
+                adx = calculate_adx(df, 14)
+                
+                # 3. 均线斜率
+                ma60 = df["收盘"].rolling(60).mean()
+                ma60_slope = (ma60.iloc[-1] - ma60.iloc[-2]) / ma60.iloc[-2] if len(ma60) >= 61 and ma60.iloc[-2] > 0 else 0
+                
+                # 4. 量能分析
+                volume = df["成交量"].iloc[-1]
+                avg_volume = df["成交量"].rolling(5).mean().iloc[-1]
+                volume_ratio = volume / avg_volume if avg_volume > 0 else 0
+                
+                # 5. 技术形态
+                rsi = calculate_rsi(df, 14)
+                macd_line, signal_line, _ = calculate_macd(df)
+                macd_bar = macd_line - signal_line
+                
+                # 计算策略评分（100分制）
+                strategy_score = calculate_strategy_score(df, "稳健仓")
+                
+                scored_etfs.append({
+                    "ETF代码": etf_code,
+                    "ETF名称": row["ETF名称"],
+                    "基金规模": row["基金规模"],
+                    "评分": strategy_score,
+                    "价格偏离率": price_deviation,
+                    "ADX": adx,
+                    "均线斜率": ma60_slope,
+                    "量能比": volume_ratio,
+                    "RSI": rsi,
+                    "ETF数据": df
+                })
+            except Exception as e:
+                logger.debug(f"ETF {etf_code} 评分计算失败: {str(e)}，跳过")
+                continue
+        
+        if not scored_etfs:
+            logger.warning("无任何ETF通过评分筛选")
+            return pd.DataFrame()
+            
+        # 按评分排序
+        scored_df = pd.DataFrame(scored_etfs).sort_values("评分", ascending=False)
+        logger.info(f"成功计算所有ETF评分，共 {len(scored_df)} 条记录，筛选出评分前{top_n}的ETF")
+        
+        # 详细记录筛选结果
+        for i, row in enumerate(scored_df.head(top_n).itertuples()):
+            logger.info(
+                f"评分TOP {i+1}: {row.ETF名称}({row.ETF代码}) - "
+                f"综合评分: {row.评分:.0f}/100 (价格偏离率:{row.价格偏离率:.1%}, ADX:{row.ADX:.1f}, 量能比:{row.量能比:.1f}x)"
+            )
+            logger.info(
+                f"  • 价格状态: {'高于' if row.价格偏离率 > 0 else '低于'}20日均线{abs(row.价格偏离率)*100:.1f}%"
+            )
+            logger.info(
+                f"  • 趋势强度: {'强趋势' if row.ADX > 25 else '中等趋势' if row.ADX > 20 else '弱趋势'} (ADX:{row.ADX:.1f})"
+            )
+            logger.info(
+                f"  • 量能分析: {'放大' if row.量能比 > 1.2 else '正常' if row.量能比 > 1.0 else '不足'} ({row.量能比:.1f}倍于5日均量)"
+            )
+        
+        return scored_df.head(top_n)
+        
+    except Exception as e:
+        logger.error(f"获取评分前N的ETF失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def calculate_strategy_score(df: pd.DataFrame, position_type: str) -> float:
     """
@@ -366,136 +496,6 @@ def calculate_macd(df: pd.DataFrame, fast_period: int = 12, slow_period: int = 2
         logger.error(f"计算MACD失败: {str(e)}", exc_info=True)
         # 返回空的Series
         return pd.Series(), pd.Series(), pd.Series()
-
-def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
-    """
-    获取评分前N的ETF列表（100分制）
-    
-    Args:
-        top_n: 获取前N名
-    
-    Returns:
-        pd.DataFrame: 评分前N的ETF列表
-    """
-    try:
-        # 直接使用已加载的ETF列表
-        from data_crawler.etf_list_manager import load_all_etf_list
-        logger.info("正在从内存中获取ETF列表...")
-        etf_list = load_all_etf_list()
-        
-        # 确保ETF代码是字符串类型
-        if not etf_list.empty and "ETF代码" in etf_list.columns:
-            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
-        
-        # 检查ETF列表是否有效
-        if etf_list.empty:
-            logger.error("ETF列表为空，无法获取评分前N的ETF")
-            return pd.DataFrame()
-        
-        # 确保包含必要列
-        required_columns = ["ETF代码", "ETF名称", "基金规模"]
-        for col in required_columns:
-            if col not in etf_list.columns:
-                logger.error(f"ETF列表缺少必要列: {col}，无法进行有效评分")
-                return pd.DataFrame()
-        
-        # 筛选基础条件：规模、非货币ETF
-        etf_list = etf_list[
-            (etf_list["基金规模"] >= 10.0) & 
-            (~etf_list["ETF代码"].astype(str).str.startswith("511"))
-        ].copy()
-        
-        if etf_list.empty:
-            logger.warning("筛选后无符合条件的ETF")
-            return pd.DataFrame()
-        
-        scored_etfs = []
-        for _, row in etf_list.iterrows():
-            etf_code = str(row["ETF代码"])
-            df = internal_load_etf_daily_data(etf_code)
-            
-            # 统一使用20天标准（永久记录在记忆库中）
-            if not internal_validate_etf_data(df, etf_code):
-                logger.debug(f"ETF {etf_code} 数据验证失败，跳过评分")
-                continue
-                
-            # 统一使用20天标准（永久记录在记忆库中）
-            if len(df) < 20:
-                logger.debug(f"ETF {etf_code} 数据量不足({len(df)}天)，跳过评分")
-                continue
-            
-            # 计算策略评分（100分制）
-            try:
-                # 1. 价格与均线关系
-                current_price = df["收盘"].iloc[-1]
-                ma20 = df["收盘"].rolling(20).mean().iloc[-1]
-                price_deviation = (current_price - ma20) / ma20 if ma20 > 0 else 0
-                
-                # 2. 趋势强度
-                adx = calculate_adx(df, 14)
-                
-                # 3. 均线斜率
-                ma60 = df["收盘"].rolling(60).mean()
-                ma60_slope = (ma60.iloc[-1] - ma60.iloc[-2]) / ma60.iloc[-2] if len(ma60) >= 61 and ma60.iloc[-2] > 0 else 0
-                
-                # 4. 量能分析
-                volume = df["成交量"].iloc[-1]
-                avg_volume = df["成交量"].rolling(5).mean().iloc[-1]
-                volume_ratio = volume / avg_volume if avg_volume > 0 else 0
-                
-                # 5. 技术形态
-                rsi = calculate_rsi(df, 14)
-                macd_line, signal_line, _ = calculate_macd(df)
-                macd_bar = macd_line - signal_line
-                
-                # 计算策略评分（100分制）
-                strategy_score = calculate_strategy_score(df, "稳健仓")
-                
-                scored_etfs.append({
-                    "ETF代码": etf_code,
-                    "ETF名称": row["ETF名称"],
-                    "基金规模": row["基金规模"],
-                    "评分": strategy_score,
-                    "价格偏离率": price_deviation,
-                    "ADX": adx,
-                    "均线斜率": ma60_slope,
-                    "量能比": volume_ratio,
-                    "RSI": rsi,
-                    "ETF数据": df
-                })
-            except Exception as e:
-                logger.debug(f"ETF {etf_code} 评分计算失败: {str(e)}，跳过")
-                continue
-        
-        if not scored_etfs:
-            logger.warning("无任何ETF通过评分筛选")
-            return pd.DataFrame()
-            
-        # 按评分排序
-        scored_df = pd.DataFrame(scored_etfs).sort_values("评分", ascending=False)
-        logger.info(f"成功计算所有ETF评分，共 {len(scored_df)} 条记录，筛选出评分前{top_n}的ETF")
-        
-        # 详细记录筛选结果
-        for i, row in enumerate(scored_df.head(top_n).itertuples()):
-            logger.info(
-                f"评分TOP {i+1}: {row.ETF名称}({row.ETF代码}) - "
-                f"综合评分: {row.评分:.0f}/100 (价格偏离率:{row.价格偏离率:.1%}, ADX:{row.ADX:.1f}, 量能比:{row.量能比:.1f}x)"
-            )
-            logger.info(
-                f"  • 价格状态: {'高于' if row.价格偏离率 > 0 else '低于'}20日均线{abs(row.价格偏离率)*100:.1f}%"
-            )
-            logger.info(
-                f"  • 趋势强度: {'强趋势' if row.ADX > 25 else '中等趋势' if row.ADX > 20 else '弱趋势'} (ADX:{row.ADX:.1f})"
-            )
-            logger.info(
-                f"  • 量能分析: {'放大' if row.量能比 > 1.2 else '正常' if row.量能比 > 1.0 else '不足'} ({row.量能比:.1f}倍于5日均量)"
-            )
-        
-        return scored_df.head(top_n)
-        
-    except Exception as e:
-        logger.error(f"获取评分前N的ETF失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
 
 def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
     """
@@ -1361,7 +1361,7 @@ def init_position_record() -> pd.DataFrame:
         # 检查文件是否存在
         if os.path.exists(POSITION_RECORD_PATH):
             try:
-                # 读取仓位记录
+                # 读取仓位记录 - 关键修复：指定数据类型
                 position_df = pd.read_csv(
                     POSITION_RECORD_PATH, 
                     encoding="utf-8",
@@ -1627,7 +1627,13 @@ def update_position_record(
         
         # 更新持仓天数
         if quantity > 0:
-            position_df.loc[mask, '持仓天数'] = position_df.loc[mask, '持仓天数'] + 1
+            # 获取当前持仓天数
+            current_days = position_df.loc[mask, '持仓天数'].values[0]
+            # 如果是新建仓位，天数设为1，否则+1
+            if current_days == 0:
+                position_df.loc[mask, '持仓天数'] = 1
+            else:
+                position_df.loc[mask, '持仓天数'] = int(current_days) + 1
         else:
             position_df.loc[mask, '持仓天数'] = 0
             
@@ -1668,8 +1674,8 @@ def record_trade(**kwargs):
             "ETF代码": str(kwargs.get("etf_code", "")),
             "ETF名称": str(kwargs.get("etf_name", "")),
             "价格": float(kwargs.get("price", 0.0)),
-            "数量": str(kwargs.get("quantity", "0")),
-            "金额": float(kwargs.get("price", 0.0)) * float(kwargs.get("quantity", 0)),
+            "数量": int(kwargs.get("quantity", 0)),
+            "金额": float(kwargs.get("price", 0.0)) * int(kwargs.get("quantity", 0)),
             "持仓天数": int(kwargs.get("holding_days", 0)),
             "收益率": float(kwargs.get("return_rate", 0.0)),
             "持仓成本价": float(kwargs.get("cost_price", 0.0)),

@@ -74,10 +74,10 @@ logger.addHandler(handler)
 """
 # 板块定义
 MARKET_SECTIONS = {
-    "沪市主板": {"prefix": ["60"], "min_market_cap": 200, "min_daily_volume": 100000000, "max_volatility": 0.4},
-    "深市主板": {"prefix": ["00"], "min_market_cap": 200, "min_daily_volume": 100000000, "max_volatility": 0.4},
-    "创业板": {"prefix": ["30"], "min_market_cap": 100, "min_daily_volume": 80000000, "max_volatility": 0.5},
-    "科创板": {"prefix": ["688"], "min_market_cap": 80, "min_daily_volume": 50000000, "max_volatility": 0.6}
+    "沪市主板": {"prefix": ["60"], "min_market_cap": 50, "min_daily_volume": 50000000, "max_volatility": 0.4},
+    "深市主板": {"prefix": ["00"], "min_market_cap": 50, "min_daily_volume": 50000000, "max_volatility": 0.4},
+    "创业板": {"prefix": ["30"], "min_market_cap": 30, "min_daily_volume": 30000000, "max_volatility": 0.5},
+    "科创板": {"prefix": ["688"], "min_market_cap": 20, "min_daily_volume": 20000000, "max_volatility": 0.6}
 }
 
 """
@@ -444,30 +444,45 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     return 0.0
 
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
-    """估算市值（亿元）"""
+    """估算市值（亿元） - 修复版"""
     try:
         if df.empty:
             return 0.0
         
-        # 从AkShare获取流通股本（简化处理，实际应使用更准确的数据源）
-        # 这里用最后一天的收盘价和假设的流通股本估算
+        # 从AkShare获取最新市值数据
+        stock_info = ak.stock_zh_a_spot_em()
+        if not stock_info.empty:
+            # 确保股票代码匹配
+            stock_info = stock_info[stock_info['代码'] == stock_code]
+            if not stock_info.empty:
+                # 总市值单位是万元，需要转换为亿元
+                market_cap = float(stock_info['总市值'].values[0]) / 10000
+                return market_cap
+        
+        # 备用方案：如果无法获取准确市值，使用更合理的估算方法
         latest = df.iloc[-1]
         close_price = latest["收盘"]
         
-        # 根据板块不同，使用不同的流通股本估算方法
+        # 获取实际流通股本（单位：万股）
+        circulating_shares = float(stock_info['流通股本'].values[0]) if not stock_info.empty else 0
+        
+        if circulating_shares > 0:
+            # 市值 = 收盘价 * 流通股本（单位：亿元）
+            return close_price * circulating_shares / 10000
+        
+        # 如果仍然无法获取，使用更合理的默认值
         section = get_stock_section(stock_code)
-        
-        # 简化处理：假设流通股本在1-10亿股之间
         if section == "科创板":
-            base_shares = 1.0  # 科创板通常流通股本较小
+            # 科创板平均流通股本约为1.5亿股
+            base_shares = 1.5
         elif section == "创业板":
-            base_shares = 2.0
+            # 创业板平均流通股本约为3亿股
+            base_shares = 3.0
         else:
-            base_shares = 5.0  # 主板通常流通股本较大
-        
-        # 假设市值 = 收盘价 * 流通股本（单位：亿元）
-        market_cap = close_price * base_shares
-        return market_cap
+            # 主板平均流通股本约为8亿股
+            base_shares = 8.0
+            
+        return close_price * base_shares
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
@@ -497,7 +512,7 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         section_config = MARKET_SECTIONS[section]
         
         # 1. 流动性过滤（日均成交>设定阈值）
-        daily_volume = df["成交量"].iloc[-20:].mean() * df["收盘"].iloc[-20:].mean()
+        daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
         if daily_volume < section_config["min_daily_volume"]:
             return False
         

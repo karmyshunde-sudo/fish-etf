@@ -14,6 +14,9 @@ import time
 import akshare as ak
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
+# ========== 以下是关键修改 ==========
+from concurrent.futures import ThreadPoolExecutor
+# ========== 以上是关键修改 ==========
 from config import Config
 from utils.date_utils import (
     get_current_times,
@@ -143,7 +146,9 @@ MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%）
 MIN_DATA_DAYS = 100  # 最小数据天数（用于计算波动率等）
 MAX_STOCKS_TO_ANALYZE = 500  # 每次分析的最大股票数量（避免请求过多）
 MAX_STOCKS_PER_SECTION = 10  # 每个板块最多报告的股票数量
-DATA_FETCH_DELAY = 0.5  # 数据请求间隔（秒），避免被AkShare限制
+# ========== 以下是关键修改 ==========
+DATA_FETCH_DELAY = 0.1  # 数据请求间隔（秒），避免被AkShare限制
+# ========== 以上是关键修改 ==========
 
 """
 ==========================================
@@ -184,6 +189,14 @@ def fetch_stock_list() -> pd.DataFrame:
         if stock_list.empty:
             logger.error("获取股票列表失败：返回为空")
             return pd.DataFrame()
+        
+        # ========== 以下是关键修改 ==========
+        # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
+        stock_list = stock_list[~stock_list["name"].str.contains("ST")]
+        stock_list = stock_list[
+            stock_list["code"].str.startswith(("60", "00", "30", "688"))
+        ]
+        # ========== 以上是关键修改 ==========
         
         # 添加所属板块列
         stock_list["板块"] = stock_list["code"].apply(get_stock_section)
@@ -269,6 +282,38 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         # ========== 以上是关键修改 ==========
         return pd.DataFrame()
 
+# ========== 以下是关键修改 ==========
+def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    预处理股票数据，计算并缓存中间结果
+    
+    Args:
+        df: 股票日线数据
+    
+    Returns:
+        pd.DataFrame: 包含预计算指标的DataFrame
+    """
+    if df.empty or len(df) < MIN_DATA_DAYS:
+        return df
+    
+    try:
+        # 计算并缓存关键指标
+        df["ma40"] = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean()
+        df["annual_volatility"] = df["收盘"].pct_change().rolling(window=30).std() * np.sqrt(252)
+        
+        # 计算成交量变化率
+        df["volume_change"] = df["成交量"].pct_change(periods=5) * 100
+        
+        # 标记是否站上/跌破40日均线
+        df["above_ma40"] = df["收盘"] >= df["ma40"]
+        df["below_ma40"] = df["收盘"] < df["ma40"]
+        
+        return df
+    except Exception as e:
+        logger.error(f"预处理股票数据失败: {str(e)}", exc_info=True)
+        return df
+# ========== 以上是关键修改 ==========
+
 def calculate_critical_value(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> float:
     """计算临界值（40日均线）"""
     if len(df) < period:
@@ -286,6 +331,22 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float,
     """计算连续站上均线的天数"""
     if len(df) < 2:
         return 0
+    
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了关键指标
+    if "above_ma40" in df.columns:
+        # 从最新日期开始向前检查
+        consecutive_days = 0
+        for i in range(len(df)-1, -1, -1):
+            if i < period - 1:
+                break
+                
+            if df["above_ma40"].iloc[i]:
+                consecutive_days += 1
+            else:
+                break
+        return consecutive_days
+    # ========== 以上是关键修改 ==========
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -310,6 +371,22 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float,
     if len(df) < 2:
         return 0
     
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了关键指标
+    if "below_ma40" in df.columns:
+        # 从最新日期开始向前检查
+        consecutive_days = 0
+        for i in range(len(df)-1, -1, -1):
+            if i < period - 1:
+                break
+                
+            if df["below_ma40"].iloc[i]:
+                consecutive_days += 1
+            else:
+                break
+        return consecutive_days
+    # ========== 以上是关键修改 ==========
+    
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
     ma_values = df["收盘"].rolling(window=period).mean().values
@@ -329,6 +406,12 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float,
 
 def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
     """计算成交量变化率"""
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了成交量变化率
+    if "volume_change" in df.columns:
+        return df["volume_change"].iloc[-1]
+    # ========== 以上是关键修改 ==========
+    
     if len(df) < days + 1:
         return 0.0
     
@@ -341,6 +424,12 @@ def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:
     """计算年化波动率"""
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了年化波动率
+    if "annual_volatility" in df.columns:
+        return df["annual_volatility"].iloc[-1]
+    # ========== 以上是关键修改 ==========
+    
     if len(df) < 30:
         return 0.0
     
@@ -443,6 +532,11 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         if df.empty or len(df) < CRITICAL_VALUE_DAYS + 30:
             return 0.0
         
+        # ========== 以下是关键修改 ==========
+        # 预处理数据，缓存中间结果
+        df = preprocess_stock_data(df)
+        # ========== 以上是关键修改 ==========
+        
         # 1. 基础信号得分（40%权重）
         current = df["收盘"].iloc[-1]
         critical = calculate_critical_value(df)
@@ -498,6 +592,59 @@ def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -
     """
     if len(df) < 10:
         return False, 0, (0, 0)
+    
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了关键指标
+    if "ma40" in df.columns:
+        # 获取收盘价和均线序列
+        close_prices = df["收盘"].values
+        ma_values = df["ma40"].values
+        
+        # 检查是否连续10天在均线附近波动
+        last_10_days = df.tail(10)
+        deviations = []
+        for i in range(len(last_10_days)):
+            # 确保有足够的数据计算均线
+            if i < period - 1 or np.isnan(ma_values[-10 + i]):
+                continue
+                
+            deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
+            # 根据板块不同，设置不同的震荡阈值
+            section = get_stock_section(df.attrs.get("stock_code", ""))
+            if section in ["科创板", "创业板"]:
+                max_deviation = 10.0  # 科创板、创业板波动更大
+            else:
+                max_deviation = 8.0   # 主板波动较小
+            
+            if abs(deviation) > max_deviation:
+                return False, 0, (0, 0)
+            deviations.append(deviation)
+        
+        # 检查价格是否反复穿越均线
+        cross_count = 0
+        for i in range(len(close_prices)-10, len(close_prices)-1):
+            # 确保有足够的数据计算均线
+            if i < period - 1 or np.isnan(ma_values[i]) or np.isnan(ma_values[i+1]):
+                continue
+                
+            if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
+               (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
+                cross_count += 1
+        
+        # 至少需要5次穿越才认定为震荡市
+        min_cross_count = 5
+        is_volatile = cross_count >= min_cross_count
+        
+        # 计算最近10天偏离率范围
+        if deviations:
+            min_deviation = min(deviations)
+            max_deviation = max(deviations)
+        else:
+            min_deviation = 0
+            max_deviation = 0
+        
+        return is_volatile, cross_count, (min_deviation, max_deviation)
+    # ========== 以上是关键修改 ==========
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -557,8 +704,15 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
-    # 获取收盘价
-    close_prices = df["收盘"].values
+    # ========== 以下是关键修改 ==========
+    # 检查是否已经预计算了关键指标
+    if "ma40" in df.columns:
+        # 获取收盘价
+        close_prices = df["收盘"].values
+    else:
+        # 获取收盘价
+        close_prices = df["收盘"].values
+    # ========== 以上是关键修改 ==========
     
     # 寻找局部高点
     peaks = []
@@ -913,23 +1067,20 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         # 2. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
-        analyzed_count = 0
         
-        for _, stock in stock_list.iterrows():
-            if analyzed_count >= MAX_STOCKS_TO_ANALYZE:
-                break
-                
-            stock_code = str(stock["code"])
-            stock_name = stock["name"]
-            
-            # 跳过ST股票
-            if "ST" in stock_name:
-                continue
+        # ========== 以下是关键修改 ==========
+        # 使用并行化获取股票数据
+        stock_codes = stock_list["code"].tolist()
+        stock_names = stock_list["name"].tolist()
+        
+        def process_stock(i):
+            stock_code = str(stock_codes[i])
+            stock_name = stock_names[i]
             
             # 获取板块
             section = get_stock_section(stock_code)
             if section not in MARKET_SECTIONS:
-                continue
+                return None
             
             logger.debug(f"正在分析股票: {stock_name}({stock_code}) | {section}")
             
@@ -937,7 +1088,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             df = fetch_stock_data(stock_code)
             if df.empty or len(df) < MIN_DATA_DAYS:
                 logger.debug(f"股票 {stock_name}({stock_code}) 数据不足，跳过")
-                continue
+                return None
             
             # 设置股票代码属性，便于后续识别
             df.attrs["stock_code"] = stock_code
@@ -947,18 +1098,29 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 # 计算策略得分
                 score = calculate_stock_strategy_score(stock_code, df)
                 if score > 0:
-                    section_stocks[section].append({
+                    return {
                         "code": stock_code,
                         "name": stock_name,
                         "score": score,
                         "df": df,
                         "section": section
-                    })
-                    logger.debug(f"股票 {stock_name}({stock_code}) 适合策略，得分: {score:.2f}")
-            
-            # 限制请求频率
-            time.sleep(DATA_FETCH_DELAY)
-            analyzed_count += 1
+                    }
+            return None
+        
+        # 并行处理股票
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            results = executor.map(process_stock, range(len(stock_list)))
+        
+        # 收集结果
+        for result in results:
+            if result is not None:
+                section = result["section"]
+                section_stocks[section].append(result)
+        
+        # 限制分析的股票数量
+        for section in section_stocks:
+            section_stocks[section] = section_stocks[section][:MAX_STOCKS_TO_ANALYZE]
+        # ========== 以上是关键修改 ==========
         
         # 3. 对每个板块的股票按得分排序，并取前N只
         top_stocks_by_section = {}
@@ -1082,7 +1244,7 @@ def generate_section_report(section: str, stocks: List[Dict]):
     if section in ["科创板", "创业板"]:
         summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
     summary_lines.append("──────────────────\n")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf    )\n")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf      )\n")
     
     summary_message = "\n".join(summary_lines)
     
@@ -1134,7 +1296,7 @@ def generate_overall_summary(top_stocks_by_section: Dict[str, List[Dict]]):
         summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只\n")
         summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
         summary_lines.append("──────────────────\n")
-        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf    )\n")
+        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf      )\n")
         
         summary_message = "\n".join(summary_lines)
         

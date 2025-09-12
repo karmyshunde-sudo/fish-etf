@@ -512,18 +512,15 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         # 直接使用已有的折溢价率列，不再重新计算
         # 折价机会：折溢价率为负
-        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
-        filtered_df = df[
-            (df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD) &
-            (df["综合评分"] >= Config.ARBITRAGE_SCORE_THRESHOLD)
-        ]
+        # 关键修复：只按折价率阈值筛选，不按评分筛选
+        filtered_df = df[df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD]
         
         # 按折溢价率绝对值排序（降序，折价率越大越靠前）
         if not filtered_df.empty:
             filtered_df = filtered_df.sort_values("折溢价率", ascending=True)
         
-        # 关键修复：在日志中使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD
-        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个有效机会（阈值：折价率≤-{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%，评分≥{Config.ARBITRAGE_SCORE_THRESHOLD:.1f}）")
+        # 修复：更新日志信息
+        logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个机会（阈值：折价率≤-{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%）")
         return filtered_df
     
     except Exception as e:

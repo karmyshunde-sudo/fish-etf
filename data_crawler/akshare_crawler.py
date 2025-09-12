@@ -341,87 +341,114 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     if df.empty:
         return df
-    # 定义数据源必需列（基础交易数据 + 折溢价率）
-    data_source_required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
-    # 检查必需列是否存在
-    missing_columns = [col for col in data_source_required_columns if col not in df.columns]
+    
+    # 定义基础必需列（包含"折溢价率"）
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "折溢价率"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
     if missing_columns:
         logger.error(f"❌ 数据源缺少必需列：{', '.join(missing_columns)}，将尝试修复")
     
-    # 为缺失的必需列计算值 - 特别修复折溢价率
-    if "折溢价率" in missing_columns or "折溢价率" not in df.columns:
-        try:
-            logger.info("尝试计算折溢价率...")
+    # 1. 优先使用数据源提供的原始折溢价率数据
+    if "折溢价率" not in df.columns:
+        logger.warning("⚠️ 数据源不提供折溢价率列，将尝试通过净值或IOPV计算")
+        
+        # 尝试从fund_etf_hist_em获取的净值数据计算
+        if "净值" in df.columns and "收盘" in df.columns:
+            df["折溢价率"] = ((df["收盘"] - df["净值"]) / df["净值"] * 100).round(2)
+            logger.info("✅ 通过净值成功计算折溢价率")
+        # 尝试从fund_etf_hist_sina获取的IOPV数据计算
+        elif "IOPV" in df.columns and "收盘" in df.columns:
+            df["折溢价率"] = ((df["收盘"] - df["IOPV"]) / df["IOPV"] * 100).round(2)
+            logger.info("✅ 通过IOPV成功计算折溢价率")
+        else:
+            logger.error("❌ 无法计算折溢价率，数据不可用")
+            # 仍然创建折溢价率列，但用NaN填充
+            df["折溢价率"] = float('nan')
+    else:
+        # 2. 检查原始折溢价率数据是否有效
+        if df["折溢价率"].isna().all() or (df["折溢价率"] == 0).all():
+            logger.warning("⚠️ 原始折溢价率数据全为0或空值，将尝试重新计算")
+            # 尝试从净值重新计算
             if "净值" in df.columns and "收盘" in df.columns:
-                # 折溢价率 = (收盘价 - 净值) / 净值 * 100%
                 df["折溢价率"] = ((df["收盘"] - df["净值"]) / df["净值"] * 100).round(2)
-                logger.info("✅ 成功计算折溢价率")
+                logger.info("✅ 通过净值重新计算折溢价率")
+            # 尝试从IOPV重新计算
+            elif "IOPV" in df.columns and "收盘" in df.columns:
+                df["折溢价率"] = ((df["收盘"] - df["IOPV"]) / df["IOPV"] * 100).round(2)
+                logger.info("✅ 通过IOPV重新计算折溢价率")
             else:
-                # 尝试从其他列推导净值
-                if "IOPV" in df.columns and "收盘" in df.columns:
-                    df["折溢价率"] = ((df["收盘"] - df["IOPV"]) / df["IOPV"] * 100).round(2)
-                    logger.info("✅ 通过IOPV成功计算折溢价率")
-                else:
-                    logger.warning("⚠️ 无法计算折溢价率，将使用0填充")
-                    df["折溢价率"] = 0.0
-        except Exception as e:
-            logger.error(f"计算折溢价率失败: {str(e)}，使用0填充", exc_info=True)
-            df["折溢价率"] = 0.0
+                logger.warning("ℹ️ 无法重新计算折溢价率，保留原始数据（可能全为0）")
     
-    # 定义可计算的衍生列
+    # 3. 处理其他衍生列
     derived_columns = ["成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-    # 检查衍生列是否存在
     missing_derived_columns = [col for col in derived_columns if col not in df.columns]
+    
     if missing_derived_columns:
-        logger.warning(f"⚠️ 数据源缺少可计算列：{', '.join(missing_derived_columns)}，将尝试计算")
-        # 为缺失的衍生列计算值
+        logger.info(f"ℹ️ 数据源缺少可计算列：{', '.join(missing_derived_columns)}，将尝试计算")
+        
         for col in missing_derived_columns:
             try:
                 if col == '成交额':
-                    # 如果有成交量，尝试估算成交额（简单估算：成交量 * 收盘价 * 100）
+                    # 如果有成交量和收盘价，可以计算成交额
                     if '成交量' in df.columns and '收盘' in df.columns:
-                        # 计算出的成交额单位是元，转换为万元
+                        # 注意：A股成交量单位是"手"（1手=100股）
                         df['成交额'] = (df['成交量'] * df['收盘'] * 100 / 10000).round(2)
+                        logger.info("✅ 成功计算成交额")
                     else:
-                        df['成交额'] = 0.0
+                        logger.warning("⚠️ 无法计算成交额，缺少必要数据")
+                
                 elif col == '振幅':
                     # 振幅 = (最高 - 最低) / 前收盘 * 100%
                     if '最高' in df.columns and '最低' in df.columns and '收盘' in df.columns:
-                        # 假设前收盘价是前一天的收盘价
+                        # 使用前一天收盘价作为前收盘
                         df['前收盘'] = df['收盘'].shift(1)
-                        df['振幅'] = ((df['最高'] - df['最低']) / df['前收盘'] * 100).round(2).fillna(0)
+                        # 处理第一天（没有前收盘）的情况
+                        df['前收盘'] = df['前收盘'].fillna(df['开盘'])
+                        df['振幅'] = ((df['最高'] - df['最低']) / df['前收盘'] * 100).round(2)
                         df = df.drop(columns=['前收盘'])
+                        logger.info("✅ 成功计算振幅")
                     else:
-                        df['振幅'] = 0.0
+                        logger.warning("⚠️ 无法计算振幅，缺少必要数据")
+                
                 elif col == '涨跌幅':
                     # 涨跌幅 = (收盘 - 前收盘) / 前收盘 * 100%
                     if '收盘' in df.columns:
                         df['前收盘'] = df['收盘'].shift(1)
-                        df['涨跌幅'] = ((df['收盘'] - df['前收盘']) / df['前收盘'] * 100).round(2).fillna(0)
+                        # 处理第一天（没有前收盘）的情况
+                        df['前收盘'] = df['前收盘'].fillna(df['开盘'])
+                        df['涨跌幅'] = ((df['收盘'] - df['前收盘']) / df['前收盘'] * 100).round(2)
                         df = df.drop(columns=['前收盘'])
+                        logger.info("✅ 成功计算涨跌幅")
                     else:
-                        df['涨跌幅'] = 0.0
+                        logger.warning("⚠️ 无法计算涨跌幅，缺少必要数据")
+                
                 elif col == '涨跌额':
                     # 涨跌额 = 收盘 - 前收盘
                     if '收盘' in df.columns:
                         df['前收盘'] = df['收盘'].shift(1)
-                        df['涨跌额'] = (df['收盘'] - df['前收盘']).round(4).fillna(0)
+                        # 处理第一天（没有前收盘）的情况
+                        df['前收盘'] = df['前收盘'].fillna(df['开盘'])
+                        df['涨跌额'] = (df['收盘'] - df['前收盘']).round(4)
                         df = df.drop(columns=['前收盘'])
+                        logger.info("✅ 成功计算涨跌额")
                     else:
-                        df['涨跌额'] = 0.0
+                        logger.warning("⚠️ 无法计算涨跌额，缺少必要数据")
+                
                 elif col == '换手率':
                     # 换手率 = 成交量 / 流通股本 * 100%
-                    # 由于不知道流通股本，暂时用0填充
-                    df['换手率'] = 0.0
+                    # 由于不知道流通股本，无法准确计算
+                    logger.warning("⚠️ 无法准确计算换手率，缺少流通股本数据")
+                    # 不填充换手率，因为不准确
+            
             except Exception as e:
                 logger.error(f"计算列 {col} 时发生错误: {str(e)}", exc_info=True)
-                df[col] = 0.0
     
-    # 再次检查必需列是否存在
-    missing_required_columns = [col for col in data_source_required_columns if col not in df.columns]
-    if missing_required_columns:
-        logger.error(f"❌ 修复后仍缺少必需列：{', '.join(missing_required_columns)}")
-        return pd.DataFrame()  # 仍缺少必需列，返回空DataFrame
+    # 4. 再次检查必需列是否存在
+    final_missing_columns = [col for col in required_columns if col not in df.columns]
+    if final_missing_columns:
+        logger.error(f"❌ 修复后仍缺少必需列：{', '.join(final_missing_columns)}")
+        return pd.DataFrame()
     
     return df
 
@@ -515,3 +542,152 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"限制数据为1年时发生错误: {str(e)}", exc_info=True)
         return df
+
+def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    尝试多种AkShare接口获取ETF数据
+    
+    Args:
+        etf_code: ETF代码
+        start_date: 开始日期
+        end_date: 结束日期
+        
+    Returns:
+        pd.DataFrame: 获取到的DataFrame
+    """
+    interfaces = [
+        lambda: try_fund_etf_hist_em_with_net_value(etf_code, start_date, end_date),
+        lambda: try_fund_etf_hist_sina_with_premium(etf_code),
+        lambda: try_fund_etf_spot_em_with_premium(etf_code)
+    ]
+    
+    total_interfaces = len(interfaces)
+    logger.info(f"尝试获取ETF {etf_code} 数据，最多 {total_interfaces} 种接口")
+    
+    for i, interface in enumerate(interfaces):
+        for attempt in range(MAX_RETRY_ATTEMPTS):
+            try:
+                logger.debug(f"尝试第{i+1}种接口（第{attempt+1}次尝试）获取ETF {etf_code} 数据")
+                df = interface()
+                
+                if not df.empty:
+                    logger.info(f"第{i+1}种接口（第{attempt+1}次尝试）成功获取ETF {etf_code} 数据")
+                    # 记录返回的列名，用于调试
+                    logger.info(f"📊 第{i+1}种接口返回的原始列名: {list(df.columns)}")
+                    
+                    # 对返回的数据进行日期过滤
+                    if 'date' in df.columns:
+                        df['date'] = pd.to_datetime(df['date'])
+                        mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
+                        df = df.loc[mask]
+                    elif '日期' in df.columns:
+                        df['日期'] = pd.to_datetime(df['日期'])
+                        mask = (df['日期'] >= pd.to_datetime(start_date)) & (df['日期'] <= pd.to_datetime(end_date))
+                        df = df.loc[mask]
+                    
+                    if not df.empty:
+                        logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据（过滤后）")
+                        return df
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # 专门处理网络错误，进行指数退避重试
+                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）网络错误: {str(e)}", exc_info=True)
+                if attempt < MAX_RETRY_ATTEMPTS - 1:
+                    # 指数退避策略
+                    wait_time = RETRY_WAIT_FIXED * (2 ** attempt) / 1000
+                    wait_time = min(wait_time, RETRY_WAIT_EXPONENTIAL_MAX / 1000)
+                    logger.info(f"网络错误，等待 {wait_time:.2f} 秒后重试（指数退避）...")
+                    time.sleep(wait_time)
+            except Exception as e:
+                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）调用失败: {str(e)}", exc_info=True)
+                # 非网络错误，直接尝试下一个接口
+                break
+    
+    logger.warning(f"所有AkShare接口均无法获取ETF {etf_code} 数据")
+    return pd.DataFrame()
+
+def try_fund_etf_hist_em_with_net_value(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    尝试使用 fund_etf_hist_em 接口获取包含净值的数据
+    Args:
+        etf_code: ETF代码
+        start_date: 开始日期
+        end_date: 结束日期
+    Returns:
+        pd.DataFrame: 获取到的DataFrame
+    """
+    try:
+        logger.debug(f"尝试使用 fund_etf_hist_em 接口获取ETF {etf_code} 数据（包含净值）")
+        df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+        
+        if not df.empty:
+            # 记录返回的列名，用于调试
+            logger.info(f"📊 fund_etf_hist_em 接口返回的原始列名: {list(df.columns)}")
+            
+            # 检查是否有净值数据（fund_etf_hist_em 可能返回的净值列）
+            net_value_columns = [col for col in df.columns if "净值" in col or "net" in col.lower()]
+            if net_value_columns:
+                # 选择第一个净值列
+                net_value_col = net_value_columns[0]
+                df["净值"] = df[net_value_col]
+                logger.info(f"✅ fund_etf_hist_em 接口成功获取净值数据（列名: {net_value_col}）")
+        
+        return df
+    except Exception as e:
+        logger.warning(f"fund_etf_hist_em 接口调用失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def try_fund_etf_spot_em_with_premium(etf_code: str) -> pd.DataFrame:
+    """
+    尝试使用 fund_etf_spot_em 接口获取包含折价率的数据（仅最新数据）
+    Args:
+        etf_code: ETF代码
+    Returns:
+        pd.DataFrame: 获取到的DataFrame
+    """
+    try:
+        logger.debug(f"尝试使用 fund_etf_spot_em 接口获取ETF {etf_code} 数据（包含折价率）")
+        df = ak.fund_etf_spot_em()
+        
+        if not df.empty:
+            # 记录返回的列名，用于调试
+            logger.info(f"📊 fund_etf_spot_em 接口返回的原始列名: {list(df.columns)}")
+            
+            # 过滤指定ETF
+            df = df[df["代码"] == etf_code]
+            
+            if not df.empty:
+                # 标准化列名
+                column_mapping = {
+                    "代码": "ETF代码",
+                    "名称": "ETF名称",
+                    "最新价": "收盘",
+                    "IOPV实时估值": "IOPV",
+                    "基金折价率": "折溢价率",
+                    "涨跌额": "涨跌额",
+                    "涨跌幅": "涨跌幅",
+                    "成交量": "成交量",
+                    "成交额": "成交额",
+                    "开盘价": "开盘",
+                    "最高价": "最高",
+                    "最低价": "最低",
+                    "昨收": "前收盘",
+                    "振幅": "振幅",
+                    "换手率": "换手率",
+                    "数据日期": "日期"
+                }
+                df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+                
+                # 确保日期格式
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+                
+                # 设置成交量单位为"手"（1手=100股）
+                if "成交量" in df.columns:
+                    df["成交量"] = df["成交量"] / 100
+                
+                logger.info("✅ fund_etf_spot_em 接口成功获取折价率数据")
+        
+        return df
+    except Exception as e:
+        logger.warning(f"fund_etf_spot_em 接口调用失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()

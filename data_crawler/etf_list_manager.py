@@ -324,10 +324,10 @@ def fetch_all_etfs_akshare() -> pd.DataFrame:
         # 成交额单位为元，转换为万元（除以1万）
         valid_etfs["日均成交额"] = pd.to_numeric(valid_etfs["日均成交额"], errors="coerce") / 10000
         
-        # 筛选条件：规模>10亿，日均成交额>5000万
+        # 筛选条件：使用Config中定义的筛选参数
         filtered_etfs = valid_etfs[
-            (valid_etfs["基金规模"] > Config.MIN_ETP_SIZE) & 
-            (valid_etfs["日均成交额"] > Config.MIN_DAILY_VOLUME)
+            (valid_etfs["基金规模"] >= Config.GLOBAL_MIN_FUND_SIZE) & 
+            (valid_etfs["日均成交额"] >= Config.GLOBAL_MIN_AVG_VOLUME)
         ].copy()
         
         # 如果没有ETF通过筛选，返回原始数据（不筛选）
@@ -471,8 +471,10 @@ def read_csv_with_encoding(file_path: str) -> pd.DataFrame:
             logger.error(f"读取CSV文件失败: {str(e)}")
             return pd.DataFrame()
 
-def get_filtered_etf_codes() -> list:
+def get_filtered_etf_codes(min_size: float = None, exclude_money_etfs: bool = True) -> list:
     """获取过滤后的有效ETF代码列表
+    :param min_size: 最小基金规模(亿元)，如果为None则使用Config.GLOBAL_MIN_FUND_SIZE
+    :param exclude_money_etfs: 是否排除货币ETF(511开头)，默认True
     :return: ETF代码列表
     """
     try:
@@ -480,10 +482,26 @@ def get_filtered_etf_codes() -> list:
         if etf_list.empty:
             logger.warning("⚠️ 无有效ETF代码列表")
             return []
+        
+        # 使用配置中的默认值
+        min_size = min_size if min_size is not None else Config.GLOBAL_MIN_FUND_SIZE
+        
         # 确保ETF代码为字符串类型
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.strip()
-        valid_codes = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]["ETF代码"].tolist()
-        logger.info(f"📊 有效ETF代码数量: {len(valid_codes)}")
+        
+        # 筛选有效ETF代码（6位数字）
+        valid_etfs = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')]
+        
+        # 应用规模过滤
+        if "基金规模" in valid_etfs.columns:
+            valid_etfs = valid_etfs[valid_etfs["基金规模"] >= min_size]
+        
+        # 应用货币ETF过滤（511开头）
+        if exclude_money_etfs:
+            valid_etfs = valid_etfs[~valid_etfs["ETF代码"].str.startswith("511")]
+        
+        valid_codes = valid_etfs["ETF代码"].tolist()
+        logger.info(f"📊 有效ETF代码数量: {len(valid_codes)} (筛选条件: 规模≥{min_size}亿, {'排除' if exclude_money_etfs else '包含'}货币ETF)")
         return valid_codes
     except Exception as e:
         logger.error(f"获取有效ETF代码列表失败: {str(e)}")

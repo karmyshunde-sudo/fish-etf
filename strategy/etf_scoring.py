@@ -822,39 +822,33 @@ def calculate_arbitrage_score(etf_code: str,
             logger.warning(f"ETF {etf_code} 成分股稳定性评分超出范围({component_score:.2f})，强制限制在0-100")
             component_score = max(0, min(100, component_score))
         
-        # 折价情况
+        # 修复：折价情况 - 折价率越高（绝对值越大），评分应该越高
         if premium_discount < 0:
             abs_premium = abs(premium_discount)
-            if abs_premium >= Config.DISCOUNT_THRESHOLD * 1.5:
+            # 折价率越高（绝对值越大），评分应该越高
+            if abs_premium >= Config.DISCOUNT_THRESHOLD * 3:
                 premium_score = 100.0
+            elif abs_premium >= Config.DISCOUNT_THRESHOLD * 2:
+                premium_score = 90.0
+            elif abs_premium >= Config.DISCOUNT_THRESHOLD * 1.5:
+                premium_score = 80.0
             elif abs_premium >= Config.DISCOUNT_THRESHOLD:
-                # 确保分母不为0
-                if Config.DISCOUNT_THRESHOLD * 0.5 > 0:
-                    premium_score = 80.0 + (abs_premium - Config.DISCOUNT_THRESHOLD) * 20.0 / (Config.DISCOUNT_THRESHOLD * 0.5)
-                else:
-                    premium_score = 100.0
+                premium_score = 70.0
             else:
-                # 确保分母不为0
-                if Config.DISCOUNT_THRESHOLD > 0:
-                    premium_score = 50.0 + (abs_premium * 20.0) / Config.DISCOUNT_THRESHOLD
-                else:
-                    premium_score = 50.0 + (abs_premium * 20.0)
-        # 溢价情况
+                premium_score = 0.0
+        # 修复：溢价情况 - 溢价率越高，评分应该越高
         else:
-            if premium_discount <= Config.PREMIUM_THRESHOLD * 0.5:
+            # 溢价率越高，评分应该越高
+            if premium_discount >= Config.PREMIUM_THRESHOLD * 3:
                 premium_score = 100.0
-            elif premium_discount <= Config.PREMIUM_THRESHOLD:
-                # 确保分母不为0
-                if Config.PREMIUM_THRESHOLD * 0.5 > 0:
-                    premium_score = 80.0 - (premium_discount - Config.PREMIUM_THRESHOLD * 0.5) * 40.0 / (Config.PREMIUM_THRESHOLD * 0.5)
-                else:
-                    premium_score = 100.0
+            elif premium_discount >= Config.PREMIUM_THRESHOLD * 2:
+                premium_score = 90.0
+            elif premium_discount >= Config.PREMIUM_THRESHOLD * 1.5:
+                premium_score = 80.0
+            elif premium_discount >= Config.PREMIUM_THRESHOLD:
+                premium_score = 70.0
             else:
-                # 确保分母不为0
-                if Config.PREMIUM_THRESHOLD > 0:
-                    premium_score = 50.0 - (premium_discount - Config.PREMIUM_THRESHOLD) * 20.0 / (Config.PREMIUM_THRESHOLD * 1.0)
-                else:
-                    premium_score = 50.0 - (premium_discount * 20.0)
+                premium_score = 0.0
         
         # 确保折溢价率评分在0-100范围内
         if premium_score < 0 or premium_score > 100:

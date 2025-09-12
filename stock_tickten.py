@@ -146,9 +146,7 @@ MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%）
 MIN_DATA_DAYS = 100  # 最小数据天数（用于计算波动率等）
 MAX_STOCKS_TO_ANALYZE = 500  # 每次分析的最大股票数量（避免请求过多）
 MAX_STOCKS_PER_SECTION = 10  # 每个板块最多报告的股票数量
-# ========== 以下是关键修改 ==========
 DATA_FETCH_DELAY = 0.1  # 数据请求间隔（秒），避免被AkShare限制
-# ========== 以上是关键修改 ==========
 
 """
 ==========================================
@@ -191,11 +189,19 @@ def fetch_stock_list() -> pd.DataFrame:
             return pd.DataFrame()
         
         # ========== 以下是关键修改 ==========
+        # 记录初始股票数量
+        initial_count = len(stock_list)
+        logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
+        
         # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
         stock_list = stock_list[~stock_list["name"].str.contains("ST")]
         stock_list = stock_list[
             stock_list["code"].str.startswith(("60", "00", "30", "688"))
         ]
+        
+        # 记录前置筛选后的股票数量
+        filtered_count = len(stock_list)
+        logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
         # ========== 以上是关键修改 ==========
         
         # 添加所属板块列
@@ -282,7 +288,6 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         # ========== 以上是关键修改 ==========
         return pd.DataFrame()
 
-# ========== 以下是关键修改 ==========
 def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     预处理股票数据，计算并缓存中间结果
@@ -312,7 +317,6 @@ def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"预处理股票数据失败: {str(e)}", exc_info=True)
         return df
-# ========== 以上是关键修改 ==========
 
 def calculate_critical_value(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> float:
     """计算临界值（40日均线）"""
@@ -332,7 +336,6 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float,
     if len(df) < 2:
         return 0
     
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了关键指标
     if "above_ma40" in df.columns:
         # 从最新日期开始向前检查
@@ -346,7 +349,6 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float,
             else:
                 break
         return consecutive_days
-    # ========== 以上是关键修改 ==========
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -371,7 +373,6 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float,
     if len(df) < 2:
         return 0
     
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了关键指标
     if "below_ma40" in df.columns:
         # 从最新日期开始向前检查
@@ -385,7 +386,6 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float,
             else:
                 break
         return consecutive_days
-    # ========== 以上是关键修改 ==========
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -406,11 +406,9 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float,
 
 def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
     """计算成交量变化率"""
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了成交量变化率
     if "volume_change" in df.columns:
         return df["volume_change"].iloc[-1]
-    # ========== 以上是关键修改 ==========
     
     if len(df) < days + 1:
         return 0.0
@@ -424,11 +422,9 @@ def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:
     """计算年化波动率"""
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了年化波动率
     if "annual_volatility" in df.columns:
         return df["annual_volatility"].iloc[-1]
-    # ========== 以上是关键修改 ==========
     
     if len(df) < 30:
         return 0.0
@@ -443,17 +439,18 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     
     return 0.0
 
+# ========== 以下是关键修改 ==========
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
     """估算市值（亿元） - 修复版"""
     try:
         if df.empty:
             return 0.0
         
-        # 从AkShare获取最新市值数据
+        # 从AkShare获取实时股票信息
         stock_info = ak.stock_zh_a_spot_em()
         if not stock_info.empty:
-            # 确保股票代码匹配
-            stock_info = stock_info[stock_info['代码'] == stock_code]
+            # 确保股票代码匹配（处理可能的前缀如'sz'、'sh'）
+            stock_info = stock_info[stock_info['代码'].str[-6:] == stock_code]
             if not stock_info.empty:
                 # 总市值单位是万元，需要转换为亿元
                 market_cap = float(stock_info['总市值'].values[0]) / 10000
@@ -463,7 +460,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
         latest = df.iloc[-1]
         close_price = latest["收盘"]
         
-        # 获取实际流通股本（单位：万股）
+        # 获取流通股本（单位：万股）
         circulating_shares = float(stock_info['流通股本'].values[0]) if not stock_info.empty else 0
         
         if circulating_shares > 0:
@@ -487,6 +484,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
         return 0.0
+# ========== 以上是关键修改 ==========
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
     """
@@ -500,33 +498,52 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         bool: 是否适合策略
     """
     try:
+        # ========== 以下是关键修改 ==========
+        # 检查数据量
         if df.empty or len(df) < MIN_DATA_DAYS:
+            logger.debug(f"股票 {stock_code} 数据量不足（{len(df)}天 < {MIN_DATA_DAYS}天），跳过")
             return False
         
         # 获取股票所属板块
         section = get_stock_section(stock_code)
         if section == "其他板块" or section not in MARKET_SECTIONS:
+            logger.debug(f"股票 {stock_code} 不属于任何板块，跳过")
             return False
         
         # 获取板块配置
         section_config = MARKET_SECTIONS[section]
         
         # 1. 流动性过滤（日均成交>设定阈值）
+        # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
         daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
+        logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 日均成交额: {daily_volume/10000:.2f}万元, 要求: >{section_config['min_daily_volume']/10000:.2f}万元")
         if daily_volume < section_config["min_daily_volume"]:
+            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 流动性过滤失败（日均成交额不足）")
             return False
+        else:
+            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 通过流动性过滤")
         
         # 2. 波动率过滤（年化波动率<设定阈值）
         annual_volatility = calculate_annual_volatility(df)
+        logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 年化波动率: {annual_volatility:.2%}, 要求: <{section_config['max_volatility']:.0%}")
         if annual_volatility > section_config["max_volatility"]:
+            logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 波动率过滤失败（波动率过高）")
             return False
+        else:
+            logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 通过波动率过滤")
         
         # 3. 市值过滤（市值>设定阈值）
         market_cap = calculate_market_cap(df, stock_code)
+        logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值: {market_cap:.2f}亿元, 要求: >{section_config['min_market_cap']:.2f}亿元")
         if market_cap < section_config["min_market_cap"]:
+            logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值过滤失败（市值不足）")
             return False
+        else:
+            logger.info(f"【市值过滤】股票 {stock_code} - {section} - 通过市值过滤")
         
+        logger.info(f"【最终结果】股票 {stock_code} - {section} - 通过所有过滤条件")
         return True
+        # ========== 以上是关键修改 ==========
     
     except Exception as e:
         logger.error(f"筛选股票{stock_code}失败: {str(e)}", exc_info=True)
@@ -547,10 +564,8 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         if df.empty or len(df) < CRITICAL_VALUE_DAYS + 30:
             return 0.0
         
-        # ========== 以下是关键修改 ==========
         # 预处理数据，缓存中间结果
         df = preprocess_stock_data(df)
-        # ========== 以上是关键修改 ==========
         
         # 1. 基础信号得分（40%权重）
         current = df["收盘"].iloc[-1]
@@ -608,7 +623,6 @@ def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -
     if len(df) < 10:
         return False, 0, (0, 0)
     
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了关键指标
     if "ma40" in df.columns:
         # 获取收盘价和均线序列
@@ -659,7 +673,6 @@ def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -
             max_deviation = 0
         
         return is_volatile, cross_count, (min_deviation, max_deviation)
-    # ========== 以上是关键修改 ==========
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -719,7 +732,6 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
-    # ========== 以下是关键修改 ==========
     # 检查是否已经预计算了关键指标
     if "ma40" in df.columns:
         # 获取收盘价
@@ -727,7 +739,6 @@ def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAY
     else:
         # 获取收盘价
         close_prices = df["收盘"].values
-    # ========== 以上是关键修改 ==========
     
     # 寻找局部高点
     peaks = []
@@ -1078,15 +1089,21 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             logger.error("获取股票列表失败，无法继续")
             return {}
         
-        logger.info(f"筛选前 {len(stock_list)} 只股票")
+        # ========== 以下是关键修改 ==========
+        # 记录初始股票数量
+        total_initial = len(stock_list)
+        logger.info(f"筛选前 {total_initial} 只股票（总数量）")
         
         # 2. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
         
-        # ========== 以下是关键修改 ==========
         # 使用并行化获取股票数据
         stock_codes = stock_list["code"].tolist()
         stock_names = stock_list["name"].tolist()
+        
+        # 初始化各板块计数器
+        section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0} 
+                         for section in MARKET_SECTIONS.keys()}
         
         def process_stock(i):
             stock_code = str(stock_codes[i])
@@ -1097,6 +1114,9 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             if section not in MARKET_SECTIONS:
                 return None
             
+            # 更新板块计数器
+            section_counts[section]["total"] += 1
+            
             logger.debug(f"正在分析股票: {stock_name}({stock_code}) | {section}")
             
             # 获取日线数据
@@ -1105,14 +1125,23 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 logger.debug(f"股票 {stock_name}({stock_code}) 数据不足，跳过")
                 return None
             
+            # 更新板块计数器
+            section_counts[section]["data_ok"] += 1
+            
             # 设置股票代码属性，便于后续识别
             df.attrs["stock_code"] = stock_code
             
             # 检查是否适合策略
             if is_stock_suitable(stock_code, df):
+                # 更新板块计数器
+                section_counts[section]["suitable"] += 1
+                
                 # 计算策略得分
                 score = calculate_stock_strategy_score(stock_code, df)
                 if score > 0:
+                    # 更新板块计数器
+                    section_counts[section]["scored"] += 1
+                    
                     return {
                         "code": stock_code,
                         "name": stock_name,
@@ -1135,19 +1164,32 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         # 限制分析的股票数量
         for section in section_stocks:
             section_stocks[section] = section_stocks[section][:MAX_STOCKS_TO_ANALYZE]
-        # ========== 以上是关键修改 ==========
+        
+        # 记录各板块筛选结果
+        for section, counts in section_counts.items():
+            logger.info(f"【筛选统计】板块 {section}:")
+            logger.info(f"  - 总股票数量: {counts['total']}")
+            logger.info(f"  - 数据量足够: {counts['data_ok']} ({counts['data_ok']/counts['total']*100:.1f}%)")
+            logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
+            logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
         
         # 3. 对每个板块的股票按得分排序，并取前N只
         top_stocks_by_section = {}
         for section, stocks in section_stocks.items():
             if stocks:
                 stocks.sort(key=lambda x: x["score"], reverse=True)
-                top_stocks_by_section[section] = stocks[:MAX_STOCKS_PER_SECTION]
-                logger.info(f"板块 {section} 筛选后符合条件的股票数量: {len(stocks)} (取前{MAX_STOCKS_PER_SECTION}只)")
+                top_stocks = stocks[:MAX_STOCKS_PER_SECTION]
+                top_stocks_by_section[section] = top_stocks
+                
+                # 记录最终结果
+                logger.info(f"【最终结果】板块 {section} 筛选后符合条件的股票数量: {len(top_stocks)} (取前{MAX_STOCKS_PER_SECTION}只)")
+                for i, stock in enumerate(top_stocks):
+                    logger.info(f"  {i+1}. {stock['name']}({stock['code']}) - 评分: {stock['score']:.2f}")
             else:
-                logger.info(f"板块 {section} 无符合条件的股票")
+                logger.info(f"【最终结果】板块 {section} 无符合条件的股票")
         
         return top_stocks_by_section
+        # ========== 以上是关键修改 ==========
     
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)

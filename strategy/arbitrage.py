@@ -250,16 +250,20 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
         premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
         
-        # 过滤有效的套利机会
-        discount_opportunities = filter_valid_discount_opportunities(discount_opportunities)
-        premium_opportunities = filter_valid_premium_opportunities(premium_opportunities)
+        # 修复：不再根据评分过滤机会，而是全部保留
+        # discount_opportunities = filter_valid_discount_opportunities(discount_opportunities)
+        # premium_opportunities = filter_valid_premium_opportunities(premium_opportunities)
+        
+        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会（基于新评分机制）")
+        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会（基于新评分机制）")
         
         # 筛选今天尚未推送的套利机会（增量推送功能）
         discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
         premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
-        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会（基于新评分机制）")
-        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会（基于新评分机制）")
+        # 修复：添加日志，显示评分详情
+        for _, row in premium_opportunities.iterrows():
+            logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折溢价率']:.2f}%, 评分: {row['综合评分']:.2f}")
         
         return discount_opportunities, premium_opportunities
 

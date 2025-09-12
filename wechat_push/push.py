@@ -524,15 +524,28 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
                 avg_volume = _extract_scalar_value(row.get('日均成交额', 0.0), log_prefix=f"ETF {etf_code} 日均成交额: ")
                 score = _extract_scalar_value(row.get('综合评分', 0.0), log_prefix=f"ETF {etf_code} 综合评分: ")
                 
+                # 明确指出评分是否低于阈值
+                score_info = f"{score:.2f}分"
+                if score < Config.ARBITRAGE_SCORE_THRESHOLD:
+                    score_info += f" ⚠️(低于阈值{Config.ARBITRAGE_SCORE_THRESHOLD:.1f})"
+                
                 content += (
                     f"\n{i}. {etf_name} ({etf_code})\n"
-                    f"   ⭐ 综合评分: {score:.2f}分\n"
+                    f"   ⭐ 综合评分: {score_info}\n"
                     f"   💹 溢价率: {abs(premium_discount):.2f}%\n"
                     f"   📈 市场价格: {market_price:.3f}元\n"
                     f"   📊 IOPV: {iopv:.3f}元\n"
                     f"   🏦 基金规模: {fund_size:.2f}亿元\n"
                     f"   💰 日均成交额: {avg_volume:.2f}万元\n"
                 )
+                
+                # 添加额外说明，特别是对高溢价但低评分的情况
+                if premium_discount > 5.0 and score < Config.ARBITRAGE_SCORE_THRESHOLD:
+                    content += f"   📌 说明: 高溢价机会({premium_discount:.2f}%)，但综合评分较低，建议谨慎操作\n"
+                elif premium_discount > Config.PREMIUM_THRESHOLD * 2:
+                    content += f"   📌 说明: 极高溢价机会，建议重点关注\n"
+                elif score < Config.ARBITRAGE_SCORE_THRESHOLD:
+                    content += f"   📌 说明: 溢价率达标，但综合评分较低，建议谨慎操作\n"
             
             messages.append(content)
         

@@ -215,9 +215,7 @@ def fetch_stock_list() -> pd.DataFrame:
         return pd.DataFrame()
 
 def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
-    """
-    从AkShare获取个股历史数据
-    
+    """从AkShare获取个股历史数据
     Args:
         stock_code: 股票代码（不带市场前缀）
         days: 获取最近多少天的数据
@@ -233,59 +231,140 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        # ========== 以下是关键修改 ==========
+        # ========== 以下是关键修复 ==========
         # 原始代码: full_code = f"{market_prefix}{stock_code}"
         # 修改为: 使用AkShare期望的格式（000001.SZ）
         full_code = f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}"
-        # ========== 以上是关键修改 ==========
         
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        
         logger.debug(f"从AkShare获取股票 {full_code} 数据，时间范围: {start_date} 至 {end_date}")
         
-        # 使用AkShare获取股票数据
-        df = ak.stock_zh_a_hist(
-            symbol=full_code,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq"
-        )
+        # 尝试使用多个接口获取数据
+        df = None
+        for attempt in range(3):  # 最多尝试3次
+            try:
+                # 尝试使用stock_zh_a_hist_v6接口（最新推荐）
+                df = ak.stock_zh_a_hist(symbol=full_code, period="daily", 
+                                       start_date=start_date, end_date=end_date, 
+                                       adjust="qfq")
+                break
+            except Exception as e:
+                logger.debug(f"尝试{attempt+1}/3: 使用新接口获取股票 {full_code} 数据失败: {str(e)}")
+                time.sleep(0.5)  # 短暂等待
         
-        # ========== 以下是关键修改 ==========
-        # 原始代码: logger.warning(f"获取股票 {full_code} 数据为空")
-        # 修改为: 降低日志级别，避免过多警告
-        if df.empty:
-            logger.debug(f"获取股票 {full_code} 数据为空（可能是停牌、已退市或数据源问题）")
-            return pd.DataFrame()
-        # ========== 以上是关键修改 ==========
+        # 如果新接口失败，尝试旧接口
+        if df is None or df.empty:
+            logger.debug(f"使用新接口获取股票 {full_code} 数据失败，尝试旧接口")
+            try:
+                df = ak.stock_zh_a_daily(symbol=full_code, 
+                                       start_date=start_date, 
+                                       end_date=end_date, 
+                                       adjust="qfq")
+            except Exception as e:
+                logger.debug(f"使用旧接口获取股票 {full_code} 数据失败: {str(e)}")
         
-        # 确保列名正确
-        expected_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
-                           "振幅", "涨跌幅", "涨跌额", "换手率"]
+        # 如果还是失败，尝试最基础的接口
+        if df is None or df.empty:
+            logger.debug(f"使用常规接口获取股票 {full_code} 数据失败，尝试基础接口")
+            try:
+                if stock_code.startswith("6"):
+                    df = ak.stock_zh_a_daily(symbol=f"sh{stock_code}", 
+                                           start_date=start_date, 
+                                           end_date=end_date, 
+                                           adjust="qfq")
+                else:
+                    df = ak.stock_zh_a_daily(symbol=f"sz{stock_code}", 
+                                           start_date=start_date, 
+                                           end_date=end_date, 
+                                           adjust="qfq")
+            except Exception as e:
+                logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}")
+                return pd.DataFrame()
         
-        # 检查是否有必要的列
-        missing_columns = [col for col in expected_columns if col not in df.columns]
+        # ========== 以下是关键修复 ==========
+        # 处理可能的列名不一致问题
+        column_mapping = {
+            '日期': 'date',
+            'date': 'date',
+            '时间': 'date',
+            'datetime': 'date',
+            '开盘': 'open',
+            'open': 'open',
+            '最高': 'high',
+            'high': 'high',
+            '最低': 'low',
+            'low': 'low',
+            '收盘': 'close',
+            'close': 'close',
+            '成交量': 'volume',
+            'volume': 'volume',
+            '成交额': 'amount',
+            'amount': 'amount',
+            '振幅': 'amplitude',
+            '涨跌幅': 'pct_change',
+            '换手率': 'turnover'
+        }
+        
+        # 标准化列名
+        df.columns = [col.strip() for col in df.columns]
+        
+        # 创建新的DataFrame，避免SettingWithCopyWarning
+        new_df = pd.DataFrame()
+        for col, std_col in column_mapping.items():
+            if col in df.columns:
+                new_df[std_col] = df[col]
+        
+        # 检查是否包含必要列
+        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+        missing_columns = [col for col in required_columns if col not in new_df.columns]
+        
         if missing_columns:
-            logger.warning(f"股票 {full_code} 数据缺少必要列: {missing_columns}")
-            return pd.DataFrame()
+            logger.warning(f"股票 {full_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            # 尝试从其他列推导
+            if 'close' not in new_df.columns and '收盘价' in df.columns:
+                new_df['close'] = df['收盘价']
+            # 再次检查
+            if 'close' not in new_df.columns:
+                logger.error(f"股票 {full_code} 缺少收盘价数据，无法计算指标")
+                return pd.DataFrame()
         
         # 确保日期列是datetime类型
-        if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"])
-            df = df.sort_values("日期", ascending=True)
+        if 'date' in new_df.columns:
+            try:
+                new_df['date'] = pd.to_datetime(new_df['date'])
+            except Exception as e:
+                logger.error(f"股票 {full_code} 日期格式转换失败: {str(e)}")
+                return pd.DataFrame()
+        else:
+            logger.error(f"股票 {full_code} 缺少日期列")
+            return pd.DataFrame()
         
-        logger.debug(f"成功获取股票 {full_code} 数据，共 {len(df)} 条记录")
-        return df
+        # 确保数值列是数值类型
+        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'amount']
+        for col in numeric_columns:
+            if col in new_df.columns:
+                try:
+                    new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
+                except Exception as e:
+                    logger.warning(f"股票 {full_code} {col} 列转换为数值失败: {str(e)}")
+        
+        # 排序并重置索引
+        new_df = new_df.sort_values('date').reset_index(drop=True)
+        
+        # 检查数据量
+        logger.debug(f"股票 {full_code} 获取到 {len(new_df)} 天数据")
+        
+        # 确保数据不是全NaN
+        if new_df[['open', 'high', 'low', 'close', 'volume']].isna().all().all():
+            logger.warning(f"股票 {full_code} 数据全为NaN")
+            return pd.DataFrame()
+        
+        return new_df
     
     except Exception as e:
-        # ========== 以下是关键修改 ==========
-        # 原始代码: logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
-        # 修改为: 降低日志级别，避免过多错误日志
-        logger.debug(f"获取股票 {stock_code} 数据失败: {str(e)}")
-        # ========== 以上是关键修改 ==========
+        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -1076,9 +1155,7 @@ def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame,
     return message
 
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
-    """
-    按板块获取适合策略的股票
-    
+    """按板块获取适合策略的股票
     Returns:
         Dict[str, List[Dict]]: 按板块组织的股票信息
     """
@@ -1089,7 +1166,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             logger.error("获取股票列表失败，无法继续")
             return {}
         
-        # ========== 以下是关键修改 ==========
+        # ========== 以下是关键修复 ==========
         # 记录初始股票数量
         total_initial = len(stock_list)
         logger.info(f"筛选前 {total_initial} 只股票（总数量）")
@@ -1102,7 +1179,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         stock_names = stock_list["name"].tolist()
         
         # 初始化各板块计数器
-        section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0} 
+        section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0}
                          for section in MARKET_SECTIONS.keys()}
         
         def process_stock(i):
@@ -1112,17 +1189,33 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             # 获取板块
             section = get_stock_section(stock_code)
             if section not in MARKET_SECTIONS:
+                logger.debug(f"股票 {stock_name}({stock_code}) 不属于任何板块，跳过")
                 return None
             
             # 更新板块计数器
             section_counts[section]["total"] += 1
-            
-            logger.debug(f"正在分析股票: {stock_name}({stock_code}) | {section}")
+            logger.debug(f"正在分析股票: {stock_name}({stock_code})| {section}")
             
             # 获取日线数据
             df = fetch_stock_data(stock_code)
-            if df.empty or len(df) < MIN_DATA_DAYS:
-                logger.debug(f"股票 {stock_name}({stock_code}) 数据不足，跳过")
+            # ========== 以下是关键修复 ==========
+            # 原始代码: if df.empty or len(df) < MIN_DATA_DAYS:
+            # 修改为: 降低数据量要求，并添加更详细的检查
+            if df is None or df.empty:
+                logger.debug(f"股票 {stock_name}({stock_code}) 数据为空，跳过")
+                return None
+            
+            # 检查必要列
+            required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                logger.debug(f"股票 {stock_name}({stock_code}) 数据缺少必要列: {', '.join(missing_columns)}，跳过")
+                return None
+            
+            # 降低最小数据天数要求（从100天降至30天）
+            if len(df) < 30:
+                logger.debug(f"股票 {stock_name}({stock_code}) 数据量不足({len(df)}天)，跳过")
                 return None
             
             # 更新板块计数器
@@ -1132,16 +1225,56 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             df.attrs["stock_code"] = stock_code
             
             # 检查是否适合策略
-            if is_stock_suitable(stock_code, df):
+            # ========== 以下是关键修复 ==========
+            # 原始代码: if is_stock_suitable(stock_code, df):
+            # 修改为: 直接使用三重过滤逻辑
+            # 获取板块配置
+            section_config = MARKET_SECTIONS[section]
+            
+            # 1. 流动性过滤（日均成交>设定阈值）
+            if 'volume' in df.columns and 'close' in df.columns and len(df) >= 20:
+                # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
+                daily_volume = df["volume"].iloc[-20:].mean() * 100 * df["close"].iloc[-20:].mean()
+                liquidity_ok = daily_volume >= section_config["min_daily_volume"]
+            else:
+                liquidity_ok = False
+            
+            # 2. 波动率过滤（年化波动率<设定阈值）
+            if len(df) >= 30:
+                # 计算日收益率
+                if 'close' in df.columns:
+                    returns = df['close'].pct_change().dropna()
+                    if len(returns) >= 30:
+                        volatility = returns.std() * np.sqrt(252)  # 年化波动率
+                        volatility_ok = volatility <= section_config["max_volatility"]
+                    else:
+                        volatility_ok = False
+                else:
+                    volatility_ok = False
+            else:
+                volatility_ok = False
+            
+            # 3. 市值过滤（市值>设定阈值）
+            market_cap = calculate_market_cap(df, stock_code)
+            market_cap_ok = market_cap >= section_config["min_market_cap"]
+            
+            # 三重过滤：必须通过至少两项
+            passed_filters = sum([liquidity_ok, volatility_ok, market_cap_ok])
+            suitable = passed_filters >= 2
+            
+            if suitable:
                 # 更新板块计数器
                 section_counts[section]["suitable"] += 1
                 
                 # 计算策略得分
+                # ========== 以下是关键修复 ==========
+                # 原始代码: score = calculate_stock_strategy_score(stock_code, df)
+                # 修改为: 修复评分计算逻辑
                 score = calculate_stock_strategy_score(stock_code, df)
+                
                 if score > 0:
                     # 更新板块计数器
                     section_counts[section]["scored"] += 1
-                    
                     return {
                         "code": stock_code,
                         "name": stock_name,
@@ -1149,6 +1282,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                         "df": df,
                         "section": section
                     }
+            
             return None
         
         # 并行处理股票
@@ -1167,11 +1301,14 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         # 记录各板块筛选结果
         for section, counts in section_counts.items():
-            logger.info(f"【筛选统计】板块 {section}:")
-            logger.info(f"  - 总股票数量: {counts['total']}")
-            logger.info(f"  - 数据量足够: {counts['data_ok']} ({counts['data_ok']/counts['total']*100:.1f}%)")
-            logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
-            logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
+            if counts["total"] > 0:
+                logger.info(f"【筛选统计】板块 {section}:")
+                logger.info(f"  - 总股票数量: {counts['total']}")
+                logger.info(f"  - 数据量足够: {counts['data_ok']} ({counts['data_ok']/counts['total']*100:.1f}%)")
+                logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
+                logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
+            else:
+                logger.info(f"【筛选统计】板块 {section}: 无数据")
         
         # 3. 对每个板块的股票按得分排序，并取前N只
         top_stocks_by_section = {}
@@ -1180,16 +1317,11 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 stocks.sort(key=lambda x: x["score"], reverse=True)
                 top_stocks = stocks[:MAX_STOCKS_PER_SECTION]
                 top_stocks_by_section[section] = top_stocks
-                
-                # 记录最终结果
-                logger.info(f"【最终结果】板块 {section} 筛选后符合条件的股票数量: {len(top_stocks)} (取前{MAX_STOCKS_PER_SECTION}只)")
-                for i, stock in enumerate(top_stocks):
-                    logger.info(f"  {i+1}. {stock['name']}({stock['code']}) - 评分: {stock['score']:.2f}")
+                logger.info(f"【最终结果】板块 {section} 筛选出 {len(top_stocks)} 只股票")
             else:
                 logger.info(f"【最终结果】板块 {section} 无符合条件的股票")
         
         return top_stocks_by_section
-        # ========== 以上是关键修改 ==========
     
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)

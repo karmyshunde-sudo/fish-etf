@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 # ========== 以下是关键修改 ==========
 from concurrent.futures import ThreadPoolExecutor
-import git
 # ========== 以上是关键修改 ==========
 from config import Config
 from utils.date_utils import (
@@ -165,32 +164,6 @@ def update_stock_basic_info(basic_info_df: pd.DataFrame, stock_code: str, stock_
         return new_df
     else:
         return pd.concat([basic_info_df, new_df], ignore_index=True)
-
-def commit_and_push_changes():
-    """提交并推送更改到GitHub"""
-    try:
-        # 配置Git
-        repo = git.Repo.init()
-        repo.git.add(BASIC_INFO_FILE)
-        
-        # 检查是否有更改
-        diff = repo.index.diff("HEAD")
-        if not diff:
-            logger.info("没有需要提交的更改")
-            return True
-        
-        # 提交更改
-        repo.index.commit(f"自动更新股票基础信息 [定时]")
-        logger.info("已提交股票基础信息更新")
-        
-        # 推送到远程仓库
-        origin = repo.remote(name='origin')
-        origin.push()
-        logger.info("已推送股票基础信息更新到远程仓库")
-        return True
-    except Exception as e:
-        logger.error(f"提交和推送更改失败: {str(e)}")
-        return False
 # ========== 以上是关键修改 ==========
 
 def get_stock_section(stock_code: str) -> str:
@@ -982,9 +955,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             
             # 保存更新后的基础信息
             save_stock_basic_info(basic_info_df)
-            
-            # 提交更改到GitHub
-            commit_and_push_changes()
         # ========== 以上是关键修改 ==========
         
         return top_stocks_by_section

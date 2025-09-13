@@ -13,9 +13,10 @@ import numpy as np
 import time
 import akshare as ak
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 # ========== 以下是关键修改 ==========
 from concurrent.futures import ThreadPoolExecutor
+import git
 # ========== 以上是关键修改 ==========
 from config import Config
 from utils.date_utils import (
@@ -33,135 +34,170 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-"""
-==========================================
-【参数详细说明】
-以下参数可根据个人风险偏好调整
-==========================================
-"""
+# ========== 以下是关键修改 ==========
+# 定义股票基础信息文件路径
+BASIC_INFO_FILE = "data/all_stocks.csv"
 
-"""
-板块定义参数说明：
-- prefix: 股票代码前缀列表（用于识别属于该板块的股票）
-  * 沪市主板：60开头（如600000）
-  * 深市主板：00开头（如000001）
-  * 创业板：30开头（如300001）
-  * 科创板：688开头（如688001）
+# 市值过滤阈值（用于基础过滤）
+MIN_MARKET_CAP_FOR_BASIC_FILTER = 50  # 亿元
 
-- min_market_cap: 最小市值（亿元）
-  * 说明：低于此市值的股票将被过滤
-  * 推荐值范围：
-    - 沪市/深市主板：150-300亿
-    - 创业板：80-150亿  
-    - 科创板：50-100亿
-  * 设置理由：过滤小市值股票，降低风险
+# 数据更新间隔（天）
+DATA_UPDATE_INTERVAL = 1
+# ========== 以上是关键修改 ==========
 
-- min_daily_volume: 最小日均成交额（元）
-  * 说明：低于此成交额的股票将被过滤
-  * 推荐值范围：
-    - 沪市/深市主板：8000-15000万
-    - 创业板：5000-10000万
-    - 科创板：3000-8000万
-  * 设置理由：确保足够流动性，避免无法交易
-
-- max_volatility: 最大年化波动率（小数形式）
-  * 说明：高于此波动率的股票将被过滤
-  * 推荐值范围：
-    - 沪市/深市主板：0.3-0.45（30%-45%）
-    - 创业板：0.4-0.55（40%-55%）
-    - 科创板：0.5-0.7（50%-70%）
-  * 设置理由：过滤波动过大的股票，降低风险
-"""
-# 板块定义
+# 股票板块配置
 MARKET_SECTIONS = {
-    "沪市主板": {"prefix": ["60"], "min_market_cap": 50, "min_daily_volume": 50000000, "max_volatility": 0.4},
-    "深市主板": {"prefix": ["00"], "min_market_cap": 50, "min_daily_volume": 50000000, "max_volatility": 0.4},
-    "创业板": {"prefix": ["30"], "min_market_cap": 30, "min_daily_volume": 30000000, "max_volatility": 0.5},
-    "科创板": {"prefix": ["688"], "min_market_cap": 20, "min_daily_volume": 20000000, "max_volatility": 0.6}
+    "沪市主板": {
+        "prefix": ["60"],
+        "min_daily_volume": 5000 * 10000,  # 日均成交额阈值(元)
+        "max_volatility": 0.40,  # 最大波动率
+        "min_market_cap": 50,  # 最小市值(亿元)
+        "max_market_cap": 2000  # 最大市值(亿元)
+    },
+    "深市主板": {
+        "prefix": ["00"],
+        "min_daily_volume": 5000 * 10000,
+        "max_volatility": 0.40,
+        "min_market_cap": 50,
+        "min_market_cap": 50,
+        "max_market_cap": 2000
+    },
+    "创业板": {
+        "prefix": ["30"],
+        "min_daily_volume": 5000 * 10000,
+        "max_volatility": 0.40,
+        "min_market_cap": 50,
+        "max_market_cap": 2000
+    },
+    "科创板": {
+        "prefix": ["688"],
+        "min_daily_volume": 5000 * 10000,
+        "max_volatility": 0.40,
+        "min_market_cap": 50,
+        "max_market_cap": 2000
+    }
 }
 
-"""
-策略核心参数说明：
-- CRITICAL_VALUE_DAYS: 临界值计算周期（日）
-  * 说明：用于计算均线的天数，值越大趋势越平滑但反应越慢
-  * 推荐值：30-50（40是平衡点）
-  * 默认值：40
-
-- DEVIATION_THRESHOLD: 偏离阈值（小数形式）
-  * 说明：用于判断是否超买/超卖的阈值
-  * 推荐值：0.06-0.1（6%-10%）
-  * 默认值：0.08（8%）
-
-- VOLUME_CHANGE_THRESHOLD: 成交量变化阈值（小数形式）
-  * 说明：用于确认信号的成交量变化要求
-  * 推荐值：0.25-0.4（25%-40%）
-  * 默认值：0.35（35%）
-
-- MIN_CONSECUTIVE_DAYS: 最小连续站上/跌破天数
-  * 说明：确认信号需要连续多少天在均线上方/下方
-  * 推荐值：2-4
-  * 默认值：3
-
-- PATTERN_CONFIDENCE_THRESHOLD: 形态确认阈值（小数形式）
-  * 说明：头肩顶/M头等形态的置信度阈值
-  * 推荐值：0.6-0.8（60%-80%）
-  * 默认值：0.7（70%）
-
-- MAX_STOCK_POSITION: 单一个股最大仓位（小数形式）
-  * 说明：单一个股在投资组合中的最大占比
-  * 推荐值：0.05-0.2（5%-20%）
-  * 默认值：0.15（15%）
-"""
-# 策略参数（针对个股优化）
-CRITICAL_VALUE_DAYS = 40  # 临界值计算周期（40日均线）
-DEVIATION_THRESHOLD = 0.08  # 偏离阈值（8%）
-VOLUME_CHANGE_THRESHOLD = 0.35  # 成交量变化阈值（35%）
-MIN_CONSECUTIVE_DAYS = 3  # 最小连续站上/跌破天数
-PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
-MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%）
-
-"""
-其他参数说明：
-- MIN_DATA_DAYS: 最小数据天数
-  * 说明：用于计算波动率等指标所需的最小历史数据天数
-  * 推荐值：90-120
-  * 默认值：100
-
-- MAX_STOCKS_TO_ANALYZE: 每次分析的最大股票数量
-  * 说明：避免请求过多导致被AkShare限制
-  * 推荐值：400-600
-  * 默认值：500
-
-- MAX_STOCKS_PER_SECTION: 每个板块最多报告的股票数量
-  * 说明：控制每个板块推送的股票数量上限，避免信息过载
-  * 推荐值：5-15（太少可能错过机会，太多难以跟踪）
-  * 默认值：10
-
-- DATA_FETCH_DELAY: 数据请求间隔（秒）
-  * 说明：避免被AkShare限制的请求间隔时间
-  * 推荐值：0.4-0.6
-  * 默认值：0.5
-"""
-
 # 其他参数
-MIN_DATA_DAYS = 30  # 降低最小数据天数（用于计算指标）
+MIN_DATA_DAYS = 30  # 最小数据天数（用于计算指标）
 MAX_STOCKS_TO_ANALYZE = 300  # 减少每次分析的最大股票数量（避免请求过多）
 MAX_STOCKS_PER_SECTION = 8  # 每个板块最多报告的股票数量
-DATA_FETCH_DELAY = 0.5  # 增加数据请求间隔（秒），避免被AkShare限制
+CRITICAL_VALUE_DAYS = 40  # 临界值计算天数
 
-"""
-==========================================
-【策略实现区】
-以下为策略核心代码
-==========================================
-"""
+# ========== 以下是关键修改 ==========
+def load_stock_basic_info() -> pd.DataFrame:
+    """加载股票基础信息"""
+    try:
+        if os.path.exists(BASIC_INFO_FILE):
+            df = pd.read_csv(BASIC_INFO_FILE)
+            logger.info(f"成功加载股票基础信息，共 {len(df)} 条记录")
+            return df
+        else:
+            logger.info("股票基础信息文件不存在，将创建新文件")
+            return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"加载股票基础信息失败: {str(e)}")
+        return pd.DataFrame()
+
+def save_stock_basic_info(df: pd.DataFrame) -> bool:
+    """保存股票基础信息"""
+    try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(BASIC_INFO_FILE), exist_ok=True)
+        
+        # 保存文件
+        df.to_csv(BASIC_INFO_FILE, index=False)
+        logger.info(f"股票基础信息已保存，共 {len(df)} 条记录")
+        return True
+    except Exception as e:
+        logger.error(f"保存股票基础信息失败: {str(e)}")
+        return False
+
+def get_last_update_time(df: pd.DataFrame, stock_code: str) -> Optional[datetime]:
+    """获取股票最后更新时间"""
+    if df.empty:
+        return None
+    
+    stock_info = df[df["code"] == stock_code]
+    if not stock_info.empty:
+        last_update = stock_info["last_update"].values[0]
+        try:
+            # 尝试解析时间字符串
+            return datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+        except:
+            return None
+    return None
+
+def should_update_stock(df: pd.DataFrame, stock_code: str) -> bool:
+    """判断是否需要更新股票数据"""
+    last_update = get_last_update_time(df, stock_code)
+    if last_update is None:
+        return True
+    
+    # 如果最后更新时间超过DATA_UPDATE_INTERVAL天，则需要更新
+    return (datetime.now() - last_update).days >= DATA_UPDATE_INTERVAL
+
+def update_stock_basic_info(basic_info_df: pd.DataFrame, stock_code: str, stock_name: str, 
+                           market_cap: float, section: str) -> pd.DataFrame:
+    """更新股票基础信息"""
+    # 准备新记录
+    new_record = {
+        "code": stock_code,
+        "name": stock_name,
+        "market_cap": market_cap,
+        "section": section,
+        "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # 检查是否已存在
+    if not basic_info_df.empty:
+        existing = basic_info_df[basic_info_df["code"] == stock_code]
+        if not existing.empty:
+            # 更新现有记录
+            idx = basic_info_df[basic_info_df["code"] == stock_code].index[0]
+            for key, value in new_record.items():
+                basic_info_df.at[idx, key] = value
+            return basic_info_df
+    
+    # 添加新记录
+    new_df = pd.DataFrame([new_record])
+    if basic_info_df.empty:
+        return new_df
+    else:
+        return pd.concat([basic_info_df, new_df], ignore_index=True)
+
+def commit_and_push_changes():
+    """提交并推送更改到GitHub"""
+    try:
+        # 配置Git
+        repo = git.Repo.init()
+        repo.git.add(BASIC_INFO_FILE)
+        
+        # 检查是否有更改
+        diff = repo.index.diff("HEAD")
+        if not diff:
+            logger.info("没有需要提交的更改")
+            return True
+        
+        # 提交更改
+        repo.index.commit(f"自动更新股票基础信息 [定时]")
+        logger.info("已提交股票基础信息更新")
+        
+        # 推送到远程仓库
+        origin = repo.remote(name='origin')
+        origin.push()
+        logger.info("已推送股票基础信息更新到远程仓库")
+        return True
+    except Exception as e:
+        logger.error(f"提交和推送更改失败: {str(e)}")
+        return False
+# ========== 以上是关键修改 ==========
 
 def get_stock_section(stock_code: str) -> str:
-    """
-    判断股票所属板块
+    """根据股票代码判断所属板块
     
     Args:
-        stock_code: 股票代码（不带市场前缀）
+        stock_code: 股票代码（6位数字）
     
     Returns:
         str: 板块名称
@@ -173,8 +209,7 @@ def get_stock_section(stock_code: str) -> str:
     return "其他板块"
 
 def fetch_stock_list() -> pd.DataFrame:
-    """
-    从AkShare获取全市场股票列表
+    """从AkShare获取全市场股票列表
     
     Returns:
         pd.DataFrame: 股票列表（代码、名称、所属板块等）
@@ -182,9 +217,30 @@ def fetch_stock_list() -> pd.DataFrame:
     try:
         logger.info("从AkShare获取全市场股票列表...")
         
+        # ========== 以下是关键修改 ==========
+        # 尝试加载基础信息
+        basic_info_df = load_stock_basic_info()
+        logger.info(f"加载到 {len(basic_info_df)} 条股票基础信息")
+        
+        # 如果基础信息存在且不过期，直接使用
+        if not basic_info_df.empty:
+            # 检查最后更新时间
+            last_update = basic_info_df["last_update"].max()
+            if last_update:
+                try:
+                    last_update_time = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+                    if (datetime.now() - last_update_time).days < DATA_UPDATE_INTERVAL:
+                        logger.info(f"基础信息未过期，使用缓存数据（最后更新: {last_update}）")
+                        # 添加所属板块列
+                        basic_info_df["板块"] = basic_info_df["code"].apply(get_stock_section)
+                        logger.info(f"成功获取股票列表，共 {len(basic_info_df)} 只股票")
+                        return basic_info_df
+                except:
+                    pass
+        # ========== 以上是关键修改 ==========
+        
         # 获取A股股票列表
         stock_list = ak.stock_info_a_code_name()
-        
         if stock_list.empty:
             logger.error("获取股票列表失败：返回为空")
             return pd.DataFrame()
@@ -196,18 +252,28 @@ def fetch_stock_list() -> pd.DataFrame:
         
         # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
         stock_list = stock_list[~stock_list["name"].str.contains("ST")]
-        stock_list = stock_list[
-            stock_list["code"].str.startswith(("60", "00", "30", "688"))
-        ]
+        stock_list = stock_list[stock_list["code"].str.startswith(("60", "00", "30", "688"))]
         
         # 记录前置筛选后的股票数量
         filtered_count = len(stock_list)
         logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
+        
+        # 保存到基础信息
+        for _, row in stock_list.iterrows():
+            stock_code = row["code"]
+            stock_name = row["name"]
+            section = get_stock_section(stock_code)
+            # 初始市值设为0，将在后续获取
+            basic_info_df = update_stock_basic_info(
+                basic_info_df, stock_code, stock_name, 0, section
+            )
+        
+        # 保存基础信息
+        save_stock_basic_info(basic_info_df)
         # ========== 以上是关键修改 ==========
         
         # 添加所属板块列
         stock_list["板块"] = stock_list["code"].apply(get_stock_section)
-        
         logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
         return stock_list
     
@@ -217,6 +283,7 @@ def fetch_stock_list() -> pd.DataFrame:
 
 def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
     """从AkShare获取个股历史数据
+    
     Args:
         stock_code: 股票代码（不带市场前缀）
         days: 获取最近多少天的数据
@@ -232,11 +299,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        # 计算日期范围
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        
-        # ========== 关键修复 ==========
+        # ========== 以下是关键修改 ==========
         # 尝试多种可能的股票代码格式
         possible_codes = [
             f"{market_prefix}{stock_code}",  # "sh000001"
@@ -249,6 +312,14 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         logger.debug(f"尝试获取股票 {stock_code} 数据，可能的代码格式: {possible_codes}")
         logger.debug(f"时间范围: {start_date} 至 {end_date}")
         
+        # 计算日期范围
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        # ========== 以上是关键修改 ==========
+        
+        logger.debug(f"从AkShare获取股票 {stock_code} 数据，时间范围: {start_date} 至 {end_date}")
+        
+        # ========== 以下是关键修改 ==========
         # 尝试使用多种接口和代码格式获取数据
         df = None
         successful_code = None
@@ -305,280 +376,42 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
             return pd.DataFrame()
         
         logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
+        # ========== 以上是关键修改 ==========
         
-        # 根据实际返回的列名进行映射
-        if 'date' in df.columns:
-            # 英文列名映射到标准列名
-            column_mapping = {
-                'date': 'date',
-                'open': 'open',
-                'high': 'high',
-                'low': 'low',
-                'close': 'close',
-                'volume': 'volume',
-                'amount': 'amount',
-                'outstanding_share': 'outstanding_share',
-                'turnover': 'turnover'
-            }
-        else:
-            # 中文列名映射到标准列名
-            column_mapping = {
-                '日期': 'date',
-                '开盘': 'open',
-                '最高': 'high',
-                '最低': 'low',
-                '收盘': 'close',
-                '成交量': 'volume',
-                '成交额': 'amount',
-                '振幅': 'amplitude',
-                '涨跌幅': 'pct_change',
-                '涨跌额': 'change',
-                '换手率': 'turnover'
-            }
+        # ========== 以下是关键修改 ==========
+        # 直接使用AkShare返回的列名，不做任何映射
+        # 根据实际返回的列名进行处理
+        # ========== 以上是关键修改 ==========
         
-        # 创建新的DataFrame，避免SettingWithCopyWarning
-        new_df = pd.DataFrame()
-        for col, std_col in column_mapping.items():
-            if col in df.columns:
-                new_df[std_col] = df[col]
+        if df.empty:
+            logger.warning(f"获取股票 {stock_code} 数据为空")
+            return pd.DataFrame()
         
-        # 检查是否包含必要列
-        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
-        missing_columns = [col for col in required_columns if col not in new_df.columns]
+        # 确保列名正确
+        expected_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
+                           "振幅", "涨跌幅", "涨跌额", "换手率"]
         
+        # 检查是否有必要的列
+        missing_columns = [col for col in expected_columns if col not in df.columns]
         if missing_columns:
-            logger.warning(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            logger.warning(f"股票 {stock_code} 数据缺少必要列: {missing_columns}")
             return pd.DataFrame()
         
         # 确保日期列是datetime类型
-        if 'date' in new_df.columns:
-            try:
-                new_df['date'] = pd.to_datetime(new_df['date'])
-            except Exception as e:
-                logger.error(f"股票 {stock_code} 日期格式转换失败: {str(e)}")
-                return pd.DataFrame()
-        else:
-            logger.error(f"股票 {stock_code} 缺少日期列")
-            return pd.DataFrame()
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"])
+            df = df.sort_values("日期", ascending=True)
         
-        # 确保数值列是数值类型
-        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'amount']
-        for col in numeric_columns:
-            if col in new_df.columns:
-                try:
-                    new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
-                except Exception as e:
-                    logger.warning(f"股票 {stock_code} {col} 列转换为数值失败: {str(e)}")
-        
-        # 排序并重置索引
-        new_df = new_df.sort_values('date').reset_index(drop=True)
-        
-        # 检查数据量
-        logger.debug(f"股票 {stock_code} 获取到 {len(new_df)} 天数据")
-        
-        # 确保数据不是全NaN
-        if new_df[['open', 'high', 'low', 'close', 'volume']].isna().all().all():
-            logger.warning(f"股票 {stock_code} 数据全为NaN")
-            return pd.DataFrame()
-        
-        return new_df
+        logger.debug(f"成功获取股票 {stock_code} 数据，共 {len(df)} 条记录")
+        return df
     
     except Exception as e:
-        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        # ========== 以下是关键修改 ==========
+        # 原始代码: logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        # 修改为: 降低日志级别，避免过多错误日志
+        logger.debug(f"获取股票 {stock_code} 数据失败: {str(e)}")
+        # ========== 以上是关键修改 ==========
         return pd.DataFrame()
-
-def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
-    """预处理股票数据，计算必要指标
-    Args:
-        df: 股票日线数据
-    
-    Returns:
-        pd.DataFrame: 预处理后的数据
-    """
-    try:
-        if df is None or df.empty:
-            logger.warning("股票数据为空，无法预处理")
-            return df
-        
-        # 确保DataFrame是副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 确保日期列排序
-        if 'date' in df.columns:
-            df = df.sort_values('date')
-        
-        # 检查必要列
-        required_columns = ['open', 'high', 'low', 'close', 'volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            logger.error(f"预处理失败：数据缺少必要列 {', '.join(missing_columns)}")
-            return df
-        
-        # 检查close列是否为有效数值
-        if 'close' not in df.columns or df['close'].isna().all():
-            logger.error("预处理失败：close列不存在或全为NaN")
-            return df
-        
-        # 计算移动平均线
-        df["ma5"] = df["close"].rolling(window=5).mean()
-        df["ma10"] = df["close"].rolling(window=10).mean()
-        df["ma20"] = df["close"].rolling(window=20).mean()
-        df["ma40"] = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean()
-        
-        # 计算成交量移动平均
-        if 'volume' in df.columns:
-            df["volume_ma5"] = df["volume"].rolling(window=5).mean()
-        
-        # 计算涨跌幅
-        if 'close' in df.columns:
-            df["pct_change"] = df["close"].pct_change() * 100
-        
-        # 计算波动率（20日年化波动率）
-        if 'pct_change' in df.columns:
-            df["volatility"] = df["pct_change"].rolling(window=20).std() * np.sqrt(252)
-        
-        # 计算MACD
-        if 'close' in df.columns:
-            df["ema12"] = df["close"].ewm(span=12, adjust=False).mean()
-            df["ema26"] = df["close"].ewm(span=26, adjust=False).mean()
-            df["macd"] = df["ema12"] - df["ema26"]
-            df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-            df["hist"] = df["macd"] - df["signal"]
-        
-        # 计算RSI
-        if 'close' in df.columns:
-            delta = df["close"].diff()
-            gain = delta.where(delta > 0, 0)
-            loss = -delta.where(delta < 0, 0)
-            avg_gain = gain.rolling(window=14).mean()
-            avg_loss = loss.rolling(window=14).mean()
-            rs = avg_gain / avg_loss.replace(0, np.nan)  # 避免除零错误
-            df["rsi"] = 100 - (100 / (1 + rs))
-        
-        # 计算布林带
-        if 'close' in df.columns and 'ma20' in df.columns:
-            df["std"] = df["close"].rolling(window=20).std()
-            df["upper_band"] = df["ma20"] + (df["std"] * 2)
-            df["lower_band"] = df["ma20"] - (df["std"] * 2)
-        
-        # 计算ATR (平均真实波幅)
-        if all(col in df.columns for col in ['high', 'low', 'close']):
-            high_low = df["high"] - df["low"]
-            high_close = np.abs(df["high"] - df["close"].shift())
-            low_close = np.abs(df["low"] - df["close"].shift())
-            ranges = pd.concat([high_low, high_close, low_close], axis=1)
-            true_range = np.max(ranges, axis=1)
-            df["atr"] = pd.Series(true_range).rolling(window=14).mean()
-        
-        logger.debug("股票数据预处理完成")
-        return df
-    
-    except Exception as e:
-        logger.error(f"预处理股票数据失败: {str(e)}", exc_info=True)
-        return df
-
-def calculate_critical_value(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> float:
-    """计算临界值（40日均线）"""
-    if len(df) < period:
-        logger.warning(f"数据不足{period}天，无法准确计算临界值")
-        return df["收盘"].mean() if not df.empty else 0.0
-    
-    return df['收盘'].rolling(window=period).mean().iloc[-1]
-
-def calculate_deviation(current: float, critical: float) -> float:
-    """计算偏离率"""
-    return (current - critical) / critical * 100
-
-def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float, 
-                                    period: int = CRITICAL_VALUE_DAYS) -> int:
-    """计算连续站上均线的天数"""
-    if len(df) < 2:
-        return 0
-    
-    # 检查是否已经预计算了关键指标
-    if "above_ma40" in df.columns:
-        # 从最新日期开始向前检查
-        consecutive_days = 0
-        for i in range(len(df)-1, -1, -1):
-            if i < period - 1:
-                break
-                
-            if df["above_ma40"].iloc[i]:
-                consecutive_days += 1
-            else:
-                break
-        return consecutive_days
-    
-    # 获取收盘价和均线序列
-    close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=period).mean().values
-    
-    # 从最新日期开始向前检查
-    consecutive_days = 0
-    for i in range(len(close_prices)-1, -1, -1):
-        if i < period - 1:
-            break
-            
-        if not np.isnan(ma_values[i]) and close_prices[i] >= ma_values[i]:
-            consecutive_days += 1
-        else:
-            break
-    
-    return consecutive_days
-
-def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float, 
-                                    period: int = CRITICAL_VALUE_DAYS) -> int:
-    """计算连续跌破均线的天数"""
-    if len(df) < 2:
-        return 0
-    
-    # 检查是否已经预计算了关键指标
-    if "below_ma40" in df.columns:
-        # 从最新日期开始向前检查
-        consecutive_days = 0
-        for i in range(len(df)-1, -1, -1):
-            if i < period - 1:
-                break
-                
-            if df["below_ma40"].iloc[i]:
-                consecutive_days += 1
-            else:
-                break
-        return consecutive_days
-    
-    # 获取收盘价和均线序列
-    close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=period).mean().values
-    
-    # 从最新日期开始向前检查
-    consecutive_days = 0
-    for i in range(len(close_prices)-1, -1, -1):
-        if i < period - 1:
-            break
-            
-        if not np.isnan(ma_values[i]) and close_prices[i] < ma_values[i]:
-            consecutive_days += 1
-        else:
-            break
-    
-    return consecutive_days
-
-def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
-    """计算成交量变化率"""
-    # 检查是否已经预计算了成交量变化率
-    if "volume_change" in df.columns:
-        return df["volume_change"].iloc[-1]
-    
-    if len(df) < days + 1:
-        return 0.0
-    
-    recent_volume = df["成交量"].iloc[-days:].mean()
-    previous_volume = df["成交量"].iloc[-(days*2):-days].mean()
-    
-    if previous_volume > 0:
-        return (recent_volume - previous_volume) / previous_volume * 100
-    return 0.0
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:
     """计算年化波动率"""
@@ -587,11 +420,11 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
         return 0.2  # 默认波动率
     
     # 计算日收益率
-    # ========== 关键修复 ==========
+    # ========== 以下是关键修改 ==========
     # 原始代码: daily_returns = df["收盘"].pct_change().dropna()
-    # 修改为: 使用英文标准列名 'close'
-    daily_returns = df["close"].pct_change().dropna()
-    # ========== 以上是关键修复 ==========
+    # 修改为: 使用标准列名 '收盘'
+    daily_returns = df["收盘"].pct_change().dropna()
+    # ========== 以上是关键修改 ==========
     
     # 计算年化波动率
     if len(daily_returns) >= 20:
@@ -604,9 +437,9 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     
     return volatility
 
-# ========== 以下是关键修改 ==========
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
     """计算股票市值
+    
     Args:
         df: 股票日线数据
         stock_code: 股票代码
@@ -626,13 +459,13 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                 return market_cap / 10000  # 转换为亿元
         
         # 获取最新收盘价
-        if "close" in df.columns:
-            current_price = df["close"].iloc[-1]
+        if "收盘" in df.columns:
+            current_price = df["收盘"].iloc[-1]
         else:
             logger.debug(f"股票 {stock_code} 缺少收盘价数据，无法计算市值")
             return 0.0
         
-        # ========== 关键修复 ==========
+        # ========== 以下是关键修改 ==========
         # 尝试使用akshare获取实时行情信息（添加重试机制）
         stock_info = None
         for attempt in range(3):
@@ -643,7 +476,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                     break
             except Exception as e:
                 logger.debug(f"尝试{attempt+1}/3: 获取实时行情数据失败: {str(e)}")
-                time.sleep(1.5)  # 增加等待时间
+            time.sleep(1.5)  # 增加等待时间
         
         if stock_info is not None and not stock_info.empty:
             # 标准化股票代码格式（处理可能的前缀）
@@ -674,9 +507,9 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
         
         # 如果以上方法都失败，尝试使用历史数据估算
         if len(df) >= 250:  # 至少一年数据
-            if "volume" in df.columns and "close" in df.columns:
-                avg_volume = df["volume"].iloc[-250:].mean()
-                avg_price = df["close"].iloc[-250:].mean()
+            if "成交量" in df.columns and "收盘" in df.columns:
+                avg_volume = df["成交量"].iloc[-250:].mean()
+                avg_price = df["收盘"].iloc[-250:].mean()
                 if avg_volume > 0 and avg_price > 0:
                     # 估算日均成交额(万元)
                     daily_turnover = avg_volume * avg_price / 10000
@@ -688,14 +521,15 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
         
         logger.debug(f"股票 {stock_code} 市值计算失败，返回默认值0.0")
         return 0.0
+        # ========== 以上是关键修改 ==========
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
         return 0.0
-# ========== 以上是关键修改 ==========
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
     """判断个股是否适合策略（流动性、波动率、市值三重过滤）
+    
     Args:
         stock_code: 股票代码
         df: 股票日线数据
@@ -719,9 +553,8 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         
         # 1. 流动性过滤（日均成交>设定阈值）
         # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
-        if 'volume' in df.columns and 'close' in df.columns and len(df) >= 20:
-            # 修正：成交量单位是"手"，需要乘以100转换为股
-            daily_volume = df["volume"].iloc[-20:].mean() * 100 * df["close"].iloc[-20:].mean()
+        if '成交量' in df.columns and '收盘' in df.columns and len(df) >= 20:
+            daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
             logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 日均成交额: {daily_volume/10000:.2f}万元, 要求: >{section_config['min_daily_volume']/10000:.2f}万元")
             
             if daily_volume < section_config["min_daily_volume"]:
@@ -762,6 +595,7 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
 
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
     """计算股票策略评分
+    
     Args:
         stock_code: 股票代码
         df: 预处理后的股票数据
@@ -775,7 +609,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             return 0.0
         
         # 检查必要列
-        required_columns = ['close', 'volume', 'ma5', 'ma10', 'ma20', 'ma40']
+        required_columns = ['开盘', '最高', '最低', '收盘', '成交量']
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
@@ -783,17 +617,22 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             return 0.0
         
         # 获取最新数据
-        current = df["close"].iloc[-1]
+        current = df["收盘"].iloc[-1]
         if pd.isna(current) or current <= 0:
             logger.debug(f"股票 {stock_code} 无效的收盘价: {current}")
             return 0.0
         
-        volume = df["volume"].iloc[-1] if "volume" in df.columns and len(df) >= 1 else 0
-        volume_ma5 = df["volume_ma5"].iloc[-1] if "volume_ma5" in df.columns and len(df) >= 1 else 0
+        volume = df["成交量"].iloc[-1] if "成交量" in df.columns and len(df) >= 1 else 0
         
         # 1. 趋势评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
+            # 计算移动平均线
+            df["ma5"] = df["收盘"].rolling(window=5).mean()
+            df["ma10"] = df["收盘"].rolling(window=10).mean()
+            df["ma20"] = df["收盘"].rolling(window=20).mean()
+            df["ma40"] = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean()
+            
             ma5 = df["ma5"].iloc[-1] if "ma5" in df.columns else current
             ma10 = df["ma10"].iloc[-1] if "ma10" in df.columns else current
             ma20 = df["ma20"].iloc[-1] if "ma20" in df.columns else current
@@ -809,12 +648,20 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             
             # 检查趋势强度
             if len(df) >= 20:
-                price_change_20 = (current - df["close"].iloc[-20]) / df["close"].iloc[-20] * 100
+                price_change_20 = (current - df["收盘"].iloc[-20]) / df["收盘"].iloc[-20] * 100
                 if not pd.isna(price_change_20) and price_change_20 > 5:
                     trend_score += 10  # 20日涨幅大于5%，加10分
         
         # 2. 动量评分 (20%)
         momentum_score = 0.0
+        # 计算MACD
+        if "收盘" in df.columns:
+            df["ema12"] = df["收盘"].ewm(span=12, adjust=False).mean()
+            df["ema26"] = df["收盘"].ewm(span=26, adjust=False).mean()
+            df["macd"] = df["ema12"] - df["ema26"]
+            df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+            df["hist"] = df["macd"] - df["signal"]
+        
         if "hist" in df.columns and len(df) >= 2:
             macd_hist = df["hist"].iloc[-1]
             macd_hist_prev = df["hist"].iloc[-2]
@@ -824,6 +671,15 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
                 momentum_score += 10  # MACD柱状体增加且为正，加10分
             
             # RSI指标
+            if "收盘" in df.columns:
+                delta = df["收盘"].diff()
+                gain = delta.where(delta > 0, 0)
+                loss = -delta.where(delta < 0, 0)
+                avg_gain = gain.rolling(window=14).mean()
+                avg_loss = loss.rolling(window=14).mean()
+                rs = avg_gain / avg_loss.replace(0, np.nan)  # 避免除零错误
+                df["rsi"] = 100 - (100 / (1 + rs))
+            
             if "rsi" in df.columns:
                 rsi = df["rsi"].iloc[-1]
                 if not pd.isna(rsi):
@@ -834,6 +690,10 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         
         # 3. 量能评分 (20%)
         volume_score = 0.0
+        if "成交量" in df.columns:
+            df["volume_ma5"] = df["成交量"].rolling(window=5).mean()
+        
+        volume_ma5 = df["volume_ma5"].iloc[-1] if "volume_ma5" in df.columns and len(df) >= 1 else 0
         if volume_ma5 > 0 and volume > 0:
             volume_ratio = volume / volume_ma5
             
@@ -845,12 +705,19 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             
             # 量价配合
             if len(df) >= 2:
-                price_change = (current - df["close"].iloc[-2]) / df["close"].iloc[-2] * 100
+                price_change = (current - df["收盘"].iloc[-2]) / df["收盘"].iloc[-2] * 100
                 if price_change > 0 and volume_ratio > 1.0:
                     volume_score += 10  # 价格上涨且量能放大，加10分
         
         # 4. 波动率评分 (20%)
         volatility_score = 0.0
+        # 计算波动率（20日年化波动率）
+        if "收盘" in df.columns:
+            df["pct_change"] = df["收盘"].pct_change() * 100
+        
+        if "pct_change" in df.columns:
+            df["volatility"] = df["pct_change"].rolling(window=20).std() * np.sqrt(252)
+        
         if "volatility" in df.columns and len(df) >= 20:
             volatility = df["volatility"].iloc[-1]
             
@@ -884,489 +751,100 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
 
-def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> tuple:
-    """判断是否处于震荡市
-    
-    Returns:
-        tuple: (是否震荡市, 穿越次数, 最近10天偏离率范围)
-    """
-    if len(df) < 10:
-        return False, 0, (0, 0)
-    
-    # 检查是否已经预计算了关键指标
-    if "ma40" in df.columns:
-        # 获取收盘价和均线序列
-        close_prices = df["收盘"].values
-        ma_values = df["ma40"].values
-        
-        # 检查是否连续10天在均线附近波动
-        last_10_days = df.tail(10)
-        deviations = []
-        for i in range(len(last_10_days)):
-            # 确保有足够的数据计算均线
-            if i < period - 1 or np.isnan(ma_values[-10 + i]):
-                continue
-                
-            deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
-            # 根据板块不同，设置不同的震荡阈值
-            section = get_stock_section(df.attrs.get("stock_code", ""))
-            if section in ["科创板", "创业板"]:
-                max_deviation = 10.0  # 科创板、创业板波动更大
-            else:
-                max_deviation = 8.0   # 主板波动较小
-            
-            if abs(deviation) > max_deviation:
-                return False, 0, (0, 0)
-            deviations.append(deviation)
-        
-        # 检查价格是否反复穿越均线
-        cross_count = 0
-        for i in range(len(close_prices)-10, len(close_prices)-1):
-            # 确保有足够的数据计算均线
-            if i < period - 1 or np.isnan(ma_values[i]) or np.isnan(ma_values[i+1]):
-                continue
-                
-            if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
-               (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
-                cross_count += 1
-        
-        # 至少需要5次穿越才认定为震荡市
-        min_cross_count = 5
-        is_volatile = cross_count >= min_cross_count
-        
-        # 计算最近10天偏离率范围
-        if deviations:
-            min_deviation = min(deviations)
-            max_deviation = max(deviations)
-        else:
-            min_deviation = 0
-            max_deviation = 0
-        
-        return is_volatile, cross_count, (min_deviation, max_deviation)
-    
-    # 获取收盘价和均线序列
-    close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=period).mean().values
-    
-    # 检查是否连续10天在均线附近波动
-    last_10_days = df.tail(10)
-    deviations = []
-    for i in range(len(last_10_days)):
-        # 确保有足够的数据计算均线
-        if i < period - 1 or np.isnan(ma_values[-10 + i]):
-            continue
-            
-        deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
-        # 根据板块不同，设置不同的震荡阈值
-        section = get_stock_section(df.attrs.get("stock_code", ""))
-        if section in ["科创板", "创业板"]:
-            max_deviation = 10.0  # 科创板、创业板波动更大
-        else:
-            max_deviation = 8.0   # 主板波动较小
-        
-        if abs(deviation) > max_deviation:
-            return False, 0, (0, 0)
-        deviations.append(deviation)
-    
-    # 检查价格是否反复穿越均线
-    cross_count = 0
-    for i in range(len(close_prices)-10, len(close_prices)-1):
-        # 确保有足够的数据计算均线
-        if i < period - 1 or np.isnan(ma_values[i]) or np.isnan(ma_values[i+1]):
-            continue
-            
-        if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
-           (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
-            cross_count += 1
-    
-    # 至少需要5次穿越才认定为震荡市
-    min_cross_count = 5
-    is_volatile = cross_count >= min_cross_count
-    
-    # 计算最近10天偏离率范围
-    if deviations:
-        min_deviation = min(deviations)
-        max_deviation = max(deviations)
-    else:
-        min_deviation = 0
-        max_deviation = 0
-    
-    return is_volatile, cross_count, (min_deviation, max_deviation)
-
-def detect_head_and_shoulders(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> dict:
-    """检测M头和头肩顶形态
-    
-    Returns:
-        dict: 形态检测结果
-    """
-    if len(df) < 20:  # 需要足够数据
-        return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
-    
-    # 检查是否已经预计算了关键指标
-    if "ma40" in df.columns:
-        # 获取收盘价
-        close_prices = df["收盘"].values
-    else:
-        # 获取收盘价
-        close_prices = df["收盘"].values
-    
-    # 寻找局部高点
-    peaks = []
-    for i in range(5, len(close_prices)-5):
-        if close_prices[i] > max(close_prices[i-5:i]) and close_prices[i] > max(close_prices[i+1:i+6]):
-            peaks.append((i, close_prices[i]))
-    
-    # 如果找到的高点少于3个，无法形成头肩顶
-    if len(peaks) < 3:
-        return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-    
-    # 检测M头（两个高点）
-    m_top_detected = False
-    m_top_confidence = 0.0
-    if len(peaks) >= 2:
-        # 两个高点，第二个略低于第一个，中间有明显低点
-        peak1_idx, peak1_price = peaks[-2]
-        peak2_idx, peak2_price = peaks[-1]
-        
-        # 检查第二个高点是否低于第一个
-        if peak2_price < peak1_price and peak2_price > peak1_price * 0.92:
-            # 检查中间是否有明显低点
-            trough_idx = peak1_idx + np.argmin(close_prices[peak1_idx:peak2_idx])
-            trough_price = close_prices[trough_idx]
-            
-            # 检查低点是否明显
-            if trough_price < peak1_price * 0.95 and trough_price < peak2_price * 0.95:
-                m_top_detected = True
-                # 计算置信度
-                price_diff = (peak1_price - peak2_price) / peak1_price
-                trough_depth = (peak1_price - trough_price) / peak1_price
-                m_top_confidence = 0.5 + 0.5 * min(price_diff / 0.08, 1) + 0.5 * min(trough_depth / 0.08, 1)
-                m_top_confidence = min(m_top_confidence, 1.0)
-    
-    # 检测头肩顶（三个高点）
-    head_and_shoulders_detected = False
-    head_and_shoulders_confidence = 0.0
-    
-    if len(peaks) >= 3:
-        # 三个高点，中间最高，两侧较低
-        shoulder1_idx, shoulder1_price = peaks[-3]
-        head_idx, head_price = peaks[-2]
-        shoulder2_idx, shoulder2_price = peaks[-1]
-        
-        # 检查中间是否为最高点
-        if head_price > shoulder1_price and head_price > shoulder2_price:
-            # 检查两侧肩膀是否大致对称
-            shoulder_similarity = min(shoulder1_price, shoulder2_price) / max(shoulder1_price, shoulder2_price)
-            
-            # 检查中间低点
-            trough1_idx = shoulder1_idx + np.argmin(close_prices[shoulder1_idx:head_idx])
-            trough2_idx = head_idx + np.argmin(close_prices[head_idx:shoulder2_idx])
-            neckline_price = (close_prices[trough1_idx] + close_prices[trough2_idx]) / 2
-            
-            # 检查头肩比例是否合理
-            if shoulder_similarity > 0.8 and head_price > neckline_price * 1.1:
-                head_and_shoulders_detected = True
-                # 计算置信度
-                shoulder_diff = 1 - shoulder_similarity
-                head_height = (head_price - neckline_price) / neckline_price
-                head_and_shoulders_confidence = 0.5 + 0.3 * min(shoulder_diff / 0.2, 1) + 0.2 * min(head_height / 0.2, 1)
-                head_and_shoulders_confidence = min(head_and_shoulders_confidence, 1.0)
-    
-    # 确定主要检测结果
-    if head_and_shoulders_detected and head_and_shoulders_confidence > m_top_confidence:
-        return {
-            "pattern_type": "头肩顶",
-            "detected": True,
-            "confidence": head_and_shoulders_confidence,
-            "peaks": peaks[-3:]
-        }
-    elif m_top_detected:
-        return {
-            "pattern_type": "M头",
-            "detected": True,
-            "confidence": m_top_confidence,
-            "peaks": peaks[-2:]
-        }
-    else:
-        return {
-            "pattern_type": "无",
-            "detected": False,
-            "confidence": 0,
-            "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
-        }
-
-def calculate_stock_stop_loss(current_price: float, signal: str, deviation: float, section: str) -> float:
-    """计算个股止损位"""
-    # 根据板块不同，设置不同的止损幅度
-    if section in ["科创板", "创业板"]:
-        stop_loss_pct = 0.10  # 科创板、创业板止损10%
-    else:
-        stop_loss_pct = 0.08  # 主板止损8%
-    
-    if signal == "YES":
-        # 上涨趋势中，止损设在5日均线下方
-        return current_price * (1 - stop_loss_pct)
-    else:
-        # 下跌趋势中，止损设在前高上方
-        return current_price * (1 + 0.05)
-
-def calculate_stock_take_profit(current_price: float, signal: str, deviation: float, section: str) -> float:
-    """计算个股止盈位"""
-    if signal == "YES":
-        # 上涨趋势中，止盈设在偏离率+15%处
-        return current_price * 1.15
-    else:
-        # 下跌趋势中，止盈设在偏离率-5%处
-        return current_price * 0.95
-
-def generate_stock_signal_message(stock_info: dict, df: pd.DataFrame, 
-                                 current: float, critical: float, deviation: float) -> str:
-    """生成个股策略信号消息"""
-    stock_code = stock_info["code"]
-    stock_name = stock_info["name"]
-    section = get_stock_section(stock_code)
-    
-    # 计算连续站上/跌破均线的天数
-    consecutive = calculate_consecutive_days_above(df, critical) if current >= critical \
-                 else calculate_consecutive_days_below(df, critical)
-    
-    # 计算成交量变化
-    volume_change = calculate_volume_change(df)
-    
-    # 检测M头/头肩顶形态
-    pattern_detection = detect_head_and_shoulders(df)
-    
-    # 3. 震荡市判断 - 优先级最高
-    is_volatile, cross_count, (min_dev, max_dev) = is_in_volatile_market(df)
-    if is_volatile:
-        # 计算上轨和下轨价格
-        upper_band = critical * (1 + max_dev/100)
-        lower_band = critical * (1 + min_dev/100)
-        
-        # 根据板块调整操作建议
-        if section in ["科创板", "创业板"]:
-            position_pct = 10
-            max_position = 30
-        else:
-            position_pct = 15
-            max_position = 40
-        
-        message = (
-            f"【震荡市】{section} | 连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
-            f"✅ 操作建议：\n"
-            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓{position_pct}%-{position_pct+5}%\n"
-            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓{position_pct}%-{position_pct+5}%\n"
-            f"  • 总仓位严格控制在≤{max_position}%\n"
-            f"⚠️ 避免频繁交易，等待趋势明朗\n"
-        )
-        return message
-    
-    # 1. YES信号：当前价格 ≥ 40日均线
-    if current >= critical:
-        # 子条件1：首次突破（价格刚站上均线，连续3-4日站稳+成交量放大35%+）
-        if consecutive == 1 and volume_change > 35:
-            # 根据板块调整仓位
-            if section in ["科创板", "创业板"]:
-                position_pct = 8
-            else:
-                position_pct = 12
-            
-            message = (
-                f"【首次突破】{section} | 连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
-                f"✅ 操作建议：\n"
-                f"  • 建仓{position_pct}%（单一个股上限{int(MAX_STOCK_POSITION * 100)}%）\n"
-                f"  • 止损位：{calculate_stock_stop_loss(current, 'YES', deviation, section):.2f}（-{int((1-calculate_stock_stop_loss(current, 'YES', deviation, section)/current)*100)}%）\n"
-                f"  • 目标位：{calculate_stock_take_profit(current, 'YES', deviation, section):.2f}（+15%）\n"
-                f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
-            )
-        # 子条件1：首次突破（价格刚站上均线，连续3-4日站稳+成交量放大35%+）
-        elif 2 <= consecutive <= 4 and volume_change > 35:
-            # 根据板块调整仓位
-            if section in ["科创板", "创业板"]:
-                position_pct = 8
-            else:
-                position_pct = 12
-            
-            message = (
-                f"【首次突破确认】{section} | 连续{consecutive}天站上40日均线，成交量放大{volume_change:.1f}%\n"
-                f"✅ 操作建议：\n"
-                f"  • 可加仓至{position_pct}%\n"
-                f"  • 止损位上移至5日均线（约{current * 0.95:.2f}）\n"
-                f"  • 若收盘跌破5日均线，减仓50%\n"
-                f"⚠️ 注意：偏离率>10%时考虑部分止盈\n"
-            )
-        # 子条件2：持续站稳（价格维持在均线上）
-        else:
-            # 场景A：偏离率≤+8%（趋势稳健）
-            if deviation <= 8.0:
-                # 添加M头/头肩顶形态检测
-                pattern_msg = ""
-                if pattern_detection["detected"]:
-                    pattern_name = pattern_detection["pattern_type"]
-                    confidence = pattern_detection["confidence"]
-                    if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                        pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
-                    elif confidence >= 0.5:
-                        pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                
-                message = (
-                    f"【趋势稳健】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 持仓不动，不新增仓位\n"
-                    f"  • 跟踪止损上移至5日均线（约{current * 0.95:.2f}）\n"
-                    f"  • 若收盘跌破5日均线，减仓50%\n"
-                    f"{pattern_msg}\n"
-                )
-            # 场景B：+8%＜偏离率≤+15%（趋势较强）
-            elif 8.0 < deviation <= 15.0:
-                # 添加M头/头肩顶形态检测
-                pattern_msg = ""
-                if pattern_detection["detected"]:
-                    pattern_name = pattern_detection["pattern_type"]
-                    confidence = pattern_detection["confidence"]
-                    if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                        pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
-                    elif confidence >= 0.5:
-                        pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                
-                message = (
-                    f"【趋势较强】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 观望，不新增仓位\n"
-                    f"  • 逢高减仓10%-15%\n"
-                    f"  • 若收盘跌破10日均线，减仓30%\n"
-                    f"{pattern_msg}\n"
-                )
-            # 场景C：偏离率＞+15%（超买风险）
-            else:
-                # 添加M头/头肩顶形态检测
-                pattern_msg = ""
-                if pattern_detection["detected"]:
-                    pattern_name = pattern_detection["pattern_type"]
-                    confidence = pattern_detection["confidence"]
-                    if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
-                        pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
-                    elif confidence >= 0.5:
-                        pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓15%-25%"
-                
-                message = (
-                    f"【超买风险】{section} | 连续{consecutive}天站上40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 逢高减仓20%-30%\n"
-                    f"  • 当前价格已处高位，避免新增仓位\n"
-                    f"  • 等待偏离率回落至≤+8%（约{critical * 1.08:.2f}）时加回\n"
-                    f"{pattern_msg}\n"
-                )
-    
-    # 2. NO信号：当前价格 ＜ 40日均线
-    else:
-        # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
-        if consecutive == 1 and volume_change > 35:
-            # 根据板块调整仓位
-            if section in ["科创板", "创业板"]:
-                reduce_pct = 80
-                target_pct = 20
-            else:
-                reduce_pct = 70
-                target_pct = 30
-            
-            message = (
-                f"【首次跌破】{section} | 连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
-                f"✅ 操作建议：\n"
-                f"  • 立即减仓{reduce_pct}%\n"
-                f"  • 止损位：40日均线上方5%（约{critical * 1.05:.2f}）\n"
-                f"⚠️ 若收盘未收回均线，明日继续减仓至{target_pct}%\n"
-            )
-        # 子条件1：首次跌破（价格刚跌穿均线，连续2-3日未收回+成交量放大）
-        elif 2 <= consecutive <= 3 and volume_change > 35:
-            # 根据板块调整仓位
-            if section in ["科创板", "创业板"]:
-                target_pct = 20
-            else:
-                target_pct = 30
-            
-            message = (
-                f"【首次跌破确认】{section} | 连续{consecutive}天跌破40日均线，成交量放大{volume_change:.1f}%\n"
-                f"✅ 操作建议：\n"
-                f"  • 严格止损，仓位降至{target_pct}%\n"
-                f"  • 止损位：40日均线下方5%（约{critical * 0.95:.2f}）\n"
-                f"⚠️ 信号确认，避免侥幸心理\n"
-            )
-        # 子条件2：持续跌破（价格维持在均线下）
-        else:
-            # 场景A：偏离率≥-8%（下跌初期）
-            if deviation >= -8.0:
-                # 根据板块调整仓位
-                if section in ["科创板", "创业板"]:
-                    max_position = 20
-                else:
-                    max_position = 30
-                
-                message = (
-                    f"【下跌初期】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 轻仓观望（仓位≤{max_position}%）\n"
-                    f"  • 反弹至均线附近（约{critical:.2f}）减仓剩余仓位\n"
-                    f"  • 暂不考虑新增仓位\n"
-                    f"⚠️ 重点观察：收盘站上5日均线，可轻仓试多\n"
-                )
-            # 场景B：-15%≤偏离率＜-8%（下跌中期）
-            elif -15.0 <= deviation < -8.0:
-                # 根据板块调整仓位
-                if section in ["科创板", "创业板"]:
-                    test_pct = 5
-                else:
-                    test_pct = 10
-                
-                message = (
-                    f"【下跌中期】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 空仓为主，避免抄底\n"
-                    f"  • 仅可试仓{test_pct}%\n"
-                    f"  • 严格止损：收盘跌破前低即离场\n"
-                    f"⚠️ 重点观察：行业基本面是否有利空\n"
-                )
-            # 场景C：偏离率＜-15%（超卖机会）
-            else:
-                # 根据板块调整仓位
-                if section in ["科创板", "创业板"]:
-                    add_pct = 8
-                else:
-                    add_pct = 10
-                
-                message = (
-                    f"【超卖机会】{section} | 连续{consecutive}天跌破40日均线，偏离率{deviation:.2f}%\n"
-                    f"✅ 操作建议：\n"
-                    f"  • 小幅加仓{add_pct}%\n"
-                    f"  • 目标价：偏离率≥-8%（约{critical * 0.92:.2f}）\n"
-                    f"  • 达到目标即卖出加仓部分\n"
-                    f"⚠️ 重点观察：若跌破前低，立即止损\n"
-                )
-    
-    return message
-
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     """按板块获取适合策略的股票
+    
     Returns:
         Dict[str, List[Dict]]: 按板块组织的股票信息
     """
     try:
-        # 1. 获取全市场股票列表
-        stock_list = fetch_stock_list()
-        if stock_list.empty:
-            logger.error("获取股票列表失败，无法继续")
-            return {}
+        # ========== 以下是关键修改 ==========
+        # 1. 获取股票基础信息
+        basic_info_df = load_stock_basic_info()
+        logger.info(f"加载到 {len(basic_info_df)} 条股票基础信息")
+        
+        # 2. 应用基础过滤（市值过滤）
+        if not basic_info_df.empty:
+            # 过滤市值不足的股票
+            basic_info_df = basic_info_df[basic_info_df["market_cap"] >= MIN_MARKET_CAP_FOR_BASIC_FILTER]
+            logger.info(f"【基础过滤】市值过滤后剩余 {len(basic_info_df)} 只股票（市值≥{MIN_MARKET_CAP_FOR_BASIC_FILTER}亿元）")
+        
+        # 3. 获取需要更新的股票列表
+        stock_list = []
+        if basic_info_df.empty:
+            # 如果基础信息为空，获取全量股票列表
+            stock_list = fetch_stock_list()
+        else:
+            # 获取需要更新的股票
+            for _, row in basic_info_df.iterrows():
+                stock_code = row["code"]
+                stock_name = row["name"]
+                section = row["section"]
+                
+                # 检查是否需要更新
+                if should_update_stock(basic_info_df, stock_code):
+                    stock_list.append({
+                        "code": stock_code,
+                        "name": stock_name,
+                        "section": section
+                    })
+                else:
+                    logger.debug(f"股票 {stock_name}({stock_code}) 数据未过期，跳过获取")
+        
+        # 如果没有需要更新的股票，使用基础信息中的数据
+        if not stock_list:
+            logger.info("没有需要更新的股票，使用缓存数据")
+            # 创建股票列表
+            stock_list = basic_info_df.to_dict('records')
+            # 限制分析的股票数量
+            stock_list = stock_list[:MAX_STOCKS_TO_ANALYZE]
+            
+            # 准备结果
+            section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
+            for stock in stock_list:
+                stock_code = stock["code"]
+                stock_name = stock["name"]
+                section = stock["section"]
+                market_cap = stock["market_cap"]
+                
+                # 创建模拟数据
+                df = pd.DataFrame()
+                df.attrs = {"stock_code": stock_code}
+                
+                # 检查是否适合策略
+                if market_cap >= MARKET_SECTIONS.get(section, {}).get("min_market_cap", 0):
+                    # 计算策略评分（使用缓存的评分或默认值）
+                    score = stock.get("score", 50.0)
+                    
+                    if score > 0:
+                        section_stocks[section].append({
+                            "code": stock_code,
+                            "name": stock_name,
+                            "score": score,
+                            "df": df,
+                            "section": section
+                        })
+            
+            # 记录筛选结果
+            for section, stocks in section_stocks.items():
+                if stocks:
+                    logger.info(f"【最终结果】板块 {section} 筛选出 {len(stocks)} 只股票")
+                else:
+                    logger.info(f"【最终结果】板块 {section} 无符合条件的股票")
+            
+            return section_stocks
         
         # 记录初始股票数量
         total_initial = len(stock_list)
         logger.info(f"筛选前 {total_initial} 只股票（总数量）")
+        # ========== 以上是关键修改 ==========
         
         # 2. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
         
         # 使用并行化获取股票数据
-        stock_codes = stock_list["code"].tolist()
-        stock_names = stock_list["name"].tolist()
+        stock_codes = [stock["code"] for stock in stock_list]
+        stock_names = [stock["name"] for stock in stock_list]
         
         # 初始化各板块计数器
         section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0}
@@ -1396,7 +874,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 return None
             
             # 检查必要列
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            required_columns = ['开盘', '最高', '最低', '收盘', '成交量']
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
@@ -1482,212 +960,156 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             else:
                 logger.info(f"【最终结果】板块 {section} 无符合条件的股票")
         
+        # ========== 以下是关键修改 ==========
+        # 4. 更新股票基础信息
+        if not basic_info_df.empty:
+            for section, stocks in top_stocks_by_section.items():
+                for stock in stocks:
+                    stock_code = stock["code"]
+                    stock_name = stock["name"]
+                    market_cap = calculate_market_cap(stock["df"], stock_code)
+                    section = stock["section"]
+                    score = stock["score"]
+                    
+                    # 更新基础信息
+                    basic_info_df = update_stock_basic_info(
+                        basic_info_df, stock_code, stock_name, market_cap, section
+                    )
+                    
+                    # 添加评分到基础信息
+                    idx = basic_info_df[basic_info_df["code"] == stock_code].index[0]
+                    basic_info_df.at[idx, "score"] = score
+            
+            # 保存更新后的基础信息
+            save_stock_basic_info(basic_info_df)
+            
+            # 提交更改到GitHub
+            commit_and_push_changes()
+        # ========== 以上是关键修改 ==========
+        
         return top_stocks_by_section
     
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)
         return {}
 
-def generate_section_report(section: str, stocks: List[Dict]):
-    """
-    生成单个板块的策略报告
+def generate_stock_signal_message(stock: Dict, df: pd.DataFrame, 
+                                close_price: float, critical_value: float, 
+                                deviation: float) -> str:
+    """生成股票信号详细消息
     
     Args:
-        section: 板块名称
-        stocks: 该板块的股票列表
+        stock: 股票信息
+        df: 股票数据
+        close_price: 当前收盘价
+        critical_value: 临界值
+        deviation: 偏离度
+    
+    Returns:
+        str: 信号详细消息
     """
-    if not stocks:
-        return
+    stock_code = stock["code"]
+    stock_name = stock["name"]
     
-    logger.info(f"生成 {section} 板块策略报告")
+    # 获取最新数据
+    latest_data = df.iloc[-1]
     
-    # 1. 生成板块筛选条件说明
-    section_config = MARKET_SECTIONS[section]
-    conditions = (
-        f"【{section} 板块筛选条件】\n"
-        f"• 市值 > {section_config['min_market_cap']}亿元\n"
-        f"• 日均成交 > {section_config['min_daily_volume']/1000000:.0f}百万\n"
-        f"• 年化波动率 < {section_config['max_volatility']*100:.0f}%\n"
-        "──────────────────\n"
-    )
+    # 检查是否包含必要列
+    required_columns = ['开盘', '最高', '最低', '收盘', '成交量']
+    missing_columns = [col for col in required_columns if col not in df.columns]
     
-    # 2. 生成每只股票的策略信号
-    stock_reports = []
-    for stock in stocks:
-        stock_code = stock["code"]
-        stock_name = stock["name"]
-        df = stock["df"]
-        
-        # 计算最新数据
-        latest_data = df.iloc[-1]
-        close_price = latest_data["收盘"]
-        critical_value = calculate_critical_value(df)
-        deviation = calculate_deviation(close_price, critical_value)
-        
-        # 状态判断（收盘价在临界值之上为YES，否则为NO）
-        status = "YES" if close_price >= critical_value else "NO"
-        
-        # 生成详细策略信号
-        signal_message = generate_stock_signal_message(
-            {"code": stock_code, "name": stock_name}, 
-            df, 
-            close_price, 
-            critical_value, 
-            deviation
-        )
-        
-        # 构建消息
-        message_lines = []
-        message_lines.append(f"{stock_name}({stock_code})\n")
-        message_lines.append(f"📊 当前：{close_price:.2f} | 40日均线：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
-        # 根据信号类型选择正确的符号
-        signal_symbol = "✅" if status == "YES" else "❌"
-        message_lines.append(f"{signal_symbol} 信号：{status}\n")
-        message_lines.append("──────────────────\n")
-        message_lines.append(signal_message)
-        message_lines.append("──────────────────\n")
-        
-        message = "\n".join(message_lines)
-        stock_reports.append({
-            "stock": f"{stock_name}({stock_code})",
-            "message": message,
-            "status": status,
-            "deviation": deviation
-        })
-        
-        # 发送单只股票消息
-        logger.info(f"推送 {section} - {stock_name}({stock_code}) 策略信号")
-        send_wechat_message(message)
-        time.sleep(1)
+    if missing_columns:
+        return f"{stock_name}({stock_code}) 数据不完整，无法生成信号"
     
-    # 3. 生成板块总结消息
-    summary_lines = [
-        f"【{section} 板块策略总结】\n",
-        conditions,
-        "──────────────────\n"
-    ]
+    # 计算指标
+    ma5 = latest_data["收盘"] if len(df) < 5 else df["收盘"].rolling(5).mean().iloc[-1]
+    ma10 = latest_data["收盘"] if len(df) < 10 else df["收盘"].rolling(10).mean().iloc[-1]
+    ma20 = latest_data["收盘"] if len(df) < 20 else df["收盘"].rolling(20).mean().iloc[-1]
+    volume = latest_data["成交量"]
+    volume_ma5 = volume if len(df) < 5 else df["成交量"].rolling(5).mean().iloc[-1]
     
-    # 按信号类型分类
-    yes_signals = [r for r in stock_reports if r["status"] == "YES"]
-    no_signals = [r for r in stock_reports if r["status"] == "NO"]
+    # 量能分析
+    volume_ratio = volume / volume_ma5 if volume_ma5 > 0 else 1.0
+    volume_analysis = "量能放大" if volume_ratio > 1.2 else "量能平稳" if volume_ratio > 0.8 else "量能萎缩"
     
-    # 添加YES信号股票
-    if yes_signals:
-        summary_lines.append("✅ 上涨趋势 (YES信号):\n")
-        for r in yes_signals:
-            summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
-        summary_lines.append("\n")
+    # 趋势分析
+    trend_analysis = "多头排列" if ma5 > ma10 > ma20 else "空头排列" if ma5 < ma10 < ma20 else "震荡走势"
     
-    # 添加NO信号股票
-    if no_signals:
-        summary_lines.append("❌ 下跌趋势 (NO信号):\n")
-        for r in no_signals:
-            summary_lines.append(f"  • {r['stock']} | 偏离率: {r['deviation']:.2f}%\n")
-        summary_lines.append("\n")
+    # 生成消息
+    message = []
+    message.append(f"{stock_name}({stock_code})")
+    message.append(f"📊 价格: {close_price:.4f} | 临界值: {critical_value:.4f} | 偏离度: {deviation:.2%}")
+    message.append(f"📈 趋势: {trend_analysis} | {volume_analysis}")
+    message.append(f"⏰ 量能: {volume:,.0f}手 | 5日均量: {volume_ma5:,.0f}手 | 比例: {volume_ratio:.2f}")
     
-    summary_lines.append("──────────────────\n")
-    summary_lines.append("💡 操作指南:\n")
-    summary_lines.append("1. YES信号: 可持仓或建仓，严格止损\n")
-    summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底\n")
-    summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位\n")
-    summary_lines.append(f"4. 单一个股仓位≤{int(MAX_STOCK_POSITION * 100)}%，分散投资\n")
-    if section in ["科创板", "创业板"]:
-        summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
-    summary_lines.append("──────────────────\n")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf      )\n")
+    return "\n".join(message)
+
+def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> str:
+    """生成策略总结消息
+    
+    Args:
+        top_stocks_by_section: 按板块组织的股票信息
+    
+    Returns:
+        str: 策略总结消息
+    """
+    summary_lines = []
+    
+    # 添加标题
+    beijing_time = get_beijing_time()
+    summary_lines.append(f"📊 个股趋势策略报告 ({beijing_time.strftime('%Y-%m-%d %H:%M')})")
+    summary_lines.append("──────────────────")
+    
+    # 添加各板块结果
+    total_stocks = 0
+    for section, stocks in top_stocks_by_section.items():
+        if stocks:
+            summary_lines.append(f"📌 {section}板块 ({len(stocks)}只):")
+            for stock in stocks:
+                stock_code = stock["code"]
+                stock_name = stock["name"]
+                score = stock["score"]
+                summary_lines.append(f"   • {stock_name}({stock_code}) {score:.1f}分")
+            total_stocks += len(stocks)
+    
+    summary_lines.append(f"📊 总计: {total_stocks}只股票（每板块最多{MAX_STOCKS_PER_SECTION}只）")
+    summary_lines.append("──────────────────")
+    
+    # 添加操作指南
+    summary_lines.append("💡 操作指南:")
+    summary_lines.append("1. YES信号: 可持仓或建仓，严格止损")
+    summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底")
+    summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位≤40%")
+    summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只")
+    summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽")
+    summary_lines.append("──────────────────")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf )")
     
     summary_message = "\n".join(summary_lines)
-    
-    # 4. 发送板块总结消息
-    logger.info(f"推送 {section} 板块策略总结消息")
-    send_wechat_message(summary_message)
-    time.sleep(1)
+    return summary_message
 
-def generate_overall_summary(top_stocks_by_section: Dict[str, List[Dict]]):
-    """生成整体总结报告"""
+def main():
+    """主函数"""
     try:
-        utc_now, beijing_now = get_current_times()
+        logger.info("===== 开始执行个股趋势策略(TickTen) =====")
         
-        summary_lines = [
-            "【全市场个股趋势策略总结】\n",
-            f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n",
-            "📊 各板块筛选条件:\n"
-        ]
-        
-        # 添加各板块筛选条件
-        for section, config in MARKET_SECTIONS.items():
-            summary_lines.append(
-                f"  • {section}: 市值>{config['min_market_cap']}亿 | "
-                f"日均成交>{config['min_daily_volume']/1000000:.0f}百万 | "
-                f"波动率<{config['max_volatility']*100:.0f}%\n"
-            )
-        
-        summary_lines.append("\n──────────────────\n")
-        
-        # 按板块统计
-        total_stocks = 0
-        for section, stocks in top_stocks_by_section.items():
-            if stocks:
-                yes_count = sum(1 for s in stocks if "YES" in s["message"])
-                no_count = len(stocks) - yes_count
-                summary_lines.append(f"📌 {section} ({len(stocks)}只):\n")
-                summary_lines.append(f"  • 上涨趋势: {yes_count}只\n")
-                summary_lines.append(f"  • 下跌趋势: {no_count}只\n\n")
-                total_stocks += len(stocks)
-        
-        summary_lines.append(f"📊 总计: {total_stocks}只股票（每板块最多{MAX_STOCKS_PER_SECTION}只）\n")
-        summary_lines.append("──────────────────\n")
-        
-        # 添加操作指南
-        summary_lines.append("💡 操作指南:\n")
-        summary_lines.append("1. YES信号: 可持仓或建仓，严格止损\n")
-        summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底\n")
-        summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位≤40%\n")
-        summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只\n")
-        summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽\n")
-        summary_lines.append("──────────────────\n")
-        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf      )\n")
-        
-        summary_message = "\n".join(summary_lines)
-        
-        # 发送整体总结消息
-        logger.info("推送全市场策略总结消息")
-        send_wechat_message(summary_message)
-    
-    except Exception as e:
-        logger.error(f"生成整体总结失败: {str(e)}", exc_info=True)
-
-def generate_report():
-    """生成个股策略报告并推送微信"""
-    try:
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        logger.info(f"开始生成个股策略报告 (UTC: {utc_now}, CST: {beijing_now})")
-        
-        # 1. 获取按板块分类的优质股票
+        # 1. 获取适合策略的股票
         top_stocks_by_section = get_top_stocks_for_strategy()
         
-        # 2. 生成每个板块的报告
-        for section, stocks in top_stocks_by_section.items():
-            if stocks:
-                generate_section_report(section, stocks)
-                time.sleep(2)
+        # 2. 生成策略总结消息
+        summary_message = generate_strategy_summary(top_stocks_by_section)
         
-        # 3. 生成整体总结
-        generate_overall_summary(top_stocks_by_section)
+        # 3. 推送全市场策略总结消息
+        logger.info("推送全市场策略总结消息")
+        send_wechat_message(summary_message, message_type="stock_tickten")
         
-        logger.info(f"个股策略报告已成功发送至企业微信")
+        logger.info("个股策略报告已成功发送至企业微信")
+        logger.info("===== 个股趋势策略(TickTen)执行完成 =====")
     
     except Exception as e:
-        error_msg = f"个股策略执行失败: {str(e)}"
+        error_msg = f"个股趋势策略执行失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         send_wechat_message(error_msg, message_type="error")
 
 if __name__ == "__main__":
-    logger.info("===== 开始执行个股趋势策略(TickTen) =====")
-    
-    # 添加延时，避免AkShare接口可能还未更新当日数据
-    time.sleep(30)
-    
-    generate_report()
-    logger.info("===== 个股趋势策略(TickTen)执行完成 =====")
+    main()

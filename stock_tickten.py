@@ -182,7 +182,7 @@ def get_stock_section(stock_code: str) -> str:
     return "其他板块"
 
 def fetch_stock_list() -> pd.DataFrame:
-    """从仓库加载股票基础信息，必要时更新"""
+    """从仓库加载股票基础信息，必要时更新并提交到仓库"""
     try:
         logger.info("正在加载股票基础信息...")
         
@@ -191,21 +191,16 @@ def fetch_stock_list() -> pd.DataFrame:
             basic_info_df = pd.read_csv(BASIC_INFO_FILE)
             logger.info(f"成功加载现有股票基础信息，共 {len(basic_info_df)} 条记录")
             
-            # 检查是否需要更新（基于最后更新时间）
+            # 检查是否需要更新
             if "last_update" in basic_info_df.columns and not basic_info_df.empty:
                 last_update_str = basic_info_df["last_update"].max()
                 try:
                     last_update = datetime.strptime(last_update_str, "%Y-%m-%d %H:%M:%S")
                     if (datetime.now() - last_update).days < 1:
                         logger.info(f"股票基础信息未过期（最后更新: {last_update_str}），使用现有数据")
-                        # 修复：移除重复记录，确保唯一性
-                        basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
-                        logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
-                        return basic_info_df
+                        return basic_info_df.drop_duplicates(subset=['code'], keep='last')
                 except Exception as e:
                     logger.warning(f"解析最后更新时间失败: {str(e)}，将重新获取数据")
-        else:
-            logger.info("股票基础信息文件不存在，将创建新文件")
         
         # 2. 获取A股股票列表
         logger.info("正在从AkShare获取股票列表...")
@@ -236,14 +231,10 @@ def fetch_stock_list() -> pd.DataFrame:
             
             # 检查是否已有记录
             existing_market_cap = 0
-            existing_score = 0
             if os.path.exists(BASIC_INFO_FILE) and "code" in basic_info_df.columns:
                 existing = basic_info_df[basic_info_df["code"] == stock_code]
                 if not existing.empty:
-                    # 保留现有市值和评分
                     existing_market_cap = existing["market_cap"].values[0]
-                    if "score" in existing.columns:
-                        existing_score = existing["score"].values[0]
             
             # 基础信息只包含必要字段
             basic_info_data.append({
@@ -251,13 +242,12 @@ def fetch_stock_list() -> pd.DataFrame:
                 "name": stock_name,
                 "section": section,
                 "market_cap": existing_market_cap,
-                "score": existing_score,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         
         basic_info_df = pd.DataFrame(basic_info_data)
         
-        # 4. 修复：确保股票代码唯一，移除重复记录
+        # 4. 确保股票代码唯一
         if "code" in basic_info_df.columns:
             basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
             logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
@@ -267,6 +257,29 @@ def fetch_stock_list() -> pd.DataFrame:
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         logger.info(f"股票基础信息已保存至 {BASIC_INFO_FILE}，共 {len(basic_info_df)} 条记录")
         
+        # ========== 关键修复 ==========
+        # 立即提交到GitHub仓库，确保文件持久化
+        try:
+            logger.info("正在提交股票基础信息到GitHub仓库...")
+            # 获取当前工作目录
+            repo_path = os.getcwd()
+            commit_message = "自动更新股票基础信息 [初始化]"
+            
+            # 添加文件到暂存区
+            subprocess.run(["git", "add", BASIC_INFO_FILE], check=True)
+            
+            # 提交更改
+            subprocess.run(["git", "commit", "-m", commit_message], check=True)
+            
+            # 推送到远程仓库
+            subprocess.run(["git", "push", "origin", "main"], check=True)
+            
+            logger.info("股票基础信息已成功提交并推送到GitHub仓库")
+        except Exception as e:
+            logger.warning(f"提交股票基础信息到GitHub仓库失败: {str(e)}")
+            # 即使提交失败，继续执行策略
+        # ========== 关键修复 ==========
+        
         return basic_info_df
     
     except Exception as e:
@@ -275,7 +288,6 @@ def fetch_stock_list() -> pd.DataFrame:
         if os.path.exists(BASIC_INFO_FILE):
             try:
                 basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-                # 确保唯一性
                 if "code" in basic_info_df.columns:
                     basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
                     logger.warning(f"使用现有数据并去重，共 {len(basic_info_df)} 条记录")
@@ -837,15 +849,29 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
         
-        # 2. 按板块分组处理
+        # 2. 首先应用基础过滤（市值过滤）
+        if not basic_info_df.empty:
+            # 过滤市值不足的股票
+            initial_count = len(basic_info_df)
+            basic_info_df = basic_info_df[basic_info_df["market_cap"] >= MIN_MARKET_CAP_FOR_BASIC_FILTER]
+            filtered_count = len(basic_info_df)
+            logger.info(f"【基础过滤】市值过滤后剩余 {filtered_count} 只股票（市值≥{MIN_MARKET_CAP_FOR_BASIC_FILTER}亿元）（过滤了 {initial_count - filtered_count} 只）")
+        
+        # 如果没有通过市值过滤的股票，直接返回
+        if basic_info_df.empty:
+            logger.warning("没有通过市值过滤的股票，无法继续筛选")
+            return {}
+        
+        # 3. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
         
-        # 3. 初始化各板块计数器
+        # 4. 初始化各板块计数器
         section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0}
                          for section in MARKET_SECTIONS.keys()}
         
-        # 4. 处理每只股票
+        # 5. 处理每只股票 - 仅处理通过市值过滤的股票
         stock_list = basic_info_df.to_dict('records')
+        logger.info(f"开始处理 {len(stock_list)} 只通过市值过滤的股票...")
         
         def process_stock(stock):
             stock_code = stock["code"]
@@ -859,11 +885,12 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             # 更新板块计数器
             section_counts[section]["total"] += 1
             
-            # 获取日线数据
+            # 获取日线数据 - 仅对通过市值过滤的股票执行
             df = fetch_stock_data(stock_code)
             
             # 检查数据量
             if df is None or df.empty or len(df) < MIN_DATA_DAYS:
+                logger.debug(f"股票 {stock_name}({stock_code}) 数据量不足，跳过")
                 return None
             
             # 更新板块计数器
@@ -890,7 +917,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             
             return None
         
-        # 5. 并行处理股票（限制并发数量，避免被AkShare限制）
+        # 6. 并行处理股票（限制并发数量，避免被AkShare限制）
         results = []
         with ThreadPoolExecutor(max_workers=5) as executor:
             # 分批处理，避免请求过于频繁
@@ -900,13 +927,13 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 results.extend(batch_results)
                 time.sleep(1.0)  # 批次间等待
         
-        # 6. 收集结果
+        # 7. 收集结果
         for result in results:
             if result is not None:
                 section = result["section"]
                 section_stocks[section].append(result)
         
-        # 7. 记录各板块筛选结果
+        # 8. 记录各板块筛选结果
         for section, counts in section_counts.items():
             if counts["total"] > 0:
                 logger.info(f"【筛选统计】板块 {section}:")
@@ -915,7 +942,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
                 logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
         
-        # 8. 对每个板块的股票按得分排序，并取前N只
+        # 9. 对每个板块的股票按得分排序，并取前N只
         top_stocks_by_section = {}
         for section, stocks in section_stocks.items():
             if stocks:
@@ -924,7 +951,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 top_stocks_by_section[section] = top_stocks
                 logger.info(f"【最终结果】板块 {section} 筛选出 {len(top_stocks)} 只股票")
         
-        # 9. 更新基础信息中的市值和评分
+        # 10. 更新基础信息中的市值和评分
         updated_records = []
         for section, stocks in top_stocks_by_section.items():
             for stock in stocks:
@@ -944,7 +971,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                     "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
         
-        # 10. 保存更新后的基础信息
+        # 11. 保存更新后的基础信息
         if updated_records:
             updated_df = pd.DataFrame(updated_records)
             # 合并到基础信息
@@ -959,9 +986,31 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                     # 添加新记录
                     basic_info_df = pd.concat([basic_info_df, pd.DataFrame([record])], ignore_index=True)
             
-            # 保存更新
+            # 12. 保存更新
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
             logger.info(f"股票基础信息已更新，共 {len(basic_info_df)} 条记录")
+            
+            # ========== 关键修复 ==========
+            # 立即提交更新后的基础信息到GitHub仓库
+            try:
+                logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
+                # 获取当前工作目录
+                repo_path = os.getcwd()
+                commit_message = "自动更新股票基础信息 [策略执行]"
+                
+                # 添加文件到暂存区
+                subprocess.run(["git", "add", BASIC_INFO_FILE], check=True)
+                
+                # 提交更改
+                subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                
+                # 推送到远程仓库
+                subprocess.run(["git", "push", "origin", "main"], check=True)
+                
+                logger.info("更新后的股票基础信息已成功提交并推送到GitHub仓库")
+            except Exception as e:
+                logger.warning(f"提交更新后的股票基础信息到GitHub仓库失败: {str(e)}")
+            # ========== 关键修复 ==========
         
         return top_stocks_by_section
     

@@ -582,22 +582,27 @@ def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:
     """计算年化波动率"""
-    # 检查是否已经预计算了年化波动率
-    if "annual_volatility" in df.columns:
-        return df["annual_volatility"].iloc[-1]
-    
-    if len(df) < 30:
-        return 0.0
+    if len(df) < 20:
+        logger.warning(f"数据不足20天，无法准确计算波动率")
+        return 0.2  # 默认波动率
     
     # 计算日收益率
-    daily_returns = df["收盘"].pct_change().dropna()
+    # ========== 关键修复 ==========
+    # 原始代码: daily_returns = df["收盘"].pct_change().dropna()
+    # 修改为: 使用英文标准列名 'close'
+    daily_returns = df["close"].pct_change().dropna()
+    # ========== 以上是关键修复 ==========
     
-    # 年化波动率 = 日波动率 * sqrt(252)
-    if len(daily_returns) > 1:
-        daily_vol = daily_returns.std()
-        return daily_vol * np.sqrt(252)
+    # 计算年化波动率
+    if len(daily_returns) >= 20:
+        volatility = daily_returns.std() * np.sqrt(252)
+    else:
+        volatility = 0.2  # 默认波动率
     
-    return 0.0
+    # 限制波动率在合理范围内
+    volatility = max(0.05, min(1.0, volatility))
+    
+    return volatility
 
 # ========== 以下是关键修改 ==========
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:

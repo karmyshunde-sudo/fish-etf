@@ -746,7 +746,15 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         stock_list = []
         if basic_info_df.empty:
             # 如果基础信息为空，获取全量股票列表
-            stock_list = fetch_stock_list()
+            df_stock_list = fetch_stock_list()
+            if not df_stock_list.empty:
+                # 将DataFrame转换为列表
+                for _, row in df_stock_list.iterrows():
+                    stock_list.append({
+                        "code": row["code"],
+                        "name": row["name"],
+                        "section": get_stock_section(row["code"])
+                    })
         else:
             # 获取需要更新的股票
             for _, row in basic_info_df.iterrows():

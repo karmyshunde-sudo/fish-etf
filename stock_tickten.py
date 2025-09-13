@@ -480,54 +480,31 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                     logger.info(f"  换手率: {record.get('换手率', 'N/A')}")
                 logger.info("===== 接口返回记录示例结束 =====")
                 
-                # 标准化股票代码格式
+                # 标准化股票代码格式 - 直接使用6位数字
                 stock_code_std = stock_code.zfill(6)
-                if stock_code.startswith(('6', '9')):
-                    stock_code_std = f"sh{stock_code_std}"
-                else:
-                    stock_code_std = f"sz{stock_code_std}"
                 
                 logger.info(f"目标股票代码格式化: {stock_code_std}")
-                
-                # 尝试匹配股票
                 logger.info(f"尝试匹配股票: {stock_code}")
                 
-                # 1. 精确匹配完整代码
+                # 1. 直接使用6位数字匹配（ak.stock_zh_a_spot_em()返回的代码是纯数字）
                 if "代码" in stock_info.columns:
                     matched = stock_info[stock_info["代码"] == stock_code_std]
                     if not matched.empty:
-                        logger.info(f"✅ 通过完整代码匹配成功: {stock_code_std}")
+                        logger.info(f"✅ 通过6位数字代码匹配成功: {stock_code_std}")
                         stock_info = matched
                     else:
-                        logger.info(f"❌ 通过完整代码匹配失败: {stock_code_std}")
+                        logger.info(f"❌ 通过6位数字代码匹配失败: {stock_code_std}")
                 
-                # 2. 如果没找到，尝试只匹配数字部分
+                # 2. 如果没找到，尝试匹配不带前导零的代码
                 if "代码" in stock_info.columns and stock_info.empty:
-                    matched = stock_info[stock_info["代码"].str[-6:] == stock_code_std[-6:]]
+                    # 尝试去除前导零后匹配
+                    stock_code_no_leading_zero = str(int(stock_code))
+                    matched = stock_info[stock_info["代码"] == stock_code_no_leading_zero]
                     if not matched.empty:
-                        logger.info(f"✅ 通过数字部分匹配成功: {stock_code_std[-6:]}")
+                        logger.info(f"✅ 通过无前导零代码匹配成功: {stock_code_no_leading_zero}")
                         stock_info = matched
                     else:
-                        logger.info(f"❌ 通过数字部分匹配失败: {stock_code_std[-6:]}")
-                
-                # 3. 如果还是没找到，尝试使用名称匹配
-                if stock_info.empty and "name" in df.attrs and "名称" in stock_info.columns:
-                    stock_name = df.attrs["name"]
-                    matched = stock_info[stock_info["名称"].str.contains(stock_name)]
-                    if not matched.empty:
-                        logger.info(f"✅ 通过名称匹配成功: {stock_name}")
-                        stock_info = matched
-                    else:
-                        logger.info(f"❌ 通过名称匹配失败: {stock_name}")
-                
-                # 4. 如果仍然没找到，尝试使用股票代码匹配（不带前缀）
-                if stock_info.empty and "代码" in stock_info.columns:
-                    matched = stock_info[stock_info["代码"].str.contains(stock_code)]
-                    if not matched.empty:
-                        logger.info(f"✅ 通过部分代码匹配成功: {stock_code}")
-                        stock_info = matched
-                    else:
-                        logger.info(f"❌ 通过部分代码匹配失败: {stock_code}")
+                        logger.info(f"❌ 通过无前导零代码匹配失败: {stock_code_no_leading_zero}")
                 
                 # 显示匹配结果
                 if not stock_info.empty:
@@ -550,10 +527,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                             logger.info(f"  流通市值字段值: {record['流通市值']}, 类型: {type(record['流通市值'])}")
                 else:
                     logger.error(f"❌ 严重错误: 无法匹配股票 {stock_code} 的数据")
-        
-            else:
-                logger.error("❌ 严重错误: ak.stock_zh_a_spot_em() 返回空数据")
-                return 0.0
+                    return 0.0
                 
         except Exception as e:
             logger.error(f"❌ 获取实时行情数据时发生异常: {str(e)}", exc_info=True)
@@ -562,7 +536,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
         # 根据实际返回列名获取市值
         if not stock_info.empty:
             # 检查所有可能的市值字段
-            possible_market_cap_fields = ["总市值", "流通市值", "market_cap"]
+            possible_market_cap_fields = ["总市值", "流通市值"]
             for field in possible_market_cap_fields:
                 if field in stock_info.columns:
                     market_cap_value = stock_info[field].iloc[0]
@@ -572,12 +546,10 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                     try:
                         market_cap = float(market_cap_value)
                         if not pd.isna(market_cap) and market_cap > 0:
-                            # 检查市值单位（万元 or 元）
-                            if market_cap > 1000000:  # 如果市值大于100万，可能是万元单位
-                                market_cap = market_cap / 10000  # 转换为亿元
-                                logger.info(f"  市值单位转换: 从万元转换为亿元, 新值: {market_cap:.2f}亿元")
-                            else:
-                                logger.info(f"  市值单位: 亿元, 值: {market_cap:.2f}亿元")
+                            # 根据日志分析，总市值单位是元，需要除以1亿转换为亿元
+                            # 之前的错误：误以为是万元单位，除以10000
+                            market_cap = market_cap / 100000000  # 正确转换：元 -> 亿元
+                            logger.info(f"  市值单位转换: 从元转换为亿元, 新值: {market_cap:.2f}亿元")
                             
                             logger.debug(f"使用{field}获取市值: {market_cap:.2f}亿元")
                             return market_cap

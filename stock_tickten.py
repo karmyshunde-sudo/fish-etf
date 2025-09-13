@@ -232,56 +232,79 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        # ========== 关键修复 ==========
-        # 使用AkShare期望的格式（000001.SZ）
-        full_code = f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}"
-        
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        logger.debug(f"从AkShare获取股票 {full_code} 数据，时间范围: {start_date} 至 {end_date}")
         
-        # 尝试使用多个接口获取数据
+        # ========== 关键修复 ==========
+        # 尝试多种可能的股票代码格式
+        possible_codes = [
+            f"{market_prefix}{stock_code}",  # "sh000001"
+            f"{stock_code}.{market_prefix.upper()}",  # "000001.SH"
+            stock_code,  # "000001"
+            f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ"
+            f"{market_prefix}{stock_code}.XSHG" if market_prefix == "sh" else f"{market_prefix}{stock_code}.XSHE",  # 交易所格式
+        ]
+        
+        logger.debug(f"尝试获取股票 {stock_code} 数据，可能的代码格式: {possible_codes}")
+        logger.debug(f"时间范围: {start_date} 至 {end_date}")
+        
+        # 尝试使用多种接口和代码格式获取数据
         df = None
-        for attempt in range(5):  # 增加重试次数到5次
-            try:
-                # 尝试使用stock_zh_a_hist接口
-                df = ak.stock_zh_a_hist(symbol=full_code, period="daily", 
-                                       start_date=start_date, end_date=end_date, 
-                                       adjust="qfq")
-                if not df.empty:
-                    logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口成功获取股票 {full_code} 数据")
-                    break
-            except Exception as e:
-                logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {full_code} 数据失败: {str(e)}")
-            
-            # 增加等待时间（指数退避）
-            wait_time = 0.5 * (2 ** attempt)  # 0.5, 1.0, 2.0, 4.0, 8.0秒
-            logger.debug(f"等待 {wait_time:.1f} 秒后重试...")
-            time.sleep(wait_time)
+        successful_code = None
+        successful_interface = None
         
-        # 如果新接口失败，尝试旧接口
-        if df is None or df.empty:
-            logger.debug(f"使用stock_zh_a_hist接口获取股票 {full_code} 数据失败，尝试旧接口")
-            for attempt in range(3):  # 尝试3次
+        # 先尝试使用stock_zh_a_hist接口
+        for code in possible_codes:
+            for attempt in range(5):  # 增加重试次数
                 try:
-                    df = ak.stock_zh_a_daily(symbol=full_code, 
-                                           start_date=start_date, 
-                                           end_date=end_date, 
+                    logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {code}")
+                    df = ak.stock_zh_a_hist(symbol=code, period="daily", 
+                                           start_date=start_date, end_date=end_date, 
                                            adjust="qfq")
                     if not df.empty:
-                        logger.debug(f"尝试{attempt+1}/3: 使用旧接口成功获取股票 {full_code} 数据")
+                        successful_code = code
+                        successful_interface = "stock_zh_a_hist"
+                        logger.debug(f"成功通过stock_zh_a_hist接口获取股票 {code} 数据")
                         break
                 except Exception as e:
-                    logger.debug(f"尝试{attempt+1}/3: 使用旧接口获取股票 {full_code} 数据失败: {str(e)}")
+                    logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                 
-                # 增加等待时间
-                time.sleep(1.0 * (2 ** attempt))
+                # 指数退避等待
+                time.sleep(0.5 * (2 ** attempt))
+            
+            if df is not None and not df.empty:
+                break
+        
+        # 如果stock_zh_a_hist接口失败，尝试stock_zh_a_daily接口
+        if df is None or df.empty:
+            for code in possible_codes:
+                for attempt in range(3):
+                    try:
+                        logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_daily接口获取股票 {code}")
+                        df = ak.stock_zh_a_daily(symbol=code, 
+                                               start_date=start_date, 
+                                               end_date=end_date, 
+                                               adjust="qfq")
+                        if not df.empty:
+                            successful_code = code
+                            successful_interface = "stock_zh_a_daily"
+                            logger.debug(f"成功通过stock_zh_a_daily接口获取股票 {code} 数据")
+                            break
+                    except Exception as e:
+                        logger.debug(f"使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
+                    
+                    time.sleep(1.0 * (2 ** attempt))
+                
+                if df is not None and not df.empty:
+                    break
         
         # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.warning(f"获取股票 {stock_code} 数据失败，所有接口均无效")
+            logger.warning(f"获取股票 {stock_code} 数据失败，所有接口和代码格式均无效")
             return pd.DataFrame()
+        
+        logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
         
         # 根据实际返回的列名进行映射
         if 'date' in df.columns:
@@ -324,7 +347,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         missing_columns = [col for col in required_columns if col not in new_df.columns]
         
         if missing_columns:
-            logger.warning(f"股票 {full_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            logger.warning(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
         # 确保日期列是datetime类型
@@ -332,10 +355,10 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
             try:
                 new_df['date'] = pd.to_datetime(new_df['date'])
             except Exception as e:
-                logger.error(f"股票 {full_code} 日期格式转换失败: {str(e)}")
+                logger.error(f"股票 {stock_code} 日期格式转换失败: {str(e)}")
                 return pd.DataFrame()
         else:
-            logger.error(f"股票 {full_code} 缺少日期列")
+            logger.error(f"股票 {stock_code} 缺少日期列")
             return pd.DataFrame()
         
         # 确保数值列是数值类型
@@ -345,17 +368,17 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                 try:
                     new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
                 except Exception as e:
-                    logger.warning(f"股票 {full_code} {col} 列转换为数值失败: {str(e)}")
+                    logger.warning(f"股票 {stock_code} {col} 列转换为数值失败: {str(e)}")
         
         # 排序并重置索引
         new_df = new_df.sort_values('date').reset_index(drop=True)
         
         # 检查数据量
-        logger.debug(f"股票 {full_code} 获取到 {len(new_df)} 天数据")
+        logger.debug(f"股票 {stock_code} 获取到 {len(new_df)} 天数据")
         
         # 确保数据不是全NaN
         if new_df[['open', 'high', 'low', 'close', 'volume']].isna().all().all():
-            logger.warning(f"股票 {full_code} 数据全为NaN")
+            logger.warning(f"股票 {stock_code} 数据全为NaN")
             return pd.DataFrame()
         
         return new_df
@@ -1408,17 +1431,17 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             return None
         
         # ========== 关键修复 ==========
-        # 调整并行参数，避免请求过于频繁
-        # 原代码: with ThreadPoolExecutor(max_workers=20) as executor:
-        # 修改为: 降低并发数量，增加任务延迟
+        # 优化并行处理策略
+        # 分批处理股票，避免请求过于频繁
+        batch_size = 10  # 每批处理10只股票
         results = []
-        # 分批处理股票，每批处理10只股票
-        batch_size = 10
+        
         for i in range(0, len(stock_list), batch_size):
             batch_indices = list(range(i, min(i + batch_size, len(stock_list))))
             with ThreadPoolExecutor(max_workers=5) as executor:  # 降低并发数量
                 batch_results = list(executor.map(process_stock, batch_indices))
                 results.extend(batch_results)
+                
                 # 每处理完一批，等待一段时间
                 time.sleep(2.0)
         

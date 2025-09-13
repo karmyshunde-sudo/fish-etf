@@ -28,9 +28,11 @@ print("🔍 正在扫描所有可用接口...")
 start_time = time.time()
 
 functions = []
-for name, obj in inspect.getmembers(ak):
-    if inspect.isfunction(obj) and not name.startswith('_'):
-        functions.append(name)
+# 修改点：只有没有指定接口时才扫描所有接口
+if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
+    for name, obj in inspect.getmembers(ak):
+        if inspect.isfunction(obj) and not name.startswith('_'):
+            functions.append(name)
 
 elapsed = time.time() - start_time
 print(f"✅ 共找到 {len(functions)} 个可用接口 (耗时: {elapsed:.2f} 秒)")
@@ -38,46 +40,57 @@ print(f"✅ 共找到 {len(functions)} 个可用接口 (耗时: {elapsed:.2f} �
 # 按字母顺序排序
 functions = sorted(functions)
 
-# 准备输出内容
-output = f"AkShare Version: {version}\n"
-output += f"Total Functions: {len(functions)}\n\n"
-output += "=" * 50 + "\n"
-output += "Available Functions\n"
-output += "=" * 50 + "\n\n"
+# 如果没有指定接口，则创建并保存完整的接口列表文件
+if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
+    # 准备输出内容
+    output = f"AkShare Version: {version}\n"
+    output += f"Total Functions: {len(functions)}\n\n"
+    output += "=" * 50 + "\n"
+    output += "Available Functions\n"
+    output += "=" * 50 + "\n\n"
 
-# 添加所有函数到输出
-for func_name in functions:
-    output += f"{func_name}\n"
+    # 添加所有函数到输出
+    for func_name in functions:
+        output += f"{func_name}\n"
 
-# 获取当前北京时间（格式：YYYYMMDD）
-beijing_date = datetime.now().strftime("%Y%m%d")
+    # 获取当前北京时间（格式：YYYYMMDD）
+    beijing_date = datetime.now().strftime("%Y%m%d")
 
-# 添加时间戳
-output += "\n" + "=" * 50 + "\n"
-output += f"Generated on: {beijing_date} (Beijing Time)\n"
-output += "=" * 50 + "\n"
+    # 添加时间戳
+    output += "\n" + "=" * 50 + "\n"
+    output += f"Generated on: {beijing_date} (Beijing Time)\n"
+    output += "=" * 50 + "\n"
 
-# 保存到文件
-file_name = f"{beijing_date}akshare_info.txt"
-output_dir = "data/flags"
+    # 保存到文件
+    file_name = f"{beijing_date}akshare_info.txt"
+    output_dir = "data/flags"
 
-# 确保目录存在
-os.makedirs(output_dir, exist_ok=True)
+    # 确保目录存在
+    os.makedirs(output_dir, exist_ok=True)
 
-# 写入文件
-file_path = os.path.join(output_dir, file_name)
-with open(file_path, "w", encoding="utf-8") as f:
-    f.write(output)
+    # 写入文件
+    file_path = os.path.join(output_dir, file_name)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(output)
 
-print(f"📁 AkShare信息已保存到 {file_path}")
-print(f"📌 提示: 完整接口列表已保存至: {file_path}")
+    print(f"📁 AkShare信息已保存到 {file_path}")
+    print(f"📌 提示: 完整接口列表已保存至: {file_path}")
+else:
+    # 如果指定了接口，不创建完整接口列表文件
+    print("ℹ️ 检测到指定了接口名称，跳过完整接口列表的生成")
 
 # 如果提供了接口名称参数，打印该接口的列名
 if len(sys.argv) > 1 and sys.argv[1].strip() != "":
     interface_name = sys.argv[1].strip()
     print(f"\n🔍 开始查询接口: {interface_name}")
     
-    if interface_name in functions:
+    # 获取所有函数列表用于检查
+    all_functions = []
+    for name, obj in inspect.getmembers(ak):
+        if inspect.isfunction(obj) and not name.startswith('_'):
+            all_functions.append(name)
+    
+    if interface_name in all_functions:
         try:
             # 尝试调用函数
             try:
@@ -148,7 +161,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
             print(f"  📝 Traceback: {traceback.format_exc()}")
     else:
         print(f"  ❌ 错误: 接口 '{interface_name}' 未在AkShare中找到")
-        print(f"  📌 提示: 当前版本AkShare共有 {len(functions)} 个可用接口，您可以查看 {file_path} 获取完整列表")
+        print(f"  📌 提示: 当前版本AkShare共有 {len(all_functions)} 个可用接口，您可以使用不带参数的方式运行脚本查看完整列表")
 else:
     print("\nℹ️ 提示: 如需查询特定接口的列名，请使用: python get_akshare_info.py 接口名称")
     print("   例如: python get_akshare_info.py fund_aum_em")

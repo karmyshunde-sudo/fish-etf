@@ -272,7 +272,10 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        # ========== 以下是关键修改 ==========
+        # 计算日期范围
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        
         # 尝试多种可能的股票代码格式
         possible_codes = [
             f"{market_prefix}{stock_code}",  # "sh000001"
@@ -285,19 +288,12 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         logger.debug(f"尝试获取股票 {stock_code} 数据，可能的代码格式: {possible_codes}")
         logger.debug(f"时间范围: {start_date} 至 {end_date}")
         
-        # 计算日期范围
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        # ========== 以上是关键修改 ==========
-        
-        logger.debug(f"从AkShare获取股票 {stock_code} 数据，时间范围: {start_date} 至 {end_date}")
-        
-        # ========== 以下是关键修改 ==========
         # 尝试使用多种接口和代码格式获取数据
         df = None
         successful_code = None
         successful_interface = None
         
+        # 先建议切换为stock_zh_a_hist 接口使用(该接口数据质量较好) [[2]]
         # 先尝试使用stock_zh_a_hist接口
         for code in possible_codes:
             for attempt in range(5):  # 增加重试次数
@@ -314,7 +310,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                 except Exception as e:
                     logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                 
-                # 指数退避等待
+                # 指数退避等待，避免高并发获取数据导致IP被拉黑 [[5]]
                 time.sleep(0.5 * (2 ** attempt))
             
             if df is not None and not df.empty:
@@ -349,41 +345,71 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
             return pd.DataFrame()
         
         logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
-        # ========== 以上是关键修改 ==========
         
-        # ========== 以下是关键修改 ==========
-        # 直接使用AkShare返回的列名，不做任何映射
-        # 根据实际返回的列名进行处理
-        # ========== 以上是关键修改 ==========
+        # 处理可能的列名差异
+        if 'date' in df.columns:
+            # 英文列名映射到标准列名
+            column_mapping = {
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量',
+                'amount': '成交额',
+                'amplitude': '振幅',
+                'percent': '涨跌幅',
+                'change': '涨跌额',
+                'turnover': '换手率'
+            }
+        else:
+            # 中文列名映射到标准列名
+            column_mapping = {
+                '日期': '日期',
+                '开盘': '开盘',
+                '最高': '最高',
+                '最低': '最低',
+                '收盘': '收盘',
+                '成交量': '成交量',
+                '成交额': '成交额',
+                '振幅': '振幅',
+                '涨跌幅': '涨跌幅',
+                '涨跌额': '涨跌额',
+                '换手率': '换手率'
+            }
         
-        if df.empty:
-            logger.warning(f"获取股票 {stock_code} 数据为空")
-            return pd.DataFrame()
+        # 重命名列
+        df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
         
-        # 确保列名正确
-        expected_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
-                           "振幅", "涨跌幅", "涨跌额", "换手率"]
+        # 确保日期列存在
+        if '日期' not in df.columns and 'date' in df.columns:
+            df = df.rename(columns={'date': '日期'})
         
         # 检查是否有必要的列
-        missing_columns = [col for col in expected_columns if col not in df.columns]
+        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
-            logger.warning(f"股票 {stock_code} 数据缺少必要列: {missing_columns}")
+            logger.warning(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
-        # 确保日期列是datetime类型
+        # 确保日期列是字符串类型
         if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"])
+            df["日期"] = df["日期"].astype(str)
+            # 确保日期格式为YYYY-MM-DD
+            df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
+                                              lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
+                                              regex=True)
             df = df.sort_values("日期", ascending=True)
+        
+        # 检查数据量
+        if len(df) < 10:
+            logger.warning(f"股票 {stock_code} 数据量不足({len(df)}天)，可能影响分析结果")
         
         logger.debug(f"成功获取股票 {stock_code} 数据，共 {len(df)} 条记录")
         return df
     
     except Exception as e:
-        # ========== 以下是关键修改 ==========
-        # 原始代码: logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
-        # 修改为: 降低日志级别，避免过多错误日志
         logger.debug(f"获取股票 {stock_code} 数据失败: {str(e)}")
-        # ========== 以上是关键修改 ==========
         return pd.DataFrame()
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:

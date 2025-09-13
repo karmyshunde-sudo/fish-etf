@@ -142,11 +142,12 @@ MAX_STOCK_POSITION = 0.15  # 单一个股最大仓位（15%）
   * 推荐值：0.4-0.6
   * 默认值：0.5
 """
+
 # 其他参数
-MIN_DATA_DAYS = 100  # 最小数据天数（用于计算波动率等）
-MAX_STOCKS_TO_ANALYZE = 500  # 每次分析的最大股票数量（避免请求过多）
-MAX_STOCKS_PER_SECTION = 10  # 每个板块最多报告的股票数量
-DATA_FETCH_DELAY = 0.1  # 数据请求间隔（秒），避免被AkShare限制
+MIN_DATA_DAYS = 30  # 降低最小数据天数（用于计算指标）
+MAX_STOCKS_TO_ANALYZE = 300  # 减少每次分析的最大股票数量（避免请求过多）
+MAX_STOCKS_PER_SECTION = 8  # 每个板块最多报告的股票数量
+DATA_FETCH_DELAY = 0.5  # 增加数据请求间隔（秒），避免被AkShare限制
 
 """
 ==========================================
@@ -231,47 +232,58 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
+        # ========== 关键修复 ==========
+        # 使用AkShare期望的格式（000001.SZ）
+        full_code = f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}"
+        
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        logger.debug(f"从AkShare获取股票 {market_prefix}{stock_code} 数据，时间范围: {start_date} 至 {end_date}")
+        logger.debug(f"从AkShare获取股票 {full_code} 数据，时间范围: {start_date} 至 {end_date}")
         
         # 尝试使用多个接口获取数据
         df = None
-        for attempt in range(3):  # 最多尝试3次
+        for attempt in range(5):  # 增加重试次数到5次
             try:
                 # 尝试使用stock_zh_a_hist接口
-                df = ak.stock_zh_a_hist(symbol=f"{market_prefix}{stock_code}", period="daily", 
+                df = ak.stock_zh_a_hist(symbol=full_code, period="daily", 
                                        start_date=start_date, end_date=end_date, 
                                        adjust="qfq")
                 if not df.empty:
-                    logger.debug(f"使用stock_zh_a_hist接口成功获取股票 {market_prefix}{stock_code} 数据")
+                    logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口成功获取股票 {full_code} 数据")
                     break
             except Exception as e:
-                logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_hist接口获取股票 {market_prefix}{stock_code} 数据失败: {str(e)}")
-                time.sleep(0.5)  # 短暂等待
+                logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {full_code} 数据失败: {str(e)}")
+            
+            # 增加等待时间（指数退避）
+            wait_time = 0.5 * (2 ** attempt)  # 0.5, 1.0, 2.0, 4.0, 8.0秒
+            logger.debug(f"等待 {wait_time:.1f} 秒后重试...")
+            time.sleep(wait_time)
         
         # 如果新接口失败，尝试旧接口
         if df is None or df.empty:
-            logger.debug(f"使用stock_zh_a_hist接口获取股票 {market_prefix}{stock_code} 数据失败，尝试旧接口")
-            try:
-                df = ak.stock_zh_a_daily(symbol=f"{market_prefix}{stock_code}", 
-                                       start_date=start_date, 
-                                       end_date=end_date, 
-                                       adjust="qfq")
-                if not df.empty:
-                    logger.debug(f"使用旧接口成功获取股票 {market_prefix}{stock_code} 数据")
-            except Exception as e:
-                logger.debug(f"使用旧接口获取股票 {market_prefix}{stock_code} 数据失败: {str(e)}")
+            logger.debug(f"使用stock_zh_a_hist接口获取股票 {full_code} 数据失败，尝试旧接口")
+            for attempt in range(3):  # 尝试3次
+                try:
+                    df = ak.stock_zh_a_daily(symbol=full_code, 
+                                           start_date=start_date, 
+                                           end_date=end_date, 
+                                           adjust="qfq")
+                    if not df.empty:
+                        logger.debug(f"尝试{attempt+1}/3: 使用旧接口成功获取股票 {full_code} 数据")
+                        break
+                except Exception as e:
+                    logger.debug(f"尝试{attempt+1}/3: 使用旧接口获取股票 {full_code} 数据失败: {str(e)}")
+                
+                # 增加等待时间
+                time.sleep(1.0 * (2 ** attempt))
         
         # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.error(f"获取股票 {stock_code} 数据失败，所有接口均无效")
+            logger.warning(f"获取股票 {stock_code} 数据失败，所有接口均无效")
             return pd.DataFrame()
         
-        # ========== 关键修复 ==========
         # 根据实际返回的列名进行映射
-        # 根据提供的信息，stock_zh_a_daily返回的是英文列名
         if 'date' in df.columns:
             # 英文列名映射到标准列名
             column_mapping = {
@@ -312,7 +324,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         missing_columns = [col for col in required_columns if col not in new_df.columns]
         
         if missing_columns:
-            logger.warning(f"股票 {market_prefix}{stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            logger.warning(f"股票 {full_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
         # 确保日期列是datetime类型
@@ -320,10 +332,10 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
             try:
                 new_df['date'] = pd.to_datetime(new_df['date'])
             except Exception as e:
-                logger.error(f"股票 {market_prefix}{stock_code} 日期格式转换失败: {str(e)}")
+                logger.error(f"股票 {full_code} 日期格式转换失败: {str(e)}")
                 return pd.DataFrame()
         else:
-            logger.error(f"股票 {market_prefix}{stock_code} 缺少日期列")
+            logger.error(f"股票 {full_code} 缺少日期列")
             return pd.DataFrame()
         
         # 确保数值列是数值类型
@@ -333,17 +345,17 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                 try:
                     new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
                 except Exception as e:
-                    logger.warning(f"股票 {market_prefix}{stock_code} {col} 列转换为数值失败: {str(e)}")
+                    logger.warning(f"股票 {full_code} {col} 列转换为数值失败: {str(e)}")
         
         # 排序并重置索引
         new_df = new_df.sort_values('date').reset_index(drop=True)
         
         # 检查数据量
-        logger.debug(f"股票 {market_prefix}{stock_code} 获取到 {len(new_df)} 天数据")
+        logger.debug(f"股票 {full_code} 获取到 {len(new_df)} 天数据")
         
         # 确保数据不是全NaN
         if new_df[['open', 'high', 'low', 'close', 'volume']].isna().all().all():
-            logger.warning(f"股票 {market_prefix}{stock_code} 数据全为NaN")
+            logger.warning(f"股票 {full_code} 数据全为NaN")
             return pd.DataFrame()
         
         return new_df
@@ -1317,7 +1329,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             logger.error("获取股票列表失败，无法继续")
             return {}
         
-        # ========== 以下是关键修复 ==========
         # 记录初始股票数量
         total_initial = len(stock_list)
         logger.info(f"筛选前 {total_initial} 只股票（总数量）")
@@ -1349,15 +1360,15 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             
             # 获取日线数据
             df = fetch_stock_data(stock_code)
-            # ========== 以下是关键修复 ==========
-            # 原始代码: if df.empty or len(df) < MIN_DATA_DAYS:
-            # 修改为: 降低数据量要求，并添加更详细的检查
+            
+            # ========== 关键修复 ==========
+            # 降低最小数据天数要求（从100天降至30天）
             if df is None or df.empty:
                 logger.debug(f"股票 {stock_name}({stock_code}) 数据为空，跳过")
                 return None
             
             # 检查必要列
-            required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
@@ -1376,51 +1387,11 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             df.attrs["stock_code"] = stock_code
             
             # 检查是否适合策略
-            # ========== 以下是关键修复 ==========
-            # 原始代码: if is_stock_suitable(stock_code, df):
-            # 修改为: 直接使用三重过滤逻辑
-            # 获取板块配置
-            section_config = MARKET_SECTIONS[section]
-            
-            # 1. 流动性过滤（日均成交>设定阈值）
-            if 'volume' in df.columns and 'close' in df.columns and len(df) >= 20:
-                # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
-                daily_volume = df["volume"].iloc[-20:].mean() * 100 * df["close"].iloc[-20:].mean()
-                liquidity_ok = daily_volume >= section_config["min_daily_volume"]
-            else:
-                liquidity_ok = False
-            
-            # 2. 波动率过滤（年化波动率<设定阈值）
-            if len(df) >= 30:
-                # 计算日收益率
-                if 'close' in df.columns:
-                    returns = df['close'].pct_change().dropna()
-                    if len(returns) >= 30:
-                        volatility = returns.std() * np.sqrt(252)  # 年化波动率
-                        volatility_ok = volatility <= section_config["max_volatility"]
-                    else:
-                        volatility_ok = False
-                else:
-                    volatility_ok = False
-            else:
-                volatility_ok = False
-            
-            # 3. 市值过滤（市值>设定阈值）
-            market_cap = calculate_market_cap(df, stock_code)
-            market_cap_ok = market_cap >= section_config["min_market_cap"]
-            
-            # 三重过滤：必须通过至少两项
-            passed_filters = sum([liquidity_ok, volatility_ok, market_cap_ok])
-            suitable = passed_filters >= 2
-            
-            if suitable:
+            if is_stock_suitable(stock_code, df):
                 # 更新板块计数器
                 section_counts[section]["suitable"] += 1
                 
                 # 计算策略得分
-                # ========== 以下是关键修复 ==========
-                # 原始代码: score = calculate_stock_strategy_score(stock_code, df)
-                # 修改为: 修复评分计算逻辑
                 score = calculate_stock_strategy_score(stock_code, df)
                 
                 if score > 0:
@@ -1436,9 +1407,20 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             
             return None
         
-        # 并行处理股票
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            results = executor.map(process_stock, range(len(stock_list)))
+        # ========== 关键修复 ==========
+        # 调整并行参数，避免请求过于频繁
+        # 原代码: with ThreadPoolExecutor(max_workers=20) as executor:
+        # 修改为: 降低并发数量，增加任务延迟
+        results = []
+        # 分批处理股票，每批处理10只股票
+        batch_size = 10
+        for i in range(0, len(stock_list), batch_size):
+            batch_indices = list(range(i, min(i + batch_size, len(stock_list))))
+            with ThreadPoolExecutor(max_workers=5) as executor:  # 降低并发数量
+                batch_results = list(executor.map(process_stock, batch_indices))
+                results.extend(batch_results)
+                # 每处理完一批，等待一段时间
+                time.sleep(2.0)
         
         # 收集结果
         for result in results:

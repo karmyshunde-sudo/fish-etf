@@ -489,7 +489,7 @@ jobs:
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "执行完成" > "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
+          git add "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt" data/all_stocks.csv
           git commit -m "个股趋势策略已推送标志 [定时]" && git push origin main
       - name: 发送策略通知
         if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
@@ -649,7 +649,7 @@ jobs:
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF Yes/No 策略】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
 
-  # 个股趋势策略（手动）
+ # 个股趋势策略（手动）
   stock-fourty-manual:
     name: 个股趋势策略 (TickTen)
     runs-on: ubuntu-latest
@@ -689,6 +689,7 @@ jobs:
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
       - name: 执行个股策略
+        id: execute_task  # 添加ID以便后续步骤引用
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
@@ -710,6 +711,18 @@ jobs:
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+      - name: 提交股票基础信息
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          # 关键修改：添加data/all_stocks.csv到提交范围
+          git add data/all_stocks.csv
+          if [ -n "$(git diff --cached --name-only data/all_stocks.csv)" ]; then
+            git commit -m "自动更新股票基础信息 [手动]" && git push origin main
+          else
+            echo "data/all_stocks.csv 没有变化，无需提交"
           fi
       - name: 发送策略通知
         if: env.WECOM_WEBHOOK

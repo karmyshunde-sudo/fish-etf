@@ -198,6 +198,9 @@ def fetch_stock_list() -> pd.DataFrame:
                     last_update = datetime.strptime(last_update_str, "%Y-%m-%d %H:%M:%S")
                     if (datetime.now() - last_update).days < 1:
                         logger.info(f"股票基础信息未过期（最后更新: {last_update_str}），使用现有数据")
+                        # 修复：移除重复记录，确保唯一性
+                        basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
+                        logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
                         return basic_info_df
                 except Exception as e:
                     logger.warning(f"解析最后更新时间失败: {str(e)}，将重新获取数据")
@@ -233,23 +236,33 @@ def fetch_stock_list() -> pd.DataFrame:
             
             # 检查是否已有记录
             existing_market_cap = 0
+            existing_score = 0
             if os.path.exists(BASIC_INFO_FILE) and "code" in basic_info_df.columns:
                 existing = basic_info_df[basic_info_df["code"] == stock_code]
                 if not existing.empty:
+                    # 保留现有市值和评分
                     existing_market_cap = existing["market_cap"].values[0]
+                    if "score" in existing.columns:
+                        existing_score = existing["score"].values[0]
             
             # 基础信息只包含必要字段
             basic_info_data.append({
                 "code": stock_code,
                 "name": stock_name,
                 "section": section,
-                "market_cap": existing_market_cap,  # 保留现有市值
+                "market_cap": existing_market_cap,
+                "score": existing_score,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         
         basic_info_df = pd.DataFrame(basic_info_data)
         
-        # 4. 保存基础信息
+        # 4. 修复：确保股票代码唯一，移除重复记录
+        if "code" in basic_info_df.columns:
+            basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
+            logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
+        
+        # 5. 保存基础信息
         os.makedirs(os.path.dirname(BASIC_INFO_FILE), exist_ok=True)
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         logger.info(f"股票基础信息已保存至 {BASIC_INFO_FILE}，共 {len(basic_info_df)} 条记录")
@@ -261,7 +274,12 @@ def fetch_stock_list() -> pd.DataFrame:
         # 如果失败，尝试返回现有数据
         if os.path.exists(BASIC_INFO_FILE):
             try:
-                return pd.read_csv(BASIC_INFO_FILE)
+                basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+                # 确保唯一性
+                if "code" in basic_info_df.columns:
+                    basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
+                    logger.warning(f"使用现有数据并去重，共 {len(basic_info_df)} 条记录")
+                return basic_info_df
             except:
                 pass
         return pd.DataFrame()

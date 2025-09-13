@@ -231,84 +231,75 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
-        # ========== 以下是关键修复 ==========
-        # 原始代码: full_code = f"{market_prefix}{stock_code}"
-        # 修改为: 使用AkShare期望的格式（000001.SZ）
-        full_code = f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}"
-        
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        logger.debug(f"从AkShare获取股票 {full_code} 数据，时间范围: {start_date} 至 {end_date}")
+        logger.debug(f"从AkShare获取股票 {market_prefix}{stock_code} 数据，时间范围: {start_date} 至 {end_date}")
         
         # 尝试使用多个接口获取数据
         df = None
         for attempt in range(3):  # 最多尝试3次
             try:
-                # 尝试使用stock_zh_a_hist_v6接口（最新推荐）
-                df = ak.stock_zh_a_hist(symbol=full_code, period="daily", 
+                # 尝试使用stock_zh_a_hist接口
+                df = ak.stock_zh_a_hist(symbol=f"{market_prefix}{stock_code}", period="daily", 
                                        start_date=start_date, end_date=end_date, 
                                        adjust="qfq")
-                break
+                if not df.empty:
+                    logger.debug(f"使用stock_zh_a_hist接口成功获取股票 {market_prefix}{stock_code} 数据")
+                    break
             except Exception as e:
-                logger.debug(f"尝试{attempt+1}/3: 使用新接口获取股票 {full_code} 数据失败: {str(e)}")
+                logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_hist接口获取股票 {market_prefix}{stock_code} 数据失败: {str(e)}")
                 time.sleep(0.5)  # 短暂等待
         
         # 如果新接口失败，尝试旧接口
         if df is None or df.empty:
-            logger.debug(f"使用新接口获取股票 {full_code} 数据失败，尝试旧接口")
+            logger.debug(f"使用stock_zh_a_hist接口获取股票 {market_prefix}{stock_code} 数据失败，尝试旧接口")
             try:
-                df = ak.stock_zh_a_daily(symbol=full_code, 
+                df = ak.stock_zh_a_daily(symbol=f"{market_prefix}{stock_code}", 
                                        start_date=start_date, 
                                        end_date=end_date, 
                                        adjust="qfq")
+                if not df.empty:
+                    logger.debug(f"使用旧接口成功获取股票 {market_prefix}{stock_code} 数据")
             except Exception as e:
-                logger.debug(f"使用旧接口获取股票 {full_code} 数据失败: {str(e)}")
+                logger.debug(f"使用旧接口获取股票 {market_prefix}{stock_code} 数据失败: {str(e)}")
         
-        # 如果还是失败，尝试最基础的接口
+        # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.debug(f"使用常规接口获取股票 {full_code} 数据失败，尝试基础接口")
-            try:
-                if stock_code.startswith("6"):
-                    df = ak.stock_zh_a_daily(symbol=f"sh{stock_code}", 
-                                           start_date=start_date, 
-                                           end_date=end_date, 
-                                           adjust="qfq")
-                else:
-                    df = ak.stock_zh_a_daily(symbol=f"sz{stock_code}", 
-                                           start_date=start_date, 
-                                           end_date=end_date, 
-                                           adjust="qfq")
-            except Exception as e:
-                logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}")
-                return pd.DataFrame()
+            logger.error(f"获取股票 {stock_code} 数据失败，所有接口均无效")
+            return pd.DataFrame()
         
-        # ========== 以下是关键修复 ==========
-        # 处理可能的列名不一致问题
-        column_mapping = {
-            '日期': 'date',
-            'date': 'date',
-            '时间': 'date',
-            'datetime': 'date',
-            '开盘': 'open',
-            'open': 'open',
-            '最高': 'high',
-            'high': 'high',
-            '最低': 'low',
-            'low': 'low',
-            '收盘': 'close',
-            'close': 'close',
-            '成交量': 'volume',
-            'volume': 'volume',
-            '成交额': 'amount',
-            'amount': 'amount',
-            '振幅': 'amplitude',
-            '涨跌幅': 'pct_change',
-            '换手率': 'turnover'
-        }
-        
-        # 标准化列名
-        df.columns = [col.strip() for col in df.columns]
+        # ========== 关键修复 ==========
+        # 根据实际返回的列名进行映射
+        # 根据提供的信息，stock_zh_a_daily返回的是英文列名
+        if 'date' in df.columns:
+            # 英文列名映射到标准列名
+            column_mapping = {
+                'date': 'date',
+                'open': 'open',
+                'high': 'high',
+                'low': 'low',
+                'close': 'close',
+                'volume': 'volume',
+                'amount': 'amount',
+                'outstanding_share': 'outstanding_share',
+                'turnover': 'turnover'
+            }
+        else:
+            # 中文列名映射到标准列名
+            column_mapping = {
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume',
+                '成交额': 'amount',
+                '振幅': 'amplitude',
+                '涨跌幅': 'pct_change',
+                '涨跌额': 'change',
+                '换手率': 'turnover'
+            }
         
         # 创建新的DataFrame，避免SettingWithCopyWarning
         new_df = pd.DataFrame()
@@ -321,24 +312,18 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         missing_columns = [col for col in required_columns if col not in new_df.columns]
         
         if missing_columns:
-            logger.warning(f"股票 {full_code} 数据缺少必要列: {', '.join(missing_columns)}")
-            # 尝试从其他列推导
-            if 'close' not in new_df.columns and '收盘价' in df.columns:
-                new_df['close'] = df['收盘价']
-            # 再次检查
-            if 'close' not in new_df.columns:
-                logger.error(f"股票 {full_code} 缺少收盘价数据，无法计算指标")
-                return pd.DataFrame()
+            logger.warning(f"股票 {market_prefix}{stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            return pd.DataFrame()
         
         # 确保日期列是datetime类型
         if 'date' in new_df.columns:
             try:
                 new_df['date'] = pd.to_datetime(new_df['date'])
             except Exception as e:
-                logger.error(f"股票 {full_code} 日期格式转换失败: {str(e)}")
+                logger.error(f"股票 {market_prefix}{stock_code} 日期格式转换失败: {str(e)}")
                 return pd.DataFrame()
         else:
-            logger.error(f"股票 {full_code} 缺少日期列")
+            logger.error(f"股票 {market_prefix}{stock_code} 缺少日期列")
             return pd.DataFrame()
         
         # 确保数值列是数值类型
@@ -348,17 +333,17 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                 try:
                     new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
                 except Exception as e:
-                    logger.warning(f"股票 {full_code} {col} 列转换为数值失败: {str(e)}")
+                    logger.warning(f"股票 {market_prefix}{stock_code} {col} 列转换为数值失败: {str(e)}")
         
         # 排序并重置索引
         new_df = new_df.sort_values('date').reset_index(drop=True)
         
         # 检查数据量
-        logger.debug(f"股票 {full_code} 获取到 {len(new_df)} 天数据")
+        logger.debug(f"股票 {market_prefix}{stock_code} 获取到 {len(new_df)} 天数据")
         
         # 确保数据不是全NaN
         if new_df[['open', 'high', 'low', 'close', 'volume']].isna().all().all():
-            logger.warning(f"股票 {full_code} 数据全为NaN")
+            logger.warning(f"股票 {market_prefix}{stock_code} 数据全为NaN")
             return pd.DataFrame()
         
         return new_df
@@ -368,31 +353,92 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         return pd.DataFrame()
 
 def preprocess_stock_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    预处理股票数据，计算并缓存中间结果
-    
+    """预处理股票数据，计算必要指标
     Args:
         df: 股票日线数据
     
     Returns:
-        pd.DataFrame: 包含预计算指标的DataFrame
+        pd.DataFrame: 预处理后的数据
     """
-    if df.empty or len(df) < MIN_DATA_DAYS:
+    try:
+        if df is None or df.empty:
+            logger.warning("股票数据为空，无法预处理")
+            return df
+        
+        # 确保DataFrame是副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
+        # 确保日期列排序
+        if 'date' in df.columns:
+            df = df.sort_values('date')
+        
+        # 检查必要列
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.error(f"预处理失败：数据缺少必要列 {', '.join(missing_columns)}")
+            return df
+        
+        # 检查close列是否为有效数值
+        if 'close' not in df.columns or df['close'].isna().all():
+            logger.error("预处理失败：close列不存在或全为NaN")
+            return df
+        
+        # 计算移动平均线
+        df["ma5"] = df["close"].rolling(window=5).mean()
+        df["ma10"] = df["close"].rolling(window=10).mean()
+        df["ma20"] = df["close"].rolling(window=20).mean()
+        df["ma40"] = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean()
+        
+        # 计算成交量移动平均
+        if 'volume' in df.columns:
+            df["volume_ma5"] = df["volume"].rolling(window=5).mean()
+        
+        # 计算涨跌幅
+        if 'close' in df.columns:
+            df["pct_change"] = df["close"].pct_change() * 100
+        
+        # 计算波动率（20日年化波动率）
+        if 'pct_change' in df.columns:
+            df["volatility"] = df["pct_change"].rolling(window=20).std() * np.sqrt(252)
+        
+        # 计算MACD
+        if 'close' in df.columns:
+            df["ema12"] = df["close"].ewm(span=12, adjust=False).mean()
+            df["ema26"] = df["close"].ewm(span=26, adjust=False).mean()
+            df["macd"] = df["ema12"] - df["ema26"]
+            df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+            df["hist"] = df["macd"] - df["signal"]
+        
+        # 计算RSI
+        if 'close' in df.columns:
+            delta = df["close"].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=14).mean()
+            avg_loss = loss.rolling(window=14).mean()
+            rs = avg_gain / avg_loss.replace(0, np.nan)  # 避免除零错误
+            df["rsi"] = 100 - (100 / (1 + rs))
+        
+        # 计算布林带
+        if 'close' in df.columns and 'ma20' in df.columns:
+            df["std"] = df["close"].rolling(window=20).std()
+            df["upper_band"] = df["ma20"] + (df["std"] * 2)
+            df["lower_band"] = df["ma20"] - (df["std"] * 2)
+        
+        # 计算ATR (平均真实波幅)
+        if all(col in df.columns for col in ['high', 'low', 'close']):
+            high_low = df["high"] - df["low"]
+            high_close = np.abs(df["high"] - df["close"].shift())
+            low_close = np.abs(df["low"] - df["close"].shift())
+            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+            true_range = np.max(ranges, axis=1)
+            df["atr"] = pd.Series(true_range).rolling(window=14).mean()
+        
+        logger.debug("股票数据预处理完成")
         return df
     
-    try:
-        # 计算并缓存关键指标
-        df["ma40"] = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean()
-        df["annual_volatility"] = df["收盘"].pct_change().rolling(window=30).std() * np.sqrt(252)
-        
-        # 计算成交量变化率
-        df["volume_change"] = df["成交量"].pct_change(periods=5) * 100
-        
-        # 标记是否站上/跌破40日均线
-        df["above_ma40"] = df["收盘"] >= df["ma40"]
-        df["below_ma40"] = df["收盘"] < df["ma40"]
-        
-        return df
     except Exception as e:
         logger.error(f"预处理股票数据失败: {str(e)}", exc_info=True)
         return df
@@ -520,45 +566,88 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
 
 # ========== 以下是关键修改 ==========
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
-    """估算市值（亿元） - 修复版"""
+    """计算股票市值
+    Args:
+        df: 股票日线数据
+        stock_code: 股票代码
+    
+    Returns:
+        float: 市值(亿元)
+    """
     try:
-        if df.empty:
+        if df is None or df.empty or len(df) < 1:
+            logger.debug(f"股票 {stock_code} 数据不足，无法计算市值")
             return 0.0
         
-        # 从AkShare获取实时股票信息
-        stock_info = ak.stock_zh_a_spot_em()
-        if not stock_info.empty:
-            # 确保股票代码匹配（处理可能的前缀如'sz'、'sh'）
-            stock_info = stock_info[stock_info['代码'].str[-6:] == stock_code]
-            if not stock_info.empty:
-                # 总市值单位是万元，需要转换为亿元
-                market_cap = float(stock_info['总市值'].values[0]) / 10000
-                return market_cap
+        # 尝试从本地数据获取市值
+        if "market_cap" in df.columns:
+            market_cap = df["market_cap"].iloc[-1]
+            if not pd.isna(market_cap) and market_cap > 0:
+                return market_cap / 10000  # 转换为亿元
         
-        # 备用方案：如果无法获取准确市值，使用更合理的估算方法
-        latest = df.iloc[-1]
-        close_price = latest["收盘"]
-        
-        # 获取流通股本（单位：万股）
-        circulating_shares = float(stock_info['流通股本'].values[0]) if not stock_info.empty else 0
-        
-        if circulating_shares > 0:
-            # 市值 = 收盘价 * 流通股本（单位：亿元）
-            return close_price * circulating_shares / 10000
-        
-        # 如果仍然无法获取，使用更合理的默认值
-        section = get_stock_section(stock_code)
-        if section == "科创板":
-            # 科创板平均流通股本约为1.5亿股
-            base_shares = 1.5
-        elif section == "创业板":
-            # 创业板平均流通股本约为3亿股
-            base_shares = 3.0
+        # 获取最新收盘价
+        if "close" in df.columns:
+            current_price = df["close"].iloc[-1]
         else:
-            # 主板平均流通股本约为8亿股
-            base_shares = 8.0
+            logger.debug(f"股票 {stock_code} 缺少收盘价数据，无法计算市值")
+            return 0.0
+        
+        # ========== 关键修复 ==========
+        # 尝试使用akshare获取实时行情信息（添加重试机制）
+        stock_info = None
+        for attempt in range(3):
+            try:
+                stock_info = ak.stock_zh_a_spot_em()
+                if not stock_info.empty:
+                    logger.debug(f"成功获取实时行情数据，尝试匹配股票 {stock_code}")
+                    break
+            except Exception as e:
+                logger.debug(f"尝试{attempt+1}/3: 获取实时行情数据失败: {str(e)}")
+                time.sleep(1.5)  # 增加等待时间
+        
+        if stock_info is not None and not stock_info.empty:
+            # 标准化股票代码格式（处理可能的前缀）
+            stock_code_std = stock_code.zfill(6)
+            if stock_code.startswith(('6', '9')):
+                stock_code_std = f"sh{stock_code_std}"
+            else:
+                stock_code_std = f"sz{stock_code_std}"
             
-        return close_price * base_shares
+            # 尝试匹配股票
+            stock_info = stock_info[stock_info["代码"] == stock_code_std]
+            
+            # 如果没有找到，尝试只匹配数字部分
+            if stock_info.empty:
+                stock_info = stock_info[stock_info["代码"].str[-6:] == stock_code_std[-6:]]
+            
+            # 如果还是没有找到，尝试使用名称匹配
+            if stock_info.empty and "name" in df.attrs:
+                stock_info = stock_info[stock_info["名称"].str.contains(df.attrs["name"])]
+            
+            if not stock_info.empty:
+                # 根据实际返回列名获取流通市值
+                if "流通市值" in stock_info.columns:
+                    market_cap = stock_info["流通市值"].iloc[0]
+                    if not pd.isna(market_cap) and market_cap > 0:
+                        logger.debug(f"使用stock_zh_a_spot_em获取流通市值: {market_cap/10000:.2f}亿元")
+                        return market_cap / 10000  # 转换为亿元
+        
+        # 如果以上方法都失败，尝试使用历史数据估算
+        if len(df) >= 250:  # 至少一年数据
+            if "volume" in df.columns and "close" in df.columns:
+                avg_volume = df["volume"].iloc[-250:].mean()
+                avg_price = df["close"].iloc[-250:].mean()
+                if avg_volume > 0 and avg_price > 0:
+                    # 估算日均成交额(万元)
+                    daily_turnover = avg_volume * avg_price / 10000
+                    # 假设换手率为2%，估算总市值
+                    if daily_turnover > 0:
+                        estimated_market_cap = daily_turnover / 0.02  # 换手率2%
+                        logger.debug(f"使用历史数据估算市值: {estimated_market_cap:.2f}亿元")
+                        return estimated_market_cap
+        
+        logger.debug(f"股票 {stock_code} 市值计算失败，返回默认值0.0")
+        return 0.0
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
@@ -566,9 +655,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
 # ========== 以上是关键修改 ==========
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
-    """
-    判断个股是否适合策略（流动性、波动率、市值三重过滤）
-    
+    """判断个股是否适合策略（流动性、波动率、市值三重过滤）
     Args:
         stock_code: 股票代码
         df: 股票日线数据
@@ -577,10 +664,8 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         bool: 是否适合策略
     """
     try:
-        # ========== 以下是关键修改 ==========
-        # 检查数据量
-        if df.empty or len(df) < MIN_DATA_DAYS:
-            logger.debug(f"股票 {stock_code} 数据量不足（{len(df)}天 < {MIN_DATA_DAYS}天），跳过")
+        if df is None or df.empty or len(df) < MIN_DATA_DAYS:
+            logger.debug(f"股票 {stock_code} 数据不足，跳过")
             return False
         
         # 获取股票所属板块
@@ -594,17 +679,24 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         
         # 1. 流动性过滤（日均成交>设定阈值）
         # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
-        daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
-        logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 日均成交额: {daily_volume/10000:.2f}万元, 要求: >{section_config['min_daily_volume']/10000:.2f}万元")
-        if daily_volume < section_config["min_daily_volume"]:
-            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 流动性过滤失败（日均成交额不足）")
-            return False
+        if 'volume' in df.columns and 'close' in df.columns and len(df) >= 20:
+            # 修正：成交量单位是"手"，需要乘以100转换为股
+            daily_volume = df["volume"].iloc[-20:].mean() * 100 * df["close"].iloc[-20:].mean()
+            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 日均成交额: {daily_volume/10000:.2f}万元, 要求: >{section_config['min_daily_volume']/10000:.2f}万元")
+            
+            if daily_volume < section_config["min_daily_volume"]:
+                logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 流动性过滤失败（日均成交额不足）")
+                return False
+            else:
+                logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 通过流动性过滤")
         else:
-            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 通过流动性过滤")
+            logger.debug(f"股票 {stock_code} 缺少成交量或收盘价数据，无法进行流动性过滤")
+            return False
         
         # 2. 波动率过滤（年化波动率<设定阈值）
         annual_volatility = calculate_annual_volatility(df)
         logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 年化波动率: {annual_volatility:.2%}, 要求: <{section_config['max_volatility']:.0%}")
+        
         if annual_volatility > section_config["max_volatility"]:
             logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 波动率过滤失败（波动率过高）")
             return False
@@ -614,6 +706,7 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         # 3. 市值过滤（市值>设定阈值）
         market_cap = calculate_market_cap(df, stock_code)
         logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值: {market_cap:.2f}亿元, 要求: >{section_config['min_market_cap']:.2f}亿元")
+        
         if market_cap < section_config["min_market_cap"]:
             logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值过滤失败（市值不足）")
             return False
@@ -622,75 +715,133 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         
         logger.info(f"【最终结果】股票 {stock_code} - {section} - 通过所有过滤条件")
         return True
-        # ========== 以上是关键修改 ==========
     
     except Exception as e:
         logger.error(f"筛选股票{stock_code}失败: {str(e)}", exc_info=True)
         return False
 
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
-    """
-    计算个股策略得分（胜率评估）
-    
+    """计算股票策略评分
     Args:
         stock_code: 股票代码
-        df: 股票日线数据
+        df: 预处理后的股票数据
     
     Returns:
-        float: 策略得分（0-100）
+        float: 评分(0-100)
     """
     try:
-        if df.empty or len(df) < CRITICAL_VALUE_DAYS + 30:
+        if df is None or df.empty or len(df) < 40:
+            logger.debug(f"股票 {stock_code} 数据不足，无法计算策略评分")
             return 0.0
         
-        # 预处理数据，缓存中间结果
-        df = preprocess_stock_data(df)
+        # 检查必要列
+        required_columns = ['close', 'volume', 'ma5', 'ma10', 'ma20', 'ma40']
+        missing_columns = [col for col in required_columns if col not in df.columns]
         
-        # 1. 基础信号得分（40%权重）
-        current = df["收盘"].iloc[-1]
-        critical = calculate_critical_value(df)
-        deviation = calculate_deviation(current, critical)
+        if missing_columns:
+            logger.debug(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}，无法计算策略评分")
+            return 0.0
         
-        base_score = 0.0
-        # YES信号
-        if current >= critical:
-            # 偏离率越小，得分越高（最大40分）
-            base_score = max(0, 40 - abs(deviation) * 2)
-        # NO信号
-        else:
-            # 偏离率越负，得分越低（但超卖有反弹机会）
-            base_score = max(0, 20 + deviation * 1.5)
+        # 获取最新数据
+        current = df["close"].iloc[-1]
+        if pd.isna(current) or current <= 0:
+            logger.debug(f"股票 {stock_code} 无效的收盘价: {current}")
+            return 0.0
         
-        # 2. 信号确认得分（30%权重）
-        volume_change = calculate_volume_change(df)
-        consecutive_days = calculate_consecutive_days_above(df, critical) if current >= critical \
-                          else calculate_consecutive_days_below(df, critical)
+        volume = df["volume"].iloc[-1] if "volume" in df.columns and len(df) >= 1 else 0
+        volume_ma5 = df["volume_ma5"].iloc[-1] if "volume_ma5" in df.columns and len(df) >= 1 else 0
         
-        confirmation_score = 0.0
-        # 成交量确认（15分）
-        if volume_change > VOLUME_CHANGE_THRESHOLD * 100:
-            confirmation_score += 15
-        # 连续天数确认（15分）
-        if consecutive_days >= MIN_CONSECUTIVE_DAYS:
-            confirmation_score += 15
+        # 1. 趋势评分 (40%)
+        trend_score = 0.0
+        if len(df) >= 40:
+            ma5 = df["ma5"].iloc[-1] if "ma5" in df.columns else current
+            ma10 = df["ma10"].iloc[-1] if "ma10" in df.columns else current
+            ma20 = df["ma20"].iloc[-1] if "ma20" in df.columns else current
+            ma40 = df["ma40"].iloc[-1] if "ma40" in df.columns else current
+            
+            # 检查短期均线是否在长期均线上方（多头排列）
+            if ma5 > ma10 > ma20 > ma40 and all(not pd.isna(x) for x in [ma5, ma10, ma20, ma40]):
+                trend_score += 20  # 多头排列，加20分
+            
+            # 检查价格是否在均线上方
+            if not pd.isna(ma20) and current > ma20:
+                trend_score += 10  # 价格在20日均线上方，加10分
+            
+            # 检查趋势强度
+            if len(df) >= 20:
+                price_change_20 = (current - df["close"].iloc[-20]) / df["close"].iloc[-20] * 100
+                if not pd.isna(price_change_20) and price_change_20 > 5:
+                    trend_score += 10  # 20日涨幅大于5%，加10分
         
-        # 3. 历史表现得分（30%权重）
-        # 这里简化处理，实际应进行历史回测
-        # 根据偏离率和信号稳定性打分
-        historical_score = 0.0
-        if current >= critical:
-            # 上涨趋势中，偏离率越小，历史表现越好
-            historical_score = max(0, 30 - abs(deviation) * 1.5)
-        else:
-            # 下跌趋势中，超卖程度越大，反弹概率越高
-            historical_score = max(0, 15 + abs(min(deviation, -10)) * 1.0)
+        # 2. 动量评分 (20%)
+        momentum_score = 0.0
+        if "hist" in df.columns and len(df) >= 2:
+            macd_hist = df["hist"].iloc[-1]
+            macd_hist_prev = df["hist"].iloc[-2]
+            
+            # MACD柱状体增加
+            if not pd.isna(macd_hist) and not pd.isna(macd_hist_prev) and macd_hist > macd_hist_prev and macd_hist > 0:
+                momentum_score += 10  # MACD柱状体增加且为正，加10分
+            
+            # RSI指标
+            if "rsi" in df.columns:
+                rsi = df["rsi"].iloc[-1]
+                if not pd.isna(rsi):
+                    if 50 < rsi < 70:
+                        momentum_score += 10  # RSI在50-70之间，加10分
+                    elif rsi >= 70:
+                        momentum_score += 5  # RSI大于70，加5分
         
-        # 综合得分
-        total_score = base_score * 0.4 + confirmation_score * 0.3 + historical_score * 0.3
-        return min(total_score, 100.0)
+        # 3. 量能评分 (20%)
+        volume_score = 0.0
+        if volume_ma5 > 0 and volume > 0:
+            volume_ratio = volume / volume_ma5
+            
+            # 量能放大
+            if volume_ratio > 1.5:
+                volume_score += 10  # 量能放大50%以上，加10分
+            elif volume_ratio > 1.2:
+                volume_score += 5  # 量能放大20%以上，加5分
+            
+            # 量价配合
+            if len(df) >= 2:
+                price_change = (current - df["close"].iloc[-2]) / df["close"].iloc[-2] * 100
+                if price_change > 0 and volume_ratio > 1.0:
+                    volume_score += 10  # 价格上涨且量能放大，加10分
+        
+        # 4. 波动率评分 (20%)
+        volatility_score = 0.0
+        if "volatility" in df.columns and len(df) >= 20:
+            volatility = df["volatility"].iloc[-1]
+            
+            if not pd.isna(volatility):
+                # 适中的波动率
+                if 15 <= volatility <= 30:
+                    volatility_score += 10  # 波动率在15%-30%之间，加10分
+                elif volatility > 30:
+                    volatility_score += 5  # 波动率大于30%，加5分
+                
+                # 波动率趋势
+                if len(df) >= 21:
+                    prev_volatility = df["volatility"].iloc[-21]
+                    if not pd.isna(prev_volatility) and prev_volatility > 0:
+                        volatility_change = (volatility - prev_volatility) / prev_volatility
+                        
+                        if -0.1 <= volatility_change <= 0.1:
+                            volatility_score += 10  # 波动率稳定，加10分
+        
+        # 综合评分
+        total_score = trend_score + momentum_score + volume_score + volatility_score
+        total_score = max(0, min(100, total_score))  # 限制在0-100范围内
+        
+        logger.debug(f"股票 {stock_code} 策略评分: {total_score:.2f} "
+                     f"(趋势={trend_score:.1f}, 动量={momentum_score:.1f}, "
+                     f"量能={volume_score:.1f}, 波动率={volatility_score:.1f})")
+        
+        return total_score
     
     except Exception as e:
-        logger.error(f"计算{stock_code}策略得分失败: {str(e)}", exc_info=True)
+        logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
 
 def is_in_volatile_market(df: pd.DataFrame, period: int = CRITICAL_VALUE_DAYS) -> tuple:

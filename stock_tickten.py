@@ -425,12 +425,6 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
             logger.debug(f"股票 {stock_code} 数据不足，无法计算市值")
             return 0.0
         
-        # 尝试从本地数据获取市值
-        if "market_cap" in df.columns:
-            market_cap = df["market_cap"].iloc[-1]
-            if not pd.isna(market_cap) and market_cap > 0:
-                return market_cap / 10000  # 转换为亿元
-        
         # 获取最新收盘价
         if "收盘" in df.columns:
             current_price = df["收盘"].iloc[-1]
@@ -438,14 +432,13 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
             logger.debug(f"股票 {stock_code} 缺少收盘价数据，无法计算市值")
             return 0.0
         
-        # ========== 以下是关键修改 ==========
         # 尝试使用akshare获取实时行情信息（添加重试机制）
         stock_info = None
         for attempt in range(3):
             try:
                 stock_info = ak.stock_zh_a_spot_em()
                 if not stock_info.empty:
-                    logger.debug(f"成功获取实时行情数据，尝试匹配股票 {stock_code}")
+                    logger.debug(f"尝试{attempt+1}/3: 成功获取实时行情数据，共 {len(stock_info)} 条记录")
                     break
             except Exception as e:
                 logger.debug(f"尝试{attempt+1}/3: 获取实时行情数据失败: {str(e)}")
@@ -460,45 +453,101 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                 stock_code_std = f"sz{stock_code_std}"
             
             # 尝试匹配股票
-            stock_info = stock_info[stock_info["代码"] == stock_code_std]
+            matched = False
             
-            # 如果没有找到，尝试只匹配数字部分
-            if stock_info.empty:
+            # 1. 精确匹配完整代码
+            if "代码" in stock_info.columns:
+                stock_info = stock_info[stock_info["代码"] == stock_code_std]
+                if not stock_info.empty:
+                    logger.debug(f"通过完整代码匹配成功: {stock_code_std}")
+                    matched = True
+            
+            # 2. 如果没找到，尝试只匹配数字部分
+            if not matched and "代码" in stock_info.columns:
                 stock_info = stock_info[stock_info["代码"].str[-6:] == stock_code_std[-6:]]
+                if not stock_info.empty:
+                    logger.debug(f"通过数字部分匹配成功: {stock_code_std[-6:]}")
+                    matched = True
             
-            # 如果还是没有找到，尝试使用名称匹配
-            if stock_info.empty and "name" in df.attrs:
-                stock_info = stock_info[stock_info["名称"].str.contains(df.attrs["name"])]
+            # 3. 如果还是没找到，尝试使用名称匹配
+            if not matched and "name" in df.attrs and "名称" in stock_info.columns:
+                stock_name = df.attrs["name"]
+                stock_info = stock_info[stock_info["名称"].str.contains(stock_name)]
+                if not stock_info.empty:
+                    logger.debug(f"通过名称匹配成功: {stock_name}")
+                    matched = True
             
-            if not stock_info.empty:
+            # 4. 如果仍然没找到，尝试使用股票代码匹配（不带前缀）
+            if not matched and "代码" in stock_info.columns:
+                stock_info = stock_info[stock_info["代码"].str.contains(stock_code)]
+                if not stock_info.empty:
+                    logger.debug(f"通过部分代码匹配成功: {stock_code}")
+                    matched = True
+            
+            if matched and not stock_info.empty:
                 # 根据实际返回列名获取流通市值
                 if "流通市值" in stock_info.columns:
                     market_cap = stock_info["流通市值"].iloc[0]
                     if not pd.isna(market_cap) and market_cap > 0:
                         logger.debug(f"使用stock_zh_a_spot_em获取流通市值: {market_cap/10000:.2f}亿元")
                         return market_cap / 10000  # 转换为亿元
+                
+                # 如果没有流通市值，尝试获取总市值
+                if "总市值" in stock_info.columns:
+                    market_cap = stock_info["总市值"].iloc[0]
+                    if not pd.isna(market_cap) and market_cap > 0:
+                        logger.debug(f"使用stock_zh_a_spot_em获取总市值: {market_cap/10000:.2f}亿元")
+                        return market_cap / 10000  # 转换为亿元
         
         # 如果以上方法都失败，尝试使用历史数据估算
-        if len(df) >= 250:  # 至少一年数据
+        if len(df) >= 20:  # 至少20天数据（不必需要一年）
             if "成交量" in df.columns and "收盘" in df.columns:
-                avg_volume = df["成交量"].iloc[-250:].mean()
-                avg_price = df["收盘"].iloc[-250:].mean()
+                # 修正：A股成交量单位是"手"（1手=100股），需要乘以100
+                avg_volume = df["成交量"].iloc[-20:].mean() * 100
+                avg_price = df["收盘"].iloc[-20:].mean()
                 if avg_volume > 0 and avg_price > 0:
                     # 估算日均成交额(万元)
                     daily_turnover = avg_volume * avg_price / 10000
-                    # 假设换手率为2%，估算总市值
-                    if daily_turnover > 0:
-                        estimated_market_cap = daily_turnover / 0.02  # 换手率2%
-                        logger.debug(f"使用历史数据估算市值: {estimated_market_cap:.2f}亿元")
+                    
+                    # 根据板块设置不同的换手率
+                    section = get_stock_section(stock_code)
+                    if section == "科创板":
+                        turnover_rate = 0.03  # 科创板平均换手率3%
+                    elif section == "创业板":
+                        turnover_rate = 0.025  # 创业板平均换手率2.5%
+                    else:
+                        turnover_rate = 0.02  # 主板平均换手率2%
+                    
+                    # 估算市值 = 日均成交额 / 换手率
+                    estimated_market_cap = daily_turnover / turnover_rate
+                    logger.debug(f"使用历史数据估算市值: {estimated_market_cap:.2f}亿元 (换手率={turnover_rate:.1%})")
+                    
+                    # 确保估算值合理（至少10亿元）
+                    if estimated_market_cap >= 10:
                         return estimated_market_cap
         
-        logger.debug(f"股票 {stock_code} 市值计算失败，返回默认值0.0")
-        return 0.0
-        # ========== 以上是关键修改 ==========
+        # 如果所有方法都失败，返回板块默认市值
+        section = get_stock_section(stock_code)
+        if section == "科创板":
+            default_market_cap = 100  # 科创板平均市值约100亿元
+        elif section == "创业板":
+            default_market_cap = 150  # 创业板平均市值约150亿元
+        else:
+            default_market_cap = 500  # 主板平均市值约500亿元
+        
+        logger.warning(f"股票 {stock_code} 市值计算失败，返回板块默认值: {default_market_cap}亿元")
+        return default_market_cap
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
-        return 0.0
+        # 返回板块默认市值
+        section = get_stock_section(stock_code)
+        if section == "科创板":
+            return 100
+        elif section == "创业板":
+            return 150
+        else:
+            return 500
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
     """判断个股是否适合策略（流动性、波动率、市值三重过滤）

@@ -393,7 +393,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                         logger.debug(f"成功通过stock_zh_a_hist接口获取股票 {code} 数据")
                         break
                 except Exception as e:
-                    logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
+                    logger.error(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}", exc_info=True)
                 
                 # 指数退避等待，避免高并发获取数据导致IP被拉黑
                 time.sleep(0.5 * (2 ** attempt))
@@ -417,16 +417,39 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                             logger.debug(f"成功通过stock_zh_a_daily接口获取股票 {code} 数据")
                             break
                     except Exception as e:
-                        logger.debug(f"使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
+                        logger.error(f"使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}", exc_info=True)
                     
                     time.sleep(1.0 * (2 ** attempt))
                 
                 if df is not None and not df.empty:
                     break
         
+        # 如果还是失败，尝试使用更简单的接口
+        if df is None or df.empty:
+            for code in possible_codes:
+                for attempt in range(3):
+                    try:
+                        logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_daily_em接口获取股票 {code}")
+                        df = ak.stock_zh_a_daily_em(symbol=code, 
+                                                  start_date=start_date, 
+                                                  end_date=end_date, 
+                                                  adjust="qfq")
+                        if not df.empty:
+                            successful_code = code
+                            successful_interface = "stock_zh_a_daily_em"
+                            logger.debug(f"成功通过stock_zh_a_daily_em接口获取股票 {code} 数据")
+                            break
+                    except Exception as e:
+                        logger.error(f"使用stock_zh_a_daily_em接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                    
+                    time.sleep(1.5 * (2 ** attempt))
+                
+                if df is not None and not df.empty:
+                    break
+        
         # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.warning(f"获取股票 {stock_code} 数据失败，所有接口和代码格式均无效")
+            logger.error(f"获取股票 {stock_code} 数据失败，所有接口和代码格式均无效")
             return pd.DataFrame()
         
         logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
@@ -451,6 +474,8 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
             df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
                                               lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
                                               regex=True)
+            # 移除可能存在的空格
+            df["日期"] = df["日期"].str.strip()
             df = df.sort_values("日期", ascending=True)
         
         # 检查数据量
@@ -461,7 +486,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.debug(f"获取股票 {stock_code} 数据失败: {str(e)}")
+        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:

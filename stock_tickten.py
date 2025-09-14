@@ -184,7 +184,7 @@ def get_stock_section(stock_code: str) -> str:
     return "其他板块"
 
 def fetch_stock_list() -> pd.DataFrame:
-    """从仓库加载股票基础信息，必要时更新并提交到仓库"""
+    """从仓库加载股票基础信息，必要时更新"""
     try:
         logger.info("正在加载股票基础信息...")
         
@@ -193,16 +193,21 @@ def fetch_stock_list() -> pd.DataFrame:
             basic_info_df = pd.read_csv(BASIC_INFO_FILE)
             logger.info(f"成功加载现有股票基础信息，共 {len(basic_info_df)} 条记录")
             
-            # 检查是否需要更新
+            # 检查是否需要更新（基于最后更新时间）
             if "last_update" in basic_info_df.columns and not basic_info_df.empty:
                 last_update_str = basic_info_df["last_update"].max()
                 try:
                     last_update = datetime.strptime(last_update_str, "%Y-%m-%d %H:%M:%S")
                     if (datetime.now() - last_update).days < 1:
                         logger.info(f"股票基础信息未过期（最后更新: {last_update_str}），使用现有数据")
-                        return basic_info_df.drop_duplicates(subset=['code'], keep='last')
+                        # 修复：移除重复记录，确保唯一性
+                        basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
+                        logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
+                        return basic_info_df
                 except Exception as e:
                     logger.warning(f"解析最后更新时间失败: {str(e)}，将重新获取数据")
+        else:
+            logger.info("股票基础信息文件不存在，将创建新文件")
         
         # 2. 获取A股股票列表
         logger.info("正在从AkShare获取股票列表...")
@@ -233,10 +238,14 @@ def fetch_stock_list() -> pd.DataFrame:
             
             # 检查是否已有记录
             existing_market_cap = 0
+            existing_score = 0
             if os.path.exists(BASIC_INFO_FILE) and "code" in basic_info_df.columns:
                 existing = basic_info_df[basic_info_df["code"] == stock_code]
                 if not existing.empty:
+                    # 保留现有市值和评分
                     existing_market_cap = existing["market_cap"].values[0]
+                    if "score" in existing.columns:
+                        existing_score = existing["score"].values[0]
             
             # 基础信息只包含必要字段
             basic_info_data.append({
@@ -244,6 +253,7 @@ def fetch_stock_list() -> pd.DataFrame:
                 "name": stock_name,
                 "section": section,
                 "market_cap": existing_market_cap,
+                "score": existing_score,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         
@@ -259,28 +269,18 @@ def fetch_stock_list() -> pd.DataFrame:
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         logger.info(f"股票基础信息已保存至 {BASIC_INFO_FILE}，共 {len(basic_info_df)} 条记录")
         
-        # ========== 关键修复 ==========
-        # 立即提交到GitHub仓库，确保文件持久化
+        # ========== 正确修复 ==========
+        # 使用 git_utils.py 中已有的工具函数
         try:
             logger.info("正在提交股票基础信息到GitHub仓库...")
-            # 获取当前工作目录
-            repo_path = os.getcwd()
             commit_message = "自动更新股票基础信息 [初始化]"
-            
-            # 添加文件到暂存区
-            subprocess.run(["git", "add", BASIC_INFO_FILE], check=True)
-            
-            # 提交更改
-            subprocess.run(["git", "commit", "-m", commit_message], check=True)
-            
-            # 推送到远程仓库
-            subprocess.run(["git", "push", "origin", "main"], check=True)
-            
-            logger.info("股票基础信息已成功提交并推送到GitHub仓库")
+            if commit_and_push_file(BASIC_INFO_FILE, commit_message):
+                logger.info("股票基础信息已成功提交并推送到GitHub仓库")
+            else:
+                logger.warning("提交股票基础信息到GitHub仓库失败，但继续执行策略")
         except Exception as e:
             logger.warning(f"提交股票基础信息到GitHub仓库失败: {str(e)}")
-            # 即使提交失败，继续执行策略
-        # ========== 关键修复 ==========
+        # ========== 正确修复 ==========
         
         return basic_info_df
     
@@ -290,6 +290,7 @@ def fetch_stock_list() -> pd.DataFrame:
         if os.path.exists(BASIC_INFO_FILE):
             try:
                 basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+                # 确保唯一性
                 if "code" in basic_info_df.columns:
                     basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
                     logger.warning(f"使用现有数据并去重，共 {len(basic_info_df)} 条记录")

@@ -23,6 +23,8 @@ from utils.date_utils import (
     get_beijing_time,
     get_utc_time
 )
+
+from utils.git_utils import commit_and_push_file
 from wechat_push.push import send_wechat_message
 
 # 初始化日志

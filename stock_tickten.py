@@ -229,6 +229,20 @@ def fetch_stock_list() -> pd.DataFrame:
         filtered_count = len(stock_list)
         logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
         
+        # ========== 关键修复 ==========
+        # 一次性获取所有股票的实时行情数据（包含市值信息）
+        logger.info("正在获取所有股票的实时行情数据（包含市值信息）...")
+        stock_info = None
+        for attempt in range(3):
+            try:
+                stock_info = ak.stock_zh_a_spot_em()
+                if not stock_info.empty:
+                    logger.info(f"成功获取所有股票的实时行情数据，共 {len(stock_info)} 条记录")
+                    break
+            except Exception as e:
+                logger.warning(f"尝试{attempt+1}/3: 获取实时行情数据失败: {str(e)}")
+                time.sleep(1.5 * (2 ** attempt))  # 指数退避
+        
         # 3. 创建基础信息DataFrame
         basic_info_data = []
         for _, row in stock_list.iterrows():
@@ -247,6 +261,38 @@ def fetch_stock_list() -> pd.DataFrame:
                     if "score" in existing.columns:
                         existing_score = existing["score"].values[0]
             
+            # 如果没有现有市值，尝试从实时行情数据获取
+            if existing_market_cap == 0 and stock_info is not None:
+                # 标准化股票代码匹配
+                stock_code_std = stock_code.zfill(6)
+                matched = stock_info[stock_info["代码"] == stock_code_std]
+                
+                if not matched.empty:
+                    # 尝试获取流通市值
+                    if "流通市值" in matched.columns:
+                        market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
+                        if market_cap > 0:
+                            logger.info(f"获取股票 {stock_code} {stock_name} 的流通市值: {market_cap:.2f}亿元")
+                            existing_market_cap = market_cap
+                    
+                    # 尝试获取总市值
+                    if "总市值" in matched.columns and existing_market_cap == 0:
+                        market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
+                        if market_cap > 0:
+                            logger.info(f"获取股票 {stock_code} {stock_name} 的总市值: {market_cap:.2f}亿元")
+                            existing_market_cap = market_cap
+            
+            # 如果仍然没有市值，使用板块默认值
+            if existing_market_cap == 0:
+                defaults = {
+                    "沪市主板": 150,
+                    "深市主板": 120,
+                    "创业板": 80,
+                    "科创板": 50
+                }
+                existing_market_cap = defaults.get(section, 100)
+                logger.warning(f"股票 {stock_code} {stock_name} 无法获取市值，使用默认值: {existing_market_cap}亿元")
+            
             # 基础信息只包含必要字段
             basic_info_data.append({
                 "code": stock_code,
@@ -256,6 +302,7 @@ def fetch_stock_list() -> pd.DataFrame:
                 "score": existing_score,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
+        # ========== 关键修复 ==========
         
         basic_info_df = pd.DataFrame(basic_info_data)
         
@@ -443,8 +490,12 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     
     return volatility
 
-def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
-    """计算股票市值（优先使用缓存数据）"""
+def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
+    """计算股票市值（优先使用缓存数据）
+    
+    Returns:
+        Optional[float]: 市值(亿元)，None表示市值数据不可靠
+    """
     try:
         # 1. 优先从缓存中获取市值
         basic_info_df = load_stock_basic_info()
@@ -484,7 +535,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
             matched = stock_info[stock_info["代码"] == stock_code_std]
             
             if not matched.empty:
-                # 直接使用中文列名获取流通市值（不进行任何映射）
+                # 直接使用中文列名获取流通市值
                 if "流通市值" in matched.columns:
                     market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
@@ -496,7 +547,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                                               get_stock_section(stock_code))
                         return market_cap
                 
-                # 直接使用中文列名获取总市值（不进行任何映射）
+                # 直接使用中文列名获取总市值
                 if "总市值" in matched.columns:
                     market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
@@ -531,53 +582,20 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                                       section)
                 return estimated_market_cap
         
-        # 5. 如果所有方法都失败，返回缓存中最近的有效值
+        # 5. 如果所有方法都失败，不要返回默认值，而是返回None
         if not basic_info_df.empty and not existing.empty:
             cached_market_cap = existing["market_cap"].values[0]
             if not pd.isna(cached_market_cap) and cached_market_cap > 0:
                 logger.warning(f"⚠️ 无法获取最新市值，使用过期缓存数据: {cached_market_cap:.2f}亿元")
                 return cached_market_cap
         
-        # 6. 最后手段：使用板块默认值
-        section = get_stock_section(stock_code)
-        defaults = {
-            "沪市主板": 150,
-            "深市主板": 120,
-            "创业板": 80,
-            "科创板": 50
-        }
-        default_cap = defaults.get(section, 100)
-        logger.warning(f"⚠️ 无法获取准确市值，使用板块默认值: {default_cap}亿元 (板块: {section})")
-        
-        # 更新缓存
-        update_stock_basic_info(basic_info_df, stock_code, 
-                              df.attrs.get("name", ""), 
-                              default_cap, 
-                              section)
-        return default_cap
+        # 6. 重要修复：不再返回板块默认值，而是返回None表示数据不可靠
+        logger.error(f"❌ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
+        return None
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
-        
-        # 出错时，尝试返回缓存数据
-        basic_info_df = load_stock_basic_info()
-        if not basic_info_df.empty:
-            existing = basic_info_df[basic_info_df["code"] == stock_code]
-            if not existing.empty and "market_cap" in existing.columns:
-                cached_market_cap = existing["market_cap"].values[0]
-                if not pd.isna(cached_market_cap) and cached_market_cap > 0:
-                    logger.warning(f"使用缓存市值作为备选: {cached_market_cap:.2f}亿元")
-                    return cached_market_cap
-        
-        # 最终备选
-        section = get_stock_section(stock_code)
-        defaults = {
-            "沪市主板": 150,
-            "深市主板": 120,
-            "创业板": 80,
-            "科创板": 50
-        }
-        return defaults.get(section, 100)
+        return None
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
     """判断个股是否适合策略（流动性、波动率、市值三重过滤）
@@ -630,6 +648,12 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         
         # 3. 市值过滤（市值>设定阈值）
         market_cap = calculate_market_cap(df, stock_code)
+        
+        # 重要修复：处理市值数据不可靠的情况
+        if market_cap is None:
+            logger.warning(f"【市值过滤】股票 {stock_code} - {section} - 市值数据不可靠，排除该股票")
+            return False
+            
         logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值: {market_cap:.2f}亿元, 要求: >{section_config['min_market_cap']:.2f}亿元")
         
         if market_cap < section_config["min_market_cap"]:

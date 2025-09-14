@@ -338,7 +338,6 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         successful_code = None
         successful_interface = None
         
-        # 先建议切换为stock_zh_a_hist 接口使用(该接口数据质量较好) [[2]]
         # 先尝试使用stock_zh_a_hist接口
         for code in possible_codes:
             for attempt in range(5):  # 增加重试次数
@@ -355,7 +354,7 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
                 except Exception as e:
                     logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                 
-                # 指数退避等待，避免高并发获取数据导致IP被拉黑 [[5]]
+                # 指数退避等待，避免高并发获取数据导致IP被拉黑
                 time.sleep(0.5 * (2 ** attempt))
             
             if df is not None and not df.empty:
@@ -391,44 +390,11 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         
         logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
         
-        # 处理可能的列名差异
-        if 'date' in df.columns:
-            # 英文列名映射到标准列名
-            column_mapping = {
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量',
-                'amount': '成交额',
-                'amplitude': '振幅',
-                'percent': '涨跌幅',
-                'change': '涨跌额',
-                'turnover': '换手率'
-            }
-        else:
-            # 中文列名映射到标准列名
-            column_mapping = {
-                '日期': '日期',
-                '开盘': '开盘',
-                '最高': '最高',
-                '最低': '最低',
-                '收盘': '收盘',
-                '成交量': '成交量',
-                '成交额': '成交额',
-                '振幅': '振幅',
-                '涨跌幅': '涨跌幅',
-                '涨跌额': '涨跌额',
-                '换手率': '换手率'
-            }
-        
-        # 重命名列
-        df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
-        
+        # 直接使用AkShare返回的列名，不做任何映射
         # 确保日期列存在
-        if '日期' not in df.columns and 'date' in df.columns:
-            df = df.rename(columns={'date': '日期'})
+        if "日期" not in df.columns:
+            logger.error(f"股票 {stock_code} 数据缺少'日期'列")
+            return pd.DataFrame()
         
         # 检查是否有必要的列
         required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
@@ -463,12 +429,8 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
         logger.warning(f"数据不足20天，无法准确计算波动率")
         return 0.2  # 默认波动率
     
-    # 计算日收益率
-    # ========== 以下是关键修改 ==========
-    # 原始代码: daily_returns = df["收盘"].pct_change().dropna()
-    # 修改为: 使用标准列名 '收盘'
+    # 直接使用"收盘"列计算日收益率（不进行任何列名映射）
     daily_returns = df["收盘"].pct_change().dropna()
-    # ========== 以上是关键修改 ==========
     
     # 计算年化波动率
     if len(daily_returns) >= 20:
@@ -522,7 +484,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
             matched = stock_info[stock_info["代码"] == stock_code_std]
             
             if not matched.empty:
-                # 尝试获取流通市值
+                # 直接使用中文列名获取流通市值（不进行任何映射）
                 if "流通市值" in matched.columns:
                     market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
@@ -534,7 +496,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                                               get_stock_section(stock_code))
                         return market_cap
                 
-                # 尝试获取总市值
+                # 直接使用中文列名获取总市值（不进行任何映射）
                 if "总市值" in matched.columns:
                     market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
@@ -844,6 +806,15 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     """按板块获取适合策略的股票"""
     try:
+        logger.info("===== 开始执行个股趋势策略(TickTen) =====")
+        # 明确列出接口调用信息
+        logger.info("===== 接口调用信息 =====")
+        logger.info("1. ak.stock_info_a_code_name() - 获取A股股票列表（返回英文列名: code, name）")
+        logger.info("2. ak.stock_zh_a_spot_em() - 获取股票实时行情数据（返回中文列名: 代码, 名称, 流通市值, 总市值等）")
+        logger.info("3. ak.stock_zh_a_hist() - 获取股票历史数据（返回中文列名: 日期, 开盘, 最高, 最低, 收盘, 成交量等）")
+        logger.info("4. ak.stock_zh_a_daily() - 获取股票历史数据（返回中文列名: 日期, 开盘, 最高, 最低, 收盘, 成交量等）")
+        logger.info("=======================")
+        
         # 1. 获取股票基础信息
         basic_info_df = fetch_stock_list()
         if basic_info_df.empty:
@@ -993,27 +964,18 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
             logger.info(f"股票基础信息已更新，共 {len(basic_info_df)} 条记录")
             
-            # ========== 关键修复 ==========
-            # 立即提交更新后的基础信息到GitHub仓库
+            # ========== 正确修复 ==========
+            # 使用 git_utils.py 中已有的工具函数
             try:
                 logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
-                # 获取当前工作目录
-                repo_path = os.getcwd()
                 commit_message = "自动更新股票基础信息 [策略执行]"
-                
-                # 添加文件到暂存区
-                subprocess.run(["git", "add", BASIC_INFO_FILE], check=True)
-                
-                # 提交更改
-                subprocess.run(["git", "commit", "-m", commit_message], check=True)
-                
-                # 推送到远程仓库
-                subprocess.run(["git", "push", "origin", "main"], check=True)
-                
-                logger.info("更新后的股票基础信息已成功提交并推送到GitHub仓库")
+                if commit_and_push_file(BASIC_INFO_FILE, commit_message):
+                    logger.info("更新后的股票基础信息已成功提交并推送到GitHub仓库")
+                else:
+                    logger.warning("提交更新后的股票基础信息到GitHub仓库失败，但继续执行策略")
             except Exception as e:
                 logger.warning(f"提交更新后的股票基础信息到GitHub仓库失败: {str(e)}")
-            # ========== 关键修复 ==========
+            # ========== 正确修复 ==========
         
         return top_stocks_by_section
     

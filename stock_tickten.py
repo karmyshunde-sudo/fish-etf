@@ -203,7 +203,14 @@ def fetch_stock_list() -> pd.DataFrame:
                         # 修复：移除重复记录，确保唯一性
                         basic_info_df = basic_info_df.drop_duplicates(subset=['code'], keep='last')
                         logger.info(f"去重后股票基础信息数量: {len(basic_info_df)} 条记录")
-                        return basic_info_df
+                        
+                        # 关键修复：检查市值数据是否有效
+                        valid_market_cap_count = len(basic_info_df[basic_info_df["market_cap"] > 10])
+                        if valid_market_cap_count < len(basic_info_df) * 0.2:
+                            logger.warning(f"市值数据有效性不足 ({valid_market_cap_count}/{len(basic_info_df)}), 将重新获取市值数据")
+                            basic_info_df = basic_info_df.drop(columns=["market_cap"], errors='ignore')
+                        else:
+                            return basic_info_df
                 except Exception as e:
                     logger.warning(f"解析最后更新时间失败: {str(e)}，将重新获取数据")
         else:
@@ -256,13 +263,13 @@ def fetch_stock_list() -> pd.DataFrame:
             if os.path.exists(BASIC_INFO_FILE) and "code" in basic_info_df.columns:
                 existing = basic_info_df[basic_info_df["code"] == stock_code]
                 if not existing.empty:
-                    # 保留现有市值和评分
-                    existing_market_cap = existing["market_cap"].values[0]
+                    # 保留现有评分
                     if "score" in existing.columns:
                         existing_score = existing["score"].values[0]
             
-            # 如果没有现有市值，尝试从实时行情数据获取
-            if existing_market_cap == 0 and stock_info is not None:
+            # 从实时行情数据获取市值
+            market_cap = 0
+            if stock_info is not None:
                 # 标准化股票代码匹配
                 stock_code_std = stock_code.zfill(6)
                 matched = stock_info[stock_info["代码"] == stock_code_std]
@@ -272,33 +279,20 @@ def fetch_stock_list() -> pd.DataFrame:
                     if "流通市值" in matched.columns:
                         market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
                         if market_cap > 0:
-                            logger.info(f"获取股票 {stock_code} {stock_name} 的流通市值: {market_cap:.2f}亿元")
-                            existing_market_cap = market_cap
+                            logger.debug(f"获取股票 {stock_code} {stock_name} 的流通市值: {market_cap:.2f}亿元")
                     
                     # 尝试获取总市值
-                    if "总市值" in matched.columns and existing_market_cap == 0:
+                    if market_cap == 0 and "总市值" in matched.columns:
                         market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
                         if market_cap > 0:
-                            logger.info(f"获取股票 {stock_code} {stock_name} 的总市值: {market_cap:.2f}亿元")
-                            existing_market_cap = market_cap
-            
-            # 如果仍然没有市值，使用板块默认值
-            if existing_market_cap == 0:
-                defaults = {
-                    "沪市主板": 150,
-                    "深市主板": 120,
-                    "创业板": 80,
-                    "科创板": 50
-                }
-                existing_market_cap = defaults.get(section, 100)
-                logger.warning(f"股票 {stock_code} {stock_name} 无法获取市值，使用默认值: {existing_market_cap}亿元")
+                            logger.debug(f"获取股票 {stock_code} {stock_name} 的总市值: {market_cap:.2f}亿元")
             
             # 基础信息只包含必要字段
             basic_info_data.append({
                 "code": stock_code,
                 "name": stock_name,
                 "section": section,
-                "market_cap": existing_market_cap,
+                "market_cap": market_cap,
                 "score": existing_score,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })

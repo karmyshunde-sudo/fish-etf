@@ -491,27 +491,14 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
         Optional[float]: 市值(亿元)，None表示市值数据不可靠
     """
     try:
-        # 1. 优先从缓存中获取市值
-        basic_info_df = load_stock_basic_info()
-        if not basic_info_df.empty:
-            existing = basic_info_df[basic_info_df["code"] == stock_code]
-            if not existing.empty and "market_cap" in existing.columns:
-                cached_market_cap = existing["market_cap"].values[0]
-                last_update = get_last_update_time(basic_info_df, stock_code)
-                
-                # 检查缓存数据是否过期（超过7天）
-                if not pd.isna(cached_market_cap) and cached_market_cap > 0:
-                    if last_update and (datetime.now() - last_update).days <= 7:
-                        logger.debug(f"使用缓存的市值数据: {cached_market_cap:.2f}亿元 (最后更新: {last_update.strftime('%Y-%m-%d')})")
-                        return cached_market_cap
-                    else:
-                        logger.debug(f"缓存市值数据过期，但仍使用: {cached_market_cap:.2f}亿元 (最后更新: {last_update.strftime('%Y-%m-%d') if last_update else '未知'})")
-                        return cached_market_cap
+        # 只使用传入的df中的数据，不再重新加载整个基础信息
+        # 优先检查df中是否已有市值数据
+        if df is not None and not df.empty and "market_cap" in df.columns:
+            market_cap = df["market_cap"].iloc[-1]
+            if not pd.isna(market_cap) and market_cap > 0:
+                return market_cap
         
-        # 2. 如果缓存数据不可用或过期，尝试获取新数据
-        logger.debug(f"尝试获取股票 {stock_code} 的最新市值数据...")
-        
-        # 尝试获取实时行情数据
+        # 尝试从实时行情数据获取
         stock_info = None
         for attempt in range(3):
             try:
@@ -522,7 +509,6 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
                 logger.debug(f"尝试{attempt+1}/3: 获取实时行情数据失败: {str(e)}")
                 time.sleep(1.5 * (2 ** attempt))  # 指数退避
         
-        # 3. 处理获取到的数据
         if stock_info is not None and not stock_info.empty:
             # 标准化股票代码匹配
             stock_code_std = stock_code.zfill(6)
@@ -534,11 +520,6 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
                     market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
                         logger.debug(f"✅ 获取到流通市值: {market_cap:.2f}亿元")
-                        # 更新缓存
-                        update_stock_basic_info(basic_info_df, stock_code, 
-                                              df.attrs.get("name", ""), 
-                                              market_cap, 
-                                              get_stock_section(stock_code))
                         return market_cap
                 
                 # 直接使用中文列名获取总市值
@@ -546,45 +527,10 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
                     market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
                         logger.debug(f"✅ 获取到总市值: {market_cap:.2f}亿元")
-                        # 更新缓存
-                        update_stock_basic_info(basic_info_df, stock_code, 
-                                              df.attrs.get("name", ""), 
-                                              market_cap, 
-                                              get_stock_section(stock_code))
                         return market_cap
         
-        # 4. 如果网络请求失败，尝试使用历史数据估算
-        if df is not None and not df.empty and "收盘" in df.columns:
-            current_price = df["收盘"].iloc[-1]
-            if current_price > 0:
-                # 根据板块使用不同的流通股本估算
-                section = get_stock_section(stock_code)
-                if section == "科创板":
-                    estimated_shares = 1.5  # 科创板平均流通股本(亿股)
-                elif section == "创业板":
-                    estimated_shares = 3.0  # 创业板平均流通股本(亿股)
-                else:
-                    estimated_shares = 8.0  # 主板平均流通股本(亿股)
-                
-                estimated_market_cap = current_price * estimated_shares
-                logger.debug(f"📊 使用历史数据估算市值: {estimated_market_cap:.2f}亿元 (流通股本: {estimated_shares}亿股)")
-                
-                # 更新缓存
-                update_stock_basic_info(basic_info_df, stock_code, 
-                                      df.attrs.get("name", ""), 
-                                      estimated_market_cap, 
-                                      section)
-                return estimated_market_cap
-        
-        # 5. 如果所有方法都失败，不要返回默认值，而是返回None
-        if not basic_info_df.empty and not existing.empty:
-            cached_market_cap = existing["market_cap"].values[0]
-            if not pd.isna(cached_market_cap) and cached_market_cap > 0:
-                logger.warning(f"⚠️ 无法获取最新市值，使用过期缓存数据: {cached_market_cap:.2f}亿元")
-                return cached_market_cap
-        
-        # 6. 重要修复：不再返回板块默认值，而是返回None表示数据不可靠
-        logger.error(f"❌ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
+        # 如果无法获取准确市值，返回None表示数据不可靠
+        logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
         return None
     
     except Exception as e:
@@ -953,30 +899,30 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 market_cap = calculate_market_cap(stock["df"], stock_code)
                 score = stock["score"]
                 
-                # 更新记录
-                updated_records.append({
-                    "code": stock_code,
-                    "name": stock_name,
-                    "section": section,
-                    "market_cap": market_cap,
-                    "score": score,
-                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                })
+                # 只更新市值数据，不覆盖基础信息
+                if market_cap is not None:
+                    updated_records.append({
+                        "code": stock_code,
+                        "name": stock_name,
+                        "section": section,
+                        "market_cap": market_cap,
+                        "score": score,
+                        "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
         
         # 11. 保存更新后的基础信息
         if updated_records:
-            updated_df = pd.DataFrame(updated_records)
-            # 合并到基础信息
-            for _, record in updated_df.iterrows():
+            # 创建临时DataFrame用于更新
+            update_df = pd.DataFrame(updated_records)
+            
+            # 仅更新市值和评分，不改变基础信息结构
+            for _, record in update_df.iterrows():
                 mask = basic_info_df["code"] == record["code"]
                 if mask.any():
-                    # 更新现有记录
+                    # 更新现有记录的市值和评分
                     basic_info_df.loc[mask, "market_cap"] = record["market_cap"]
                     basic_info_df.loc[mask, "score"] = record["score"]
                     basic_info_df.loc[mask, "last_update"] = record["last_update"]
-                else:
-                    # 添加新记录
-                    basic_info_df = pd.concat([basic_info_df, pd.DataFrame([record])], ignore_index=True)
             
             # 12. 保存更新
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)

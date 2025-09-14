@@ -177,6 +177,9 @@ def get_stock_section(stock_code: str) -> str:
     Returns:
         str: 板块名称
     """
+    # 确保股票代码是字符串，并且是6位（前面补零）
+    stock_code = str(stock_code).zfill(6)
+    
     for section, config in MARKET_SECTIONS.items():
         for prefix in config["prefix"]:
             if stock_code.startswith(prefix):
@@ -253,7 +256,8 @@ def fetch_stock_list() -> pd.DataFrame:
         # 3. 创建基础信息DataFrame
         basic_info_data = []
         for _, row in stock_list.iterrows():
-            stock_code = row["code"]
+            # 确保股票代码是字符串，并且是6位（前面补零）
+            stock_code = str(row["code"]).zfill(6)
             stock_name = row["name"]
             section = get_stock_section(stock_code)
             
@@ -351,6 +355,9 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 个股日线数据
     """
     try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
         # 确定市场前缀
         section = get_stock_section(stock_code)
         if section == "沪市主板" or section == "科创板":
@@ -837,7 +844,8 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         logger.info(f"开始处理 {len(stock_list)} 只通过市值过滤的股票...")
         
         def process_stock(stock):
-            stock_code = stock["code"]
+            # 确保股票代码是字符串，并且是6位（前面补零）
+            stock_code = str(stock["code"]).zfill(6)
             stock_name = stock["name"]
             section = stock["section"]
             
@@ -918,7 +926,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         updated_records = []
         for section, stocks in top_stocks_by_section.items():
             for stock in stocks:
-                stock_code = stock["code"]
+                stock_code = str(stock["code"]).zfill(6)
                 stock_name = stock["name"]
                 section = stock["section"]
                 market_cap = calculate_market_cap(stock["df"], stock_code)

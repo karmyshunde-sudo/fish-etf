@@ -523,12 +523,30 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
         Optional[float]: 市值(亿元)，None表示市值数据不可靠
     """
     try:
-        # 只使用传入的df中的数据，不再重新加载整个基础信息
-        # 优先检查df中是否已有市值数据
+        # 尝试从本地数据获取市值（如果已经计算过）
         if df is not None and not df.empty and "market_cap" in df.columns:
             market_cap = df["market_cap"].iloc[-1]
             if not pd.isna(market_cap) and market_cap > 0:
                 return market_cap
+        
+        # 检查是否需要缓存市值数据
+        cache_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "market_cap_cache.csv")
+        cache_days = 3  # 市值数据缓存3天
+        
+        if os.path.exists(cache_file):
+            cache_df = pd.read_csv(cache_file)
+            record = cache_df[cache_df["code"] == stock_code]
+            if not record.empty:
+                last_update = record["last_update"].values[0]
+                try:
+                    last_update_time = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+                    if (datetime.now() - last_update_time).days <= cache_days:
+                        market_cap = record["market_cap"].values[0]
+                        if not pd.isna(market_cap) and market_cap > 0:
+                            logger.debug(f"使用缓存的市值数据: {market_cap:.2f}亿元 (最后更新: {last_update})")
+                            return market_cap
+                except Exception as e:
+                    logger.warning(f"解析市值缓存更新时间失败: {str(e)}")
         
         # 尝试从实时行情数据获取
         stock_info = None
@@ -552,6 +570,27 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
                     market_cap = float(matched["流通市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
                         logger.debug(f"✅ 获取到流通市值: {market_cap:.2f}亿元")
+                        # 更新缓存
+                        if os.path.exists(cache_file):
+                            cache_df = pd.read_csv(cache_file)
+                            if stock_code in cache_df["code"].values:
+                                cache_df.loc[cache_df["code"] == stock_code, "market_cap"] = market_cap
+                                cache_df.loc[cache_df["code"] == stock_code, "last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            else:
+                                new_record = pd.DataFrame([{
+                                    "code": stock_code,
+                                    "market_cap": market_cap,
+                                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                }])
+                                cache_df = pd.concat([cache_df, new_record], ignore_index=True)
+                            cache_df.to_csv(cache_file, index=False)
+                        else:
+                            cache_df = pd.DataFrame([{
+                                "code": stock_code,
+                                "market_cap": market_cap,
+                                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }])
+                            cache_df.to_csv(cache_file, index=False)
                         return market_cap
                 
                 # 直接使用中文列名获取总市值
@@ -559,6 +598,27 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
                     market_cap = float(matched["总市值"].values[0]) / 100000000  # 元 → 亿元
                     if market_cap > 0:
                         logger.debug(f"✅ 获取到总市值: {market_cap:.2f}亿元")
+                        # 更新缓存
+                        if os.path.exists(cache_file):
+                            cache_df = pd.read_csv(cache_file)
+                            if stock_code in cache_df["code"].values:
+                                cache_df.loc[cache_df["code"] == stock_code, "market_cap"] = market_cap
+                                cache_df.loc[cache_df["code"] == stock_code, "last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            else:
+                                new_record = pd.DataFrame([{
+                                    "code": stock_code,
+                                    "market_cap": market_cap,
+                                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                }])
+                                cache_df = pd.concat([cache_df, new_record], ignore_index=True)
+                            cache_df.to_csv(cache_file, index=False)
+                        else:
+                            cache_df = pd.DataFrame([{
+                                "code": stock_code,
+                                "market_cap": market_cap,
+                                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }])
+                            cache_df.to_csv(cache_file, index=False)
                         return market_cap
         
         # 如果无法获取准确市值，返回None表示数据不可靠
@@ -800,15 +860,14 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         return 0.0
 
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
-    """按板块获取适合策略的股票"""
+    """按板块获取适合策略的股票（使用增量数据）"""
     try:
         logger.info("===== 开始执行个股趋势策略(TickTen) =====")
         # 明确列出接口调用信息
         logger.info("===== 接口调用信息 =====")
         logger.info("1. ak.stock_info_a_code_name() - 获取A股股票列表（返回英文列名: code, name）")
         logger.info("2. ak.stock_zh_a_spot_em() - 获取股票实时行情数据（返回中文列名: 代码, 名称, 流通市值, 总市值等）")
-        logger.info("3. ak.stock_zh_a_hist() - 获取股票历史数据（返回中文列名: 日期, 开盘, 最高, 最低, 收盘, 成交量等）")
-        logger.info("4. ak.stock_zh_a_daily() - 获取股票历史数据（返回中文列名: 日期, 开盘, 最高, 最低, 收盘, 成交量等）")
+        logger.info("3. 增量获取 - 仅获取最新数据（使用本地历史数据）")
         logger.info("=======================")
         
         # 1. 获取股票基础信息
@@ -843,6 +902,14 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         stock_list = basic_info_df.to_dict('records')
         logger.info(f"开始处理 {len(stock_list)} 只通过市值过滤的股票...")
         
+        # ========== 关键修改 ==========
+        # 分阶段执行：只处理今天的分组
+        today_group = datetime.now().weekday() % 5  # 0-4，对应周一至周五
+        logger.info(f"今天处理第 {today_group} 组股票（共5组）")
+        stock_list = [stock for stock in stock_list if get_stock_group(stock["code"]) == today_group]
+        logger.info(f"今天实际处理 {len(stock_list)} 只股票（分组过滤后）")
+        # ========== 关键修改 ==========
+        
         def process_stock(stock):
             # 确保股票代码是字符串，并且是6位（前面补零）
             stock_code = str(stock["code"]).zfill(6)
@@ -856,8 +923,10 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             # 更新板块计数器
             section_counts[section]["total"] += 1
             
-            # 获取日线数据 - 仅对通过市值过滤的股票执行
-            df = fetch_stock_data(stock_code)
+            # ========== 关键修改 ==========
+            # 获取日线数据（增量更新）
+            df = get_stock_daily_data(stock_code)
+            # ========== 关键修改 ==========
             
             # 检查数据量
             if df is None or df.empty or len(df) < MIN_DATA_DAYS:
@@ -890,13 +959,13 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         # 6. 并行处理股票（限制并发数量，避免被AkShare限制）
         results = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:  # 降低并发数，减少限流风险
             # 分批处理，避免请求过于频繁
-            for i in range(0, len(stock_list), 10):
-                batch = stock_list[i:i+10]
+            for i in range(0, len(stock_list), 5):  # 每批处理5只股票
+                batch = stock_list[i:i+5]
                 batch_results = list(executor.map(process_stock, batch))
                 results.extend(batch_results)
-                time.sleep(1.0)  # 批次间等待
+                time.sleep(2.0)  # 增加批次间等待时间
         
         # 7. 收集结果
         for result in results:
@@ -1097,6 +1166,205 @@ def main():
         error_msg = f"个股趋势策略执行失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         send_wechat_message(error_msg, message_type="error")
+
+# ========== 以下是关键修改 ==========
+def get_last_crawl_date(stock_code: str) -> str:
+    """获取股票最后爬取日期"""
+    # 检查是否有最后爬取日期记录
+    last_crawl_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "last_crawl_date.csv")
+    if os.path.exists(last_crawl_file):
+        try:
+            last_crawl_df = pd.read_csv(last_crawl_file)
+            record = last_crawl_df[last_crawl_df["code"] == stock_code]
+            if not record.empty:
+                return record["last_date"].values[0]
+        except Exception as e:
+            logger.warning(f"读取最后爬取日期失败: {str(e)}")
+    
+    # 如果没有记录，返回1年之前的日期（首次爬取）
+    return (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+def save_last_crawl_date(stock_code: str, date: str):
+    """保存股票最后爬取日期"""
+    last_crawl_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "last_crawl_date.csv")
+    
+    try:
+        if os.path.exists(last_crawl_file):
+            df = pd.read_csv(last_crawl_file)
+            # 更新或添加记录
+            if stock_code in df["code"].values:
+                df.loc[df["code"] == stock_code, "last_date"] = date
+            else:
+                df = pd.concat([df, pd.DataFrame([{"code": stock_code, "last_date": date}])], ignore_index=True)
+        else:
+            df = pd.DataFrame([{"code": stock_code, "last_date": date}])
+        
+        df.to_csv(last_crawl_file, index=False)
+    except Exception as e:
+        logger.error(f"保存最后爬取日期失败: {str(e)}", exc_info=True)
+
+def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
+    """获取股票日线数据（增量更新）"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        daily_dir = os.path.join(os.path.dirname(BASIC_INFO_FILE), "daily")
+        os.makedirs(daily_dir, exist_ok=True)
+        
+        # 检查本地是否有历史数据
+        file_path = os.path.join(daily_dir, f"{stock_code}.csv")
+        if os.path.exists(file_path):
+            try:
+                # 读取历史数据
+                historical_df = pd.read_csv(file_path)
+                
+                # 获取最后一条记录的日期
+                last_date = historical_df["日期"].max()
+                logger.debug(f"股票 {stock_code} 最后数据日期: {last_date}")
+                
+                # 计算需要爬取的日期范围
+                start_date = (datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+                end_date = datetime.now().strftime("%Y%m%d")
+                
+                # 如果没有新数据需要爬取
+                if start_date > end_date:
+                    logger.info(f"股票 {stock_code} 数据已最新，无需爬取")
+                    return historical_df
+                
+                # 获取增量数据
+                logger.info(f"股票 {stock_code} 增量爬取: {start_date} 至 {end_date}")
+                incremental_df = fetch_stock_data_incremental(stock_code, start_date, end_date)
+                
+                # 如果获取到新数据，合并并保存
+                if not incremental_df.empty:
+                    # 确保增量数据的日期格式一致
+                    incremental_df["日期"] = incremental_df["日期"].astype(str)
+                    
+                    # 合并数据
+                    combined_df = pd.concat([historical_df, incremental_df], ignore_index=True)
+                    # 去重并按日期排序
+                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                    combined_df = combined_df.sort_values("日期", ascending=True)
+                    
+                    # 保存更新后的数据
+                    combined_df.to_csv(file_path, index=False)
+                    
+                    # 更新最后爬取日期
+                    latest_date = incremental_df["日期"].max()
+                    save_last_crawl_date(stock_code, latest_date)
+                    
+                    logger.info(f"股票 {stock_code} 数据已更新，最新日期: {latest_date}")
+                    return combined_df
+            except Exception as e:
+                logger.warning(f"处理股票 {stock_code} 历史数据时出错: {str(e)}，将重新获取完整数据")
+        
+        # 首次爬取或历史数据处理失败
+        logger.info(f"股票 {stock_code} 首次爬取或历史数据处理失败，获取1年历史数据")
+        full_df = fetch_stock_data(stock_code, days=365)
+        
+        if not full_df.empty:
+            # 保存数据
+            full_df.to_csv(file_path, index=False)
+            
+            # 更新最后爬取日期
+            latest_date = full_df["日期"].max()
+            save_last_crawl_date(stock_code, latest_date)
+            
+            return full_df
+        
+        return pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """增量获取股票历史数据"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 确定市场前缀
+        section = get_stock_section(stock_code)
+        if section == "沪市主板" or section == "科创板":
+            market_prefix = "sh"
+        else:  # 深市主板、创业板
+            market_prefix = "sz"
+        
+        # 尝试多种可能的股票代码格式
+        possible_codes = [
+            f"{market_prefix}{stock_code}",  # "sh000001"
+            f"{stock_code}.{market_prefix.upper()}",  # "000001.SH"
+            stock_code,  # "000001"
+            f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ"
+            f"{market_prefix}{stock_code}.XSHG" if market_prefix == "sh" else f"{market_prefix}{stock_code}.XSHE",  # 交易所格式
+        ]
+        
+        # 尝试使用多种接口和代码格式获取数据
+        df = None
+        for code in possible_codes:
+            for attempt in range(3):  # 重试3次
+                try:
+                    df = ak.stock_zh_a_hist(symbol=code, period="daily", 
+                                          start_date=start_date, end_date=end_date, 
+                                          adjust="qfq")
+                    if not df.empty:
+                        break
+                except Exception as e:
+                    logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
+                
+                # 增加重试等待时间
+                time.sleep(1.5 * (2 ** attempt))
+            
+            if df is not None and not df.empty:
+                break
+        
+        if df is None or df.empty:
+            return pd.DataFrame()
+        
+        # 确保日期列存在
+        if "日期" not in df.columns:
+            return pd.DataFrame()
+        
+        # 检查是否有必要的列
+        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return pd.DataFrame()
+        
+        # 确保日期列是字符串类型
+        if "日期" in df.columns:
+            df["日期"] = df["日期"].astype(str)
+            # 确保日期格式为YYYY-MM-DD
+            df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
+                                              lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
+                                              regex=True)
+        
+        return df
+    
+    except Exception as e:
+        logger.debug(f"获取股票 {stock_code} 增量数据失败: {str(e)}")
+        return pd.DataFrame()
+
+def get_stock_group(stock_code: str, num_groups: int = 5) -> int:
+    """根据股票代码确定所属分组
+    
+    Args:
+        stock_code: 股票代码
+        num_groups: 分组数量
+    
+    Returns:
+        int: 所属分组编号（0到num_groups-1）
+    """
+    # 使用股票代码的最后一位数字进行简单分组
+    try:
+        last_digit = int(stock_code[-1])
+        return last_digit % num_groups
+    except Exception as e:
+        logger.warning(f"确定股票 {stock_code} 分组失败: {str(e)}，默认分组0")
+        return 0
+# ========== 以上是关键修改 ==========
 
 if __name__ == "__main__":
     main()

@@ -1144,29 +1144,6 @@ def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> s
     summary_message = "\n".join(summary_lines)
     return summary_message
 
-def main():
-    """主函数"""
-    try:
-        logger.info("===== 开始执行个股趋势策略(TickTen) =====")
-        
-        # 1. 获取适合策略的股票
-        top_stocks_by_section = get_top_stocks_for_strategy()
-        
-        # 2. 生成策略总结消息
-        summary_message = generate_strategy_summary(top_stocks_by_section)
-        
-        # 3. 推送全市场策略总结消息
-        logger.info("推送全市场策略总结消息")
-        send_wechat_message(summary_message, message_type="stock_tickten")
-        
-        logger.info("个股策略报告已成功发送至企业微信")
-        logger.info("===== 个股趋势策略(TickTen)执行完成 =====")
-    
-    except Exception as e:
-        error_msg = f"个股趋势策略执行失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        send_wechat_message(error_msg, message_type="error")
-
 # ========== 以下是关键修改 ==========
 def get_last_crawl_date(stock_code: str) -> str:
     """获取股票最后爬取日期"""
@@ -1365,6 +1342,50 @@ def get_stock_group(stock_code: str, num_groups: int = 5) -> int:
         logger.warning(f"确定股票 {stock_code} 分组失败: {str(e)}，默认分组0")
         return 0
 # ========== 以上是关键修改 ==========
+
+def main():
+    """主函数"""
+    try:
+        logger.info("===== 开始执行个股趋势策略(TickTen) =====")
+        
+        # 清理过期的市值缓存
+        cache_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "market_cap_cache.csv")
+        if os.path.exists(cache_file):
+            try:
+                cache_df = pd.read_csv(cache_file)
+                if not cache_df.empty and "last_update" in cache_df.columns:
+                    # 保留最近3天的缓存
+                    cache_df["last_update"] = pd.to_datetime(cache_df["last_update"])
+                    cutoff_date = datetime.now() - timedelta(days=3)
+                    cache_df = cache_df[cache_df["last_update"] >= cutoff_date]
+                    cache_df.to_csv(cache_file, index=False)
+                    logger.info(f"清理市值缓存，保留 {len(cache_df)} 条有效记录")
+            except Exception as e:
+                logger.warning(f"清理市值缓存失败: {str(e)}")
+                # 如果清理失败，删除缓存文件重新开始
+                try:
+                    os.remove(cache_file)
+                    logger.info("已删除损坏的市值缓存文件")
+                except:
+                    pass
+        
+        # 1. 获取适合策略的股票
+        top_stocks_by_section = get_top_stocks_for_strategy()
+        
+        # 2. 生成策略总结消息
+        summary_message = generate_strategy_summary(top_stocks_by_section)
+        
+        # 3. 推送全市场策略总结消息
+        logger.info("推送全市场策略总结消息")
+        send_wechat_message(summary_message, message_type="stock_tickten")
+        
+        logger.info("个股策略报告已成功发送至企业微信")
+        logger.info("===== 个股趋势策略(TickTen)执行完成 =====")
+    
+    except Exception as e:
+        error_msg = f"个股趋势策略执行失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(error_msg, message_type="error")
 
 if __name__ == "__main__":
     main()

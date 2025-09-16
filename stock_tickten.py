@@ -85,6 +85,49 @@ MAX_STOCKS_TO_ANALYZE = 300  # 减少每次分析的最大股票数量（避免�
 MAX_STOCKS_PER_SECTION = 8  # 每个板块最多报告的股票数量
 CRITICAL_VALUE_DAYS = 40  # 临界值计算天数
 
+
+def check_data_integrity(df: pd.DataFrame) -> Tuple[str, int]:
+    """检查数据完整性并返回级别
+    
+    Returns:
+        (str, int): (完整性级别, 数据天数)
+    """
+    if df is None or df.empty:
+        return "none", 0
+    
+    # 计算数据天数
+    data_days = len(df)
+    
+    # 检查必要列
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        return "corrupted", data_days
+    
+    # 检查数据连续性
+    df = df.copy()
+    df["日期"] = pd.to_datetime(df["日期"])
+    df = df.sort_values("日期")
+    
+    # 检查日期间隔
+    df["日期_diff"] = df["日期"].diff().dt.days
+    gaps = df[df["日期_diff"] > 1]
+    
+    # 计算缺失率
+    expected_days = (df["日期"].iloc[-1] - df["日期"].iloc[0]).days + 1
+    missing_rate = 1 - (data_days / expected_days) if expected_days > 0 else 1
+    
+    # 数据完整性分级
+    if data_days < 30:
+        return "insufficient", data_days
+    elif missing_rate > 0.2:  # 缺失率超过20%
+        return "partial", data_days
+    elif gaps.shape[0] > 5:  # 有5个以上大间隔
+        return "gapped", data_days
+    else:
+        return "complete", data_days
+
 # ========== 以下是关键修改 ==========
 def load_stock_basic_info() -> pd.DataFrame:
     """加载股票基础信息"""
@@ -629,18 +672,10 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
         return None
 
-def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
-    """判断个股是否适合策略（流动性、波动率、市值三重过滤）
-    
-    Args:
-        stock_code: 股票代码
-        df: 股票日线数据
-    
-    Returns:
-        bool: 是否适合策略
-    """
+def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_days: int) -> bool:
+    """根据数据完整性级别应用不同的筛选策略"""
     try:
-        if df is None or df.empty or len(df) < MIN_DATA_DAYS:
+        if df is None or df.empty or data_days < 10:
             logger.debug(f"股票 {stock_code} 数据不足，跳过")
             return False
         
@@ -653,53 +688,73 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame) -> bool:
         # 获取板块配置
         section_config = MARKET_SECTIONS[section]
         
-        # 1. 流动性过滤（日均成交>设定阈值）
-        # 修正：A股的成交量单位是"手"（1手=100股），需要乘以100
-        if '成交量' in df.columns and '收盘' in df.columns and len(df) >= 20:
-            daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
-            logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 日均成交额: {daily_volume/10000:.2f}万元, 要求: >{section_config['min_daily_volume']/10000:.2f}万元")
-            
-            if daily_volume < section_config["min_daily_volume"]:
-                logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 流动性过滤失败（日均成交额不足）")
-                return False
-            else:
-                logger.info(f"【流动性过滤】股票 {stock_code} - {section} - 通过流动性过滤")
-        else:
-            logger.debug(f"股票 {stock_code} 缺少成交量或收盘价数据，无法进行流动性过滤")
+        # 根据数据完整性应用不同筛选策略
+        if data_level == "complete":
+            # 完整数据：应用全部三重过滤
+            return _full_filter_strategy(stock_code, df, section, section_config)
+        elif data_level in ["gapped", "partial"]:
+            # 部分数据：应用简化版过滤
+            return _simplified_filter_strategy(stock_code, df, section, section_config, data_days)
+        elif data_level == "insufficient":
+            # 数据严重不足：只应用基础过滤
+            return _basic_filter_strategy(stock_code, df, section, section_config, data_days)
+        else:  # corrupted or unknown
+            logger.debug(f"股票 {stock_code} 数据损坏，跳过")
             return False
-        
-        # 2. 波动率过滤（年化波动率<设定阈值）
-        annual_volatility = calculate_annual_volatility(df)
-        logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 年化波动率: {annual_volatility:.2%}, 要求: <{section_config['max_volatility']:.0%}")
-        
-        if annual_volatility > section_config["max_volatility"]:
-            logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 波动率过滤失败（波动率过高）")
-            return False
-        else:
-            logger.info(f"【波动率过滤】股票 {stock_code} - {section} - 通过波动率过滤")
-        
-        # 3. 市值过滤（市值>设定阈值）
-        market_cap = calculate_market_cap(df, stock_code)
-        
-        # 重要修复：处理市值数据不可靠的情况
-        if market_cap is None:
-            logger.warning(f"【市值过滤】股票 {stock_code} - {section} - 市值数据不可靠，排除该股票")
-            return False
-            
-        logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值: {market_cap:.2f}亿元, 要求: >{section_config['min_market_cap']:.2f}亿元")
-        
-        if market_cap < section_config["min_market_cap"]:
-            logger.info(f"【市值过滤】股票 {stock_code} - {section} - 市值过滤失败（市值不足）")
-            return False
-        else:
-            logger.info(f"【市值过滤】股票 {stock_code} - {section} - 通过市值过滤")
-        
-        logger.info(f"【最终结果】股票 {stock_code} - {section} - 通过所有过滤条件")
-        return True
     
     except Exception as e:
         logger.error(f"筛选股票{stock_code}失败: {str(e)}", exc_info=True)
         return False
+
+def _full_filter_strategy(stock_code: str, df: pd.DataFrame, section: str, section_config: dict) -> bool:
+    """完整数据筛选策略（全部三重过滤）"""
+    # 1. 流动性过滤
+    if '成交量' in df.columns and '收盘' in df.columns and len(df) >= 20:
+        daily_volume = df["成交量"].iloc[-20:].mean() * 100 * df["收盘"].iloc[-20:].mean()
+        if daily_volume < section_config["min_daily_volume"]:
+            return False
+    
+    # 2. 波动率过滤
+    annual_volatility = calculate_annual_volatility(df)
+    if annual_volatility > section_config["max_volatility"]:
+        return False
+    
+    # 3. 市值过滤
+    market_cap = calculate_market_cap(df, stock_code)
+    if market_cap is None or market_cap < section_config["min_market_cap"]:
+        return False
+    
+    return True
+
+def _simplified_filter_strategy(stock_code: str, df: pd.DataFrame, section: str, 
+                              section_config: dict, data_days: int) -> bool:
+    """简化版筛选策略（跳过部分计算）"""
+    # 只应用关键过滤
+    # 1. 流动性过滤（使用可用数据）
+    if '成交量' in df.columns and '收盘' in df.columns:
+        # 使用可用的最近数据
+        available_days = min(20, data_days)
+        daily_volume = df["成交量"].iloc[-available_days:].mean() * 100 * df["收盘"].iloc[-available_days:].mean()
+        if daily_volume < section_config["min_daily_volume"] * 0.8:  # 适当放宽阈值
+            return False
+    
+    # 2. 市值过滤（必须）
+    market_cap = calculate_market_cap(df, stock_code)
+    if market_cap is None or market_cap < section_config["min_market_cap"]:
+        return False
+    
+    # 跳过波动率过滤（数据不完整时波动率计算不可靠）
+    return True
+
+def _basic_filter_strategy(stock_code: str, df: pd.DataFrame, section: str, 
+                         section_config: dict, data_days: int) -> bool:
+    """基础筛选策略（仅应用关键过滤）"""
+    # 只应用最基础的市值过滤
+    market_cap = calculate_market_cap(df, stock_code)
+    if market_cap is None or market_cap < section_config["min_market_cap"] * 0.9:  # 进一步放宽
+        return False
+    
+    return True
 
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
     """计算股票策略评分
@@ -859,6 +914,37 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
 
+# ========== 以下是关键修改 ==========
+# 缓存字典
+FILTER_CACHE = {}
+SCORE_CACHE = {}
+CACHE_EXPIRY = timedelta(hours=1)  # 缓存有效期
+
+def get_cached_filter_result(stock_code: str, last_update: datetime) -> Optional[bool]:
+    """获取缓存的筛选结果"""
+    if stock_code in FILTER_CACHE:
+        cached_result, cache_time = FILTER_CACHE[stock_code]
+        if datetime.now() - cache_time < CACHE_EXPIRY:
+            return cached_result
+    return None
+
+def cache_filter_result(stock_code: str, result: bool):
+    """缓存筛选结果"""
+    FILTER_CACHE[stock_code] = (result, datetime.now())
+
+def get_cached_score(stock_code: str, last_update: datetime) -> Optional[float]:
+    """获取缓存的评分结果"""
+    if stock_code in SCORE_CACHE:
+        cached_score, cache_time = SCORE_CACHE[stock_code]
+        if datetime.now() - cache_time < CACHE_EXPIRY:
+            return cached_score
+    return None
+
+def cache_score(stock_code: str, score: float):
+    """缓存评分结果"""
+    SCORE_CACHE[stock_code] = (score, datetime.now())
+# ========== 以上是关键修改 ==========
+
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     """按板块获取适合策略的股票（使用增量数据）"""
     try:
@@ -929,29 +1015,48 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             section_counts[section]["total"] += 1
             
             # ========== 关键修改 ==========
-            # 获取日线数据（增量更新）
-            df = get_stock_daily_data(stock_code)
-            # ========== 关键修改 ==========
-            
-            # 检查数据量
-            if df is None or df.empty or len(df) < MIN_DATA_DAYS:
-                logger.debug(f"股票 {stock_name}({stock_code}) 数据量不足，跳过")
-                return None
-            
-            # 更新板块计数器
-            section_counts[section]["data_ok"] += 1
-            
-            # 检查是否适合策略
-            if is_stock_suitable(stock_code, df):
-                # 更新板块计数器
-                section_counts[section]["suitable"] += 1
+            # 1. 尝试从缓存获取结果
+            last_update = get_last_update_time(basic_info_df, stock_code)
+            cached_result = get_cached_filter_result(stock_code, last_update)
+            if cached_result is not None:
+                logger.debug(f"股票 {stock_code} 使用缓存筛选结果: {cached_result}")
+                if not cached_result:
+                    return None
                 
-                # 计算策略得分
+                cached_score = get_cached_score(stock_code, last_update)
+                if cached_score is not None and cached_score > 0:
+                    # 从缓存加载数据（避免重复读取文件）
+                    df = get_cached_stock_data(stock_code)
+                    if df is not None:
+                        return {
+                            "code": stock_code,
+                            "name": stock_name,
+                            "score": cached_score,
+                            "df": df,
+                            "section": section
+                        }
+            
+            # 2. 获取日线数据（增量更新）
+            df = get_stock_daily_data(stock_code)
+            
+            # 3. 检查数据完整性
+            data_level, data_days = check_data_integrity(df)
+            logger.debug(f"股票 {stock_code} 数据完整性: {data_level} ({data_days}天)")
+            
+            # 4. 根据数据完整性应用不同策略
+            if is_stock_suitable(stock_code, df, data_level, data_days):
+                # 5. 计算策略得分
                 score = calculate_stock_strategy_score(stock_code, df)
                 
                 if score > 0:
-                    # 更新板块计数器
+                    # 6. 缓存结果
+                    cache_filter_result(stock_code, True)
+                    cache_score(stock_code, score)
+                    
+                    # 7. 更新板块计数器
+                    section_counts[section]["suitable"] += 1
                     section_counts[section]["scored"] += 1
+                    
                     return {
                         "code": stock_code,
                         "name": stock_name,
@@ -960,7 +1065,10 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                         "section": section
                     }
             
+            # 7. 缓存筛选失败结果
+            cache_filter_result(stock_code, False)
             return None
+            # ========== 关键修改 ==========
         
         # 6. 并行处理股票（限制并发数量，避免被AkShare限制）
         results = []
@@ -1053,6 +1161,77 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)
         return {}
+
+# ========== 以下是关键修改 ==========
+STOCK_DATA_CACHE = {}
+CACHE_MAX_SIZE = 1000  # 最大缓存股票数量
+
+def get_cached_stock_data(stock_code: str) -> Optional[pd.DataFrame]:
+    """获取缓存的股票数据"""
+    if stock_code in STOCK_DATA_CACHE:
+        return STOCK_DATA_CACHE[stock_code]
+    return None
+
+def cache_stock_data(stock_code: str, df: pd.DataFrame):
+    """缓存股票数据"""
+    # 实现LRU缓存策略
+    if len(STOCK_DATA_CACHE) >= CACHE_MAX_SIZE:
+        # 移除最旧的缓存项
+        oldest_key = min(STOCK_DATA_CACHE.keys(), key=lambda k: STOCK_DATA_CACHE[k]["timestamp"])
+        del STOCK_DATA_CACHE[oldest_key]
+    
+    STOCK_DATA_CACHE[stock_code] = {
+        "data": df,
+        "timestamp": datetime.now()
+    }
+
+def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
+    """获取股票日线数据（带缓存）"""
+    # 1. 检查缓存
+    cached_df = get_cached_stock_data(stock_code)
+    if cached_df is not None:
+        return cached_df
+    
+    # 2. 从文件加载
+    daily_dir = os.path.join(os.path.dirname(BASIC_INFO_FILE), "daily")
+    file_path = os.path.join(daily_dir, f"{stock_code}.csv")
+    
+    if os.path.exists(file_path):
+        try:
+            df = pd.read_csv(file_path)
+            # 缓存数据
+            cache_stock_data(stock_code, df)
+            return df
+        except Exception as e:
+            logger.warning(f"读取股票 {stock_code} 数据失败: {str(e)}")
+    
+    # 3. 如果文件不存在或读取失败，获取新数据
+    logger.info(f"股票 {stock_code} 首次爬取或历史数据处理失败，获取1年历史数据")
+    df = fetch_stock_data(stock_code, days=365)
+    
+    if not df.empty:
+        # 限制数据为最近1年
+        df = limit_to_one_year_data(df)
+        
+        # 保存数据
+        os.makedirs(daily_dir, exist_ok=True)
+        df.to_csv(file_path, index=False)
+        
+        # 缓存数据
+        cache_stock_data(stock_code, df)
+        
+        # 提交到Git
+        try:
+            logger.info(f"正在提交股票 {stock_code} 数据到GitHub仓库...")
+            commit_message = f"自动更新股票 {stock_code} 数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            if commit_and_push_file(file_path, commit_message):
+                logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+        except Exception as e:
+            logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}")
+    
+    return df
+# ========== 以上是关键修改 ==========
+
 
 def generate_stock_signal_message(stock: Dict, df: pd.DataFrame, 
                                 close_price: float, critical_value: float, 

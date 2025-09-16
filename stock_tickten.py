@@ -1232,6 +1232,20 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     save_last_crawl_date(stock_code, latest_date)
                     
                     logger.info(f"股票 {stock_code} 数据已更新，最新日期: {latest_date}")
+                    
+                    # ========== 关键修改 ==========
+                    # 立即提交到Git仓库（每股票单独提交）
+                    try:
+                        logger.info(f"正在提交股票 {stock_code} 数据到GitHub仓库...")
+                        commit_message = f"自动更新股票 {stock_code} 数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                        if commit_and_push_file(file_path, commit_message):
+                            logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                        else:
+                            logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行策略")
+                    except Exception as e:
+                        logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行策略")
+                    # ========== 关键修改 ==========
+                    
                     return combined_df
             except Exception as e:
                 logger.warning(f"处理股票 {stock_code} 历史数据时出错: {str(e)}，将重新获取完整数据")
@@ -1247,6 +1261,19 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
             # 更新最后爬取日期
             latest_date = full_df["日期"].max()
             save_last_crawl_date(stock_code, latest_date)
+            
+            # ========== 关键修改 ==========
+            # 立即提交到Git仓库（每股票单独提交）
+            try:
+                logger.info(f"正在提交股票 {stock_code} 数据到GitHub仓库...")
+                commit_message = f"自动更新股票 {stock_code} 数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                if commit_and_push_file(file_path, commit_message):
+                    logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                else:
+                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行策略")
+            except Exception as e:
+                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行策略")
+            # ========== 关键修改 ==========
             
             return full_df
         

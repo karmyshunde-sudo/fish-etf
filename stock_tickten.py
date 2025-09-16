@@ -906,6 +906,11 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         # 分阶段执行：只处理今天的分组
         today_group = datetime.now().weekday() % 5  # 0-4，对应周一至周五
         logger.info(f"今天处理第 {today_group} 组股票（共5组）")
+        
+        # 确保所有股票代码是字符串格式（6位，前面补零）
+        for stock in stock_list:
+            stock["code"] = str(stock["code"]).zfill(6)
+        
         stock_list = [stock for stock in stock_list if get_stock_group(stock["code"]) == today_group]
         logger.info(f"今天实际处理 {len(stock_list)} 只股票（分组过滤后）")
         # ========== 关键修改 ==========
@@ -1422,9 +1427,12 @@ def get_stock_group(stock_code: str, num_groups: int = 5) -> int:
     Returns:
         int: 所属分组编号（0到num_groups-1）
     """
-    # 使用股票代码的最后一位数字进行简单分组
     try:
-        last_digit = int(stock_code[-1])
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code_str = str(stock_code).zfill(6)
+        
+        # 使用股票代码的最后一位数字进行简单分组
+        last_digit = int(stock_code_str[-1])
         return last_digit % num_groups
     except Exception as e:
         logger.warning(f"确定股票 {stock_code} 分组失败: {str(e)}，默认分组0")

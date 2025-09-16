@@ -1181,7 +1181,7 @@ def save_last_crawl_date(stock_code: str, date: str):
         logger.error(f"保存最后爬取日期失败: {str(e)}", exc_info=True)
 
 def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """获取股票日线数据（增量更新）"""
+    """获取股票日线数据（增量更新，并限制为最近1年数据）"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
@@ -1207,7 +1207,15 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 # 如果没有新数据需要爬取
                 if start_date > end_date:
                     logger.info(f"股票 {stock_code} 数据已最新，无需爬取")
-                    return historical_df
+                    
+                    # ========== 关键修改 ==========
+                    # 限制数据为最近1年
+                    limited_df = limit_to_one_year_data(historical_df)
+                    if len(limited_df) < len(historical_df):
+                        limited_df.to_csv(file_path, index=False)
+                        logger.info(f"股票 {stock_code} 数据已限制为最近1年，保存 {len(limited_df)} 条记录")
+                    return limited_df
+                    # ========== 关键修改 ==========
                 
                 # 获取增量数据
                 logger.info(f"股票 {stock_code} 增量爬取: {start_date} 至 {end_date}")
@@ -1224,8 +1232,13 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
                     combined_df = combined_df.sort_values("日期", ascending=True)
                     
+                    # 限制数据为最近1年
+                    # ========== 关键修改 ==========
+                    limited_df = limit_to_one_year_data(combined_df)
+                    # ========== 关键修改 ==========
+                    
                     # 保存更新后的数据
-                    combined_df.to_csv(file_path, index=False)
+                    limited_df.to_csv(file_path, index=False)
                     
                     # 更新最后爬取日期
                     latest_date = incremental_df["日期"].max()
@@ -1246,7 +1259,7 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                         logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行策略")
                     # ========== 关键修改 ==========
                     
-                    return combined_df
+                    return limited_df
             except Exception as e:
                 logger.warning(f"处理股票 {stock_code} 历史数据时出错: {str(e)}，将重新获取完整数据")
         
@@ -1255,11 +1268,16 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
         full_df = fetch_stock_data(stock_code, days=365)
         
         if not full_df.empty:
+            # 限制数据为最近1年（虽然这里已经是1年，但确保格式正确）
+            # ========== 关键修改 ==========
+            limited_df = limit_to_one_year_data(full_df)
+            # ========== 关键修改 ==========
+            
             # 保存数据
-            full_df.to_csv(file_path, index=False)
+            limited_df.to_csv(file_path, index=False)
             
             # 更新最后爬取日期
-            latest_date = full_df["日期"].max()
+            latest_date = limited_df["日期"].max()
             save_last_crawl_date(stock_code, latest_date)
             
             # ========== 关键修改 ==========
@@ -1275,13 +1293,56 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行策略")
             # ========== 关键修改 ==========
             
-            return full_df
+            return limited_df
         
         return pd.DataFrame()
     
     except Exception as e:
         logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
+# ========== 关键新增 ==========
+def limit_to_one_year_data(df: pd.DataFrame) -> pd.DataFrame:
+    """限制数据为最近1年的数据
+    
+    Args:
+        df: 原始DataFrame
+    
+    Returns:
+        pd.DataFrame: 限制为1年数据后的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # 计算1年前的日期
+        one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        
+        # 确保日期列存在
+        if "日期" not in df.columns:
+            logger.warning("数据中缺少日期列，无法限制为1年数据")
+            return df
+        
+        # 创建DataFrame的副本，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        
+        # 转换日期列
+        df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+        
+        # 过滤数据
+        mask = df["日期"] >= pd.to_datetime(one_year_ago)
+        df = df.loc[mask]
+        
+        # 转换回字符串格式
+        df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
+        
+        logger.info(f"数据已限制为最近1年（从 {one_year_ago} 至 {datetime.now().strftime('%Y-%m-%d')}），剩余 {len(df)} 条记录")
+        return df
+    
+    except Exception as e:
+        logger.error(f"限制数据为1年时发生错误: {str(e)}", exc_info=True)
+        return df
+# ========== 关键新增 ==========
 
 def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """增量获取股票历史数据"""

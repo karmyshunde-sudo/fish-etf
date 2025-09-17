@@ -99,7 +99,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/  {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/    {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -308,13 +308,16 @@ class Config:
         :param log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         :param log_file: 日志文件路径，如果为None则只输出到控制台
         """
+        # 检查是否已经配置过日志
+        if hasattr(logging, 'LOGGING_CONFIGURED') and logging.LOGGING_CONFIGURED:
+            return
+        
         try:
             level = log_level or Config.LOG_LEVEL
             log_format = Config.LOG_FORMAT
             
             # 创建根日志记录器
             root_logger = logging.getLogger()
-            root_logger.setLevel(level)
             
             # 清除现有处理器
             for handler in root_logger.handlers[:]:
@@ -344,7 +347,24 @@ class Config:
                     logging.info(f"日志文件已配置: {log_file}")
                 except Exception as e:
                     logging.error(f"配置日志文件失败: {str(e)}", exc_info=True)
+            
+            # 标记日志已配置
+            logging.LOGGING_CONFIGURED = True
+            root_logger.setLevel(level)
+            
+            # 设置第三方库的日志级别
+            logging.getLogger("akshare").setLevel(logging.WARNING)
+            logging.getLogger("urllib3").setLevel(logging.WARNING)
+            logging.getLogger("requests").setLevel(logging.WARNING)
+            logging.getLogger("git").setLevel(logging.WARNING)
+            
         except Exception as e:
+            # 尝试设置基本日志配置
+            logging.basicConfig(
+                level=logging.INFO,
+                format=Config.LOG_FORMAT,
+                handlers=[logging.StreamHandler()]
+            )
             logging.error(f"配置日志系统失败: {str(e)}", exc_info=True)
     
     LOG_LEVEL: str = "INFO"

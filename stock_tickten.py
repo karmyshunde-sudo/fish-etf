@@ -430,7 +430,7 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                 latest_date = pd.to_datetime(existing_df["日期"]).max().strftime("%Y%m%d")
                 # 从最新日期的下一天开始获取
                 start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-                logger.info(f"检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+                logger.info(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
         
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
@@ -456,8 +456,8 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
             f"{market_prefix}{stock_code}.XSHG" if market_prefix == "sh" else f"{market_prefix}{stock_code}.XSHE",  # 交易所格式
         ]
         
-        logger.debug(f"尝试获取股票 {stock_code} 数据，可能的代码格式: {possible_codes}")
-        logger.debug(f"时间范围: {start_date} 至 {end_date}")
+        logger.debug(f"股票 {stock_code} 尝试获取数据，可能的代码格式: {possible_codes}")
+        logger.debug(f"股票 {stock_code} 时间范围: {start_date} 至 {end_date}")
         
         # 尝试使用多种接口和代码格式获取数据
         df = None
@@ -468,17 +468,17 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
         for code in possible_codes:
             for attempt in range(5):  # 增加重试次数
                 try:
-                    logger.debug(f"尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {code}")
+                    logger.debug(f"股票 {stock_code} 尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {code}")
                     df = ak.stock_zh_a_hist(symbol=code, period="daily", 
                                            start_date=start_date, end_date=end_date, 
                                            adjust="qfq")
                     if not df.empty:
                         successful_code = code
                         successful_interface = "stock_zh_a_hist"
-                        logger.debug(f"成功通过stock_zh_a_hist接口获取股票 {code} 数据")
+                        logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_hist接口获取股票 {code} 数据")
                         break
                 except Exception as e:
-                    logger.error(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                    logger.error(f"股票 {stock_code} 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}", exc_info=True)
                 
                 # 指数退避等待，避免高并发获取数据导致IP被拉黑
                 time.sleep(0.5 * (2 ** attempt))
@@ -491,7 +491,7 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
             for code in possible_codes:
                 for attempt in range(3):
                     try:
-                        logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_daily接口获取股票 {code}")
+                        logger.debug(f"股票 {stock_code} 尝试{attempt+1}/3: 使用stock_zh_a_daily接口获取股票 {code}")
                         df = ak.stock_zh_a_daily(symbol=code, 
                                                start_date=start_date, 
                                                end_date=end_date, 
@@ -499,10 +499,10 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                         if not df.empty:
                             successful_code = code
                             successful_interface = "stock_zh_a_daily"
-                            logger.debug(f"成功通过stock_zh_a_daily接口获取股票 {code} 数据")
+                            logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_daily接口获取股票 {code} 数据")
                             break
                     except Exception as e:
-                        logger.error(f"使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                        logger.error(f"股票 {stock_code} 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}", exc_info=True)
                     
                     time.sleep(1.0 * (2 ** attempt))
                 
@@ -514,7 +514,7 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
             for code in possible_codes:
                 for attempt in range(3):
                     try:
-                        logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_daily_em接口获取股票 {code}")
+                        logger.debug(f"股票 {stock_code} 尝试{attempt+1}/3: 使用stock_zh_a_daily_em接口获取股票 {code}")
                         df = ak.stock_zh_a_daily_em(symbol=code, 
                                                   start_date=start_date, 
                                                   end_date=end_date, 
@@ -522,10 +522,10 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                         if not df.empty:
                             successful_code = code
                             successful_interface = "stock_zh_a_daily_em"
-                            logger.debug(f"成功通过stock_zh_a_daily_em接口获取股票 {code} 数据")
+                            logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_daily_em接口获取股票 {code} 数据")
                             break
                     except Exception as e:
-                        logger.error(f"使用stock_zh_a_daily_em接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                        logger.error(f"股票 {stock_code} 使用stock_zh_a_daily_em接口获取股票 {code} 失败: {str(e)}", exc_info=True)
                     
                     time.sleep(1.5 * (2 ** attempt))
                 
@@ -534,10 +534,10 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
         
         # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.error(f"获取股票 {stock_code} 数据失败，所有接口和代码格式均无效")
+            logger.error(f"股票 {stock_code} 获取数据失败，所有接口和代码格式均无效")
             return pd.DataFrame()
         
-        logger.info(f"✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
+        logger.info(f"股票 {stock_code} ✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
         
         # 直接使用AkShare返回的列名，不做任何映射
         # 确保日期列存在
@@ -567,11 +567,14 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
         if len(df) < 10:
             logger.warning(f"股票 {stock_code} 数据量不足({len(df)}天)，可能影响分析结果")
         
-        logger.debug(f"成功获取股票 {stock_code} 数据，共 {len(df)} 条记录")
+        # 关键修复：在日志中包含股票代码
+        logger.info(f"股票 {stock_code} 数据已限制为最近1年（从 {start_date} 至 {end_date}），剩余 {len(df)} 条记录")
+        
         return df
     
     except Exception as e:
-        logger.error(f"获取股票 {stock_code} 数据失败: {str(e)}", exc_info=True)
+        # 关键修复：在日志中包含股票代码
+        logger.error(f"股票 {stock_code} 获取数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def calculate_annual_volatility(df: pd.DataFrame) -> float:

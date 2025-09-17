@@ -387,12 +387,12 @@ def fetch_stock_list() -> pd.DataFrame:
                 pass
         return pd.DataFrame()
 
-def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
+def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
     """从AkShare获取个股历史数据
     
     Args:
         stock_code: 股票代码（不带市场前缀）
-        days: 获取最近多少天的数据
+        days: 获取最近多少天的数据，None表示增量爬取
     
     Returns:
         pd.DataFrame: 个股日线数据
@@ -408,9 +408,34 @@ def fetch_stock_data(stock_code: str, days: int = 250) -> pd.DataFrame:
         else:  # 深市主板、创业板
             market_prefix = "sz"
         
+        # 检查本地是否已有数据
+        file_path = os.path.join(Config.DATA_DIR, "daily", f"{stock_code}.csv")
+        start_date = None
+        
+        if os.path.exists(file_path) and days is None:
+            # 读取现有数据文件
+            existing_df = pd.read_csv(file_path)
+            if not existing_df.empty and "日期" in existing_df.columns:
+                # 获取现有数据的最新日期
+                latest_date = pd.to_datetime(existing_df["日期"]).max().strftime("%Y%m%d")
+                # 从最新日期的下一天开始获取
+                start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+                logger.info(f"检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+        
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        if start_date is None:
+            if days is not None:
+                # 如果指定了天数，获取指定天数的数据
+                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+            else:
+                # 默认获取1年数据
+                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        
+        # 如果开始日期晚于结束日期，无需获取
+        if start_date > end_date:
+            logger.info(f"股票 {stock_code} 无需更新数据")
+            return pd.DataFrame()
         
         # 尝试多种可能的股票代码格式
         possible_codes = [
@@ -1528,7 +1553,7 @@ def limit_to_one_year_data(df: pd.DataFrame) -> pd.DataFrame:
         return df
 # ========== 关键新增 ==========
 
-def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+def fetch_stock_data_incremental(stock_code: str) -> pd.DataFrame:
     """增量获取股票历史数据"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
@@ -1540,6 +1565,30 @@ def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str
             market_prefix = "sh"
         else:  # 深市主板、创业板
             market_prefix = "sz"
+        
+        # 检查本地是否已有数据
+        file_path = os.path.join(Config.DATA_DIR, "daily", f"{stock_code}.csv")
+        start_date = None
+        
+        if os.path.exists(file_path):
+            # 读取现有数据文件
+            existing_df = pd.read_csv(file_path)
+            if not existing_df.empty and "日期" in existing_df.columns:
+                # 获取现有数据的最新日期
+                latest_date = pd.to_datetime(existing_df["日期"]).max().strftime("%Y%m%d")
+                # 从最新日期的下一天开始获取
+                start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+                logger.info(f"检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+        
+        # 如果没有找到有效起始日期，获取1年数据
+        end_date = datetime.now().strftime("%Y%m%d")
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        
+        # 如果开始日期晚于结束日期，无需获取
+        if start_date > end_date:
+            logger.info(f"股票 {stock_code} 无需更新数据")
+            return pd.DataFrame()
         
         # 尝试多种可能的股票代码格式
         possible_codes = [
@@ -1555,6 +1604,7 @@ def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str
         for code in possible_codes:
             for attempt in range(3):  # 重试3次
                 try:
+                    logger.debug(f"尝试{attempt+1}/3: 使用stock_zh_a_hist接口获取股票 {code}")
                     df = ak.stock_zh_a_hist(symbol=code, period="daily", 
                                           start_date=start_date, end_date=end_date, 
                                           adjust="qfq")
@@ -1595,27 +1645,6 @@ def fetch_stock_data_incremental(stock_code: str, start_date: str, end_date: str
     except Exception as e:
         logger.debug(f"获取股票 {stock_code} 增量数据失败: {str(e)}")
         return pd.DataFrame()
-
-def get_stock_group(stock_code: str, num_groups: int = 5) -> int:
-    """根据股票代码确定所属分组
-    
-    Args:
-        stock_code: 股票代码
-        num_groups: 分组数量
-    
-    Returns:
-        int: 所属分组编号（0到num_groups-1）
-    """
-    try:
-        # 确保股票代码是字符串，并且是6位（前面补零）
-        stock_code_str = str(stock_code).zfill(6)
-        
-        # 使用股票代码的最后一位数字进行简单分组
-        last_digit = int(stock_code_str[-1])
-        return last_digit % num_groups
-    except Exception as e:
-        logger.warning(f"确定股票 {stock_code} 分组失败: {str(e)}，默认分组0")
-        return 0
 # ========== 以上是关键修改 ==========
 
 def main():

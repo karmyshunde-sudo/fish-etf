@@ -214,33 +214,31 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(valid_opportunities)}，折溢价率范围: {valid_opportunities['折溢价率'].min():.2f}% ~ {valid_opportunities['折溢价率'].max():.2f}%")
         
-        # 拆分折价和溢价机会
-        # 折价：市场价格 < IOPV (折溢价率为负)
-        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
+        # ===== 核心修复：使用绝对值比较阈值 =====
+        abs_threshold = Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
+        
+        # 折价：市场价格 < IOPV (折溢价率为负)，且绝对值大于阈值
         discount_opportunities = valid_opportunities[
-            valid_opportunities["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
+            (valid_opportunities["折溢价率"] < 0) & 
+            (valid_opportunities["折溢价率"].abs() >= abs_threshold)
         ].copy()
         
-        # 溢价：市场价格 > IOPV (折溢价率为正)
-        # 关键修复：使用 MIN_ARBITRAGE_DISPLAY_THRESHOLD 配置项
+        # 溢价：市场价格 > IOPV (折溢价率为正)，且绝对值大于阈值
         premium_opportunities = valid_opportunities[
-            valid_opportunities["折溢价率"] >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
+            (valid_opportunities["折溢价率"] > 0) & 
+            (valid_opportunities["折溢价率"].abs() >= abs_threshold)
         ].copy()
         
         # 按折溢价率绝对值排序
         if not discount_opportunities.empty:
-            discount_opportunities["abs_premium_discount"] = discount_opportunities["折溢价率"].abs()
-            discount_opportunities = discount_opportunities.sort_values("abs_premium_discount", ascending=False)
-            discount_opportunities = discount_opportunities.drop(columns=["abs_premium_discount"])
+            discount_opportunities = discount_opportunities.sort_values("折溢价率", ascending=True)
         
         if not premium_opportunities.empty:
-            premium_opportunities["abs_premium_discount"] = premium_opportunities["折溢价率"].abs()
-            premium_opportunities = premium_opportunities.sort_values("abs_premium_discount", ascending=False)
-            premium_opportunities = premium_opportunities.drop(columns=["abs_premium_discount"])
+            premium_opportunities = premium_opportunities.sort_values("折溢价率", ascending=False)
         
-        # 记录筛选结果
-        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
-        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD}%)")
+        # 修复：更新日志信息，准确反映筛选条件
+        logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≤-{abs_threshold}%)")
+        logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{abs_threshold}%)")
         
         # 添加规模和日均成交额信息
         discount_opportunities = add_etf_basic_info(discount_opportunities)
@@ -249,13 +247,6 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         # 计算综合评分
         discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
         premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
-        
-        # 修复：不再根据评分过滤机会，而是全部保留
-        # discount_opportunities = filter_valid_discount_opportunities(discount_opportunities)
-        # premium_opportunities = filter_valid_premium_opportunities(premium_opportunities)
-        
-        logger.info(f"发现 {len(discount_opportunities)} 个新的折价机会（基于新评分机制）")
-        logger.info(f"发现 {len(premium_opportunities)} 个新的溢价机会（基于新评分机制）")
         
         # 筛选今天尚未推送的套利机会（增量推送功能）
         discount_opportunities = filter_new_discount_opportunities(discount_opportunities)

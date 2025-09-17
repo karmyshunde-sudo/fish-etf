@@ -398,7 +398,7 @@ def fetch_stock_list() -> pd.DataFrame:
         return pd.DataFrame()
 
 def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
-    """从AkShare获取个股历史数据
+    """从AkShare获取个股历史数据（真正的增量爬取）
     
     Args:
         stock_code: 股票代码（不带市场前缀）
@@ -424,13 +424,18 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
         
         if os.path.exists(file_path) and days is None:
             # 读取现有数据文件
-            existing_df = pd.read_csv(file_path)
-            if not existing_df.empty and "日期" in existing_df.columns:
-                # 获取现有数据的最新日期
-                latest_date = pd.to_datetime(existing_df["日期"]).max().strftime("%Y%m%d")
-                # 从最新日期的下一天开始获取
-                start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-                logger.info(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+            try:
+                existing_df = pd.read_csv(file_path)
+                if not existing_df.empty and "日期" in existing_df.columns:
+                    # 确保日期列是datetime类型
+                    existing_df["日期"] = pd.to_datetime(existing_df["日期"])
+                    # 获取现有数据的最新日期
+                    latest_date = existing_df["日期"].max().strftime("%Y%m%d")
+                    # 从最新日期的下一天开始获取
+                    start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+                    logger.info(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+            except Exception as e:
+                logger.warning(f"股票 {stock_code} 读取现有数据失败，将重新获取1年数据: {str(e)}")
         
         # 计算日期范围
         end_date = datetime.now().strftime("%Y%m%d")
@@ -439,7 +444,7 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                 # 如果指定了天数，获取指定天数的数据
                 start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
             else:
-                # 默认获取1年数据
+                # 默认获取1年数据（仅当没有现有数据时）
                 start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
         
         # 如果开始日期晚于结束日期，无需获取
@@ -466,9 +471,9 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
         
         # 先尝试使用stock_zh_a_hist接口
         for code in possible_codes:
-            for attempt in range(5):  # 增加重试次数
+            for attempt in range(3):  # 减少重试次数
                 try:
-                    logger.debug(f"股票 {stock_code} 尝试{attempt+1}/5: 使用stock_zh_a_hist接口获取股票 {code}")
+                    logger.debug(f"股票 {stock_code} 尝试{attempt+1}/3: 使用stock_zh_a_hist接口获取股票 {code}")
                     df = ak.stock_zh_a_hist(symbol=code, period="daily", 
                                            start_date=start_date, end_date=end_date, 
                                            adjust="qfq")
@@ -478,20 +483,25 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                         logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_hist接口获取股票 {code} 数据")
                         break
                 except Exception as e:
-                    logger.error(f"股票 {stock_code} 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                    logger.debug(f"股票 {stock_code} 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                 
-                # 指数退避等待，避免高并发获取数据导致IP被拉黑
-                time.sleep(0.5 * (2 ** attempt))
+                # 优化等待时间，避免被限流
+                if attempt == 0:
+                    time.sleep(0.3)  # 第一次失败等待0.3秒
+                elif attempt == 1:
+                    time.sleep(0.6)  # 第二次失败等待0.6秒
+                else:
+                    time.sleep(1.0)  # 第三次失败等待1.0秒
             
             if df is not None and not df.empty:
                 break
         
-        # 如果stock_zh_a_hist接口失败，尝试stock_zh_a_daily接口
-        if df is None or df.empty:
+        # 如果stock_zh_a_hist接口失败，尝试其他接口（仅当增量获取失败时）
+        if df is None or df.empty and (days is None or days > 30):
             for code in possible_codes:
-                for attempt in range(3):
+                for attempt in range(2):  # 更少的重试次数
                     try:
-                        logger.debug(f"股票 {stock_code} 尝试{attempt+1}/3: 使用stock_zh_a_daily接口获取股票 {code}")
+                        logger.debug(f"股票 {stock_code} 尝试{attempt+1}/2: 使用stock_zh_a_daily接口获取股票 {code}")
                         df = ak.stock_zh_a_daily(symbol=code, 
                                                start_date=start_date, 
                                                end_date=end_date, 
@@ -502,54 +512,28 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
                             logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_daily接口获取股票 {code} 数据")
                             break
                     except Exception as e:
-                        logger.error(f"股票 {stock_code} 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}", exc_info=True)
+                        logger.debug(f"股票 {stock_code} 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
                     
-                    time.sleep(1.0 * (2 ** attempt))
-                
-                if df is not None and not df.empty:
-                    break
-        
-        # 如果还是失败，尝试使用更简单的接口
-        if df is None or df.empty:
-            for code in possible_codes:
-                for attempt in range(3):
-                    try:
-                        logger.debug(f"股票 {stock_code} 尝试{attempt+1}/3: 使用stock_zh_a_daily_em接口获取股票 {code}")
-                        df = ak.stock_zh_a_daily_em(symbol=code, 
-                                                  start_date=start_date, 
-                                                  end_date=end_date, 
-                                                  adjust="qfq")
-                        if not df.empty:
-                            successful_code = code
-                            successful_interface = "stock_zh_a_daily_em"
-                            logger.debug(f"股票 {stock_code} 成功通过stock_zh_a_daily_em接口获取股票 {code} 数据")
-                            break
-                    except Exception as e:
-                        logger.error(f"股票 {stock_code} 使用stock_zh_a_daily_em接口获取股票 {code} 失败: {str(e)}", exc_info=True)
-                    
-                    time.sleep(1.5 * (2 ** attempt))
+                    time.sleep(0.5 * (2 ** attempt))
                 
                 if df is not None and not df.empty:
                     break
         
         # 如果还是失败，返回空DataFrame
         if df is None or df.empty:
-            logger.error(f"股票 {stock_code} 获取数据失败，所有接口和代码格式均无效")
+            logger.debug(f"股票 {stock_code} 获取数据失败，所有接口和代码格式均无效")
             return pd.DataFrame()
         
-        logger.info(f"股票 {stock_code} ✅ 成功通过 {successful_interface} 接口获取股票 {successful_code} 数据，共 {len(df)} 天")
-        
-        # 直接使用AkShare返回的列名，不做任何映射
         # 确保日期列存在
         if "日期" not in df.columns:
-            logger.error(f"股票 {stock_code} 数据缺少'日期'列")
+            logger.debug(f"股票 {stock_code} 数据缺少'日期'列")
             return pd.DataFrame()
         
         # 检查是否有必要的列
         required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
-            logger.warning(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            logger.debug(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
         
         # 确保日期列是字符串类型
@@ -564,11 +548,11 @@ def fetch_stock_data(stock_code: str, days: int = None) -> pd.DataFrame:
             df = df.sort_values("日期", ascending=True)
         
         # 检查数据量
-        if len(df) < 10:
-            logger.warning(f"股票 {stock_code} 数据量不足({len(df)}天)，可能影响分析结果")
+        if len(df) < 5:
+            logger.debug(f"股票 {stock_code} 数据量不足({len(df)}天)，可能影响分析结果")
         
-        # 关键修复：在日志中包含股票代码
-        logger.info(f"股票 {stock_code} 数据已限制为最近1年（从 {start_date} 至 {end_date}），剩余 {len(df)} 条记录")
+        # 记录实际获取的数据量
+        logger.info(f"股票 {stock_code} ✅ 成功通过 {successful_interface} 接口获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
         
         return df
     
@@ -1016,12 +1000,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
     """按板块获取适合策略的股票（使用增量数据）"""
     try:
         logger.info("===== 开始执行个股趋势策略(TickTen) =====")
-        # 明确列出接口调用信息
-        logger.info("===== 接口调用信息 =====")
-        logger.info("1. ak.stock_info_a_code_name() - 获取A股股票列表（返回英文列名: code, name）")
-        logger.info("2. ak.stock_zh_a_spot_em() - 获取股票实时行情数据（返回中文列名: 代码, 名称, 流通市值, 总市值等）")
-        logger.info("3. 增量获取 - 仅获取最新数据（使用本地历史数据）")
-        logger.info("=======================")
         
         # 1. 获取股票基础信息
         basic_info_df = fetch_stock_list()
@@ -1055,7 +1033,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         stock_list = basic_info_df.to_dict('records')
         logger.info(f"开始处理 {len(stock_list)} 只通过市值过滤的股票...")
         
-        # ========== 关键修复 ==========
         # 分阶段执行：只处理今天的分组
         today = datetime.now().date()
         # 使用日期的天数对5取模，确保每天处理不同的组
@@ -1066,11 +1043,10 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         for stock in stock_list:
             stock["code"] = str(stock["code"]).zfill(6)
         
-        # 修复：直接根据股票代码最后一位计算分组
+        # 直接根据股票代码最后一位计算分组
         # 将股票代码最后一位数字映射到1-5的组
         stock_list = [stock for stock in stock_list if (int(stock["code"][-1]) % 5) + 1 == today_group]
         logger.info(f"今天实际处理 {len(stock_list)} 只股票（分组过滤后）")
-        # ========== 关键修复 ==========
         
         def process_stock(stock):
             # 确保股票代码是字符串，并且是6位（前面补零）
@@ -1085,7 +1061,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             # 更新板块计数器
             section_counts[section]["total"] += 1
             
-            # ========== 关键修改 ==========
             # 1. 尝试从缓存获取结果
             last_update = get_last_update_time(basic_info_df, stock_code)
             cached_result = get_cached_filter_result(stock_code, last_update)
@@ -1108,7 +1083,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                         }
             
             # 2. 获取日线数据（增量更新）
-            df = get_stock_daily_data(stock_code)
+            df = fetch_stock_data(stock_code)
             
             # 3. 检查数据完整性
             data_level, data_days = check_data_integrity(df)
@@ -1139,17 +1114,18 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             # 7. 缓存筛选失败结果
             cache_filter_result(stock_code, False)
             return None
-            # ========== 关键修改 ==========
         
-        # 6. 并行处理股票（限制并发数量，避免被AkShare限制）
+        # 6. 并行处理股票（优化并发参数）
         results = []
-        with ThreadPoolExecutor(max_workers=3) as executor:  # 降低并发数，减少限流风险
-            # 分批处理，避免请求过于频繁
-            for i in range(0, len(stock_list), 5):  # 每批处理5只股票
-                batch = stock_list[i:i+5]
+        # 提高并发数，但确保不会触发AkShare限制
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # 增加每批处理的股票数量
+            for i in range(0, len(stock_list), 15):
+                batch = stock_list[i:i+15]
                 batch_results = list(executor.map(process_stock, batch))
                 results.extend(batch_results)
-                time.sleep(2.0)  # 增加批次间等待时间
+                # 减少等待时间
+                time.sleep(0.8)
         
         # 7. 收集结果
         for result in results:
@@ -1162,7 +1138,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             if counts["total"] > 0:
                 logger.info(f"【筛选统计】板块 {section}:")
                 logger.info(f"  - 总股票数量: {counts['total']}")
-                logger.info(f"  - 数据量足够: {counts['data_ok']} ({counts['data_ok']/counts['total']*100:.1f}%)")
                 logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
                 logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
         
@@ -1214,7 +1189,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
             logger.info(f"股票基础信息已更新，共 {len(basic_info_df)} 条记录")
             
-            # ========== 正确修复 ==========
             # 使用 git_utils.py 中已有的工具函数
             try:
                 logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
@@ -1225,7 +1199,6 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                     logger.warning("提交更新后的股票基础信息到GitHub仓库失败，但继续执行策略")
             except Exception as e:
                 logger.warning(f"提交更新后的股票基础信息到GitHub仓库失败: {str(e)}")
-            # ========== 正确修复 ==========
         
         return top_stocks_by_section
     

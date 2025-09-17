@@ -69,6 +69,14 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
             remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
             subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
         
+        # 关键修复：先拉取再推送，避免冲突
+        logger.info("执行 git pull 以获取远程最新更改")
+        try:
+            # 先拉取远程仓库的最新更改
+            subprocess.run(['git', 'pull', 'origin', branch], check=True, cwd=repo_root)
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"git pull 失败，可能没有新更改: {str(e)}")
+        
         push_cmd = ['git', 'push', 'origin', branch]
         subprocess.run(push_cmd, check=True, cwd=repo_root)
         logger.info(f"已推送到远程仓库: origin/{branch}")

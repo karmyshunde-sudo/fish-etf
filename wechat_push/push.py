@@ -597,8 +597,8 @@ def _format_position_message(strategies: Dict[str, str]) -> List[str]:
             f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "==================\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
-            "📊 环境：生产"
+            # f"🔗 【GIT：fish-etf】: {log_url}\n"
+            "📊 环境：【GIT：fish-etf】"
         )
         
         messages = []
@@ -612,7 +612,7 @@ def _format_position_message(strategies: Dict[str, str]) -> List[str]:
             )
             
             # 添加页脚
-            content += footer
+            # content += footer
             messages.append(content)
         
         return messages
@@ -637,11 +637,8 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
         # 全局消息脚模板
         footer = (
             "\n==================\n"
-            f"📅 UTC时间: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "==================\n"
-            f"🔗 数据来源: {log_url}\n"
-            "📊 环境：生产"
+            "📊 环境：Git-fish-etf"
         )
         
         # 根据消息类型应用不同的模板
@@ -663,7 +660,7 @@ def _apply_message_template(message: Union[str, pd.DataFrame, Dict], message_typ
             "\n==================\n"
             "📅 时间: 无法获取\n"
             "\n==================\n"
-            "📊 数据来源：AkShare| 环境：生产\n"
+            "📊 数据来源：Git-fish-etf\n"
             "⚠️ 注意: 消息格式化过程中发生错误\n"
         )
 
@@ -832,11 +829,13 @@ def send_wechat_markdown(message: str,
             f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "──────────────────\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
+            # f"🔗 【GIT：fish-etf】: {log_url}\n"
+            f"🔗 【GIT：fish-etf】\n"
         )
         
         # 完整消息
-        full_message = message + footer
+        # full_message = message + footer
+        full_message = message
         
         # 企业微信Markdown消息格式
         payload = {
@@ -963,7 +962,7 @@ def test_webhook_connection(webhook: Optional[str] = None) -> bool:
             f"🕒 **UTC时间**: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 **北京时间**: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"
             "\n──────────────────\n"
-            f"🔗 【GIT：fish-etf】: {log_url}\n"
+            f"🔗 消息来源【GIT：fish-etf】\n"
         )
         
         logger.info("开始测试Webhook连接")

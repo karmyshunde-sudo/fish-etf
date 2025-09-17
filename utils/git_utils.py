@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
     """
-    提交并推送单个文件到Git仓库
+    提交并推送单个文件到Git仓库（先拉取再推送，避免冲突）
     
     Args:
         file_path: 要提交的文件路径
@@ -55,7 +55,7 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
         
         # 在GitHub Actions环境中设置Git用户信息
         if 'GITHUB_ACTIONS' in os.environ:
-            logger.info("检测到GitHub Actions环境，设置Git用户信息")
+            logger.debug("检测到GitHub Actions环境，设置Git用户信息")
             # 使用GitHub Actor作为用户名
             actor = os.environ.get('GITHUB_ACTOR', 'fish-etf-bot')
             # 使用GitHub提供的noreply邮箱
@@ -64,23 +64,23 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
             # 设置Git用户信息
             subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
             subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
-            logger.info(f"已设置Git用户: {actor} <{email}>")
+            logger.debug(f"已设置Git用户: {actor} <{email}>")
         
         # 添加文件到暂存区
         add_cmd = ['git', 'add', relative_path]
         subprocess.run(add_cmd, check=True, cwd=repo_root)
         if stock_code:
-            logger.info(f"股票 {stock_code} 已添加文件到暂存区: {relative_path}")
+            logger.debug(f"股票 {stock_code} 已添加文件到暂存区: {relative_path}")
         else:
-            logger.info(f"已添加文件到暂存区: {relative_path}")
+            logger.debug(f"已添加文件到暂存区: {relative_path}")
         
         # 提交更改
         commit_cmd = ['git', 'commit', '-m', commit_message]
         subprocess.run(commit_cmd, check=True, cwd=repo_root)
         if stock_code:
-            logger.info(f"股票 {stock_code} 已提交更改: {commit_message}")
+            logger.debug(f"股票 {stock_code} 已提交更改: {commit_message}")
         else:
-            logger.info(f"已提交更改: {commit_message}")
+            logger.debug(f"已提交更改: {commit_message}")
         
         # 推送到远程仓库
         branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
@@ -91,9 +91,9 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
         
         # 关键修复：先拉取再推送，避免冲突
         if stock_code:
-            logger.info(f"股票 {stock_code} 执行 git pull 以获取远程最新更改")
+            logger.debug(f"股票 {stock_code} 执行 git pull 以获取远程最新更改")
         else:
-            logger.info("执行 git pull 以获取远程最新更改")
+            logger.debug("执行 git pull 以获取远程最新更改")
         
         try:
             # 先拉取远程仓库的最新更改

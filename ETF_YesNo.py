@@ -192,14 +192,17 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 纳斯达克100指数等美股指数
-            df = ak.index_us_stock_considering_currency(index=index_code, start_date=start_date, end_date=end_date)
+            # 纳斯达克100指数等美股指数 - 修复：使用正确的AkShare函数
+            index_name = index_code[1:]  # 去掉^符号
+            df = ak.index_us_stock_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date)
         elif index_code.endswith('.CSI'):
-            # 中证系列指数
-            df = ak.index_stock_zh_sina(index_code=index_code.replace('.CSI', ''), start_date=start_date, end_date=end_date)
+            # 中证系列指数 - 修复：使用正确的AkShare函数
+            index_name = index_code.replace('.CSI', '')
+            df = ak.index_zh_a_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date, adjust="")
         elif index_code.endswith('.HI'):
-            # 恒生系列指数
-            df = ak.index_hk_hist(index_code=index_code.replace('.HI', ''))
+            # 恒生系列指数 - 修复：使用正确的AkShare函数
+            index_name = index_code.replace('.HI', '')
+            df = ak.index_hk_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date)
         else:
             # A股指数
             df = ak.index_zh_a_hist(

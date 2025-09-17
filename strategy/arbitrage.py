@@ -148,6 +148,33 @@ def is_manual_trigger() -> bool:
         logger.error(f"检查是否为手动触发失败: {str(e)}", exc_info=True)
         return False
 
+def validate_arbitrage_data(df: pd.DataFrame) -> bool:
+    """
+    验证实时套利数据
+    Args:
+        df: 实时套利数据DataFrame
+    Returns:
+        bool: 数据是否有效
+    """
+    if df.empty:
+        logger.warning("实时套利数据为空")
+        return False
+    
+    # 检查必要列
+    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        logger.warning(f"实时套利数据缺少必要列: {', '.join(missing_columns)}")
+        return False
+    
+    # 检查数据量
+    if len(df) < 10:  # 至少需要10个ETF才有分析价值
+        logger.warning(f"实时套利数据量不足({len(df)}条)，需要至少10条数据")
+        return False
+    
+    return True
+
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     基于实时数据计算ETF套利机会
@@ -168,8 +195,10 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             logger.error(f"get_arbitrage_data() 返回值类型错误，期望pd.DataFrame，实际返回: {type(all_opportunities)}")
             return pd.DataFrame(), pd.DataFrame()
         
-        if all_opportunities.empty:
-            logger.info("未发现有效套利机会")
+        # ===== 使用新的验证函数 =====
+        # 验证实时套利数据
+        if not validate_arbitrage_data(all_opportunities):
+            logger.error("实时套利数据验证失败，无法计算套利机会")
             return pd.DataFrame(), pd.DataFrame()
         
         # 确保DataFrame使用中文列名
@@ -177,17 +206,6 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 标准化列名 - 处理可能的空格问题
         all_opportunities.columns = [col.strip() for col in all_opportunities.columns]
-        
-        # ===== 关键修复：确保必要列存在 =====
-        # 必须有"ETF代码"、"ETF名称"、"市场价格"和"IOPV"列
-        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
-        missing_columns = [col for col in required_columns if col not in all_opportunities.columns]
-        
-        if missing_columns:
-            logger.error(f"DataFrame缺少必要列: {', '.join(missing_columns)}")
-            # 记录实际存在的列
-            logger.info(f"实际列名: {list(all_opportunities.columns)}")
-            return pd.DataFrame(), pd.DataFrame()
         
         # ===== 关键修复：确保数据有效性 =====
         # 1. 确保IOPV有效（大于最小阈值）

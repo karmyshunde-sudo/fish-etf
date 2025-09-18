@@ -1807,10 +1807,100 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     # 获取策略表现
     performance = get_strategy_performance()
     
-    # 为每个仓位类型生成详细分析
+    # 为每个ETF生成详细分析
     for position_type, strategy in strategies.items():
-        content += f"【{position_type}】\n"
-        content += strategy + "\n"
+        # 提取ETF名称和代码
+        if "ETF名称：" in strategy and "ETF代码：" in strategy:
+            etf_name = strategy.split("ETF名称：")[1].split("\n")[0]
+            etf_code = strategy.split("ETF代码：")[1].split("\n")[0]
+            current_price = strategy.split("当前价格：")[1].split("\n")[0]
+            
+            # 技术状态
+            if "技术状态：" in strategy:
+                tech_status = strategy.split("技术状态：")[1].split("\n")[0]
+                # 从技术状态中提取20日均线和偏离率
+                if "|" in tech_status:
+                    parts = tech_status.split("|")
+                    ma20 = parts[1].strip().split(":")[1].strip()
+                    deviation = parts[2].strip().split(":")[1].strip()
+                else:
+                    ma20 = "N/A"
+                    deviation = "N/A"
+            else:
+                tech_status = "N/A"
+                ma20 = "N/A"
+                deviation = "N/A"
+            
+            # 策略评分
+            if "策略评分：" in strategy:
+                score = strategy.split("策略评分：")[1].split("/")[0].strip()
+            else:
+                score = "N/A"
+            
+            # 操作场景
+            if "操作场景：" in strategy:
+                scenario = strategy.split("操作场景：")[1].split("\n")[0]
+            else:
+                scenario = "N/A"
+            
+            # 操作建议
+            if "操作建议：" in strategy:
+                advice = strategy.split("操作建议：")[1].split("\n")[0]
+            else:
+                advice = "N/A"
+            
+            # 动态止损
+            if "动态止损：" in strategy:
+                stop_loss = strategy.split("动态止损：")[1].split("\n")[0]
+            else:
+                stop_loss = "N/A"
+            
+            # 信号状态
+            signal_status = "✅" if "YES信号" in tech_status else "❌"
+            
+            # 生成新的格式
+            content += f"【{etf_name}({etf_code})】\n"
+            content += f"📊 当前：{current_price} | 20日均线：{ma20} | 偏离率：{deviation}\n"
+            content += f"{signal_status} 信号：{tech_status}\n\n"
+            content += f"──────────────────\n\n"
+            
+            # 场景描述
+            if "首次突破" in scenario:
+                content += f"【首次突破】{scenario}\n"
+            elif "持续站稳" in scenario:
+                content += f"【持续站稳】{scenario}\n"
+            elif "偏离率＞+10%" in scenario:
+                content += f"【超买风险】{scenario}\n"
+            elif "下跌初期" in scenario:
+                content += f"【下跌初期】{scenario}\n"
+            else:
+                content += f"【趋势分析】{scenario}\n"
+            
+            # 操作建议
+            content += "✅ 操作建议：\n"
+            if "新建仓位" in advice:
+                position_size = advice.split("新建仓位【")[1].split("】")[0]
+                content += f"  • {advice}\n"
+                content += f"  • 动态止损：{stop_loss}\n"
+            elif "持有观望" in advice:
+                content += f"  • {advice}\n"
+                content += f"  • 动态止损：{stop_loss}\n"
+            elif "减仓" in advice:
+                content += f"  • {advice}\n"
+            elif "止损清仓" in advice:
+                content += f"  • {advice}\n"
+            else:
+                content += f"  • {advice}\n"
+            
+            # 风险控制规则
+            if "风险控制规则" in strategy:
+                risk_rules = strategy.split("风险控制规则")[1].split("\n\n")[0].strip()
+                content += "⚠️ 风险控制规则：\n"
+                for rule in risk_rules.split("\n"):
+                    if rule.strip():
+                        content += f"  • {rule.strip()}\n"
+            
+            content += "\n"
     
     # 添加策略执行指南
     content += "💡 策略执行指南：\n"
@@ -1826,29 +1916,24 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     content += "   • 持续站稳：跟踪止损上移至5日均线\n"
     content += "   • 首次跌破：20日均线下方5%\n"
     content += "4. 止盈策略：盈利超8%后，止损上移至成本价\n"
-    content += "5. ETF轮动：根据趋势信号动态调整\n"
+    content += "5. ETF轮动：根据趋势信号动态调整\n\n"
     
     # 添加策略历史表现
     content += "📊 策略历史表现(近6个月)：\n"
     content += f"• 胜率：{performance['win_rate']:.1%} | 平均持仓周期：{performance['avg_holding_days']:.1f}天\n"
     content += f"• 盈亏比：{performance['profit_loss_ratio']:.1f}:1 | 最大回撤：{performance['max_drawdown']:.1%}\n"
     content += f"• 年化收益率：{performance['annualized_return']:.1%} (同期沪深300: {performance['hs300_return']:.1%})\n"
-    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n"
+    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n\n"
     
     # 添加数据验证信息
     content += "🔍 数据验证：基于真实交易记录计算，策略表现指标每交易日更新\n"
-    # content += "==================\n"
-    # content += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    # content += f"📅 北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
     content += "📊 策略版本: 20-Day-Moving-Average-Strategy v2.0.0\n"
-    # content += "🔗 详细分析: https://github.com/karmyshunde-sudo/fish-etf/actions/runs/17605215706    \n"
-    # content += "📊 环境：生产"
     
     return content
 
 def calculate_position_strategy() -> str:
     """
-    计算仓位操作策略（稳健仓、激进仓）
+    计算仓位操作策略（返回Top 5 ETF分析）
     
     Returns:
         str: 策略内容字符串
@@ -1930,24 +2015,23 @@ def calculate_position_strategy() -> str:
         # 3. 筛选有效的ETF
         valid_etfs = filter_valid_etfs(top_etfs)
         
-        # 4. 分别计算稳健仓和激进仓策略
+        # 4. 为每个ETF生成策略分析
         strategies = {}
         trade_actions = []
         
-        # 4.1 稳健仓策略（评分最高+趋势策略）
-        if valid_etfs:
-            stable_etf = valid_etfs[0]
-            stable_code = stable_etf["ETF代码"]
-            stable_name = stable_etf["ETF名称"]
-            stable_df = stable_etf["ETF数据"]
+        # 4.1 为Top 5 ETF生成策略分析
+        for i, etf in enumerate(valid_etfs[:5]):  # 只处理前5个ETF
+            etf_code = etf["ETF代码"]
+            etf_name = etf["ETF名称"]
+            etf_df = etf["ETF数据"]
             
-            # 稳健仓当前持仓
-            stable_position = position_df[position_df["仓位类型"] == "稳健仓"]
-            if stable_position.empty:
-                logger.warning("未找到稳健仓记录，使用默认值")
-                stable_position = pd.Series({
-                    "ETF代码": "",
-                    "ETF名称": "",
+            # 获取当前持仓信息
+            current_position = position_df[position_df["ETF代码"] == etf_code]
+            if current_position.empty:
+                logger.debug(f"未找到{etf_code}的持仓记录，使用默认值")
+                current_position = pd.Series({
+                    "ETF代码": etf_code,
+                    "ETF名称": etf_name,
                     "持仓成本价": 0.0,
                     "持仓日期": "",
                     "持仓数量": 0,
@@ -1958,59 +2042,24 @@ def calculate_position_strategy() -> str:
                     "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             else:
-                stable_position = stable_position.iloc[0]
+                current_position = current_position.iloc[0]
             
+            # 判断是稳健型还是激进型ETF（根据代码前缀）
+            is_stable = etf_code.startswith(("510", "512", "513", "159"))  # 宽基ETF
+            
+            # 生成策略分析
             strategy, actions = calculate_single_position_strategy(
-                position_type="稳健仓",
-                current_position=stable_position,
-                target_etf_code=stable_code,
-                target_etf_name=stable_name,
-                etf_df=stable_df,
-                is_stable=True
+                position_type="ETF分析",
+                current_position=current_position,
+                target_etf_code=etf_code,
+                target_etf_name=etf_name,
+                etf_df=etf_df,
+                is_stable=is_stable
             )
-            strategies["稳健仓"] = strategy
-            trade_actions.extend(actions)
-        else:
-            strategies["稳健仓"] = "稳健仓：无符合条件的ETF，保持空仓"
-        
-        # 4.2 激进仓策略（质量评分第二的ETF）
-        if len(valid_etfs) > 1:
-            aggressive_etf = valid_etfs[1]
-            aggressive_code = aggressive_etf["ETF代码"]
-            aggressive_name = aggressive_etf["ETF名称"]
-            aggressive_df = aggressive_etf["ETF数据"]
             
-            # 激进仓当前持仓
-            aggressive_position = position_df[position_df["仓位类型"] == "激进仓"]
-            if aggressive_position.empty:
-                logger.warning("未找到激进仓记录，使用默认值")
-                aggressive_position = pd.Series({
-                    "ETF代码": "",
-                    "ETF名称": "",
-                    "持仓成本价": 0.0,
-                    "持仓日期": "",
-                    "持仓数量": 0,
-                    "最新操作": "未持仓",
-                    "操作日期": "",
-                    "持仓天数": 0,
-                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                })
-            else:
-                aggressive_position = aggressive_position.iloc[0]
-            
-            strategy, actions = calculate_single_position_strategy(
-                position_type="激进仓",
-                current_position=aggressive_position,
-                target_etf_code=aggressive_code,
-                target_etf_name=aggressive_name,
-                etf_df=aggressive_df,
-                is_stable=False
-            )
-            strategies["激进仓"] = strategy
+            # 为每个ETF创建唯一标识的键名
+            strategies[f"【{i+1}/{len(valid_etfs)}】{etf_name}({etf_code})"] = strategy
             trade_actions.extend(actions)
-        else:
-            strategies["激进仓"] = "激进仓：无符合条件的ETF，保持空仓"
         
         # 5. 执行交易操作
         for action in trade_actions:

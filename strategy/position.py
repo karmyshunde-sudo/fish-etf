@@ -1833,16 +1833,16 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     content += f"• 胜率：{performance['win_rate']:.1%} | 平均持仓周期：{performance['avg_holding_days']:.1f}天\n"
     content += f"• 盈亏比：{performance['profit_loss_ratio']:.1f}:1 | 最大回撤：{performance['max_drawdown']:.1%}\n"
     content += f"• 年化收益率：{performance['annualized_return']:.1%} (同期沪深300: {performance['hs300_return']:.1%})\n"
-    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n\n"
+    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n"
     
     # 添加数据验证信息
     content += "🔍 数据验证：基于真实交易记录计算，策略表现指标每交易日更新\n"
-    content += "==================\n"
-    content += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    content += f"📅 北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    # content += "==================\n"
+    # content += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    # content += f"📅 北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
     content += "📊 策略版本: 20-Day-Moving-Average-Strategy v2.0.0\n"
-    content += "🔗 详细分析: https://github.com/karmyshunde-sudo/fish-etf/actions/runs/17605215706    \n"
-    content += "📊 环境：生产"
+    # content += "🔗 详细分析: https://github.com/karmyshunde-sudo/fish-etf/actions/runs/17605215706    \n"
+    # content += "📊 环境：生产"
     
     return content
 

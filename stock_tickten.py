@@ -50,31 +50,30 @@ DATA_UPDATE_INTERVAL = 1
 MARKET_SECTIONS = {
     "沪市主板": {
         "prefix": ["60"],
-        "min_daily_volume": 5000 * 10000,  # 日均成交额阈值(元)
+        "min_daily_volume": 5 * 10000,  # 日均成交额阈值(元)
         "max_volatility": 0.40,  # 最大波动率
-        "min_market_cap": 50,  # 最小市值(亿元)
+        "min_market_cap": 5,  # 最小市值(亿元)
         "max_market_cap": 2000  # 最大市值(亿元)
     },
     "深市主板": {
         "prefix": ["00"],
-        "min_daily_volume": 5000 * 10000,
+        "min_daily_volume": 5 * 10000,
         "max_volatility": 0.40,
-        "min_market_cap": 50,
-        "min_market_cap": 50,
+        "min_market_cap": 5,
         "max_market_cap": 2000
     },
     "创业板": {
         "prefix": ["30"],
-        "min_daily_volume": 5000 * 10000,
+        "min_daily_volume": 5 * 10,
         "max_volatility": 0.40,
-        "min_market_cap": 50,
+        "min_market_cap": 5,
         "max_market_cap": 2000
     },
     "科创板": {
         "prefix": ["688"],
-        "min_daily_volume": 5000 * 10000,
+        "min_daily_volume": 5 * 1,
         "max_volatility": 0.40,
-        "min_market_cap": 50,
+        "min_market_cap": 5,
         "max_market_cap": 2000
     }
 }
@@ -695,38 +694,71 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
         return None
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_days: int) -> bool:
-    """根据数据完整性级别应用不同的筛选策略"""
+    """判断个股是否适合策略（流动性、波动率、市值三重过滤）"""
     try:
-        if df is None or df.empty or data_days < 10:
-            logger.debug(f"股票 {stock_code} 数据不足，跳过")
+        # 1. 数据完整性检查
+        if data_level == "数据量不足":
+            logger.debug(f"股票 {stock_code} 被过滤 - 数据量不足({data_days}天)")
             return False
-        
-        # 获取股票所属板块
-        section = get_stock_section(stock_code)
-        if section == "其他板块" or section not in MARKET_SECTIONS:
-            logger.debug(f"股票 {stock_code} 不属于任何板块，跳过")
+            
+        # 2. 市值过滤
+        market_cap = calculate_market_cap(df, stock_code)
+        if market_cap < MIN_MARKET_CAP_FOR_BASIC_FILTER:
+            logger.debug(f"股票 {stock_code} 被过滤 - 市值不足({market_cap:.2f}亿元 < {MIN_MARKET_CAP_FOR_BASIC_FILTER}亿元)")
             return False
-        
-        # 获取板块配置
-        section_config = MARKET_SECTIONS[section]
-        
-        # 根据数据完整性应用不同筛选策略
-        if data_level == "complete":
-            # 完整数据：应用全部三重过滤
-            return _full_filter_strategy(stock_code, df, section, section_config)
-        elif data_level in ["gapped", "partial"]:
-            # 部分数据：应用简化版过滤
-            return _simplified_filter_strategy(stock_code, df, section, section_config, data_days)
-        elif data_level == "insufficient":
-            # 数据严重不足：只应用基础过滤
-            return _basic_filter_strategy(stock_code, df, section, section_config, data_days)
-        else:  # corrupted or unknown
-            logger.debug(f"股票 {stock_code} 数据损坏，跳过")
+            
+        # 3. 波动率过滤
+        volatility = calculate_volatility(df)
+        if volatility < MIN_VOLATILITY or volatility > MAX_VOLATILITY:
+            logger.debug(f"股票 {stock_code} 被过滤 - 波动率异常({volatility:.2%}不在{MIN_VOLATILITY:.2%}-{MAX_VOLATILITY:.2%}范围内)")
             return False
-    
+            
+        # 4. 流动性过滤
+        avg_volume = calculate_avg_volume(df)
+        if avg_volume < MIN_DAILY_VOLUME:
+            logger.debug(f"股票 {stock_code} 被过滤 - 流动性不足(日均成交额{avg_volume:.2f}万元 < {MIN_DAILY_VOLUME}万元)")
+            return False
+            
+        logger.debug(f"股票 {stock_code} 通过所有过滤条件")
+        return True
+        
     except Exception as e:
-        logger.error(f"筛选股票{stock_code}失败: {str(e)}", exc_info=True)
+        logger.error(f"股票 {stock_code} 过滤检查失败: {str(e)}", exc_info=True)
         return False
+
+def verify_market_cap_calculation():
+    """验证市值计算逻辑是否正确"""
+    logger.info("===== 开始验证市值计算逻辑 =====")
+    
+    # 1. 选择各板块代表性股票
+    test_stocks = {
+        "沪市主板": ["600000", "600036", "600050"],
+        "深市主板": ["000001", "000002", "000004"],
+        "创业板": ["300001", "300002", "300003"],
+        "科创板": ["688001", "688002", "688003"]
+    }
+    
+    # 2. 验证市值计算
+    for section, codes in test_stocks.items():
+        logger.info(f"--- 验证板块: {section} ---")
+        for code in codes:
+            df = fetch_stock_data(code)
+            if df.empty:
+                logger.error(f"股票 {code} 数据获取失败")
+                continue
+                
+            # 获取实时行情数据
+            real_time_data = get_real_time_market_data(code)
+            
+            # 计算市值
+            calculated_cap = calculate_market_cap(df, code)
+            reported_cap = real_time_data.get("总市值", 0) if real_time_data else 0
+            
+            # 比较计算值与报告值
+            diff = abs(calculated_cap - reported_cap) / reported_cap if reported_cap > 0 else 0
+            logger.info(f"股票 {code}: 计算市值={calculated_cap:.2f}亿元, 报告市值={reported_cap:.2f}亿元, 差异={diff:.2%}")
+    
+    logger.info("===== 市值计算验证完成 =====")
 
 def _full_filter_strategy(stock_code: str, df: pd.DataFrame, section: str, section_config: dict) -> bool:
     """完整数据筛选策略（全部三重过滤）"""

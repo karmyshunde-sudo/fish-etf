@@ -1031,36 +1031,8 @@ def cache_score(stock_code: str, score: float):
 
 # ========== 以上是关键修改 ==========
 
-def get_stock_group(stock_code: str) -> int:
-    """
-    根据股票代码确定股票所属的组（1-5）
-    
-    Args:
-        stock_code: 股票代码（可能带市场前缀）
-    
-    Returns:
-        int: 股票所属的组（1-5）
-    """
-    # 确保股票代码是字符串
-    stock_code = str(stock_code)
-    
-    # 移除可能的市场前缀（sh/sz）
-    if stock_code.lower().startswith(('sh', 'sz')):
-        stock_code = stock_code[2:]
-    
-    # 确保股票代码是6位数字
-    stock_code = stock_code.zfill(6)
-    
-    # 计算组号：基于股票代码最后一位数字
-    last_digit = int(stock_code[-1])
-    
-    # 将0-9的数字映射到1-5的组
-    group = (last_digit % 5) + 1
-    
-    return group
-
 def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
-    """按板块获取适合策略的股票（使用增量数据）"""
+    """按板块获取适合策略的股票（使用完整数据）"""
     try:
         logger.info("===== 开始执行个股趋势策略(TickTen) =====")
         
@@ -1072,14 +1044,10 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
         
-        # 2. 移除全局市值过滤 - 关键修改
-        # 之前: basic_info_df = basic_info_df[basic_info_df["market_cap"] >= MIN_MARKET_CAP_FOR_BASIC_FILTER]
-        # 现在: 保留所有股票，让它们有机会进入各自的板块过滤
-        
-        # 3. 按板块分组处理
+        # 2. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
         
-        # 4. 初始化各板块计数器（添加详细过滤原因统计）
+        # 3. 初始化各板块计数器（添加详细过滤原因统计）
         section_counts = {section: {
             "total": 0, 
             "data_ok": 0, 
@@ -1091,24 +1059,21 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             "scored": 0
         } for section in MARKET_SECTIONS.keys()}
         
-        # 5. 处理每只股票 - 处理所有股票（不再预先过滤）
+        # 4. 处理每只股票 - 处理所有股票（完整处理）
         stock_list = basic_info_df.to_dict('records')
         logger.info(f"开始处理 {len(stock_list)} 只股票...")
         
-        # 分阶段执行：只处理今天的分组
-        today = datetime.now().date()
-        # 使用日期的天数对5取模，确保每天处理不同的组
-        today_group = (today.day % 5) + 1
-        logger.info(f"今天处理第 {today_group} 组股票（共5组）")
+        # ========== 关键修改：移除分组逻辑 ==========
+        # 原有分组逻辑已完全移除
+        # 不再按日期或股票代码分组
+        # 确保每天处理所有股票
+        # ========== 关键修改：移除分组逻辑 ==========
         
         # 确保所有股票代码是字符串格式（6位，前面补零）
         for stock in stock_list:
             stock["code"] = str(stock["code"]).zfill(6)
         
-        # 直接根据股票代码最后一位计算分组
-        # 将股票代码最后一位数字映射到1-5的组
-        stock_list = [stock for stock in stock_list if (int(stock["code"][-1]) % 5) + 1 == today_group]
-        logger.info(f"今天实际处理 {len(stock_list)} 只股票（分组过滤后）")
+        logger.info(f"今天实际处理 {len(stock_list)} 只股票（完整处理）")
         
         def process_stock(stock):
             # 确保股票代码是字符串，并且是6位（前面补零）

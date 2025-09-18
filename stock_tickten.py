@@ -1041,18 +1041,9 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         
         logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
         
-        # 2. 首先应用基础过滤（市值过滤）
-        if not basic_info_df.empty:
-            # 过滤市值不足的股票
-            initial_count = len(basic_info_df)
-            basic_info_df = basic_info_df[basic_info_df["market_cap"] >= MIN_MARKET_CAP_FOR_BASIC_FILTER]
-            filtered_count = len(basic_info_df)
-            logger.info(f"【基础过滤】市值过滤后剩余 {filtered_count} 只股票（市值≥{MIN_MARKET_CAP_FOR_BASIC_FILTER}亿元）（过滤了 {initial_count - filtered_count} 只）")
-        
-        # 如果没有通过市值过滤的股票，直接返回
-        if basic_info_df.empty:
-            logger.warning("没有通过市值过滤的股票，无法继续筛选")
-            return {}
+        # 2. 移除全局市值过滤 - 关键修改
+        # 之前: basic_info_df = basic_info_df[basic_info_df["market_cap"] >= MIN_MARKET_CAP_FOR_BASIC_FILTER]
+        # 现在: 保留所有股票，让它们有机会进入各自的板块过滤
         
         # 3. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
@@ -1069,9 +1060,9 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             "scored": 0
         } for section in MARKET_SECTIONS.keys()}
         
-        # 5. 处理每只股票 - 仅处理通过市值过滤的股票
+        # 5. 处理每只股票 - 处理所有股票（不再预先过滤）
         stock_list = basic_info_df.to_dict('records')
-        logger.info(f"开始处理 {len(stock_list)} 只通过市值过滤的股票...")
+        logger.info(f"开始处理 {len(stock_list)} 只股票...")
         
         # 分阶段执行：只处理今天的分组
         today = datetime.now().date()

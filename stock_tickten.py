@@ -850,6 +850,9 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         
         volume = df["成交量"].iloc[-1] if "成交量" in df.columns and len(df) >= 1 else 0
         
+        # 获取股票所属板块
+        section = get_stock_section(stock_code)
+        
         # 1. 趋势评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
@@ -948,11 +951,31 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             volatility = df["volatility"].iloc[-1]
             
             if not pd.isna(volatility):
-                # 适中的波动率
-                if 15 <= volatility <= 30:
-                    volatility_score += 10  # 波动率在15%-30%之间，加10分
-                elif volatility > 30:
-                    volatility_score += 5  # 波动率大于30%，加5分
+                # 根据不同板块设置不同的波动率评分标准
+                if section == "沪市主板":
+                    # 沪市主板：波动率在15%-25%为最佳
+                    if 0.15 <= volatility <= 0.25:
+                        volatility_score += 10
+                    elif volatility > 0.25:
+                        volatility_score += 5
+                elif section == "深市主板":
+                    # 深市主板：波动率在18%-28%为最佳
+                    if 0.18 <= volatility <= 0.28:
+                        volatility_score += 10
+                    elif volatility > 0.28:
+                        volatility_score += 5
+                elif section == "创业板":
+                    # 创业板：波动率在20%-35%为最佳
+                    if 0.20 <= volatility <= 0.35:
+                        volatility_score += 10
+                    elif volatility > 0.35:
+                        volatility_score += 5
+                elif section == "科创板":
+                    # 科创板：波动率在25%-40%为最佳
+                    if 0.25 <= volatility <= 0.40:
+                        volatility_score += 10
+                    elif volatility > 0.40:
+                        volatility_score += 5
                 
                 # 波动率趋势
                 if len(df) >= 21:
@@ -967,7 +990,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         total_score = trend_score + momentum_score + volume_score + volatility_score
         total_score = max(0, min(100, total_score))  # 限制在0-100范围内
         
-        logger.debug(f"股票 {stock_code} 策略评分: {total_score:.2f} "
+        logger.debug(f"股票 {stock_code}({section}) 策略评分: {total_score:.2f} "
                      f"(趋势={trend_score:.1f}, 动量={momentum_score:.1f}, "
                      f"量能={volume_score:.1f}, 波动率={volatility_score:.1f})")
         
@@ -982,7 +1005,6 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
 FILTER_CACHE = {}
 SCORE_CACHE = {}
 CACHE_EXPIRY = timedelta(hours=1)  # 缓存有效期
-
 def get_cached_filter_result(stock_code: str, last_update: datetime) -> Optional[bool]:
     """获取缓存的筛选结果"""
     if stock_code in FILTER_CACHE:
@@ -1448,7 +1470,7 @@ def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> s
     summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只")
     summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽")
     summary_lines.append("──────────────────")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf )")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf   )")
     
     summary_message = "\n".join(summary_lines)
     return summary_message

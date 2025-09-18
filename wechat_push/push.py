@@ -726,7 +726,20 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
         # 应用消息模板并发送所有分页消息
         all_success = True
         for msg in messages:
-            full_message = _apply_message_template(msg, message_type)
+            # 仅对position类型应用底部格式
+            if message_type == "position":
+                # 添加底部格式
+                beijing_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                footer = f"\n\n==================\n"
+                footer += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                footer += f"📅 北京时间: {beijing_time}\n"
+                footer += "📊 环境：生产\n"
+                footer += f"📅 北京时间: {beijing_time}\n"
+                footer += "📊 环境：Git-fish-etf"
+                
+                full_message = msg + footer
+            else:
+                full_message = _apply_message_template(msg, message_type)
             
             # 检查消息长度并进行分片
             messages_to_send = _check_message_length(full_message)

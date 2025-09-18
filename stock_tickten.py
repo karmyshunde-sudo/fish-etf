@@ -701,25 +701,34 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_d
             logger.debug(f"股票 {stock_code} 被过滤 - 数据量不足({data_days}天)")
             return False
             
-        # 2. 市值过滤
+        # 获取股票所属板块
+        section = get_stock_section(stock_code)
+        if section not in MARKET_SECTIONS:
+            logger.debug(f"股票 {stock_code} 不属于任何板块，跳过")
+            return False
+            
+        # 获取板块配置
+        section_config = MARKET_SECTIONS[section]
+        
+        # 2. 市值过滤 - 使用板块特定的阈值
         market_cap = calculate_market_cap(df, stock_code)
-        if market_cap < MIN_MARKET_CAP_FOR_BASIC_FILTER:
-            logger.debug(f"股票 {stock_code} 被过滤 - 市值不足({market_cap:.2f}亿元 < {MIN_MARKET_CAP_FOR_BASIC_FILTER}亿元)")
+        if market_cap < section_config["min_market_cap"]:
+            logger.debug(f"股票 {stock_code}({section}) 被过滤 - 市值不足({market_cap:.2f}亿元 < {section_config['min_market_cap']}亿元)")
             return False
             
-        # 3. 波动率过滤
+        # 3. 波动率过滤 - 使用板块特定的阈值
         volatility = calculate_volatility(df)
-        if volatility < MIN_VOLATILITY or volatility > MAX_VOLATILITY:
-            logger.debug(f"股票 {stock_code} 被过滤 - 波动率异常({volatility:.2%}不在{MIN_VOLATILITY:.2%}-{MAX_VOLATILITY:.2%}范围内)")
+        if volatility < section_config["min_volatility"] or volatility > section_config["max_volatility"]:
+            logger.debug(f"股票 {stock_code}({section}) 被过滤 - 波动率异常({volatility:.2%}不在{section_config['min_volatility']:.2%}-{section_config['max_volatility']:.2%}范围内)")
             return False
             
-        # 4. 流动性过滤
+        # 4. 流动性过滤 - 使用板块特定的阈值
         avg_volume = calculate_avg_volume(df)
-        if avg_volume < MIN_DAILY_VOLUME:
-            logger.debug(f"股票 {stock_code} 被过滤 - 流动性不足(日均成交额{avg_volume:.2f}万元 < {MIN_DAILY_VOLUME}万元)")
+        if avg_volume < section_config["min_daily_volume"]:
+            logger.debug(f"股票 {stock_code}({section}) 被过滤 - 流动性不足(日均成交额{avg_volume:.2f}万元 < {section_config['min_daily_volume']/10000:.2f}万元)")
             return False
             
-        logger.debug(f"股票 {stock_code} 通过所有过滤条件")
+        logger.debug(f"股票 {stock_code}({section}) 通过所有过滤条件")
         return True
         
     except Exception as e:

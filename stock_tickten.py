@@ -1057,9 +1057,17 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         # 3. 按板块分组处理
         section_stocks = {section: [] for section in MARKET_SECTIONS.keys()}
         
-        # 4. 初始化各板块计数器
-        section_counts = {section: {"total": 0, "data_ok": 0, "suitable": 0, "scored": 0}
-                         for section in MARKET_SECTIONS.keys()}
+        # 4. 初始化各板块计数器（添加详细过滤原因统计）
+        section_counts = {section: {
+            "total": 0, 
+            "data_ok": 0, 
+            "market_cap_filtered": 0,
+            "volatility_filtered": 0,
+            "liquidity_filtered": 0,
+            "data_filtered": 0,
+            "suitable": 0,
+            "scored": 0
+        } for section in MARKET_SECTIONS.keys()}
         
         # 5. 处理每只股票 - 仅处理通过市值过滤的股票
         stock_list = basic_info_df.to_dict('records')
@@ -1122,26 +1130,58 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             logger.debug(f"股票 {stock_code} 数据完整性: {data_level} ({data_days}天)")
             
             # 4. 根据数据完整性应用不同策略
-            if is_stock_suitable(stock_code, df, data_level, data_days):
-                # 5. 计算策略得分
-                score = calculate_stock_strategy_score(stock_code, df)
+            if data_level != "数据量充足":
+                section_counts[section]["data_filtered"] += 1
+                logger.debug(f"股票 {stock_code} 被过滤 - 数据量不足({data_days}天)")
+                cache_filter_result(stock_code, False)
+                return None
+            
+            # 检查市值数据是否可靠
+            market_cap = calculate_market_cap(df, stock_code)
+            if market_cap is None or market_cap <= 0:
+                logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
+                section_counts[section]["market_cap_filtered"] += 1
+                cache_filter_result(stock_code, False)
+                return None
+            
+            # 检查是否适合策略
+            if not is_stock_suitable(stock_code, df, data_level, data_days):
+                # 记录具体过滤原因
+                if not is_market_cap_suitable(stock_code, df, data_level, data_days):
+                    section_counts[section]["market_cap_filtered"] += 1
+                    logger.debug(f"股票 {stock_code} 被过滤 - 市值不足")
+                elif not is_volatility_suitable(stock_code, df, data_level, data_days):
+                    section_counts[section]["volatility_filtered"] += 1
+                    logger.debug(f"股票 {stock_code} 被过滤 - 波动率异常")
+                elif not is_liquidity_suitable(stock_code, df, data_level, data_days):
+                    section_counts[section]["liquidity_filtered"] += 1
+                    logger.debug(f"股票 {stock_code} 被过滤 - 流动性不足")
+                else:
+                    logger.debug(f"股票 {stock_code} 被过滤 - 未知原因")
                 
-                if score > 0:
-                    # 6. 缓存结果
-                    cache_filter_result(stock_code, True)
-                    cache_score(stock_code, score)
-                    
-                    # 7. 更新板块计数器
-                    section_counts[section]["suitable"] += 1
-                    section_counts[section]["scored"] += 1
-                    
-                    return {
-                        "code": stock_code,
-                        "name": stock_name,
-                        "score": score,
-                        "df": df,
-                        "section": section
-                    }
+                cache_filter_result(stock_code, False)
+                return None
+            
+            section_counts[section]["suitable"] += 1
+            
+            # 5. 计算策略得分
+            score = calculate_stock_strategy_score(stock_code, df)
+            
+            if score > 0:
+                # 6. 缓存结果
+                cache_filter_result(stock_code, True)
+                cache_score(stock_code, score)
+                
+                # 7. 更新板块计数器
+                section_counts[section]["scored"] += 1
+                
+                return {
+                    "code": stock_code,
+                    "name": stock_name,
+                    "score": score,
+                    "df": df,
+                    "section": section
+                }
             
             # 7. 缓存筛选失败结果
             cache_filter_result(stock_code, False)
@@ -1165,11 +1205,15 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 section = result["section"]
                 section_stocks[section].append(result)
         
-        # 8. 记录各板块筛选结果
+        # 8. 记录各板块筛选结果（包含详细过滤原因）
         for section, counts in section_counts.items():
             if counts["total"] > 0:
-                logger.info(f"【筛选统计】板块 {section}:")
+                logger.info(f"【筛选详细统计】板块 {section}:")
                 logger.info(f"  - 总股票数量: {counts['total']}")
+                logger.info(f"  - 数据量不足: {counts['data_filtered']} ({counts['data_filtered']/counts['total']*100:.1f}%)")
+                logger.info(f"  - 市值过滤: {counts['market_cap_filtered']} ({counts['market_cap_filtered']/counts['total']*100:.1f}%)")
+                logger.info(f"  - 波动率过滤: {counts['volatility_filtered']} ({counts['volatility_filtered']/counts['total']*100:.1f}%)")
+                logger.info(f"  - 流动性过滤: {counts['liquidity_filtered']} ({counts['liquidity_filtered']/counts['total']*100:.1f}%)")
                 logger.info(f"  - 通过三重过滤: {counts['suitable']} ({counts['suitable']/counts['total']*100:.1f}%)")
                 logger.info(f"  - 评分>0: {counts['scored']} ({counts['scored']/counts['total']*100:.1f}%)")
         
@@ -1181,6 +1225,11 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 top_stocks = stocks[:MAX_STOCKS_PER_SECTION]
                 top_stocks_by_section[section] = top_stocks
                 logger.info(f"【最终结果】板块 {section} 筛选出 {len(top_stocks)} 只股票")
+                # 记录筛选出的股票详情
+                for i, stock in enumerate(top_stocks):
+                    logger.info(f"  {i+1}. {stock['name']}({stock['code']}) - 评分: {stock['score']:.2f}")
+            else:
+                logger.info(f"【最终结果】板块 {section} 无符合条件的股票")
         
         # 10. 更新基础信息中的市值和评分
         updated_records = []

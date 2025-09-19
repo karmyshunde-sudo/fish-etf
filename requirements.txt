@@ -1,4 +1,4 @@
-yfinance==0.20.3
+yfinance==0.2.66
 akshare>=1.17.41  # 主数据源
 pandas>=1.5.3     # 数据处理
 numpy>=1.21.0     # 数值计算

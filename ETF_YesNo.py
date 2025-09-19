@@ -192,9 +192,32 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 纳斯达克100指数等美股指数 - 完全重写美股指数获取逻辑
+            # 美股指数处理 - 使用正确的接口和代码格式
             index_name = index_code[1:]  # 去掉^符号
-            df = get_us_index_data(index_name, start_date, end_date)
+            
+            # 转换为AkShare期望的格式（.NDX而不是^NDX）
+            akshare_symbol = f".{index_name}"
+            
+            # 使用正确的接口
+            df = ak.stock_us_index_daily(symbol=akshare_symbol)
+            
+            # 筛选日期范围
+            if not df.empty:
+                # 转换日期格式
+                df['date'] = pd.to_datetime(df['date'])
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+                
+                # 重命名列以匹配其他数据源
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘',
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘',
+                    'volume': '成交量'
+                })
         
         elif index_code.endswith('.CSI'):
             # 中证系列指数
@@ -239,165 +262,25 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 标准化列名
         if not df.empty:
-            df = standardize_index_columns(df, index_code)
+            # 确保必需列存在
+            required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                logger.warning(f"指数 {index_code} 数据缺少必要列: {', '.join(missing_columns)}")
+                return pd.DataFrame()
+            
+            # 确保日期列是字符串格式
+            if "日期" in df.columns:
+                df["日期"] = df["日期"].astype(str)
+                df = df.sort_values("日期", ascending=True)
         
+        logger.info(f"成功获取指数 {index_code} 数据，共 {len(df)} 条记录")
         return df
     
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
-def get_us_index_data(index_name: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    获取美股指数数据（使用最可靠的AkShare接口）
-    
-    Args:
-        index_name: 指数名称
-        start_date: 开始日期
-        end_date: 结束日期
-        
-    Returns:
-        pd.DataFrame: 指数数据
-    """
-    # 美股指数代码映射 - 使用Yahoo Finance标准代码
-    symbol_map = {
-        'NDX': '^NDX',  # 纳斯达克100
-        'DJI': '^DJI',  # 道琼斯工业指数
-        'GSPC': '^GSPC',  # 标准普尔500
-        'IXIC': '^IXIC',  # 纳斯达克综合指数
-        'RUT': '^RUT'  # 罗素2000
-    }
-    
-    # 获取正确的指数代码
-    symbol = symbol_map.get(index_name, f'^{index_name}')
-    
-    # 转换日期格式
-    start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
-    
-    try:
-        # 直接使用 stock_us_daily 接口 - 这是目前最可靠的美股指数获取方式
-        df = ak.stock_us_daily(
-            symbol=symbol,
-            adjust="hfq"  # 前复权
-        )
-        
-        if df.empty:
-            logger.warning(f"通过 stock_us_daily 获取 {index_name} 数据为空")
-            return pd.DataFrame()
-        
-        # 只保留指定日期范围
-        df = df[(df.index >= start_dt) & (df.index <= end_dt)]
-        
-        # 重命名列并设置日期列
-        df = df.reset_index()
-        df = df.rename(columns={
-            'date': '日期',
-            'open': '开盘',
-            'high': '最高',
-            'low': '最低',
-            'close': '收盘',
-            'volume': '成交量'
-        })
-        
-        # 转换日期格式
-        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-        
-        logger.info(f"成功通过 stock_us_daily 获取 {index_name} 指数数据，共 {len(df)} 条记录")
-        return df
-    
-    except Exception as e:
-        logger.warning(f"通过 stock_us_daily 获取 {index_name} 失败: {str(e)}")
-        
-        # 尝试使用 investing 接口作为备用
-        try:
-            # 根据指数选择不同的 investing ID
-            investing_map = {
-                'NDX': ('nasdaq-100', '179', '美国'),
-                'DJI': ('dow-jones', '2', '美国'),
-                'GSPC': ('s-p-500', '166', '美国'),
-                'IXIC': ('nasdaq-composite', '117', '美国')
-            }
-            
-            inv_params = investing_map.get(index_name, ('nasdaq-100', '179', '美国'))
-            
-            df = ak.index_investing_global(
-                symbol=inv_params[0],
-                index_id=inv_params[1],
-                country=inv_params[2],
-                period="daily",
-                start_date=start_date,
-                end_date=end_date
-            )
-            
-            if not df.empty:
-                # 重命名列
-                df = df.rename(columns={
-                    '日期': '日期',
-                    '开盘': '开盘',
-                    '最高': '最高',
-                    '最低': '最低',
-                    '收盘': '收盘',
-                    '成交量': '成交量'
-                })
-                
-                # 转换日期格式
-                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-                
-                logger.info(f"成功通过 investing_global 获取 {index_name} 指数数据，共 {len(df)} 条记录")
-                return df
-            
-        except Exception as inv_e:
-            logger.warning(f"通过 investing_global 获取 {index_name} 失败: {str(inv_e)}")
-    
-    logger.warning(f"无法获取 {index_name} 指数数据")
-    return pd.DataFrame()
-
-def standardize_index_columns(df: pd.DataFrame, index_code: str) -> pd.DataFrame:
-    """
-    标准化指数数据的列名
-    
-    Args:
-        df: 指数数据
-        index_code: 指数代码
-        
-    Returns:
-        pd.DataFrame: 标准化后的指数数据
-    """
-    # 标准化列名
-    column_mapping = {
-        'date': '日期',
-        'open': '开盘',
-        'high': '最高',
-        'low': '最低',
-        'close': '收盘',
-        'volume': '成交量',
-        '成交额': '成交额',
-        '涨跌幅': '涨跌幅',
-        '涨跌额': '涨跌额'
-    }
-    
-    # 保留存在的列
-    existing_columns = [col for col in column_mapping.keys() if col in df.columns]
-    rename_mapping = {col: column_mapping[col] for col in existing_columns}
-    
-    # 重命名列
-    df = df.rename(columns=rename_mapping)
-    
-    # 确保必需列存在
-    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        logger.warning(f"指数 {index_code} 数据缺少必要列: {', '.join(missing_columns)}")
-        return pd.DataFrame()
-    
-    # 确保日期列是字符串格式
-    if "日期" in df.columns:
-        df["日期"] = df["日期"].astype(str)
-        df = df.sort_values("日期", ascending=True)
-    
-    return df
 
 def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""

@@ -785,13 +785,32 @@ def generate_report():
                 time.sleep(2)
                 continue
             
-            # 计算最新数据
-            latest_data = df.iloc[-1]
-            close_price = latest_data["收盘"]
+            # 修复：确保获取标量值而不是Series
+            # 使用.values[-1]确保获取标量值
+            close_price = df['收盘'].values[-1]
+            
+            # 修复：确保critical_value是标量值
             critical_value = calculate_critical_value(df)
+            # 如果返回的是Series，获取最后一个值
+            if isinstance(critical_value, pd.Series):
+                critical_value = critical_value.values[-1]
+            # 如果返回的是DataFrame，获取最后一个值
+            elif isinstance(critical_value, pd.DataFrame):
+                critical_value = critical_value.iloc[-1, 0]
+            
+            # 修复：确保close_price和critical_value都是数值类型
+            try:
+                close_price = float(close_price)
+                critical_value = float(critical_value)
+            except (TypeError, ValueError) as e:
+                logger.error(f"转换价格值失败: {str(e)}")
+                continue
+            
+            # 计算偏离率
             deviation = calculate_deviation(close_price, critical_value)
             
             # 状态判断（收盘价在临界值之上为YES，否则为NO）
+            # 修复：现在close_price和critical_value都是标量值，可以安全比较
             status = "YES" if close_price >= critical_value else "NO"
             
             # 生成详细策略信号
@@ -800,10 +819,10 @@ def generate_report():
             # 构建消息
             message_lines = []
             message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
-            message_lines.append(f"📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%\n")
+            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）\n")
+            message_lines.append(f"{signal_symbol} 信号：{status}\n")
             message_lines.append(signal_message)            
             message = "\n".join(message_lines)
             
@@ -818,7 +837,7 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status}📊 当前：{int(close_price)} | 临界值：{int(critical_value)} | 偏离率：{deviation:.2f}%\n"
+            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1

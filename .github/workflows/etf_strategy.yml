@@ -1,12 +1,13 @@
 name: ETF仓位折溢套利
 on:
   schedule:
-    - cron: '0 14 * * 1-5'   # UTC 14:00 = 北京时间 22:00 (日线爬取)
+    - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (日线爬取)
     - cron: '*/35 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (套利计算)
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (仓位策略)
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
-    - cron: '0 9 * * *'       # UTC 09:00 = 北京时间 17:00 (ETF Yes/No)
-    - cron: '0 10 * * 1-5'    # UTC 10:00 = 北京时间 18:00 (个股趋势策略)
+    - cron: '0 8 * * *'       # UTC 08:00 = 北京时间 16:00 (ETF Yes/No)
+    - cron: '30 0 * * 1-5'    # UTC 0:30 = 北京时间 8:30 (个股趋势策略)
+    - cron: '*/10 12-22 * * *'    # UTC 11:00 = 北京时间 20:00-06：00 (股票日线爬取)
   workflow_dispatch:
     inputs:
       task:
@@ -17,6 +18,7 @@ on:
           - 'update_etf_list'
           - 'etf_yesno'
           - 'stock_fourty'
+          - 'stock_crawler'
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
           - 'calculate_position'
@@ -38,7 +40,7 @@ jobs:
   crawl-etf-daily-schedule:
     name: 日线数据爬取（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 14 * * 1-5'
+    if: github.event_name == 'schedule' && github.event.schedule == '0 10 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -342,7 +344,7 @@ jobs:
   etf-yesno-schedule:
     name: ETF Yes/No 策略（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * *'
+    if: github.event_name == 'schedule' && github.event.schedule == '0 8 * * *'
     permissions:
       contents: write
     steps:
@@ -406,7 +408,7 @@ jobs:
   stock-fourty-schedule:
     name: 个股趋势策略 (TickTen) - 定时
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 10 * * 1-5'
+    if: github.event_name == 'schedule' && github.event.schedule == '30 0 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -462,7 +464,7 @@ jobs:
       - name: 执行个股策略
         if: env.skip_execution != 'true'
         env:
-          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 修改为使用STOCK_WEBHOOK
           TZ: Asia/Shanghai
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
@@ -470,11 +472,11 @@ jobs:
           echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
           # 执行策略
-          if [ -f "stock_tickten.py" ]; then
-            echo "找到策略文件: stock_tickten.py"
-            python stock_tickten.py 2>&1 | tee "$LOG_FILE"
+          if [ -f "stock/tickten.py" ]; then
+            echo "找到策略文件: stock/tickten.py"
+            python stock/tickten.py 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
+            echo "错误: 未找到个股趋势策略文件 stock/tickten.py"
             exit 1
           fi
           # 记录任务状态
@@ -499,6 +501,99 @@ jobs:
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+
+  # 股票日线数据爬取（定时）
+  stock-crawler-schedule:
+    name: 股票日线数据爬取（定时）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && github.event.schedule == '*/10 12-22 * * *'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{daily,flags,logs} && chmod -R 777 data/
+      - name: 检查交易日
+        id: check_trading_day
+        run: |
+          IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
+          echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
+      - name: 跳过非交易日
+        if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
+      - name: 执行股票日线数据爬取
+        if: env.skip_execution != 'true'
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 使用STOCK_WEBHOOK
+          TZ: Asia/Shanghai
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/stock_crawler_${BEIJING_TIME}.log"
+          echo "正在执行: 股票日线数据爬取"
+          echo "日志文件: $LOG_FILE"
+          # 执行爬取
+          if [ -f "stock/crawler.py" ]; then
+            echo "找到爬取文件: stock/crawler.py"
+            python stock/crawler.py 2>&1 | tee "$LOG_FILE"
+          else
+            echo "错误: 未找到股票爬取文件 stock/crawler.py"
+            exit 1
+          fi
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+      - name: 提交更新的数据
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/daily/
+          git add data/all_stocks.csv
+          if [ -n "$(git diff --cached --name-only data/daily/ data/all_stocks.csv)" ]; then
+            git commit -m "自动更新股票日线数据 [定时]" && git push origin main
+          else
+            echo "没有数据变化，无需提交"
+          fi
+      - name: 发送爬取通知
+        if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
+          EMOJI=${STATUS == 'success' && '✅' || '❌'}
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ========================
   # 手动任务 - 每个任务都有独立Job
@@ -691,19 +786,19 @@ jobs:
       - name: 执行个股策略
         id: execute_task  # 添加ID以便后续步骤引用
         env:
-          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 修改为使用STOCK_WEBHOOK
           TZ: Asia/Shanghai
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
           echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
-          # 执行策略（stock_tickten.py在根目录）
-          if [ -f "stock_tickten.py" ]; then
-            echo "找到策略文件: stock_tickten.py"
-            python stock_tickten.py 2>&1 | tee "$LOG_FILE"
+          # 执行策略（stock_tickten.py在stock目录）
+          if [ -f "stock/tickten.py" ]; then
+            echo "找到策略文件: stock/tickten.py"
+            python stock/tickten.py 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
+            echo "错误: 未找到个股趋势策略文件 stock/tickten.py"
             exit 1
           fi
           # 记录任务状态
@@ -732,6 +827,99 @@ jobs:
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+
+  # 股票日线数据爬取（手动）
+  stock-crawler-manual:
+    name: 股票日线数据爬取
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_crawler'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{daily,flags,logs} && chmod -R 777 data/
+      - name: 检查交易日
+        id: check_trading_day
+        run: |
+          IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
+          echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
+      - name: 跳过非交易日
+        if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
+      - name: 执行股票日线数据爬取
+        if: env.skip_execution != 'true'
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 使用STOCK_WEBHOOK
+          TZ: Asia/Shanghai
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/stock_crawler_${BEIJING_TIME}.log"
+          echo "正在执行: 股票日线数据爬取"
+          echo "日志文件: $LOG_FILE"
+          # 执行爬取
+          if [ -f "stock/crawler.py" ]; then
+            echo "找到爬取文件: stock/crawler.py"
+            python stock/crawler.py 2>&1 | tee "$LOG_FILE"
+          else
+            echo "错误: 未找到股票爬取文件 stock/crawler.py"
+            exit 1
+          fi
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+      - name: 提交更新的数据
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/daily/
+          git add data/all_stocks.csv
+          if [ -n "$(git diff --cached --name-only data/daily/ data/all_stocks.csv)" ]; then
+            git commit -m "手动更新股票日线数据" && git push origin main
+          else
+            echo "没有数据变化，无需提交"
+          fi
+      - name: 发送爬取通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
+          EMOJI=${STATUS == 'success' && '✅' || '❌'}
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # 日线数据爬取（手动）
   crawl-etf-daily-manual:
@@ -1164,4 +1352,3 @@ jobs:
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main
-     

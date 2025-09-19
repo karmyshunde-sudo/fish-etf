@@ -192,32 +192,35 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 美股指数处理 - 使用正确的接口和代码格式
+            # 美股指数处理
             index_name = index_code[1:]  # 去掉^符号
             
-            # 转换为AkShare期望的格式（.NDX而不是^NDX）
-            akshare_symbol = f".{index_name}"
+            # 正确的美股指数映射（AkShare 1.17.53 版本适用）
+            symbol_map = {
+                'NDX': 'nasdaq100',
+                'DJI': 'dow30',
+                'GSPC': 'sp500'
+            }
             
-            # 使用正确的接口
-            df = ak.stock_us_index_daily(symbol=akshare_symbol)
+            # 获取映射符号
+            symbol = symbol_map.get(index_name, 'nasdaq100')
             
-            # 筛选日期范围
-            if not df.empty:
-                # 转换日期格式
-                df['date'] = pd.to_datetime(df['date'])
-                start_dt = pd.to_datetime(start_date)
-                end_dt = pd.to_datetime(end_date)
-                df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+            # 使用存在的 index_us_stock_sina 接口
+            try:
+                df = ak.index_us_stock_sina(symbol=symbol)
                 
-                # 重命名列以匹配其他数据源
-                df = df.rename(columns={
-                    'date': '日期',
-                    'open': '开盘',
-                    'high': '最高',
-                    'low': '最低',
-                    'close': '收盘',
-                    'volume': '成交量'
-                })
+                if not df.empty:
+                    # 确保日期格式正确
+                    df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+                    # 只保留指定日期范围
+                    df = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
+                else:
+                    logger.warning(f"通过 index_us_stock_sina 获取 {index_name} 数据为空")
+                    return pd.DataFrame()
+            
+            except Exception as e:
+                logger.warning(f"通过 index_us_stock_sina 获取 {index_name} 失败: {str(e)}")
+                return pd.DataFrame()
         
         elif index_code.endswith('.CSI'):
             # 中证系列指数

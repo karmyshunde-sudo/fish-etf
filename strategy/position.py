@@ -1801,19 +1801,32 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     Returns:
         str: 格式化后的策略内容
     """
-    content = "【ETF趋势策略深度分析报告】\n"
-    content += "（小资金趋势交易策略：基于20日均线的YES/NO信号）\n\n"
+    # 获取当前日期
+    beijing_time = get_beijing_time()
+    date_str = beijing_time.strftime("%Y-%m-%d")
     
-    # 获取策略表现
-    performance = get_strategy_performance()
+    # 计算有效ETF数量
+    valid_etfs = []
+    for position_type, strategy in strategies.items():
+        if "ETF名称：" in strategy and "ETF代码：" in strategy:
+            valid_etfs.append(position_type)
+    
+    # 确定仓位类型（稳健仓或激进仓）
+    position_type = "稳健仓"
+    if any("激进仓" in key for key in strategies.keys()):
+        position_type = "激进仓"
+    
+    # 生成标题
+    content = f"📅 {date_str} {position_type}推荐ETF (共{len(valid_etfs)}只)\n"
+    content += "===================================\n\n"
     
     # 为每个ETF生成详细分析
-    for position_type, strategy in strategies.items():
+    for i, (key, strategy) in enumerate(strategies.items(), 1):
         # 提取ETF名称和代码
         if "ETF名称：" in strategy and "ETF代码：" in strategy:
             etf_name = strategy.split("ETF名称：")[1].split("\n")[0]
             etf_code = strategy.split("ETF代码：")[1].split("\n")[0]
-            current_price = strategy.split("当前价格：")[1].split("\n")[0]
+            current_price = float(strategy.split("当前价格：")[1].split("\n")[0])
             
             # 技术状态
             if "技术状态：" in strategy:
@@ -1831,18 +1844,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
                 ma20 = "N/A"
                 deviation = "N/A"
             
-            # 策略评分
-            if "策略评分：" in strategy:
-                score = strategy.split("策略评分：")[1].split("/")[0].strip()
-            else:
-                score = "N/A"
-            
-            # 操作场景
-            if "操作场景：" in strategy:
-                scenario = strategy.split("操作场景：")[1].split("\n")[0]
-            else:
-                scenario = "N/A"
-            
             # 操作建议
             if "操作建议：" in strategy:
                 advice = strategy.split("操作建议：")[1].split("\n")[0]
@@ -1852,82 +1853,56 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
             # 动态止损
             if "动态止损：" in strategy:
                 stop_loss = strategy.split("动态止损：")[1].split("\n")[0]
+                # 提取止损百分比
+                stop_loss_pct = "5%"
+                if "买入价下方" in strategy:
+                    try:
+                        stop_loss_pct = strategy.split("买入价下方")[1].split("%")[0] + "%"
+                    except:
+                        pass
             else:
                 stop_loss = "N/A"
+                stop_loss_pct = "5%"
             
-            # 信号状态
-            signal_status = "✅" if "YES信号" in tech_status else "❌"
+            # 计算每1万元可买多少股
+            shares_per_10k = int(10000 / current_price)
+            amount_per_10k = shares_per_10k * current_price
+            
+            # 确定建议买入金额比例
+            position_size = 30  # 默认30%
+            if "新建仓位" in advice:
+                try:
+                    # 从"新建仓位【芯片ETF】30%（首次突破信号）"中提取30
+                    position_size = int(advice.split("新建仓位【")[1].split("】")[1].split("%")[0])
+                except:
+                    pass
+            
+            # 提取后续操作
+            follow_up = "价格回落到适当位置可考虑加仓"
+            if "回调至" in advice:
+                try:
+                    follow_up = advice.split("回调至")[1].split("可加仓")[0].strip() + "可考虑加仓"
+                except:
+                    pass
+            elif "突破" in advice:
+                try:
+                    follow_up = "价格突破" + advice.split("突破")[1].split("后继续持有")[0].strip() + "后继续持有"
+                except:
+                    pass
             
             # 生成新的格式
-            content += f"【{etf_name}({etf_code})】\n"
-            content += f"📊 当前：{current_price} | 20日均线：{ma20} | 偏离率：{deviation}\n"
-            content += f"{signal_status} 信号：{tech_status}\n\n"
-            content += f"──────────────────\n\n"
-            
-            # 场景描述
-            if "首次突破" in scenario:
-                content += f"【首次突破】{scenario}\n"
-            elif "持续站稳" in scenario:
-                content += f"【持续站稳】{scenario}\n"
-            elif "偏离率＞+10%" in scenario:
-                content += f"【超买风险】{scenario}\n"
-            elif "下跌初期" in scenario:
-                content += f"【下跌初期】{scenario}\n"
-            else:
-                content += f"【趋势分析】{scenario}\n"
-            
-            # 操作建议
-            content += "✅ 操作建议：\n"
-            if "新建仓位" in advice:
-                position_size = advice.split("新建仓位【")[1].split("】")[0]
-                content += f"  • {advice}\n"
-                content += f"  • 动态止损：{stop_loss}\n"
-            elif "持有观望" in advice:
-                content += f"  • {advice}\n"
-                content += f"  • 动态止损：{stop_loss}\n"
-            elif "减仓" in advice:
-                content += f"  • {advice}\n"
-            elif "止损清仓" in advice:
-                content += f"  • {advice}\n"
-            else:
-                content += f"  • {advice}\n"
-            
-            # 风险控制规则
-            if "风险控制规则" in strategy:
-                risk_rules = strategy.split("风险控制规则")[1].split("\n\n")[0].strip()
-                content += "⚠️ 风险控制规则：\n"
-                for rule in risk_rules.split("\n"):
-                    if rule.strip():
-                        content += f"  • {rule.strip()}\n"
-            
-            content += "\n"
+            content += f"{i}️⃣ {etf_name} ({etf_code})\n"
+            content += f"📊 当前：{current_price:.4f} | 20日均线：{ma20} | 偏离率：{deviation}\n"
+            content += "✅ 操作建议：适合建仓\n"
+            content += f"• 每1万元可买：{shares_per_10k:,}股 (约{amount_per_10k:.0f}元)\n"
+            content += f"• 建议买入金额：{position_size * 100:,}元 (占总资金{position_size}%)\n"
+            content += f"• 止损价格：{stop_loss} (亏损{stop_loss_pct}时自动卖出)\n"
+            content += f"• 后续操作：{follow_up}\n"
+            content += "===================================\n\n"
     
-    # 添加策略执行指南
-    content += "💡 策略执行指南：\n"
-    content += "1. 第一层决策：基于20日均线的YES/NO信号\n"
-    content += "   • YES信号（价格≥20日均线）：可参与趋势\n"
-    content += "   • NO信号（价格<20日均线）：需规避趋势\n"
-    content += "2. 仓位管理：\n"
-    content += "   • 核心宽基ETF（如510300/510500）：单只≤30%\n"
-    content += "   • 卫星行业ETF（如515070/159813）：单只≤15%\n"
-    content += "   • 单行业ETF≤10%\n"
-    content += "3. 止损规则：\n"
-    content += "   • 首次突破：买入价下方3%（高波动ETF）或5%（宽基ETF）\n"
-    content += "   • 持续站稳：跟踪止损上移至5日均线\n"
-    content += "   • 首次跌破：20日均线下方5%\n"
-    content += "4. 止盈策略：盈利超8%后，止损上移至成本价\n"
-    content += "5. ETF轮动：根据趋势信号动态调整\n\n"
-    
-    # 添加策略历史表现
-    content += "📊 策略历史表现(近6个月)：\n"
-    content += f"• 胜率：{performance['win_rate']:.1%} | 平均持仓周期：{performance['avg_holding_days']:.1f}天\n"
-    content += f"• 盈亏比：{performance['profit_loss_ratio']:.1f}:1 | 最大回撤：{performance['max_drawdown']:.1%}\n"
-    content += f"• 年化收益率：{performance['annualized_return']:.1%} (同期沪深300: {performance['hs300_return']:.1%})\n"
-    content += f"• 夏普比率：{performance['sharpe_ratio']:.2f} | 卡玛比率：{performance['calmar_ratio']:.2f}\n\n"
-    
-    # 添加数据验证信息
-    content += "🔍 数据验证：基于真实交易记录计算，策略表现指标每交易日更新\n"
-    content += "📊 策略版本: 20-Day-Moving-Average-Strategy v2.0.0\n"
+    # 添加更新时间
+    content += f"⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
+    content += "📊 策略版本: 20日均线趋势策略 v2.0.0\n"
     
     return content
 
@@ -1959,7 +1934,7 @@ def calculate_position_strategy() -> str:
                 etf_list = update_all_etf_list()
                 if etf_list.empty:
                     logger.error("ETF列表加载失败，无法计算仓位策略")
-                    return "【ETF仓位操作提示】ETF列表加载失败，请检查数据源"
+                    return "【ETF仓位操作提示】ETF列表加载失败，无法计算仓位策略"
                 logger.info(f"成功重新加载ETF列表，共 {len(etf_list)} 条记录")
             except Exception as e:
                 error_msg = f"重新加载ETF列表失败: {str(e)}"
@@ -2127,6 +2102,3 @@ if __name__ == "__main__":
     # 记录任务完成
     logger.info("===== 任务执行结束：success =====")
     logger.info(f"{{\n  \"status\": \"success\",\n  \"task\": \"calculate_position\",\n  \"message\": \"Position strategy pushed successfully\",\n  \"timestamp\": \"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\"\n}}")
-
-# 
-# 

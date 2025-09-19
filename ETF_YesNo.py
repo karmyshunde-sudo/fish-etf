@@ -192,33 +192,23 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 纳斯达克100指数等美股指数
+            # 纳斯达克100指数等美股指数 - 完全重写美股指数获取逻辑
             index_name = index_code[1:]  # 去掉^符号
-            
-            # 尝试多种方法获取美股指数数据（添加重试机制和备用方案）
-            df = try_get_us_index_data(index_name, start_date, end_date)
+            df = get_us_index_data(index_name, start_date, end_date)
         
         elif index_code.endswith('.CSI'):
             # 中证系列指数
             index_name = index_code.replace('.CSI', '')
-            
-            # 使用正确的AkShare函数（移除adjust参数）
-            try:
-                df = ak.index_zh_a_hist(
-                    symbol=index_name,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            except Exception as e:
-                logger.error(f"获取中证指数 {index_code} 失败: {str(e)}", exc_info=True)
-                return pd.DataFrame()
+            df = ak.index_zh_a_hist(
+                symbol=index_name,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
         
         elif index_code.endswith('.HI'):
             # 恒生系列指数
             index_name = index_code.replace('.HI', '')
-            
-            # 尝试使用可能的恒生指数接口
             try:
                 df = ak.index_hk_hist(
                     symbol=index_name,
@@ -240,16 +230,12 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         else:
             # A股指数
-            try:
-                df = ak.index_zh_a_hist(
-                    symbol=index_code,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            except Exception as e:
-                logger.error(f"获取A股指数 {index_code} 失败: {str(e)}", exc_info=True)
-                return pd.DataFrame()
+            df = ak.index_zh_a_hist(
+                symbol=index_code,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
         
         # 标准化列名
         if not df.empty:
@@ -261,9 +247,9 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def try_get_us_index_data(index_name: str, start_date: str, end_date: str) -> pd.DataFrame:
+def get_us_index_data(index_name: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
-    尝试多种方法获取美股指数数据（添加重试机制和备用方案）
+    获取美股指数数据（使用最可靠的AkShare接口）
     
     Args:
         index_name: 指数名称
@@ -273,119 +259,99 @@ def try_get_us_index_data(index_name: str, start_date: str, end_date: str) -> pd
     Returns:
         pd.DataFrame: 指数数据
     """
-    # 美股指数映射
+    # 美股指数代码映射 - 使用Yahoo Finance标准代码
     symbol_map = {
-        'NDX': 'nasdaq100',
-        'DJI': 'dow30',
-        'GSPC': 'sp500'
+        'NDX': '^NDX',  # 纳斯达克100
+        'DJI': '^DJI',  # 道琼斯工业指数
+        'GSPC': '^GSPC',  # 标准普尔500
+        'IXIC': '^IXIC',  # 纳斯达克综合指数
+        'RUT': '^RUT'  # 罗素2000
     }
     
-    # 获取映射符号
-    symbol = symbol_map.get(index_name, 'nasdaq100')
+    # 获取正确的指数代码
+    symbol = symbol_map.get(index_name, f'^{index_name}')
     
-    # 尝试多种方法
-    methods = [
-        lambda: try_index_us_stock_sina(symbol, start_date, end_date),
-        lambda: try_stock_us_daily(index_name, start_date, end_date)
-    ]
+    # 转换日期格式
+    start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
     
-    for method in methods:
-        try:
-            df = method()
-            if not df.empty:
-                return df
-        except Exception as e:
-            logger.debug(f"尝试获取美股指数 {index_name} 失败: {str(e)}")
-    
-    logger.warning(f"所有方法均无法获取美股指数 {index_name} 数据")
-    return pd.DataFrame()
-
-def try_index_us_stock_sina(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    尝试使用 index_us_stock_sina 接口获取美股指数数据（添加重试机制）
-    
-    Args:
-        symbol: 指数符号
-        start_date: 开始日期
-        end_date: 结束日期
-        
-    Returns:
-        pd.DataFrame: 指数数据
-    """
-    for attempt in range(3):
-        try:
-            df = ak.index_us_stock_sina(symbol=symbol)
-            
-            if not df.empty:
-                # 确保日期格式正确
-                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-                # 只保留指定日期范围
-                df = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
-                logger.info(f"成功通过 index_us_stock_sina 获取美股指数数据 (尝试 {attempt+1}/3)")
-                return df
-            else:
-                logger.debug(f"尝试 {attempt+1}/3: 获取到空数据")
-        
-        except IndexError as e:
-            # 特别处理 list index out of range 错误
-            logger.warning(f"尝试 {attempt+1}/3: index_us_stock_sina 失败: {str(e)} - 可能是AkShare内部实现问题")
-        except Exception as e:
-            logger.warning(f"尝试 {attempt+1}/3: index_us_stock_sina 失败: {str(e)}")
-        
-        if attempt < 2:
-            time.sleep(2)  # 等待2秒后重试
-    
-    return pd.DataFrame()
-
-def try_stock_us_daily(index_name: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    尝试使用 stock_us_daily 接口获取美股指数数据（备用方案）
-    
-    Args:
-        index_name: 指数名称
-        start_date: 开始日期
-        end_date: 结束日期
-        
-    Returns:
-        pd.DataFrame: 指数数据
-    """
     try:
-        # 将日期格式转换
-        start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
+        # 直接使用 stock_us_daily 接口 - 这是目前最可靠的美股指数获取方式
+        df = ak.stock_us_daily(
+            symbol=symbol,
+            adjust="hfq"  # 前复权
+        )
         
-        # 指数代码映射
-        symbol_map = {
-            'NDX': 'IXIC',  # 纳斯达克100
-            'DJI': 'DJIA',  # 道琼斯工业指数
-            'GSPC': '^GSPC' # 标准普尔500
-        }
+        if df.empty:
+            logger.warning(f"通过 stock_us_daily 获取 {index_name} 数据为空")
+            return pd.DataFrame()
         
-        symbol = symbol_map.get(index_name, f'^{index_name}')
+        # 只保留指定日期范围
+        df = df[(df.index >= start_dt) & (df.index <= end_dt)]
         
-        # 获取数据
-        df = ak.stock_us_daily(symbol=symbol, start_date=start_dt, end_date=end_dt)
+        # 重命名列并设置日期列
+        df = df.reset_index()
+        df = df.rename(columns={
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量'
+        })
         
-        if not df.empty:
-            # 重命名列
-            df = df.reset_index()
-            df = df.rename(columns={
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量'
-            })
-            
-            # 转换日期格式
-            df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-            logger.info(f"成功通过 stock_us_daily 获取美股指数数据")
+        # 转换日期格式
+        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
         
+        logger.info(f"成功通过 stock_us_daily 获取 {index_name} 指数数据，共 {len(df)} 条记录")
         return df
+    
     except Exception as e:
-        logger.debug(f"stock_us_daily 失败: {str(e)}")
-        raise
+        logger.warning(f"通过 stock_us_daily 获取 {index_name} 失败: {str(e)}")
+        
+        # 尝试使用 investing 接口作为备用
+        try:
+            # 根据指数选择不同的 investing ID
+            investing_map = {
+                'NDX': ('nasdaq-100', '179', '美国'),
+                'DJI': ('dow-jones', '2', '美国'),
+                'GSPC': ('s-p-500', '166', '美国'),
+                'IXIC': ('nasdaq-composite', '117', '美国')
+            }
+            
+            inv_params = investing_map.get(index_name, ('nasdaq-100', '179', '美国'))
+            
+            df = ak.index_investing_global(
+                symbol=inv_params[0],
+                index_id=inv_params[1],
+                country=inv_params[2],
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if not df.empty:
+                # 重命名列
+                df = df.rename(columns={
+                    '日期': '日期',
+                    '开盘': '开盘',
+                    '最高': '最高',
+                    '最低': '最低',
+                    '收盘': '收盘',
+                    '成交量': '成交量'
+                })
+                
+                # 转换日期格式
+                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+                
+                logger.info(f"成功通过 investing_global 获取 {index_name} 指数数据，共 {len(df)} 条记录")
+                return df
+            
+        except Exception as inv_e:
+            logger.warning(f"通过 investing_global 获取 {index_name} 失败: {str(inv_e)}")
+    
+    logger.warning(f"无法获取 {index_name} 指数数据")
+    return pd.DataFrame()
 
 def standardize_index_columns(df: pd.DataFrame, index_code: str) -> pd.DataFrame:
     """

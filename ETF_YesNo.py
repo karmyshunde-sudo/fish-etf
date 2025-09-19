@@ -194,15 +194,65 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         if index_code.startswith('^'):
             # 纳斯达克100指数等美股指数 - 修复：使用正确的AkShare函数
             index_name = index_code[1:]  # 去掉^符号
-            df = ak.index_us_stock_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date)
+            
+            # 正确的美股指数映射
+            symbol_map = {
+                'NDX': 'nasdaq100',
+                'DJI': 'dow30',
+                'GSPC': 'sp500'
+            }
+            
+            # 获取映射符号，如果没有匹配则使用默认值
+            symbol = symbol_map.get(index_name, 'nasdaq100')
+            
+            # 使用正确的接口
+            df = ak.index_us_stock_sina(symbol=symbol)
+            
+            # 如果获取到数据，筛选日期范围
+            if not df.empty:
+                # 确保日期格式正确
+                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+                # 只保留指定日期范围
+                df = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
+        
         elif index_code.endswith('.CSI'):
             # 中证系列指数 - 修复：使用正确的AkShare函数
             index_name = index_code.replace('.CSI', '')
-            df = ak.index_zh_a_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date, adjust="")
+            
+            # 使用正确的接口，移除adjust参数
+            df = ak.index_zh_a_hist(
+                symbol=index_name,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
+        
         elif index_code.endswith('.HI'):
-            # 恒生系列指数 - 修复：使用正确的AkShare函数
+            # 恒生系列指数 - 修复：确认接口是否正确
             index_name = index_code.replace('.HI', '')
-            df = ak.index_hk_hist(symbol=index_name, period="daily", start_date=start_date, end_date=end_date)
+            
+            # 尝试使用可能的恒生指数接口
+            try:
+                # 先尝试 index_hk_hist
+                df = ak.index_hk_hist(
+                    symbol=index_name,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            except AttributeError:
+                # 如果 index_hk_hist 不存在，尝试其他接口
+                try:
+                    df = ak.index_hk_hist_sina(
+                        symbol=index_name,
+                        period="daily",
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                except:
+                    logger.warning(f"恒生指数 {index_name} 获取失败，尝试其他方法")
+                    df = pd.DataFrame()
+        
         else:
             # A股指数
             df = ak.index_zh_a_hist(
@@ -216,26 +266,51 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             logger.warning(f"获取指数 {index_code} 数据为空")
             return pd.DataFrame()
         
-        # 标准化列名
+        # 标准化列名 - 根据实际返回的列名处理
         if 'date' in df.columns:
-            df = df.rename(columns={
+            # 美股指数返回的列名
+            column_mapping = {
                 "date": "日期",
+                "open": "开盘",
+                "high": "最高",
+                "low": "最低",
                 "close": "收盘",
-                "volume": "成交量"
-            })
+                "volume": "成交量",
+                "change": "涨跌幅",
+                "change_amount": "涨跌额"
+            }
         else:
-            df = df.rename(columns={
+            # A股指数返回的列名
+            column_mapping = {
                 "日期": "日期",
                 "开盘": "开盘",
                 "最高": "最高",
                 "最低": "最低",
                 "收盘": "收盘",
-                "成交量": "成交量"
-            })
+                "成交量": "成交量",
+                "成交额": "成交额",
+                "涨跌幅": "涨跌幅",
+                "涨跌额": "涨跌额"
+            }
+        
+        # 保留存在的列
+        existing_columns = [col for col in column_mapping.keys() if col in df.columns]
+        rename_mapping = {col: column_mapping[col] for col in existing_columns}
+        
+        # 重命名列
+        df = df.rename(columns=rename_mapping)
+        
+        # 确保必需列存在
+        required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.warning(f"指数 {index_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            return pd.DataFrame()
         
         # 确保日期列是datetime类型
         if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"])
+            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
             df = df.sort_values("日期", ascending=True)
         
         logger.info(f"成功获取指数 {index_code} 数据，共 {len(df)} 条记录")

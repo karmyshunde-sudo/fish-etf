@@ -354,17 +354,51 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
     
     return consecutive_days
 
-def calculate_volume_change(df: pd.DataFrame, days: int = 5) -> float:
-    """计算成交量变化率"""
-    if len(df) < days + 1:
+def calculate_volume_change(df: pd.DataFrame) -> float:
+    """
+    计算成交量变化率
+    
+    Args:
+        df: ETF日线数据
+    
+    Returns:
+        float: 成交量变化率（当前成交量相比前一日的变化百分比）
+    """
+    try:
+        if len(df) < 2:
+            logger.warning("数据量不足，无法计算成交量变化")
+            return 0.0
+        
+        # 关键修复：确保获取标量值而不是Series
+        # 使用iloc获取单个值，并确保转换为标量
+        current_volume = df['成交量'].iloc[-1]
+        previous_volume = df['成交量'].iloc[-2]
+        
+        # 如果是Series，获取值
+        if isinstance(current_volume, pd.Series):
+            current_volume = current_volume.item()
+        if isinstance(previous_volume, pd.Series):
+            previous_volume = previous_volume.item()
+            
+        # 转换为浮点数
+        current_volume = float(current_volume)
+        previous_volume = float(previous_volume)
+        
+        # 确保是数值类型
+        if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
+            logger.warning("成交量数据类型错误")
+            return 0.0
+        
+        # 现在previous_volume是标量值，可以安全比较
+        if previous_volume > 0:
+            volume_change = (current_volume - previous_volume) / previous_volume
+            return volume_change
+        else:
+            return 0.0
+    
+    except Exception as e:
+        logger.error(f"计算成交量变化失败: {str(e)}", exc_info=True)
         return 0.0
-    
-    recent_volume = df["成交量"].iloc[-days:].mean()
-    previous_volume = df["成交量"].iloc[-(days*2):-days].mean()
-    
-    if previous_volume > 0:
-        return (recent_volume - previous_volume) / previous_volume * 100
-    return 0.0
 
 def calculate_loss_percentage(df: pd.DataFrame) -> float:
     """计算当前亏损比例（相对于最近一次买入点）"""

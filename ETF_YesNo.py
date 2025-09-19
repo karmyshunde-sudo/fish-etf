@@ -826,10 +826,7 @@ def generate_report():
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             message_lines.append(f"{signal_symbol} 信号：{status}（{status}信号）\n")
-            message_lines.append("──────────────────\n")
-            message_lines.append(signal_message)
-            message_lines.append("──────────────────\n")
-            
+            message_lines.append(signal_message)            
             message = "\n".join(message_lines)
             
             # 发送消息
@@ -852,7 +849,7 @@ def generate_report():
         # 如果有有效的指数数据，发送总结消息
         if valid_indices_count > 0:
             # 构建总结消息
-            summary_message = "\n".join(summary_lines) + "\n***\n──────────────────\n"
+            summary_message = "\n".join(summary_lines) 
             
             logger.info("推送总结消息")
             send_wechat_message(summary_message)

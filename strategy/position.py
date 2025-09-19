@@ -2127,3 +2127,6 @@ if __name__ == "__main__":
     # 记录任务完成
     logger.info("===== 任务执行结束：success =====")
     logger.info(f"{{\n  \"status\": \"success\",\n  \"task\": \"calculate_position\",\n  \"message\": \"Position strategy pushed successfully\",\n  \"timestamp\": \"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\"\n}}")
+
+# 
+# 

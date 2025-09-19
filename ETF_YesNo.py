@@ -174,7 +174,7 @@ PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
 
 def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从AkShare获取指数历史数据
+    从可靠数据源获取指数历史数据
     
     Args:
         index_code: 指数代码（如"000300"）
@@ -188,44 +188,17 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
         
-        logger.info(f"从AkShare获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
+        logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 美股指数处理
-            index_name = index_code[1:]  # 去掉^符号
-            
-            # 正确的美股指数映射（AkShare 1.17.53 版本适用）
-            symbol_map = {
-                'NDX': 'nasdaq100',
-                'DJI': 'dow30',
-                'GSPC': 'sp500'
-            }
-            
-            # 获取映射符号
-            symbol = symbol_map.get(index_name, 'nasdaq100')
-            
-            # 使用存在的 index_us_stock_sina 接口
-            try:
-                df = ak.index_us_stock_sina(symbol=symbol)
-                
-                if not df.empty:
-                    # 确保日期格式正确
-                    df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-                    # 只保留指定日期范围
-                    df = df[(df['日期'] >= start_date) & (df['日期'] <= end_date)]
-                else:
-                    logger.warning(f"通过 index_us_stock_sina 获取 {index_name} 数据为空")
-                    return pd.DataFrame()
-            
-            except Exception as e:
-                logger.warning(f"通过 index_us_stock_sina 获取 {index_name} 失败: {str(e)}")
-                return pd.DataFrame()
+            # 美股指数处理 - 使用YFinance替代方案
+            return fetch_us_index_from_yfinance(index_code, start_date, end_date)
         
         elif index_code.endswith('.CSI'):
             # 中证系列指数
             index_name = index_code.replace('.CSI', '')
-            df = ak.index_zh_a_hist(
+            return ak.index_zh_a_hist(
                 symbol=index_name,
                 period="daily",
                 start_date=start_date,
@@ -236,53 +209,93 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             # 恒生系列指数
             index_name = index_code.replace('.HI', '')
             try:
-                df = ak.index_hk_hist(
+                return ak.index_hk_hist(
                     symbol=index_name,
                     period="daily",
                     start_date=start_date,
                     end_date=end_date
                 )
-            except AttributeError:
-                try:
-                    df = ak.index_hk_hist_sina(
-                        symbol=index_name,
-                        period="daily",
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                except Exception as e:
-                    logger.error(f"获取恒生指数 {index_code} 失败: {str(e)}", exc_info=True)
-                    return pd.DataFrame()
+            except:
+                return ak.index_hk_hist_sina(
+                    symbol=index_name,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date
+                )
         
         else:
             # A股指数
-            df = ak.index_zh_a_hist(
+            return ak.index_zh_a_hist(
                 symbol=index_code,
                 period="daily",
                 start_date=start_date,
                 end_date=end_date
             )
-        
-        # 标准化列名
-        if not df.empty:
-            # 确保必需列存在
-            required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            
-            if missing_columns:
-                logger.warning(f"指数 {index_code} 数据缺少必要列: {', '.join(missing_columns)}")
-                return pd.DataFrame()
-            
-            # 确保日期列是字符串格式
-            if "日期" in df.columns:
-                df["日期"] = df["日期"].astype(str)
-                df = df.sort_values("日期", ascending=True)
-        
-        logger.info(f"成功获取指数 {index_code} 数据，共 {len(df)} 条记录")
-        return df
     
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    使用YFinance获取美股指数数据（最可靠的替代方案）
+    
+    Args:
+        index_code: 指数代码（如"^NDX"）
+        start_date: 开始日期（YYYYMMDD）
+        end_date: 结束日期（YYYYMMDD）
+        
+    Returns:
+        pd.DataFrame: 指数日线数据
+    """
+    try:
+        # 转换日期格式
+        start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
+        
+        # 指数代码映射
+        symbol_map = {
+            '^NDX': '^NDX',  # 纳斯达克100
+            '^DJI': '^DJI',  # 道琼斯工业指数
+            '^GSPC': '^GSPC' # 标准普尔500
+        }
+        
+        symbol = symbol_map.get(index_code, index_code)
+        
+        # 检查是否已安装yfinance
+        try:
+            import yfinance as yf
+        except ImportError:
+            logger.error("需要安装yfinance: pip install yfinance")
+            return pd.DataFrame()
+        
+        # 获取数据
+        df = yf.download(symbol, start=start_dt, end=end_dt)
+        
+        if df.empty:
+            logger.warning(f"通过yfinance获取{index_code}数据为空")
+            return pd.DataFrame()
+        
+        # 标准化列名
+        df = df.reset_index()
+        df = df.rename(columns={
+            'Date': '日期',
+            'Open': '开盘',
+            'High': '最高',
+            'Low': '最低',
+            'Close': '收盘',
+            'Volume': '成交量',
+            'Adj Close': '复权收盘'
+        })
+        
+        # 确保日期格式正确
+        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+        
+        logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
+        return df
+    
+    except Exception as e:
+        logger.error(f"通过yfinance获取{index_code}失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def calculate_critical_value(df: pd.DataFrame) -> float:

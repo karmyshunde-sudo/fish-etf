@@ -51,9 +51,9 @@ def apply_request_delay():
 
 def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES) -> Optional[pd.DataFrame]:
     """带重试机制的股票数据获取"""
-    # 关键修复：确保股票代码是6位数字格式
-    original_stock_code = stock_code
-    stock_code = stock_code.zfill(6)
+    # 关键修复：确保股票代码是字符串并格式化为6位
+    original_stock_code = str(stock_code)  # 先转换为字符串
+    stock_code = original_stock_code.zfill(6)  # 然后格式化为6位
     
     for attempt in range(max_retries):
         try:
@@ -84,9 +84,9 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                         latest_date = existing_df["日期"].max().strftime("%Y%m%d")
                         # 从最新日期的下一天开始获取
                         start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-                        logger.debug(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
                 except Exception as e:
-                    logger.warning(f"读取股票 {stock_code} 现有数据失败: {str(e)}")
+                    logger.warning(f"读取股票 {stock_code} (原始: {original_stock_code}) 现有数据失败: {str(e)}")
                     # 如果无法读取现有数据，从一年前开始获取
                     start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
             
@@ -98,10 +98,10 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             
             # 如果开始日期晚于结束日期，无需获取
             if start_date > end_date:
-                logger.info(f"股票 {stock_code} 数据已最新，无需爬取")
+                logger.info(f"股票 {stock_code} (原始: {original_stock_code}) 数据已最新，无需爬取")
                 return None
             
-            # 关键修复：尝试多种可能的股票代码格式（优化顺序）
+            # 尝试多种可能的股票代码格式（优化顺序）
             possible_codes = [
                 f"{market_prefix}{stock_code}",  # "sh000001"
                 f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ" - 优先尝试这种格式
@@ -119,17 +119,17 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             for code in possible_codes:
                 for inner_attempt in range(2):  # 减少重试次数
                     try:
-                        logger.debug(f"股票 {stock_code} 尝试{inner_attempt+1}/2: 使用stock_zh_a_hist接口获取股票 {code}")
+                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/2: 使用stock_zh_a_hist接口获取股票 {code}")
                         df = ak.stock_zh_a_hist(symbol=code, period="daily", 
                                               start_date=start_date, end_date=end_date, 
                                               adjust="qfq")
                         if not df.empty:
                             successful_code = code
                             successful_interface = "stock_zh_a_hist"
-                            logger.debug(f"股票 {stock_code} 成功通过 {successful_interface} 接口获取股票 {code} 数据")
+                            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 成功通过 {successful_interface} 接口获取股票 {code} 数据")
                             break
                     except Exception as e:
-                        logger.debug(f"股票 {stock_code} 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
+                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                     
                     # 优化等待时间
                     time.sleep(0.3 * (2 ** inner_attempt))
@@ -142,7 +142,7 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                 for code in possible_codes:
                     for inner_attempt in range(2):
                         try:
-                            logger.debug(f"股票 {stock_code} 尝试{inner_attempt+1}/2: 使用stock_zh_a_daily接口获取股票 {code}")
+                            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/2: 使用stock_zh_a_daily接口获取股票 {code}")
                             df = ak.stock_zh_a_daily(symbol=code, 
                                                    start_date=start_date, 
                                                    end_date=end_date, 
@@ -150,10 +150,10 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                             if not df.empty:
                                 successful_code = code
                                 successful_interface = "stock_zh_a_daily"
-                                logger.debug(f"股票 {stock_code} 成功通过 {successful_interface} 接口获取股票 {code} 数据")
+                                logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 成功通过 {successful_interface} 接口获取股票 {code} 数据")
                                 break
                         except Exception as e:
-                            logger.debug(f"股票 {stock_code} 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
+                            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
                         
                         time.sleep(0.5 * (2 ** inner_attempt))
                     
@@ -162,22 +162,22 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             
             # 如果还是失败，返回None
             if df is None or df.empty:
-                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败，所有接口和代码格式均无效")
+                logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败，所有接口和代码格式均无效")
                 return None
             
             # 确保日期列存在
             if "日期" not in df.columns:
-                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 数据缺少'日期'列")
+                logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少'日期'列")
                 return None
             
             # 检查是否有必要的列
             required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
+                logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
                 return None
             
-            # 关键修复：确保日期列格式正确
+            # 确保日期列格式正确
             if "日期" in df.columns:
                 # 处理不同的日期格式
                 if df["日期"].dtype == 'object':
@@ -209,7 +209,7 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             df = df[df["日期"] >= one_year_ago]
             
             # 记录实际获取的数据量
-            logger.info(f"股票 {stock_code} (原始代码: {original_stock_code}) ✅ 成功通过 {successful_interface} 接口获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
+            logger.info(f"股票 {stock_code} (原始: {original_stock_code}) ✅ 成功通过 {successful_interface} 接口获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
             
             return df
         
@@ -218,13 +218,13 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             if "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e):
                 # 指数退避重试
                 wait_time = REQUEST_DELAY_BASE * (EXPONENTIAL_BACKOFF_BASE ** attempt)
-                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 请求被限流，等待 {wait_time:.1f} 秒后重试 ({attempt+1}/{max_retries})")
+                logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 请求被限流，等待 {wait_time:.1f} 秒后重试 ({attempt+1}/{max_retries})")
                 time.sleep(wait_time)
             else:
-                logger.error(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败: {str(e)}", exc_info=True)
+                logger.error(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败: {str(e)}", exc_info=True)
                 break
     
-    logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败，超过最大重试次数")
+    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败，超过最大重试次数")
     return None
 
 def get_stock_section(stock_code: str) -> str:

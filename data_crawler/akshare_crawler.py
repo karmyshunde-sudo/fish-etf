@@ -135,65 +135,93 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         raise  # 触发重试
 
 def try_multiple_akshare_interfaces(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """
-    尝试多种AkShare接口获取ETF数据
+    """尝试多种AkShare接口获取ETF数据"""
+    logger.info(f"尝试获取ETF {etf_code} 数据，最多 3 种接口")
     
-    Args:
-        etf_code: ETF代码
-        start_date: 开始日期
-        end_date: 结束日期
+    # 接口1: fund_etf_hist_em (提供IOPV和折溢价率)
+    try:
+        logger.info(f"尝试使用fund_etf_hist_em接口获取ETF {etf_code} 数据")
+        df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", 
+                                start_date=start_date, end_date=end_date, adjust="")
         
-    Returns:
-        pd.DataFrame: 获取到的DataFrame
-    """
-    interfaces = [
-        lambda: try_fund_etf_hist_em_with_net_value(etf_code, start_date, end_date),
-        lambda: try_fund_etf_hist_sina(etf_code, start_date, end_date),  # 修复：使用正确的函数名
-        lambda: try_fund_etf_spot_em_with_premium(etf_code)
-    ]
+        if not df.empty:
+            logger.info(f"第1种接口（fund_etf_hist_em）成功获取ETF {etf_code} 数据")
+            logger.info(f"📊 fund_etf_hist_em 接口返回的原始列名: {list(df.columns)}")
+            
+            # 标准化列名
+            if '净值日期' in df.columns:
+                df = df.rename(columns={
+                    '净值日期': '日期',
+                    '单位净值': 'IOPV',
+                    '折价率': '折溢价率'
+                })
+            elif '净值估算日期' in df.columns:
+                df = df.rename(columns={
+                    '净值估算日期': '日期',
+                    '单位净值估算': 'IOPV',
+                    '折价率估算': '折溢价率'
+                })
+            
+            # 确保日期格式
+            if '日期' in df.columns:
+                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+            
+            return df
+    except Exception as e:
+        logger.debug(f"fund_etf_hist_em接口失败: {str(e)}")
     
-    total_interfaces = len(interfaces)
-    logger.info(f"尝试获取ETF {etf_code} 数据，最多 {total_interfaces} 种接口")
+    # 接口2: stock_zh_index_daily_js (提供基础数据)
+    try:
+        logger.info(f"尝试使用stock_zh_index_daily_js接口获取ETF {etf_code} 数据")
+        df = ak.stock_zh_index_daily_js(symbol=f"sh{etf_code}" if etf_code.startswith('5') else f"sz{etf_code}")
+        
+        if not df.empty:
+            logger.info(f"第2种接口（stock_zh_index_daily_js）成功获取ETF {etf_code} 数据")
+            logger.info(f"📊 stock_zh_index_daily_js 接口返回的原始列名: {list(df.columns)}")
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 尝试计算折溢价率（如果可能）
+            if 'IOPV' in df.columns and '收盘' in df.columns:
+                df['折溢价率'] = (df['收盘'] - df['IOPV']) / df['IOPV'] * 100
+            
+            return df
+    except Exception as e:
+        logger.debug(f"stock_zh_index_daily_js接口失败: {str(e)}")
     
-    for i, interface in enumerate(interfaces):
-        for attempt in range(MAX_RETRY_ATTEMPTS):
-            try:
-                logger.debug(f"尝试第{i+1}种接口（第{attempt+1}次尝试）获取ETF {etf_code} 数据")
-                df = interface()
-                
-                if not df.empty:
-                    logger.info(f"第{i+1}种接口（第{attempt+1}次尝试）成功获取ETF {etf_code} 数据")
-                    # 记录返回的列名，用于调试
-                    logger.info(f"📊 第{i+1}种接口返回的原始列名: {list(df.columns)}")
-                    
-                    # 对返回的数据进行日期过滤
-                    if 'date' in df.columns:
-                        df['date'] = pd.to_datetime(df['date'])
-                        mask = (df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))
-                        df = df.loc[mask]
-                    elif '日期' in df.columns:
-                        df['日期'] = pd.to_datetime(df['日期'])
-                        mask = (df['日期'] >= pd.to_datetime(start_date)) & (df['日期'] <= pd.to_datetime(end_date))
-                        df = df.loc[mask]
-                    
-                    if not df.empty:
-                        logger.info(f"第{i+1}种接口成功获取ETF {etf_code} 数据（过滤后）")
-                        return df
-            except (ConnectionError, TimeoutError, OSError) as e:
-                # 专门处理网络错误，进行指数退避重试
-                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）网络错误: {str(e)}", exc_info=True)
-                if attempt < MAX_RETRY_ATTEMPTS - 1:
-                    # 指数退避策略
-                    wait_time = RETRY_WAIT_FIXED * (2 ** attempt) / 1000
-                    wait_time = min(wait_time, RETRY_WAIT_EXPONENTIAL_MAX / 1000)
-                    logger.info(f"网络错误，等待 {wait_time:.2f} 秒后重试（指数退避）...")
-                    time.sleep(wait_time)
-            except Exception as e:
-                logger.warning(f"第{i+1}种接口（第{attempt+1}次尝试）调用失败: {str(e)}", exc_info=True)
-                # 非网络错误，直接尝试下一个接口
-                break
+    # 接口3: fund_etf_hist_sina (基础数据)
+    try:
+        logger.info(f"尝试使用fund_etf_hist_sina接口获取ETF {etf_code} 数据")
+        df = ak.fund_etf_hist_sina(symbol=etf_code, period="daily", 
+                                 start_date=start_date, end_date=end_date)
+        
+        if not df.empty:
+            logger.info(f"第3种接口（fund_etf_hist_sina）成功获取ETF {etf_code} 数据")
+            logger.info(f"📊 fund_etf_hist_sina 接口返回的原始列名: {list(df.columns)}")
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            return df
+    except Exception as e:
+        logger.debug(f"fund_etf_hist_sina接口失败: {str(e)}")
     
-    logger.warning(f"所有AkShare接口均无法获取ETF {etf_code} 数据")
+    logger.warning(f"所有AkShare接口均未获取到ETF {etf_code} 数据")
     return pd.DataFrame()
 
 def try_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:

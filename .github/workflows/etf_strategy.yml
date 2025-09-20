@@ -563,7 +563,7 @@ jobs:
           # 执行爬取
           if [ -f "stock/crawler.py" ]; then
             echo "找到爬取文件: stock/crawler.py"
-            python stock/crawler.py 2>&1 | tee "$LOG_FILE"
+            python -m stock.crawler 2>&1 | tee "$LOG_FILE"
           else
             echo "错误: 未找到股票爬取文件 stock/crawler.py"
             exit 1

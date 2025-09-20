@@ -51,6 +51,10 @@ def apply_request_delay():
 
 def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES) -> Optional[pd.DataFrame]:
     """带重试机制的股票数据获取"""
+    # 关键修复：确保股票代码是6位数字格式
+    original_stock_code = stock_code
+    stock_code = stock_code.zfill(6)
+    
     for attempt in range(max_retries):
         try:
             # 应用请求延迟
@@ -71,15 +75,20 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             
             if os.path.exists(file_path):
                 # 读取现有数据文件
-                existing_df = pd.read_csv(file_path)
-                if not existing_df.empty and "日期" in existing_df.columns:
-                    # 确保日期列是datetime类型
-                    existing_df["日期"] = pd.to_datetime(existing_df["日期"])
-                    # 获取现有数据的最新日期
-                    latest_date = existing_df["日期"].max().strftime("%Y%m%d")
-                    # 从最新日期的下一天开始获取
-                    start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-                    logger.debug(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+                try:
+                    existing_df = pd.read_csv(file_path)
+                    if not existing_df.empty and "日期" in existing_df.columns:
+                        # 确保日期列是datetime类型
+                        existing_df["日期"] = pd.to_datetime(existing_df["日期"])
+                        # 获取现有数据的最新日期
+                        latest_date = existing_df["日期"].max().strftime("%Y%m%d")
+                        # 从最新日期的下一天开始获取
+                        start_date = (datetime.strptime(latest_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+                        logger.debug(f"股票 {stock_code} 检测到现有数据，最新日期: {latest_date}, 将从 {start_date} 开始增量获取")
+                except Exception as e:
+                    logger.warning(f"读取股票 {stock_code} 现有数据失败: {str(e)}")
+                    # 如果无法读取现有数据，从一年前开始获取
+                    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
             
             # 计算日期范围
             end_date = datetime.now().strftime("%Y%m%d")
@@ -92,12 +101,12 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                 logger.info(f"股票 {stock_code} 数据已最新，无需爬取")
                 return None
             
-            # 尝试多种可能的股票代码格式
+            # 关键修复：尝试多种可能的股票代码格式（优化顺序）
             possible_codes = [
                 f"{market_prefix}{stock_code}",  # "sh000001"
+                f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ" - 优先尝试这种格式
                 f"{stock_code}.{market_prefix.upper()}",  # "000001.SH"
                 stock_code,  # "000001"
-                f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ"
                 f"{market_prefix}{stock_code}.XSHG" if market_prefix == "sh" else f"{market_prefix}{stock_code}.XSHE",  # 交易所格式
             ]
             
@@ -153,26 +162,42 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             
             # 如果还是失败，返回None
             if df is None or df.empty:
-                logger.warning(f"股票 {stock_code} 获取数据失败，所有接口和代码格式均无效")
+                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败，所有接口和代码格式均无效")
                 return None
             
             # 确保日期列存在
             if "日期" not in df.columns:
-                logger.warning(f"股票 {stock_code} 数据缺少'日期'列")
+                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 数据缺少'日期'列")
                 return None
             
             # 检查是否有必要的列
             required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                logger.warning(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}")
+                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
                 return None
             
-            # 确保日期列是字符串类型
+            # 关键修复：确保日期列格式正确
             if "日期" in df.columns:
+                # 处理不同的日期格式
+                if df["日期"].dtype == 'object':
+                    # 尝试多种日期格式
+                    try:
+                        df["日期"] = pd.to_datetime(df["日期"], format='%Y-%m-%d')
+                    except:
+                        try:
+                            df["日期"] = pd.to_datetime(df["日期"], format='%Y%m%d')
+                        except:
+                            df["日期"] = pd.to_datetime(df["日期"])
+                
+                # 转换为字符串格式
                 df["日期"] = df["日期"].astype(str)
                 # 确保日期格式为YYYY-MM-DD
                 df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
+                                                  lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
+                                                  regex=True)
+                # 处理其他可能的格式
+                df["日期"] = df["日期"].str.replace(r'(\d{4})-(\d{1,2}) (\d{1,2})', 
                                                   lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
                                                   regex=True)
                 # 移除可能存在的空格
@@ -184,7 +209,7 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             df = df[df["日期"] >= one_year_ago]
             
             # 记录实际获取的数据量
-            logger.info(f"股票 {stock_code} ✅ 成功通过 {successful_interface} 接口获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
+            logger.info(f"股票 {stock_code} (原始代码: {original_stock_code}) ✅ 成功通过 {successful_interface} 接口获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
             
             return df
         
@@ -193,13 +218,13 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             if "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e):
                 # 指数退避重试
                 wait_time = REQUEST_DELAY_BASE * (EXPONENTIAL_BACKOFF_BASE ** attempt)
-                logger.warning(f"股票 {stock_code} 请求被限流，等待 {wait_time:.1f} 秒后重试 ({attempt+1}/{max_retries})")
+                logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 请求被限流，等待 {wait_time:.1f} 秒后重试 ({attempt+1}/{max_retries})")
                 time.sleep(wait_time)
             else:
-                logger.error(f"股票 {stock_code} 获取数据失败: {str(e)}", exc_info=True)
+                logger.error(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败: {str(e)}", exc_info=True)
                 break
     
-    logger.warning(f"股票 {stock_code} 获取数据失败，超过最大重试次数")
+    logger.warning(f"股票 {stock_code} (原始代码: {original_stock_code}) 获取数据失败，超过最大重试次数")
     return None
 
 def get_stock_section(stock_code: str) -> str:

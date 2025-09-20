@@ -1573,40 +1573,13 @@ def init_performance_record():
             message_type="error"
         )
 
-def update_position_record(
-    position_type: str,
-    etf_code: str,
-    etf_name: str,
-    cost_price: float,
-    current_price: float,
-    quantity: int,
-    action: str
-):
-    """
-    更新仓位记录
-    
-    Args:
-        position_type: 仓位类型
-        etf_code: ETF代码
-        etf_name: ETF名称
-        cost_price: 持仓成本价
-        current_price: 当前价格
-        quantity: 持仓数量
-        action: 操作类型
-    """
+def update_position_record(position_type: str, etf_code: str, etf_name: str, 
+                          cost_price: float, current_price: float, 
+                          quantity: int, action: str):
+    """更新仓位记录"""
     try:
         # 读取现有记录 - 确保正确指定数据类型
-        position_df = pd.read_csv(
-            POSITION_RECORD_PATH, 
-            encoding="utf-8",
-            dtype={
-                "ETF代码": str,
-                "ETF名称": str,
-                "持仓成本价": float,
-                "持仓数量": int,
-                "持仓天数": int
-            }
-        )
+        position_df = pd.read_csv(POSITION_RECORD_PATH, encoding="utf-8")
         
         # 确保正确的数据类型
         position_df["ETF代码"] = position_df["ETF代码"].astype(str)
@@ -1615,43 +1588,72 @@ def update_position_record(
         position_df["持仓数量"] = position_df["持仓数量"].astype(int)
         position_df["持仓天数"] = position_df["持仓天数"].astype(int)
         
-        # 更新指定仓位类型的数据
+        # 确保日期列是字符串类型
+        if "持仓日期" in position_df.columns:
+            position_df["持仓日期"] = position_df["持仓日期"].astype(str)
+        if "操作日期" in position_df.columns:
+            position_df["操作日期"] = position_df["操作日期"].astype(str)
+        if "创建时间" in position_df.columns:
+            position_df["创建时间"] = position_df["创建时间"].astype(str)
+        if "更新时间" in position_df.columns:
+            position_df["更新时间"] = position_df["更新时间"].astype(str)
+        
+        # 检查是否存在指定的仓位类型
         mask = position_df['仓位类型'] == position_type
+        if not mask.any():
+            # 仓位类型不存在，创建新行
+            new_row = {
+                "仓位类型": position_type,
+                "ETF代码": "",
+                "ETF名称": "",
+                "持仓成本价": 0.0,
+                "持仓日期": "",
+                "持仓数量": 0,
+                "最新操作": "未持仓",
+                "操作日期": "",
+                "持仓天数": 0,
+                "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            position_df = pd.concat([position_df, pd.DataFrame([new_row])], ignore_index=True)
+            mask = position_df['仓位类型'] == position_type
+        
+        # 更新指定仓位类型的数据
+        current_time = datetime.now().strftime("%Y-%m-%d")
+        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         position_df.loc[mask, 'ETF代码'] = str(etf_code)
         position_df.loc[mask, 'ETF名称'] = str(etf_name)
         position_df.loc[mask, '持仓成本价'] = float(cost_price)
-        position_df.loc[mask, '持仓日期'] = datetime.now().strftime("%Y-%m-%d")
+        position_df.loc[mask, '持仓日期'] = current_time
         position_df.loc[mask, '持仓数量'] = int(quantity)
         position_df.loc[mask, '最新操作'] = str(action)
-        position_df.loc[mask, '操作日期'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        position_df.loc[mask, '操作日期'] = current_datetime
+        
+        # 修复：安全获取当前持仓天数
+        current_days = position_df.loc[mask, '持仓天数'].values[0] if mask.any() else 0
         
         # 更新持仓天数
         if quantity > 0:
-            # 获取当前持仓天数
-            current_days = position_df.loc[mask, '持仓天数'].values[0]
-            # 如果是新建仓位，天数设为1，否则+1
-            if current_days == 0:
-                position_df.loc[mask, '持仓天数'] = 1
-            else:
+            # 如果有持仓，天数+1
+            if current_days > 0:
                 position_df.loc[mask, '持仓天数'] = int(current_days) + 1
+            else:
+                position_df.loc[mask, '持仓天数'] = 1
         else:
             position_df.loc[mask, '持仓天数'] = 0
-            
-        position_df.loc[mask, '更新时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        position_df.loc[mask, '更新时间'] = current_datetime
         
         # 保存更新后的记录
         position_df.to_csv(POSITION_RECORD_PATH, index=False, encoding="utf-8")
         logger.info(f"已更新{position_type}仓位记录: {etf_code} {action}")
-    
+        
     except Exception as e:
         error_msg = f"更新{position_type}仓位记录失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        
         # 发送错误通知
-        send_wechat_message(
-            message=error_msg,
-            message_type="error"
-        )
+        send_wechat_message(message=error_msg, message_type="error")
 
 def record_trade(**kwargs):
     """

@@ -209,19 +209,16 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             # 恒生系列指数
             index_name = index_code.replace('.HI', '')
             try:
-                return ak.index_hk_hist(
+                # 修复：使用正确的恒生指数接口 index_hk_sina
+                return ak.index_hk_sina(
                     symbol=index_name,
                     period="daily",
                     start_date=start_date,
                     end_date=end_date
                 )
-            except:
-                return ak.index_hk_hist_sina(
-                    symbol=index_name,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date
-                )
+            except Exception as e:
+                logger.warning(f"获取恒生指数 {index_code} 失败: {str(e)}")
+                return pd.DataFrame()
         
         else:
             # A股指数

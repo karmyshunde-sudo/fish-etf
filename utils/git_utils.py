@@ -8,6 +8,7 @@ Git操作工具模块
 import os
 import logging
 import subprocess
+import time  # 添加time模块用于重试等待
 from datetime import datetime
 
 # 初始化日志
@@ -89,30 +90,43 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
             remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
             subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
         
-        # 关键修复：先拉取再推送，避免冲突
-        if stock_code:
-            logger.debug(f"股票 {stock_code} 执行 git pull 以获取远程最新更改")
-        else:
-            logger.debug("执行 git pull 以获取远程最新更改")
-        
-        try:
-            # 先拉取远程仓库的最新更改
-            subprocess.run(['git', 'pull', 'origin', branch], check=True, cwd=repo_root)
-        except subprocess.CalledProcessError as e:
-            if stock_code:
-                logger.warning(f"股票 {stock_code} git pull 失败，可能没有新更改: {str(e)}")
-            else:
-                logger.warning(f"git pull 失败，可能没有新更改: {str(e)}")
-        
-        push_cmd = ['git', 'push', 'origin', branch]
-        subprocess.run(push_cmd, check=True, cwd=repo_root)
-        if stock_code:
-            logger.info(f"股票 {stock_code} 已推送到远程仓库: origin/{branch}")
-            logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
-        else:
-            logger.info(f"已推送到远程仓库: origin/{branch}")
-        
-        return True
+        # ===== 关键修复：添加重试机制和冲突解决 =====
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 尝试拉取远程仓库的最新更改（使用rebase避免合并提交）
+                logger.debug(f"尝试拉取远程仓库最新更改 (尝试 {attempt+1}/{max_retries})")
+                subprocess.run(['git', 'pull', '--rebase', 'origin', branch], 
+                              check=True, cwd=repo_root)
+                
+                # 推送更改
+                push_cmd = ['git', 'push', 'origin', branch]
+                subprocess.run(push_cmd, check=True, cwd=repo_root)
+                
+                # 推送成功
+                if stock_code:
+                    logger.info(f"股票 {stock_code} 已推送到远程仓库: origin/{branch}")
+                    logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                else:
+                    logger.info(f"已推送到远程仓库: origin/{branch}")
+                return True
+                
+            except subprocess.CalledProcessError as e:
+                if attempt < max_retries - 1:
+                    # 指数退避等待
+                    wait_time = 2 ** attempt
+                    if stock_code:
+                        logger.warning(f"股票 {stock_code} Git操作失败，{wait_time}秒后重试 ({attempt+1}/{max_retries}): {str(e)}")
+                    else:
+                        logger.warning(f"Git操作失败，{wait_time}秒后重试 ({attempt+1}/{max_retries}): {str(e)}")
+                    time.sleep(wait_time)
+                else:
+                    if stock_code:
+                        logger.error(f"股票 {stock_code} Git操作失败，超过最大重试次数: {str(e)}", exc_info=True)
+                    else:
+                        logger.error(f"Git操作失败，超过最大重试次数: {str(e)}", exc_info=True)
+                    return False
+        # ===== 修复结束 =====
     
     except subprocess.CalledProcessError as e:
         if stock_code:

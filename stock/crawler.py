@@ -34,6 +34,8 @@ DAILY_DATA_DIR = os.path.join(Config.DATA_DIR, "daily")
 
 # 每次爬取的股票数量
 STOCKS_PER_RUN = 100
+# 每批提交的股票数量
+BATCH_COMMIT_SIZE = 10
 # 请求延迟参数
 REQUEST_DELAY_BASE = 1.5
 REQUEST_DELAY_RANDOM_FACTOR = 0.5
@@ -264,8 +266,8 @@ def get_stock_section(stock_code: str) -> str:
     
     return "其他板块"
 
-def process_stock_for_crawl(stock_code: str) -> bool:
-    """处理单只股票的爬取任务"""
+def process_stock_for_crawl(stock_code: str) -> Optional[str]:
+    """处理单只股票的爬取任务，返回需要提交的文件路径"""
     try:
         # 获取日线数据
         df = fetch_stock_data_with_retry(stock_code)
@@ -291,49 +293,12 @@ def process_stock_for_crawl(stock_code: str) -> bool:
                 # 新建文件
                 df.to_csv(file_path, index=False)
             
-            # 提交到Git仓库
-            try:
-                logger.info(f"正在提交股票 {stock_code} 数据到GitHub仓库...")
-                commit_message = f"自动更新股票 {stock_code} 数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-                
-                # ===== 关键修复：添加重试机制和冲突解决 =====
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        if commit_and_push_file(file_path, commit_message):
-                            logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
-                            break
-                        else:
-                            if attempt < max_retries - 1:
-                                # 尝试拉取最新更改解决冲突
-                                logger.info(f"Git提交失败，尝试拉取最新更改...")
-                                repo_root = os.path.dirname(os.path.abspath(file_path))
-                                subprocess.run(["git", "pull", "--rebase", "origin", "main"], 
-                                              check=True, cwd=repo_root)
-                                
-                                wait_time = 2 ** attempt  # 指数退避
-                                logger.warning(f"股票 {stock_code} 提交失败，{wait_time}秒后重试 ({attempt+1}/{max_retries})")
-                                time.sleep(wait_time)
-                            else:
-                                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，超过最大重试次数，但继续执行爬取")
-                    except Exception as e:
-                        logger.warning(f"Git操作过程中出错: {str(e)}")
-                        if attempt < max_retries - 1:
-                            wait_time = 2 ** attempt
-                            logger.warning(f"股票 {stock_code} 提交失败，{wait_time}秒后重试 ({attempt+1}/{max_retries})")
-                            time.sleep(wait_time)
-                        else:
-                            logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，超过最大重试次数，但继续执行爬取")
-                # ===== 修复结束 =====
-            
-            except Exception as e:
-                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
-            
-            return True
-        return False
+            return file_path  # 返回需要提交的文件路径
+        
+        return None
     except Exception as e:
         logger.error(f"处理股票 {stock_code} 时出错: {str(e)}", exc_info=True)
-        return False
+        return None
 
 def main():
     """主函数：股票日线数据增量爬取"""
@@ -353,7 +318,11 @@ def main():
             logger.error("股票基础信息为空，无法继续")
             return
         
-        logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
+        # ===== 关键修复1：确保股票代码是6位字符串 =====
+        basic_info_df["code"] = basic_info_df["code"].astype(str).str.zfill(6)
+        # 保存修改后的基础信息
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录")
         
         # 2. 确保 next_crawl_index 列存在
         if "next_crawl_index" not in basic_info_df.columns:
@@ -385,14 +354,51 @@ def main():
         
         logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")
         
+        # 收集需要提交的文件
+        files_to_commit = []
+        
         # 并行处理股票
         success_count = 0
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = executor.map(process_stock_for_crawl, stocks_to_crawl)
-            for i, result in enumerate(results):
-                if result:
+            for i, file_path in enumerate(results):
+                if file_path:
                     success_count += 1
+                    files_to_commit.append(file_path)
+                    
+                    # ===== 关键修复2：每10个股票提交一次 =====
+                    if len(files_to_commit) >= BATCH_COMMIT_SIZE:
+                        commit_message = f"批量更新{BATCH_COMMIT_SIZE}只股票数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                        logger.info(f"正在批量提交 {len(files_to_commit)} 个股票数据文件到GitHub仓库...")
+                        
+                        for f in files_to_commit:
+                            stock_code = os.path.basename(f).replace(".csv", "")
+                            try:
+                                if commit_and_push_file(f, commit_message):
+                                    logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                                else:
+                                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行爬取")
+                            except Exception as e:
+                                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
+                        
+                        files_to_commit = []  # 重置列表
+                
                 logger.info(f"已处理 {i+1}/{len(stocks_to_crawl)} 只股票，成功: {success_count}")
+        
+        # 提交剩余的文件
+        if files_to_commit:
+            commit_message = f"批量更新剩余{len(files_to_commit)}只股票数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            logger.info(f"正在提交剩余的 {len(files_to_commit)} 个股票数据文件到GitHub仓库...")
+            
+            for f in files_to_commit:
+                stock_code = os.path.basename(f).replace(".csv", "")
+                try:
+                    if commit_and_push_file(f, commit_message):
+                        logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                    else:
+                        logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行爬取")
+                except Exception as e:
+                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
         
         # 5. 更新 next_crawl_index
         next_index = end_index if end_index < total_stocks else 0

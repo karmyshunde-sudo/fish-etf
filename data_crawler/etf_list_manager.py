@@ -124,9 +124,15 @@ def update_all_etf_list() -> pd.DataFrame:
     """更新ETF列表（优先使用本地文件，若需更新则从网络获取）
     :return: 包含ETF信息的DataFrame
     """
-    # 检查是否需要更新
-    if not os.path.exists(Config.ALL_ETFS_PATH) or is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        logger.info("ETF列表文件不存在或已过期，尝试从网络获取...")
+    # ===== 关键修复：添加周日强制更新逻辑 =====
+    # 获取当前北京时间
+    beijing_time = get_beijing_time()
+    # 判断是否为周日（星期日的索引是6，星期一的索引是0）
+    is_sunday = beijing_time.weekday() == 6
+    
+    # 检查是否需要更新 - 周日强制更新
+    if is_sunday or not os.path.exists(Config.ALL_ETFS_PATH) or is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
+        logger.info(f"{'[强制更新] ' if is_sunday else ''}ETF列表文件不存在或已过期，尝试从网络获取...")
         try:
             primary_etf_list = None
             
@@ -460,7 +466,7 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从新浪获取ETF列表...")
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList"
+        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList  "
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
         response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
         response.raise_for_status()
@@ -735,4 +741,3 @@ def repair_etf_list(etf_list: pd.DataFrame) -> pd.DataFrame:
                 repaired_list[col] = 0.0 if col == "基金规模" else ""
     
     return repaired_list
-

@@ -90,13 +90,13 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
             remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
             subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
         
-        # ===== 关键修复：添加重试机制和冲突解决 =====
+        # ===== 关键修复：移除 --rebase 参数 =====
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                # 尝试拉取远程仓库的最新更改（使用rebase避免合并提交）
+                # 尝试拉取远程仓库的最新更改（移除 --rebase 参数）
                 logger.debug(f"尝试拉取远程仓库最新更改 (尝试 {attempt+1}/{max_retries})")
-                subprocess.run(['git', 'pull', '--rebase', 'origin', branch], 
+                subprocess.run(['git', 'pull', 'origin', branch], 
                               check=True, cwd=repo_root)
                 
                 # 推送更改

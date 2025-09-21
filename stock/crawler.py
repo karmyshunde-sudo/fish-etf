@@ -10,6 +10,7 @@ import logging
 import pandas as pd
 import time
 import akshare as ak
+import subprocess  # 添加这个导入，用于执行Git命令
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import Config
@@ -170,7 +171,7 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                 logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少'日期'列")
                 return None
             
-            # 检查是否有必要的列
+            # 檢查是否有必要的列
             required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
@@ -214,7 +215,7 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             return df
         
         except Exception as e:
-            # 检测是否是限流错误
+            # 檢测是否是限流错误
             if "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e):
                 # 指数退避重试
                 wait_time = REQUEST_DELAY_BASE * (EXPONENTIAL_BACKOFF_BASE ** attempt)
@@ -294,10 +295,37 @@ def process_stock_for_crawl(stock_code: str) -> bool:
             try:
                 logger.info(f"正在提交股票 {stock_code} 数据到GitHub仓库...")
                 commit_message = f"自动更新股票 {stock_code} 数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-                if commit_and_push_file(file_path, commit_message):
-                    logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
-                else:
-                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行爬取")
+                
+                # ===== 关键修复：添加重试机制和冲突解决 =====
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        if commit_and_push_file(file_path, commit_message):
+                            logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
+                            break
+                        else:
+                            if attempt < max_retries - 1:
+                                # 尝试拉取最新更改解决冲突
+                                logger.info(f"Git提交失败，尝试拉取最新更改...")
+                                repo_root = os.path.dirname(os.path.abspath(file_path))
+                                subprocess.run(["git", "pull", "--rebase", "origin", "main"], 
+                                              check=True, cwd=repo_root)
+                                
+                                wait_time = 2 ** attempt  # 指数退避
+                                logger.warning(f"股票 {stock_code} 提交失败，{wait_time}秒后重试 ({attempt+1}/{max_retries})")
+                                time.sleep(wait_time)
+                            else:
+                                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，超过最大重试次数，但继续执行爬取")
+                    except Exception as e:
+                        logger.warning(f"Git操作过程中出错: {str(e)}")
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt
+                            logger.warning(f"股票 {stock_code} 提交失败，{wait_time}秒后重试 ({attempt+1}/{max_retries})")
+                            time.sleep(wait_time)
+                        else:
+                            logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，超过最大重试次数，但继续执行爬取")
+                # ===== 修复结束 =====
+            
             except Exception as e:
                 logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
             

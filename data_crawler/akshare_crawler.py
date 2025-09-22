@@ -105,15 +105,57 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         
         logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
         
-        # 特殊处理ETF 513750 - 使用更灵活的日期范围
-        if etf_code == "513750":
-            # 尝试获取最近30天数据
-            extended_start_date = (last_trading_day - timedelta(days=30)).strftime("%Y-%m-%d")
-            logger.info(f"特殊处理ETF 513750，扩展日期范围为 {extended_start_date} 至 {end_date}")
-            df = try_multiple_akshare_interfaces(etf_code, extended_start_date, end_date)
-        else:
-            # 尝试多种AkShare接口
-            df = try_multiple_akshare_interfaces(etf_code, start_date, end_date)
+        # ========== 以下是关键修复 ==========
+        # 特殊处理A股ETF（510300等） - 添加yfinance作为备选数据源
+        if etf_code.startswith(("51", "159")):
+            logger.info(f"特殊处理A股ETF {etf_code}，尝试使用yfinance作为备选数据源")
+            
+            # 尝试使用yfinance获取数据
+            try:
+                # A股ETF在yfinance中的代码格式：XXXXXX.SS（上交所）或XXXXXX.SZ（深交所）
+                market_suffix = ".SS" if etf_code.startswith("51") else ".SZ"
+                yf_code = f"{etf_code}{market_suffix}"
+                
+                # 转换日期格式
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+                
+                # 检查是否已安装yfinance
+                try:
+                    import yfinance as yf
+                except ImportError:
+                    logger.error("需要安装yfinance: pip install yfinance")
+                else:
+                    # 获取数据
+                    df = yf.download(yf_code, start=start_dt, end=end_dt)
+                    
+                    if not df.empty:
+                        # 标准化列名
+                        df = df.reset_index()
+                        df = df.rename(columns={
+                            'Date': '日期',
+                            'Open': '开盘',
+                            'High': '最高',
+                            'Low': '最低',
+                            'Close': '收盘',
+                            'Volume': '成交量',
+                            'Adj Close': '复权收盘'
+                        })
+                        
+                        # 确保日期格式正确
+                        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+                        
+                        # 添加成交额（估算，假设1手=100份）
+                        if '成交量' in df.columns:
+                            df['成交额'] = df['成交量'] * 100 * df['收盘']
+                        
+                        logger.info(f"✅ 通过yfinance成功获取A股ETF {etf_code} 数据，共{len(df)}条记录")
+                        return df
+            except Exception as e:
+                logger.warning(f"通过yfinance获取A股ETF {etf_code} 失败: {str(e)}")
+        
+        # 尝试多种AkShare接口
+        df = try_multiple_akshare_interfaces(etf_code, start_date, end_date)
         
         if df.empty:
             logger.warning(f"AkShare未获取到{etf_code}数据（{start_date}至{end_date}）")
@@ -153,9 +195,9 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         if "日期" in df.columns:
             df = df[(df["日期"] >= start_date) & (df["日期"] <= end_date)]
         
-        # 特殊处理ETF 513750 - 修复可能的列名问题
-        if etf_code == "513750" and "折溢价率" not in df.columns and "基金折价率" in df.columns:
-            df["折溢价率"] = df["基金折价率"]
+        # 特殊处理510300（沪深300ETF） - 修复可能的列名问题
+        if etf_code == "510300" and "成交额" not in df.columns and "成交金额" in df.columns:
+            df["成交额"] = df["成交金额"]
         
         # 数据清洗：去重
         if "日期" in df.columns:

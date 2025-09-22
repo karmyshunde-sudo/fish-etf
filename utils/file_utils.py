@@ -145,9 +145,12 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         # 使用config中定义的列名映射
         col_mapping = {}
         for eng_col, chn_col in Config.COLUMN_NAME_MAPPING.items():
-            if eng_col in df.columns:
-                col_mapping[eng_col] = chn_col
-                logger.debug(f"映射列名: {eng_col} -> {chn_col}")
+            # 模糊匹配，处理大小写和空格差异
+            for col in df.columns:
+                if eng_col.lower() in str(col).lower().replace(' ', ''):
+                    col_mapping[col] = chn_col
+                    logger.debug(f"映射列名: {col} -> {chn_col}")
+                    break
         
         # 重命名列
         df = df.rename(columns=col_mapping)
@@ -156,7 +159,17 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
         required_columns = ["日期", "收盘", "成交额"]
         for col in required_columns:
             if col not in df.columns:
-                logger.warning(f"DataFrame缺少必要列: {col}")
+                # 尝试使用替代列
+                if col == "日期" and "交易日期" in df.columns:
+                    df["日期"] = df["交易日期"]
+                elif col == "收盘" and "最新价" in df.columns:
+                    df["收盘"] = df["最新价"]
+                elif col == "成交额" and "成交金额" in df.columns:
+                    df["成交额"] = df["成交金额"]
+                else:
+                    logger.warning(f"DataFrame缺少必要列: {col}")
+                    # 创建空列，避免后续处理失败
+                    df[col] = np.nan
         
         # 记录映射后的列名
         logger.info(f"映射后列名: {list(df.columns)}")
@@ -166,6 +179,155 @@ def ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"确保中文列名失败: {str(e)}", exc_info=True)
         return df
+
+def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    内部实现的列名标准化函数（不依赖utils.file_utils）
+    
+    Args:
+        df: 原始DataFrame
+    
+    Returns:
+        pd.DataFrame: 使用中文列名的DataFrame
+    """
+    if df.empty:
+        return df
+    
+    # 列名映射字典（移除了所有与"折溢价率"相关的映射）
+    column_mapping = {
+        # 日期列
+        'date': '日期',
+        'trade_date': '日期',
+        'dt': '日期',
+        'date_time': '日期',
+        '日期': '日期',  # 防止重复映射
+        
+        # 价格列
+        'open': '开盘',
+        'open_price': '开盘',
+        'openprice': '开盘',
+        'openprice_': '开盘',
+        '开盘': '开盘',
+        
+        'high': '最高',
+        'high_price': '最高',
+        'highprice': '最高',
+        '最高': '最高',
+        
+        'low': '最低',
+        'low_price': '最低',
+        'lowprice': '最低',
+        '最低': '最低',
+        
+        'close': '收盘',
+        'close_price': '收盘',
+        'closeprice': '收盘',
+        '收盘价': '收盘',
+        '最新价': '收盘',
+        '收盘': '收盘',
+        
+        # 成交量列
+        'volume': '成交量',
+        'vol': '成交量',
+        '成交数量': '成交量',
+        '成交量': '成交量',
+        
+        # 成交额列
+        'amount': '成交额',
+        '成交金额': '成交额',
+        '成交额': '成交额',
+        
+        # 涨跌幅列
+        'pct_chg': '涨跌幅',
+        'change_pct': '涨跌幅',
+        '涨跌幅': '涨跌幅',
+        '涨跌幅度': '涨跌幅',
+        
+        # 涨跌额列
+        'change': '涨跌额',
+        'price_change': '涨跌额',
+        '涨跌额': '涨跌额',
+        '涨跌': '涨跌额',
+        
+        # 振幅列
+        'amplitude': '振幅',
+        '振幅': '振幅',
+        
+        # 换手率列
+        'turnover': '换手率',
+        'turnover_rate': '换手率',
+        '换手率': '换手率',
+        
+        # IOPV列
+        'iopv': 'IOPV',
+        'iopv_value': 'IOPV',
+        'IOPV实时估值': 'IOPV',
+        '实时估值': 'IOPV',
+        'IOPV': 'IOPV',
+        
+        # 净值列
+        'net_value': '净值',
+        'nav': '净值',
+        '净值': '净值',
+        '单位净值': '净值',
+        
+        # ETF代码列
+        'code': 'ETF代码',
+        'symbol': 'ETF代码',
+        'ETF代码': 'ETF代码',
+        
+        # ETF名称列
+        'name': 'ETF名称',
+        '基金名称': 'ETF名称',
+        'ETF名称': 'ETF名称'
+    }
+    
+    # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+    df = df.copy(deep=True)
+    
+    # 记录原始列名用于诊断
+    logger.debug(f"internal_ensure_chinese_columns: 原始列名: {list(df.columns)}")
+    
+    # 尝试模糊匹配列名（处理大小写和空格差异）
+    final_mapping = {}
+    for col in df.columns:
+        # 标准化列名（小写、移除空格）
+        normalized_col = str(col).strip().lower().replace(' ', '').replace('\n', '')
+        
+        # 尝试匹配映射字典
+        for src, target in column_mapping.items():
+            normalized_src = src.strip().lower().replace(' ', '')
+            
+            # 完全匹配或部分匹配
+            if normalized_src == normalized_col or normalized_col.startswith(normalized_src) or normalized_src.startswith(normalized_col):
+                final_mapping[col] = target
+                logger.debug(f"internal_ensure_chinese_columns: 映射列名 {col} -> {target}")
+                break
+    
+    # 重命名列
+    df = df.rename(columns=final_mapping)
+    
+    # 确保关键列存在
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+    for col in required_columns:
+        if col not in df.columns:
+            logger.warning(f"internal_ensure_chinese_columns: DataFrame缺少必要列: {col}")
+            
+            # 尝试使用替代列
+            if col == "日期" and "交易日期" in df.columns:
+                df["日期"] = df["交易日期"]
+            elif col == "收盘" and "最新价" in df.columns:
+                df["收盘"] = df["最新价"]
+            elif col == "成交量" and "成交数量" in df.columns:
+                df["成交量"] = df["成交数量"]
+            elif col == "成交额" and "成交金额" in df.columns:
+                df["成交额"] = df["成交金额"]
+    
+    # 记录映射后的列名
+    logger.debug(f"internal_ensure_chinese_columns: 映射后列名: {list(df.columns)}")
+    
+    return df
+
 
 def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """

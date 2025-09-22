@@ -392,8 +392,9 @@ def calculate_avg_volume(df: pd.DataFrame) -> float:
     # 转换为万元
     return avg_volume / 10000
 
+# ========== 以下是关键修改：更弹性的评分机制 ==========
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
-    """计算股票策略评分
+    """计算股票策略评分（更精细化的评分机制）
     
     Args:
         stock_code: 股票代码
@@ -426,36 +427,73 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         # 获取股票所属板块
         section = get_stock_section(stock_code)
         
-        # 1. 趋势评分 (40%)
+        # 1. 趋势指标评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
             # 计算移动平均线
             df["ma5"] = df["收盘"].rolling(window=5).mean()
             df["ma10"] = df["收盘"].rolling(window=10).mean()
             df["ma20"] = df["收盘"].rolling(window=20).mean()
-            df["ma40"] = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean()
+            df["ma40"] = df["收盘"].rolling(window=40).mean()
             
+            # 1.1 多头排列评分 (20分) - 基于均线间距和角度
             ma5 = df["ma5"].iloc[-1] if "ma5" in df.columns else current
             ma10 = df["ma10"].iloc[-1] if "ma10" in df.columns else current
             ma20 = df["ma20"].iloc[-1] if "ma20" in df.columns else current
             ma40 = df["ma40"].iloc[-1] if "ma40" in df.columns else current
             
-            # 检查短期均线是否在长期均线上方（多头排列）
-            if (not pd.isna(ma5) and not pd.isna(ma10) and not pd.isna(ma20) and not pd.isna(ma40) and
-                ma5 > ma10 > ma20 > ma40):
-                trend_score += 20  # 多头排列，加20分
-            
-            # 检查价格是否在均线上方
-            if not pd.isna(ma20) and current > ma20:
-                trend_score += 10  # 价格在20日均线上方，加10分
-            
-            # 检查趋势强度
-            if len(df) >= 20:
-                price_change_20 = (current - df["收盘"].iloc[-20]) / df["收盘"].iloc[-20] * 100
-                if not pd.isna(price_change_20) and price_change_20 > 5:
-                    trend_score += 10  # 20日涨幅大于5%，加10分
+            # 检查是否多头排列
+            if not pd.isna(ma5) and not pd.isna(ma10) and not pd.isna(ma20) and not pd.isna(ma40):
+                # 计算均线间距比例
+                spacing_ratio_5_10 = (ma5 - ma10) / ma10 if ma10 > 0 else 0
+                spacing_ratio_10_20 = (ma10 - ma20) / ma20 if ma20 > 0 else 0
+                spacing_ratio_20_40 = (ma20 - ma40) / ma40 if ma40 > 0 else 0
+                
+                # 计算均线斜率
+                ma5_slope = (df["ma5"].iloc[-1] - df["ma5"].iloc[-5]) / 5 if len(df) >= 5 and "ma5" in df.columns else 0
+                ma10_slope = (df["ma10"].iloc[-1] - df["ma10"].iloc[-5]) / 5 if len(df) >= 5 and "ma10" in df.columns else 0
+                ma20_slope = (df["ma20"].iloc[-1] - df["ma20"].iloc[-5]) / 5 if len(df) >= 5 and "ma20" in df.columns else 0
+                
+                # 多头排列强度评分 (0-20分)
+                spacing_score = min(10, max(0, (spacing_ratio_5_10 + spacing_ratio_10_20 + spacing_ratio_20_40) * 100))
+                slope_score = min(10, max(0, (ma5_slope + ma10_slope + ma20_slope) * 100))
+                trend_score += spacing_score + slope_score
         
-        # 2. 动量评分 (20%)
+        # 1.2 价格位置评分 (10分) - 基于在20日均线上方的天数和偏离率
+        if "ma20" in df.columns and len(df) >= 20:
+            ma20 = df["ma20"].iloc[-1]
+            if not pd.isna(ma20) and ma20 > 0:
+                # 计算价格偏离率
+                deviation = (current - ma20) / ma20
+                
+                # 计算连续在均线上方的天数
+                above_ma_days = 0
+                for i in range(1, min(20, len(df))):
+                    if df["收盘"].iloc[-i] > df["ma20"].iloc[-i]:
+                        above_ma_days += 1
+                    else:
+                        break
+                
+                # 价格位置评分 (0-10分)
+                deviation_score = max(0, min(5, 5 - abs(deviation) * 50))  # 理想偏离率在0-2%
+                days_score = min(5, above_ma_days * 0.5)  # 每多一天加0.5分，最多5分
+                trend_score += deviation_score + days_score
+        
+        # 1.3 趋势强度评分 (10分) - 基于20日涨幅和趋势稳定性
+        if len(df) >= 20:
+            price_change_20 = (current - df["收盘"].iloc[-20]) / df["收盘"].iloc[-20] * 100
+            
+            # 计算趋势稳定性 (价格在20日均线之上的比例)
+            above_ma_ratio = 0
+            if "ma20" in df.columns:
+                above_ma_ratio = sum(1 for i in range(20) if df["收盘"].iloc[-i-1] > df["ma20"].iloc[-i-1]) / 20
+            
+            # 趋势强度评分 (0-10分)
+            change_score = min(7, max(0, price_change_20 * 0.2))  # 每1%涨幅得0.2分，最高7分
+            stability_score = min(3, above_ma_ratio * 3)  # 稳定性最高3分
+            trend_score += change_score + stability_score
+        
+        # 2. 动量指标评分 (20%)
         momentum_score = 0.0
         # 计算MACD
         if "收盘" in df.columns:
@@ -465,34 +503,49 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
             df["hist"] = df["macd"] - df["signal"]
         
+        # 2.1 MACD评分 (10分) - 基于柱状体增长和正值大小
         if "hist" in df.columns and len(df) >= 2:
             macd_hist = df["hist"].iloc[-1]
             macd_hist_prev = df["hist"].iloc[-2]
             
-            # MACD柱状体增加
-            if (not pd.isna(macd_hist) and not pd.isna(macd_hist_prev) and 
-                macd_hist > macd_hist_prev and macd_hist > 0):
-                momentum_score += 10  # MACD柱状体增加且为正，加10分
-            
-            # RSI指标
-            if "收盘" in df.columns:
-                delta = df["收盘"].diff()
-                gain = delta.where(delta > 0, 0)
-                loss = -delta.where(delta < 0, 0)
-                avg_gain = gain.rolling(window=14).mean()
-                avg_loss = loss.rolling(window=14).mean()
-                rs = avg_gain / avg_loss.replace(0, np.nan)  # 避免除零错误
-                df["rsi"] = 100 - (100 / (1 + rs))
-            
-            if "rsi" in df.columns:
-                rsi = df["rsi"].iloc[-1]
-                if not pd.isna(rsi):
-                    if 50 < rsi < 70:
-                        momentum_score += 10  # RSI在50-70之间，加10分
-                    elif rsi >= 70:
-                        momentum_score += 5  # RSI大于70，加5分
+            # MACD柱状体增长评分
+            if not pd.isna(macd_hist) and not pd.isna(macd_hist_prev):
+                growth_rate = (macd_hist - macd_hist_prev) / abs(macd_hist_prev) if macd_hist_prev != 0 else 1
+                
+                # 增长率评分 (0-5分)
+                growth_score = min(5, max(0, growth_rate * 10))
+                
+                # 正值大小评分 (0-5分)
+                value_score = min(5, max(0, macd_hist * 10))
+                
+                momentum_score += growth_score + value_score
         
-        # 3. 量能评分 (20%)
+        # 2.2 RSI评分 (10分) - 基于与理想区域的距离
+        if "收盘" in df.columns:
+            delta = df["收盘"].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=14).mean()
+            avg_loss = loss.rolling(window=14).mean()
+            rs = avg_gain / avg_loss.replace(0, np.nan)  # 避免除零错误
+            df["rsi"] = 100 - (100 / (1 + rs))
+        
+        if "rsi" in df.columns:
+            rsi = df["rsi"].iloc[-1]
+            if not pd.isna(rsi):
+                # RSI评分 (0-10分)，理想区域50-70
+                if 50 <= rsi <= 70:
+                    # 在理想区域内，越接近60分越高
+                    distance = abs(rsi - 60)
+                    rsi_score = max(0, 10 - distance * 0.2)
+                else:
+                    # 在理想区域外，根据距离扣分
+                    distance = min(abs(rsi - 50), abs(rsi - 70))
+                    rsi_score = max(0, 5 - distance * 0.1)
+                
+                momentum_score += rsi_score
+        
+        # 3. 量能指标评分 (20%)
         volume_score = 0.0
         if "成交量" in df.columns:
             df["volume_ma5"] = df["成交量"].rolling(window=5).mean()
@@ -501,19 +554,34 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         if volume_ma5 > 0 and volume > 0:
             volume_ratio = volume / volume_ma5
             
-            # 量能放大
-            if volume_ratio > 1.5:
-                volume_score += 10  # 量能放大50%以上，加10分
-            elif volume_ratio > 1.2:
-                volume_score += 5  # 量能放大20%以上，加5分
+            # 3.1 量能放大评分 (10分) - 基于放大比例
+            volume_score += min(10, volume_ratio * 5)  # 放大100%得满分
             
-            # 量价配合
+            # 3.2 量价配合评分 (10分) - 基于价格变化与量能变化的相关性
             if len(df) >= 2:
-                price_change = (current - df["收盘"].iloc[-2]) / df["收盘"].iloc[-2] * 100
-                if price_change > 0 and volume_ratio > 1.0:
-                    volume_score += 10  # 价格上涨且量能放大，加10分
+                price_change = (current - df["收盘"].iloc[-2]) / df["收盘"].iloc[-2]
+                volume_change = (volume - volume_ma5) / volume_ma5
+                
+                # 计算近5天价格变化与量能变化的相关性
+                price_changes = []
+                volume_changes = []
+                for i in range(1, min(5, len(df))):
+                    price_changes.append((df["收盘"].iloc[-i] - df["收盘"].iloc[-i-1]) / df["收盘"].iloc[-i-1])
+                    volume_changes.append((df["成交量"].iloc[-i] - df["成交量"].iloc[-i-1]) / df["成交量"].iloc[-i-1])
+                
+                # 计算相关系数
+                if len(price_changes) > 1:
+                    mean_price = sum(price_changes) / len(price_changes)
+                    mean_volume = sum(volume_changes) / len(volume_changes)
+                    
+                    numerator = sum((p - mean_price) * (v - mean_volume) for p, v in zip(price_changes, volume_changes))
+                    denominator = (sum((p - mean_price)**2 for p in price_changes) * sum((v - mean_volume)**2 for v in volume_changes)) ** 0.5
+                    
+                    if denominator != 0:
+                        correlation = numerator / denominator
+                        volume_score += max(0, min(10, correlation * 10))
         
-        # 4. 波动率评分 (20%)
+        # 4. 波动率指标评分 (20%)
         volatility_score = 0.0
         # 计算波动率（20日年化波动率）
         if "收盘" in df.columns:
@@ -526,40 +594,32 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             volatility = df["volatility"].iloc[-1]
             
             if not pd.isna(volatility):
-                # 根据不同板块设置不同的波动率评分标准
-                if section == "沪市主板":
-                    # 沪市主板：波动率在15%-25%为最佳
-                    if 0.15 <= volatility <= 0.25:
-                        volatility_score += 10
-                    elif volatility > 0.25:
-                        volatility_score += 5
-                elif section == "深市主板":
-                    # 深市主板：波动率在18%-28%为最佳
-                    if 0.18 <= volatility <= 0.28:
-                        volatility_score += 10
-                    elif volatility > 0.28:
-                        volatility_score += 5
-                elif section == "创业板":
-                    # 创业板：波动率在20%-35%为最佳
-                    if 0.20 <= volatility <= 0.35:
-                        volatility_score += 10
-                    elif volatility > 0.35:
-                        volatility_score += 5
-                elif section == "科创板":
-                    # 科创板：波动率在25%-40%为最佳
-                    if 0.25 <= volatility <= 0.40:
-                        volatility_score += 10
-                    elif volatility > 0.40:
-                        volatility_score += 5
+                # 4.1 波动率水平评分 (10分) - 基于与理想范围的距离
+                section_config = MARKET_SECTIONS.get(section, MARKET_SECTIONS["沪市主板"])
+                min_vol = section_config["min_volatility"]
+                max_vol = section_config["max_volatility"]
                 
-                # 波动率趋势
+                if min_vol <= volatility <= max_vol:
+                    # 在理想范围内，越接近中间值分越高
+                    mid_vol = (min_vol + max_vol) / 2
+                    distance = abs(volatility - mid_vol)
+                    vol_score = max(0, 10 - distance * 20)
+                else:
+                    # 在理想范围外，根据距离扣分
+                    distance = min(abs(volatility - min_vol), abs(volatility - max_vol))
+                    vol_score = max(0, 5 - distance * 10)
+                
+                volatility_score += vol_score
+                
+                # 4.2 波动率稳定性评分 (10分) - 基于波动率变化率
                 if len(df) >= 21:
                     prev_volatility = df["volatility"].iloc[-21]
                     if not pd.isna(prev_volatility) and prev_volatility > 0:
                         volatility_change = (volatility - prev_volatility) / prev_volatility
                         
-                        if -0.1 <= volatility_change <= 0.1:
-                            volatility_score += 10  # 波动率稳定，加10分
+                        # 变化率越小，评分越高
+                        stability_score = max(0, 10 - abs(volatility_change) * 100)
+                        volatility_score += stability_score
         
         # 综合评分
         total_score = trend_score + momentum_score + volume_score + volatility_score
@@ -574,6 +634,87 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
     except Exception as e:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
+# ========== 以上是关键修改：更弹性的评分机制 ==========
+
+# ========== 以下是关键修改：为每个板块生成详细报告 ==========
+def generate_section_report(section: str, stocks: List[Dict]) -> str:
+    """生成单个板块的详细报告
+    
+    Args:
+        section: 板块名称
+        stocks: 该板块的股票列表
+    
+    Returns:
+        str: 板块详细报告
+    """
+    report_lines = []
+    
+    # 添加标题
+    beijing_time = get_beijing_time()
+    report_lines.append(f"📊 {section}板块趋势策略报告 ({beijing_time.strftime('%Y-%m-%d %H:%M')})")
+    report_lines.append("──────────────────")
+    
+    # 添加板块筛选条件
+    section_config = MARKET_SECTIONS.get(section, MARKET_SECTIONS["沪市主板"])
+    report_lines.append(f"🔍 筛选条件:")
+    report_lines.append(f"  • 市值范围: {section_config['min_market_cap']}-{section_config['max_market_cap']}亿元")
+    report_lines.append(f"  • 日均成交额: >{section_config['min_daily_volume']/10000:.2f}万元")
+    report_lines.append(f"  • 年化波动率: {section_config['min_volatility']*100:.1f}%-{section_config['max_volatility']*100:.1f}%")
+    report_lines.append("──────────────────")
+    
+    # 检查是否有符合条件的股票
+    if not stocks:
+        report_lines.append(f"⚠️ 未筛选出符合条件的{section}股票")
+        report_lines.append("──────────────────")
+        report_lines.append("💡 操作建议: 当前市场环境下，该板块暂无符合策略标准的标的")
+        report_lines.append("──────────────────")
+        report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
+        return "\n".join(report_lines)
+    
+    # 添加筛选出的股票详情
+    report_lines.append(f"✅ 筛选出 {len(stocks)} 只优质股票 (按评分排序):")
+    
+    for i, stock in enumerate(stocks):
+        stock_code = stock["code"]
+        stock_name = stock["name"]
+        score = stock["score"]
+        df = stock["df"]
+        
+        # 获取最新数据
+        current = df["收盘"].iloc[-1]
+        volume = df["成交量"].iloc[-1] if "成交量" in df.columns and len(df) >= 1 else 0
+        
+        # 计算20日均线
+        ma20 = df["收盘"].rolling(window=20).mean().iloc[-1] if len(df) >= 20 else current
+        
+        # 计算价格偏离率
+        deviation = (current - ma20) / ma20 if ma20 > 0 else 0
+        
+        # 获取趋势指标
+        trend_score = min(40, score * 0.4)  # 从总分中推算
+        momentum_score = min(20, score * 0.2)
+        volume_score = min(20, score * 0.2)
+        volatility_score = min(20, score * 0.2)
+        
+        # 添加股票详情
+        report_lines.append(f"{'='*30}")
+        report_lines.append(f"{i+1}. {stock_name}({stock_code}) - {score:.1f}分")
+        report_lines.append(f"📈 趋势: {trend_score:.1f}/40 | 动量: {momentum_score:.1f}/20")
+        report_lines.append(f"📊 量能: {volume_score:.1f}/20 | 波动: {volatility_score:.1f}/20")
+        report_lines.append(f"💰 价格: {current:.4f} | 20日均线: {ma20:.4f} | 偏离率: {deviation:.2%}")
+        report_lines.append(f"🔄 量能: {volume:,.0f}手 | 5日均量: {calculate_avg_volume(df):,.2f}万元")
+    
+    report_lines.append("──────────────────")
+    report_lines.append("💡 操作指南:")
+    report_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
+    report_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
+    report_lines.append("3. 持续关注趋势变化，及时调整持仓")
+    report_lines.append("4. 科创板/创业板波动较大，注意控制风险")
+    report_lines.append("──────────────────")
+    report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
+    
+    return "\n".join(report_lines)
+# ========== 以上是关键修改：为每个板块生成详细报告 ==========
 
 # ========== 以下是关键修改 ==========
 # 缓存字典
@@ -842,49 +983,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
         logger.error(traceback.format_exc())
         return {}
 
-def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> str:
-    """生成策略总结消息
-    
-    Args:
-        top_stocks_by_section: 按板块组织的股票信息
-    
-    Returns:
-        str: 策略总结消息
-    """
-    summary_lines = []
-    
-    # 添加标题
-    beijing_time = get_beijing_time()
-    summary_lines.append(f"📊 个股趋势策略报告 ({beijing_time.strftime('%Y-%m-%d %H:%M')})")
-    summary_lines.append("──────────────────")
-    
-    # 添加各板块结果
-    total_stocks = 0
-    for section, stocks in top_stocks_by_section.items():
-        if stocks:
-            summary_lines.append(f"📌 {section}板块 ({len(stocks)}只):")
-            for stock in stocks:
-                stock_code = stock["code"]
-                stock_name = stock["name"]
-                score = stock["score"]
-                summary_lines.append(f"   • {stock_name}({stock_code}) {score:.1f}分")
-            total_stocks += len(stocks)
-    
-    summary_lines.append(f"📊 总计: {total_stocks}只股票（每板块最多{MAX_STOCKS_PER_SECTION}只）")
-    summary_lines.append("──────────────────")
-    
-    # 添加操作指南
-    summary_lines.append("💡 操作指南:")
-    summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
-    summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
-    summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
-    summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
-    summary_lines.append("──────────────────")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
-    
-    summary_message = "\n".join(summary_lines)
-    return summary_message
-
+# ========== 以下是关键修改：移除旧的生成策略总结函数，改为生成每个板块的报告 ==========
 def main():
     """主函数"""
     try:
@@ -893,11 +992,41 @@ def main():
         # 1. 获取适合策略的股票
         top_stocks_by_section = get_top_stocks_for_strategy()
         
-        # 2. 生成策略总结消息
-        summary_message = generate_strategy_summary(top_stocks_by_section)
+        # 2. 为每个板块生成详细报告并推送
+        total_stocks = 0
+        for section, stocks in top_stocks_by_section.items():
+            if stocks:
+                total_stocks += len(stocks)
+                # 生成板块报告
+                section_report = generate_section_report(section, stocks)
+                # 推送板块报告
+                logger.info(f"推送 {section} 板块策略报告")
+                send_wechat_message(section_report, message_type="stock_tickten")
+                # 适当延时，避免消息推送过于频繁
+                time.sleep(2)
         
-        # 3. 推送全市场策略总结消息
-        logger.info("推送全市场策略总结消息")
+        # 3. 生成并推送整体总结
+        beijing_time = get_beijing_time()
+        summary_lines = []
+        summary_lines.append(f"📊 个股趋势策略执行总结 ({beijing_time.strftime('%Y-%m-%d %H:%M')})")
+        summary_lines.append("──────────────────")
+        summary_lines.append(f"✅ 共筛选出 {total_stocks} 只优质股票（按板块分布）:")
+        
+        for section, stocks in top_stocks_by_section.items():
+            if stocks:
+                summary_lines.append(f"  • {section}: {len(stocks)} 只")
+        
+        summary_lines.append("──────────────────")
+        summary_lines.append("💡 操作指南:")
+        summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
+        summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
+        summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
+        summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
+        summary_lines.append("──────────────────")
+        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
+        
+        summary_message = "\n".join(summary_lines)
+        logger.info("推送整体策略执行总结")
         send_wechat_message(summary_message, message_type="stock_tickten")
         
         logger.info("个股策略报告已成功发送至企业微信")

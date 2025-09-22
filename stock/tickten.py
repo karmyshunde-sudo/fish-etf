@@ -906,10 +906,6 @@ def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> s
     summary_lines.append("💡 操作指南:")
     summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
     summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
-    summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
-    summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
-    summary_lines.append("──────────────────")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
     
     summary_message = "\n".join(summary_lines)
     return summary_message

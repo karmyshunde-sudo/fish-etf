@@ -206,19 +206,48 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             )
         
         elif index_code.endswith('.HI'):
-            # 恒生系列指数
+            # 恒生系列指数 - 修复：使用正确的恒生指数接口
             index_name = index_code.replace('.HI', '')
+            
+            # ========== 以下是关键修复 ==========
             try:
-                # 修复：使用正确的恒生指数接口 index_hk_sina
-                return ak.index_hk_sina(
-                    symbol=index_name,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date
-                )
+                # 尝试使用 index_hk_hist 方法（akshare最新API）
+                df = ak.index_hk_hist(symbol=index_name, period="daily", 
+                                     start_date=start_date, end_date=end_date)
+                if not df.empty:
+                    logger.info(f"📊 index_hk_hist 接口返回的原始列名: {list(df.columns)}")
+                    logger.info(f"✅ 通过 index_hk_hist 方法成功获取恒生指数 {index_code} 数据")
+                    return df
             except Exception as e:
-                logger.warning(f"获取恒生指数 {index_code} 失败: {str(e)}")
-                return pd.DataFrame()
+                logger.warning(f"index_hk_hist 方法失败: {str(e)}")
+            
+            try:
+                # 尝试使用 stock_hk_index_hist 方法（akshare备选API）
+                df = ak.stock_hk_index_hist(symbol=index_name, period="daily", 
+                                          start_date=start_date, end_date=end_date)
+                if not df.empty:
+                    logger.info(f"📊 stock_hk_index_hist 接口返回的原始列名: {list(df.columns)}")
+                    logger.info(f"✅ 通过 stock_hk_index_hist 方法成功获取恒生指数 {index_code} 数据")
+                    return df
+            except Exception as e:
+                logger.warning(f"stock_hk_index_hist 方法失败: {str(e)}")
+            
+            # 尝试使用 fund_etf_spot_em 获取（作为最后手段）
+            try:
+                df = ak.fund_etf_spot_em()
+                if not df.empty:
+                    # 过滤指定ETF
+                    df = df[df["代码"] == index_name]
+                    if not df.empty:
+                        logger.info(f"📊 fund_etf_spot_em 接口返回的原始列名: {list(df.columns)}")
+                        logger.info(f"✅ 通过 fund_etf_spot_em 方法成功获取恒生指数 {index_code} 数据")
+                        return df
+            except Exception as e:
+                logger.warning(f"fund_etf_spot_em 方法失败: {str(e)}")
+            # ========== 以上是关键修复 ==========
+            
+            logger.warning(f"无法获取恒生指数 {index_code} 数据")
+            return pd.DataFrame()
         
         else:
             # A股指数

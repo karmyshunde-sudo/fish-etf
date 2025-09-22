@@ -10,7 +10,7 @@ import logging
 import pandas as pd
 import time
 import akshare as ak
-import subprocess  # 添加这个导入，用于执行Git命令
+import subprocess
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import Config
@@ -36,10 +36,10 @@ DAILY_DATA_DIR = os.path.join(Config.DATA_DIR, "daily")
 STOCKS_PER_RUN = 100
 # 每批提交的股票数量
 BATCH_COMMIT_SIZE = 10
-# 请求延迟参数
-REQUEST_DELAY_BASE = 1.5
-REQUEST_DELAY_RANDOM_FACTOR = 0.5
-MAX_RETRIES = 3
+# 请求延迟参数 - 增加基础延迟，避免被AkShare限制
+REQUEST_DELAY_BASE = 2.5  # 从1.5增加到2.5秒
+REQUEST_DELAY_RANDOM_FACTOR = 0.8  # 增加随机因子
+MAX_RETRIES = 5  # 增加重试次数
 EXPONENTIAL_BACKOFF_BASE = 2.0
 
 def ensure_daily_data_dir():
@@ -50,6 +50,7 @@ def ensure_daily_data_dir():
 def apply_request_delay():
     """应用请求延迟，避免被AkShare限流"""
     delay = REQUEST_DELAY_BASE + random.uniform(0, REQUEST_DELAY_RANDOM_FACTOR)
+    logger.debug(f"应用请求延迟: {delay:.2f}秒")
     time.sleep(delay)
 
 def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES) -> Optional[pd.DataFrame]:
@@ -120,9 +121,9 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             
             # 先尝试使用stock_zh_a_hist接口
             for code in possible_codes:
-                for inner_attempt in range(2):  # 减少重试次数
+                for inner_attempt in range(3):  # 增加重试次数
                     try:
-                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/2: 使用stock_zh_a_hist接口获取股票 {code}")
+                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/3: 使用stock_zh_a_hist接口获取股票 {code}")
                         df = ak.stock_zh_a_hist(symbol=code, period="daily", 
                                               start_date=start_date, end_date=end_date, 
                                               adjust="qfq")
@@ -134,8 +135,10 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                     except Exception as e:
                         logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
                     
-                    # 优化等待时间
-                    time.sleep(0.3 * (2 ** inner_attempt))
+                    # 优化等待时间 - 增加延迟
+                    wait_time = 1.0 * (2 ** inner_attempt)
+                    logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 等待 {wait_time:.1f} 秒后重试")
+                    time.sleep(wait_time)
                 
                 if df is not None and not df.empty:
                     break
@@ -143,9 +146,9 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
             # 如果stock_zh_a_hist接口失败，尝试其他接口
             if df is None or df.empty:
                 for code in possible_codes:
-                    for inner_attempt in range(2):
+                    for inner_attempt in range(3):
                         try:
-                            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/2: 使用stock_zh_a_daily接口获取股票 {code}")
+                            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试{inner_attempt+1}/3: 使用stock_zh_a_daily接口获取股票 {code}")
                             df = ak.stock_zh_a_daily(symbol=code, 
                                                    start_date=start_date, 
                                                    end_date=end_date, 
@@ -158,7 +161,10 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
                         except Exception as e:
                             logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
                         
-                        time.sleep(0.5 * (2 ** inner_attempt))
+                        # 增加等待时间
+                        wait_time = 1.5 * (2 ** inner_attempt)
+                        logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 等待 {wait_time:.1f} 秒后重试")
+                        time.sleep(wait_time)
                     
                     if df is not None and not df.empty:
                         break
@@ -219,8 +225,8 @@ def fetch_stock_data_with_retry(stock_code: str, max_retries: int = MAX_RETRIES)
         except Exception as e:
             # 檢测是否是限流错误
             if "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e):
-                # 指数退避重试
-                wait_time = REQUEST_DELAY_BASE * (EXPONENTIAL_BACKOFF_BASE ** attempt)
+                # 指数退避重试 - 增加基础等待时间
+                wait_time = (REQUEST_DELAY_BASE * 2) * (EXPONENTIAL_BACKOFF_BASE ** attempt)
                 logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 请求被限流，等待 {wait_time:.1f} 秒后重试 ({attempt+1}/{max_retries})")
                 time.sleep(wait_time)
             else:

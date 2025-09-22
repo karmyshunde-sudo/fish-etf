@@ -169,6 +169,18 @@ def update_all_etf_list() -> pd.DataFrame:
                     logger.info(f"✅ AkShare更新成功（{len(primary_etf_list)}只ETF）")
                     # 标记数据来源
                     primary_etf_list.source = "AkShare"
+                    
+                    # ===== 关键修复：添加ETF列表Git提交逻辑 =====
+                    try:
+                        from utils.git_utils import commit_and_push_etf_list
+                        commit_and_push_etf_list(len(primary_etf_list), "AkShare")
+                        logger.info("✅ ETF列表已成功提交到Git仓库")
+                    except ImportError:
+                        logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
+                    except Exception as e:
+                        logger.error(f"❌ ETF列表提交到Git仓库失败: {str(e)}", exc_info=True)
+                        # 重要：提交失败应被视为严重错误
+                        raise RuntimeError("ETF列表Git提交失败") from e
                 else:
                     logger.error("ETF列表验证失败，跳过保存")
             else:
@@ -206,6 +218,18 @@ def update_all_etf_list() -> pd.DataFrame:
                         logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
                         # 标记数据来源
                         primary_etf_list.source = "新浪"
+                        
+                        # ===== 关键修复：添加ETF列表Git提交逻辑 =====
+                        try:
+                            from utils.git_utils import commit_and_push_etf_list
+                            commit_and_push_etf_list(len(primary_etf_list), "新浪")
+                            logger.info("✅ ETF列表已成功提交到Git仓库")
+                        except ImportError:
+                            logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
+                        except Exception as e:
+                            logger.error(f"❌ ETF列表提交到Git仓库失败: {str(e)}", exc_info=True)
+                            # 重要：提交失败应被视为严重错误
+                            raise RuntimeError("ETF列表Git提交失败") from e
                     else:
                         logger.error("ETF列表验证失败，跳过保存")
                 else:

@@ -181,7 +181,8 @@ def update_all_etf_list() -> pd.DataFrame:
                     # ===== 关键修复：添加ETF列表Git提交逻辑 =====
                     try:
                         from utils.git_utils import commit_and_push_etf_list
-                        commit_and_push_etf_list(len(primary_etf_list), "AkShare")
+                        # commit_and_push_etf_list(len(primary_etf_list), "AkShare")
+                        commit_and_push_etf_list(len(primary_etf_list), "AkShare", Config.ALL_ETFS_PATH)
                         logger.info("✅ ETF列表已成功提交到Git仓库")
                     except ImportError:
                         logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")

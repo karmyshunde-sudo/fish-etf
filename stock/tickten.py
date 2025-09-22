@@ -16,6 +16,12 @@ from typing import Dict, List, Tuple, Optional, Any
 # ========== 以下是关键修改 ==========
 from concurrent.futures import ThreadPoolExecutor
 # ========== 以上是关键修改 ==========
+
+# ===== 新增导入 =====
+import sys
+import traceback
+# ===== 新增导入结束 =====
+
 from config import Config
 from utils.date_utils import (
     get_current_times,
@@ -23,6 +29,7 @@ from utils.date_utils import (
     get_utc_time
 )
 from wechat_push.push import send_wechat_message
+from utils.git_utils import commit_and_push_file  # 确保导入这个函数
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -45,6 +52,7 @@ MARKET_SECTIONS = {
     "沪市主板": {
         "prefix": ["60"],
         "min_daily_volume": 5 * 10000,  # 日均成交额阈值(元)
+        "min_volatility": 0.05,  # 最小波动率
         "max_volatility": 0.40,  # 最大波动率
         "min_market_cap": 5,  # 最小市值(亿元)
         "max_market_cap": 2000  # 最大市值(亿元)
@@ -52,20 +60,23 @@ MARKET_SECTIONS = {
     "深市主板": {
         "prefix": ["00"],
         "min_daily_volume": 5 * 10000,
+        "min_volatility": 0.05,
         "max_volatility": 0.40,
         "min_market_cap": 5,
         "max_market_cap": 2000
     },
     "创业板": {
         "prefix": ["30"],
-        "min_daily_volume": 5 * 10,
+        "min_daily_volume": 5 * 10000,  # 修复：统一单位为元
+        "min_volatility": 0.05,
         "max_volatility": 0.40,
         "min_market_cap": 5,
         "max_market_cap": 2000
     },
     "科创板": {
         "prefix": ["688"],
-        "min_daily_volume": 5 * 1,
+        "min_daily_volume": 5 * 10000,  # 修复：统一单位为元
+        "min_volatility": 0.05,
         "max_volatility": 0.40,
         "min_market_cap": 5,
         "max_market_cap": 2000
@@ -100,7 +111,12 @@ def check_data_integrity(df: pd.DataFrame) -> Tuple[str, int]:
     
     # 检查数据连续性
     df = df.copy()
-    df["日期"] = pd.to_datetime(df["日期"])
+    # 确保日期列是datetime类型
+    try:
+        df["日期"] = pd.to_datetime(df["日期"])
+    except:
+        return "corrupted", data_days
+    
     df = df.sort_values("日期")
     
     # 检查日期间隔
@@ -112,7 +128,7 @@ def check_data_integrity(df: pd.DataFrame) -> Tuple[str, int]:
     missing_rate = 1 - (data_days / expected_days) if expected_days > 0 else 1
     
     # 数据完整性分级
-    if data_days < 30:
+    if data_days < MIN_DATA_DAYS:
         return "insufficient", data_days
     elif missing_rate > 0.2:  # 缺失率超过20%
         return "partial", data_days
@@ -127,6 +143,31 @@ def load_stock_basic_info() -> pd.DataFrame:
     try:
         if os.path.exists(BASIC_INFO_FILE):
             df = pd.read_csv(BASIC_INFO_FILE)
+            
+            # 确保所有必要列存在
+            if "code" not in df.columns:
+                logger.error(f"股票基础信息文件缺少 'code' 列")
+                return pd.DataFrame()
+            
+            # 确保股票代码是字符串格式，并且是6位（前面补零）
+            df["code"] = df["code"].astype(str).str.zfill(6)
+            
+            # 如果没有 section 列，添加并计算
+            if "section" not in df.columns:
+                df["section"] = df["code"].apply(get_stock_section)
+            
+            # 如果没有 market_cap 列，添加并初始化
+            if "market_cap" not in df.columns:
+                df["market_cap"] = 0.0
+                
+            # 如果没有 score 列，添加并初始化
+            if "score" not in df.columns:
+                df["score"] = 0.0
+                
+            # 如果没有 last_update 列，添加并初始化
+            if "last_update" not in df.columns:
+                df["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             logger.info(f"成功加载股票基础信息，共 {len(df)} 条记录")
             return df
         else:
@@ -134,6 +175,7 @@ def load_stock_basic_info() -> pd.DataFrame:
             return pd.DataFrame()
     except Exception as e:
         logger.error(f"加载股票基础信息失败: {str(e)}")
+        logger.error(traceback.format_exc())
         return pd.DataFrame()
 
 def get_last_update_time(df: pd.DataFrame, stock_code: str) -> Optional[datetime]:
@@ -147,7 +189,8 @@ def get_last_update_time(df: pd.DataFrame, stock_code: str) -> Optional[datetime
         try:
             # 尝试解析时间字符串
             return datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
-        except:
+        except Exception as e:
+            logger.debug(f"解析更新时间失败: {str(e)}")
             return None
     return None
 # ========== 以上是关键修改 ==========
@@ -194,6 +237,14 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
         if os.path.exists(file_path):
             try:
                 df = pd.read_csv(file_path)
+                
+                # 确保必要列存在
+                required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+                for col in required_columns:
+                    if col not in df.columns:
+                        logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                        return pd.DataFrame()
+                
                 # 确保日期列是字符串类型
                 if "日期" in df.columns:
                     df["日期"] = df["日期"].astype(str)
@@ -201,14 +252,22 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
                                                       lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
                                                       regex=True)
+                    # 处理其他可能的格式
+                    df["日期"] = df["日期"].str.replace(r'(\d{4})-(\d{1,2}) (\d{1,2})', 
+                                                      lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
+                                                      regex=True)
                     # 移除可能存在的空格
                     df["日期"] = df["日期"].str.strip()
                     df = df.sort_values("日期", ascending=True)
                 
-                logger.info(f"成功加载股票 {stock_code} 的本地日线数据，共 {len(df)} 条记录")
+                # 移除NaN值
+                df = df.dropna(subset=['收盘', '成交量'])
+                
+                logger.info(f"成功加载股票 {stock_code} 的本地日线数据，共 {len(df)} 条有效记录")
                 return df
             except Exception as e:
                 logger.warning(f"读取股票 {stock_code} 数据失败: {str(e)}")
+                logger.debug(traceback.format_exc())
         
         logger.warning(f"股票 {stock_code} 的日线数据不存在")
         return pd.DataFrame()
@@ -244,53 +303,74 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
         Optional[float]: 市值(亿元)，None表示市值数据不可靠
     """
     try:
-        # 尝试从本地数据获取市值（如果已经计算过）
-        if df is not None and not df.empty and "market_cap" in df.columns:
-            market_cap = df["market_cap"].iloc[-1]
-            if not pd.isna(market_cap) and market_cap > 0:
-                return market_cap
-        
         # 检查是否需要缓存市值数据
         cache_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "market_cap_cache.csv")
         cache_days = 3  # 市值数据缓存3天
         
+        # 如果存在缓存文件，尝试读取
         if os.path.exists(cache_file):
-            cache_df = pd.read_csv(cache_file)
-            record = cache_df[cache_df["code"] == stock_code]
-            if not record.empty:
-                last_update = record["last_update"].values[0]
-                try:
-                    last_update_time = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
-                    if (datetime.now() - last_update_time).days <= cache_days:
-                        market_cap = record["market_cap"].values[0]
-                        if not pd.isna(market_cap) and market_cap > 0:
-                            logger.debug(f"使用缓存的市值数据: {market_cap:.2f}亿元 (最后更新: {last_update})")
-                            return market_cap
-                except Exception as e:
-                    logger.warning(f"解析市值缓存更新时间失败: {str(e)}")
+            try:
+                cache_df = pd.read_csv(cache_file)
+                record = cache_df[cache_df["code"] == stock_code]
+                if not record.empty:
+                    last_update = record["last_update"].values[0]
+                    try:
+                        last_update_time = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+                        if (datetime.now() - last_update_time).days <= cache_days:
+                            market_cap = record["market_cap"].values[0]
+                            if not pd.isna(market_cap) and market_cap > 0:
+                                logger.debug(f"使用缓存的市值数据: {market_cap:.2f}亿元 (最后更新: {last_update})")
+                                return market_cap
+                    except Exception as e:
+                        logger.warning(f"解析市值缓存更新时间失败: {str(e)}")
+            except Exception as e:
+                logger.warning(f"读取市值缓存文件失败: {str(e)}")
         
-        # 由于我们不再实时获取数据，这里只尝试使用基础信息中的市值
+        # 从基础信息文件中获取市值
         basic_info_df = load_stock_basic_info()
         if not basic_info_df.empty:
             stock_info = basic_info_df[basic_info_df["code"] == stock_code]
             if not stock_info.empty:
                 market_cap = stock_info["market_cap"].values[0]
                 if not pd.isna(market_cap) and market_cap > 0:
+                    # 更新缓存
+                    if not os.path.exists(os.path.dirname(cache_file)):
+                        os.makedirs(os.path.dirname(cache_file))
+                    
+                    if os.path.exists(cache_file):
+                        cache_df = pd.read_csv(cache_file)
+                        cache_df = cache_df[cache_df["code"] != stock_code]
+                        new_record = pd.DataFrame([{
+                            "code": stock_code,
+                            "market_cap": market_cap,
+                            "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }])
+                        cache_df = pd.concat([cache_df, new_record], ignore_index=True)
+                    else:
+                        cache_df = pd.DataFrame([{
+                            "code": stock_code,
+                            "market_cap": market_cap,
+                            "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }])
+                    
+                    cache_df.to_csv(cache_file, index=False)
+                    logger.debug(f"市值缓存已更新: {stock_code} - {market_cap:.2f}亿元")
+                    
                     return market_cap
         
-        # 如果无法获取准确市值，返回None表示数据不可靠
-        logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
-        return None
+        # 如果无法获取市值，返回默认值（但不返回None，避免后续问题）
+        logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，使用默认市值 50亿元")
+        return 50.0
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
-        return None
+        return 50.0  # 返回默认市值
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_days: int) -> bool:
     """判断个股是否适合策略（流动性、波动率、市值三重过滤）"""
     try:
         # 1. 数据完整性检查
-        if data_level == "数据量不足":
+        if data_level == "insufficient" or data_level == "corrupted":
             logger.debug(f"股票 {stock_code} 被过滤 - 数据量不足({data_days}天)")
             return False
             
@@ -308,6 +388,9 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_d
         if market_cap < section_config["min_market_cap"]:
             logger.debug(f"股票 {stock_code}({section}) 被过滤 - 市值不足({market_cap:.2f}亿元 < {section_config['min_market_cap']}亿元)")
             return False
+        if market_cap > section_config["max_market_cap"]:
+            logger.debug(f"股票 {stock_code}({section}) 被过滤 - 市值过大({market_cap:.2f}亿元 > {section_config['max_market_cap']}亿元)")
+            return False
             
         # 3. 波动率过滤 - 使用板块特定的阈值
         volatility = calculate_annual_volatility(df)
@@ -317,7 +400,7 @@ def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_d
             
         # 4. 流动性过滤 - 使用板块特定的阈值
         avg_volume = calculate_avg_volume(df)
-        if avg_volume < section_config["min_daily_volume"]:
+        if avg_volume < section_config["min_daily_volume"] / 10000:  # 转换为万元
             logger.debug(f"股票 {stock_code}({section}) 被过滤 - 流动性不足(日均成交额{avg_volume:.2f}万元 < {section_config['min_daily_volume']/10000:.2f}万元)")
             return False
             
@@ -387,7 +470,8 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             ma40 = df["ma40"].iloc[-1] if "ma40" in df.columns else current
             
             # 检查短期均线是否在长期均线上方（多头排列）
-            if ma5 > ma10 > ma20 > ma40 and all(not pd.isna(x) for x in [ma5, ma10, ma20, ma40]):
+            if (not pd.isna(ma5) and not pd.isna(ma10) and not pd.isna(ma20) and not pd.isna(ma40) and
+                ma5 > ma10 > ma20 > ma40):
                 trend_score += 20  # 多头排列，加20分
             
             # 检查价格是否在均线上方
@@ -415,7 +499,8 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             macd_hist_prev = df["hist"].iloc[-2]
             
             # MACD柱状体增加
-            if not pd.isna(macd_hist) and not pd.isna(macd_hist_prev) and macd_hist > macd_hist_prev and macd_hist > 0:
+            if (not pd.isna(macd_hist) and not pd.isna(macd_hist_prev) and 
+                macd_hist > macd_hist_prev and macd_hist > 0):
                 momentum_score += 10  # MACD柱状体增加且为正，加10分
             
             # RSI指标
@@ -629,7 +714,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             logger.debug(f"股票 {stock_code} 数据完整性: {data_level} ({data_days}天)")
             
             # 4. 根据数据完整性应用不同策略
-            if data_level != "数据量充足":
+            if data_level == "insufficient" or data_level == "corrupted":
                 section_counts[section]["data_filtered"] += 1
                 logger.debug(f"股票 {stock_code} 被过滤 - 数据量不足({data_days}天)")
                 cache_filter_result(stock_code, False)
@@ -637,22 +722,21 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             
             # 检查市值数据是否可靠
             market_cap = calculate_market_cap(df, stock_code)
-            if market_cap is None or market_cap <= 0:
-                logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，市值数据不可靠")
-                section_counts[section]["market_cap_filtered"] += 1
-                cache_filter_result(stock_code, False)
-                return None
+            if market_cap <= 0:
+                logger.warning(f"⚠️ 股票 {stock_code} 市值数据不可靠，使用默认值")
+                market_cap = 50.0  # 使用默认市值
             
             # 检查是否适合策略
             if not is_stock_suitable(stock_code, df, data_level, data_days):
                 # 记录具体过滤原因
-                if not is_market_cap_suitable(stock_code, df, data_level, data_days):
+                if market_cap < MARKET_SECTIONS[section]["min_market_cap"]:
                     section_counts[section]["market_cap_filtered"] += 1
                     logger.debug(f"股票 {stock_code} 被过滤 - 市值不足")
-                elif not is_volatility_suitable(stock_code, df, data_level, data_days):
+                elif calculate_annual_volatility(df) < MARKET_SECTIONS[section]["min_volatility"] or \
+                     calculate_annual_volatility(df) > MARKET_SECTIONS[section]["max_volatility"]:
                     section_counts[section]["volatility_filtered"] += 1
                     logger.debug(f"股票 {stock_code} 被过滤 - 波动率异常")
-                elif not is_liquidity_suitable(stock_code, df, data_level, data_days):
+                elif calculate_avg_volume(df) < MARKET_SECTIONS[section]["min_daily_volume"] / 10000:
                     section_counts[section]["liquidity_filtered"] += 1
                     logger.debug(f"股票 {stock_code} 被过滤 - 流动性不足")
                 else:
@@ -740,16 +824,15 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                 market_cap = calculate_market_cap(stock["df"], stock_code)
                 score = stock["score"]
                 
-                # 只更新市值数据，不覆盖基础信息
-                if market_cap is not None:
-                    updated_records.append({
-                        "code": stock_code,
-                        "name": stock_name,
-                        "section": section,
-                        "market_cap": market_cap,
-                        "score": score,
-                        "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
+                # 更新基础信息
+                updated_records.append({
+                    "code": stock_code,
+                    "name": stock_name,
+                    "section": section,
+                    "market_cap": market_cap,
+                    "score": score,
+                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
         
         # 11. 保存更新后的基础信息
         if updated_records:
@@ -779,63 +862,14 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
                     logger.warning("提交更新后的股票基础信息到GitHub仓库失败，但继续执行策略")
             except Exception as e:
                 logger.warning(f"提交更新后的股票基础信息到GitHub仓库失败: {str(e)}")
+                logger.warning(traceback.format_exc())
         
         return top_stocks_by_section
     
     except Exception as e:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)
+        logger.error(traceback.format_exc())
         return {}
-
-def generate_stock_signal_message(stock: Dict, df: pd.DataFrame, 
-                                close_price: float, critical_value: float, 
-                                deviation: float) -> str:
-    """生成股票信号详细消息
-    
-    Args:
-        stock: 股票信息
-        df: 股票数据
-        close_price: 当前收盘价
-        critical_value: 临界值
-        deviation: 偏离度
-    
-    Returns:
-        str: 信号详细消息
-    """
-    stock_code = stock["code"]
-    stock_name = stock["name"]
-    
-    # 获取最新数据
-    latest_data = df.iloc[-1]
-    
-    # 检查是否包含必要列
-    required_columns = ['开盘', '最高', '最低', '收盘', '成交量']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        return f"{stock_name}({stock_code}) 数据不完整，无法生成信号"
-    
-    # 计算指标
-    ma5 = latest_data["收盘"] if len(df) < 5 else df["收盘"].rolling(5).mean().iloc[-1]
-    ma10 = latest_data["收盘"] if len(df) < 10 else df["收盘"].rolling(10).mean().iloc[-1]
-    ma20 = latest_data["收盘"] if len(df) < 20 else df["收盘"].rolling(20).mean().iloc[-1]
-    volume = latest_data["成交量"]
-    volume_ma5 = volume if len(df) < 5 else df["成交量"].rolling(5).mean().iloc[-1]
-    
-    # 量能分析
-    volume_ratio = volume / volume_ma5 if volume_ma5 > 0 else 1.0
-    volume_analysis = "量能放大" if volume_ratio > 1.2 else "量能平稳" if volume_ratio > 0.8 else "量能萎缩"
-    
-    # 趋势分析
-    trend_analysis = "多头排列" if ma5 > ma10 > ma20 else "空头排列" if ma5 < ma10 < ma20 else "震荡走势"
-    
-    # 生成消息
-    message = []
-    message.append(f"{stock_name}({stock_code})")
-    message.append(f"📊 价格: {close_price:.4f} | 临界值: {critical_value:.4f} | 偏离度: {deviation:.2%}")
-    message.append(f"📈 趋势: {trend_analysis} | {volume_analysis}")
-    message.append(f"⏰ 量能: {volume:,.0f}手 | 5日均量: {volume_ma5:,.0f}手 | 比例: {volume_ratio:.2f}")
-    
-    return "\n".join(message)
 
 def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> str:
     """生成策略总结消息
@@ -870,13 +904,12 @@ def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> s
     
     # 添加操作指南
     summary_lines.append("💡 操作指南:")
-    summary_lines.append("1. YES信号: 可持仓或建仓，严格止损")
-    summary_lines.append("2. NO信号: 减仓或观望，避免盲目抄底")
-    summary_lines.append("3. 震荡市: 高抛低吸，控制总仓位≤40%")
-    summary_lines.append("4. 单一个股仓位≤15%，分散投资5-8只")
-    summary_lines.append("5. 科创板/创业板: 仓位和止损幅度适当放宽")
+    summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
+    summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
+    summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
+    summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
     summary_lines.append("──────────────────")
-    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf   )")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
     
     summary_message = "\n".join(summary_lines)
     return summary_message
@@ -902,6 +935,7 @@ def main():
     except Exception as e:
         error_msg = f"个股趋势策略执行失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        logger.error(traceback.format_exc())
         send_wechat_message(error_msg, message_type="error")
 
 if __name__ == "__main__":

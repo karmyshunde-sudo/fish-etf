@@ -140,3 +140,52 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
         else:
             logger.error(f"提交文件失败: {str(e)}", exc_info=True)
         return False
+
+def commit_and_push_etf_list(etf_count: int, source: str) -> None:
+    """
+    专门用于提交ETF列表更新的Git提交函数
+    
+    Args:
+        etf_count: ETF数量
+        source: 数据来源（如"AkShare"、"新浪"等）
+    
+    Raises:
+        Exception: 如果Git操作失败
+    """
+    try:
+        # 获取项目根目录
+        repo_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        logger.info(f"🔍 检测到项目根目录: {repo_path}")
+        
+        # 初始化git仓库
+        repo = git.Repo(repo_path)
+        
+        # 检查是否在主分支
+        if repo.active_branch.name not in ['main', 'master']:
+            logger.warning(f"⚠️ 当前在分支 '{repo.active_branch.name}' 上，建议在main/master分支操作")
+        
+        # 添加ETF列表文件
+        etf_list_path = os.path.join(repo_path, Config.ALL_ETFS_PATH)
+        repo.git.add(etf_list_path)
+        logger.info(f"✅ 添加ETF列表文件到暂存区: {etf_list_path}")
+        
+        # 检查是否有更改需要提交
+        if repo.is_dirty():
+            # 创建提交消息
+            commit_message = f"更新ETF列表: {etf_count}只ETF (来源: {source})"
+            
+            # 提交更改
+            repo.index.commit(commit_message)
+            logger.info(f"✅ 已提交: {commit_message}")
+            
+            # 推送到远程仓库
+            origin = repo.remote(name='origin')
+            logger.info(f"📤 推送到远程仓库: {origin.url}")
+            origin.push()
+            logger.info("✅ 成功推送到远程仓库")
+        else:
+            logger.info("ℹ️ 没有需要提交的ETF列表更改")
+            
+    except Exception as e:
+        logger.error(f"❌ ETF列表Git操作失败: {str(e)}", exc_info=True)
+        raise

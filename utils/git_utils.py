@@ -14,6 +14,15 @@ from datetime import datetime
 # 初始化日志
 logger = logging.getLogger(__name__)
 
+try:
+    import git
+    GIT_AVAILABLE = True
+    logger.info("✅ GitPython模块已成功导入")
+except ImportError:
+    GIT_AVAILABLE = False
+    logger.warning("⚠️ GitPython模块未安装，Git功能将不可用")
+    logger.warning("⚠️ 请安装GitPython: pip install GitPython")
+
 def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
     """
     提交并推送单个文件到Git仓库（先拉取再推送，避免冲突）

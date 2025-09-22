@@ -474,7 +474,7 @@ jobs:
           # 执行策略
           if [ -f "stock/tickten.py" ]; then
             echo "找到策略文件: stock/tickten.py"
-            python stock/tickten.py 2>&1 | tee "$LOG_FILE"
+            python -m stock.tickten 2>&1 | tee "$LOG_FILE"
           else
             echo "错误: 未找到个股趋势策略文件 stock/tickten.py"
             exit 1
@@ -784,10 +784,10 @@ jobs:
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
           echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
-          # 执行策略（stock_tickten.py在stock目录）
+          # 执行策略（tickten.py在stock目录）
           if [ -f "stock/tickten.py" ]; then
             echo "找到策略文件: stock/tickten.py"
-            python stock/tickten.py 2>&1 | tee "$LOG_FILE"
+            python -m stock.tickten 2>&1 | tee "$LOG_FILE"
           else
             echo "错误: 未找到个股趋势策略文件 stock/tickten.py"
             exit 1

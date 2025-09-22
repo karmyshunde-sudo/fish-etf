@@ -206,10 +206,20 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             )
         
         elif index_code.endswith('.HI'):
-            # 恒生系列指数 - 修复：使用正确的恒生指数接口
+            # 恒生系列指数 - 修复：使用yfinance作为主要备选方案
             index_name = index_code.replace('.HI', '')
             
             # ========== 以下是关键修复 ==========
+            # 首先尝试yfinance（更可靠）
+            yfinance_symbol = f"^{index_name}"  # yfinance格式：^HSNDXIT
+            logger.info(f"尝试通过yfinance获取恒生指数 {yfinance_symbol}")
+            df = fetch_us_index_from_yfinance(yfinance_symbol, start_date, end_date)
+            
+            if not df.empty:
+                logger.info(f"✅ 通过yfinance成功获取恒生指数 {index_code} 数据")
+                return df
+            
+            # 如果yfinance失败，再尝试akshare方法
             try:
                 # 尝试使用 index_hk_hist 方法（akshare最新API）
                 df = ak.index_hk_hist(symbol=index_name, period="daily", 

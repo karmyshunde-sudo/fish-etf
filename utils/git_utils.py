@@ -150,13 +150,14 @@ def commit_and_push_file(file_path: str, commit_message: str = None) -> bool:
             logger.error(f"提交文件失败: {str(e)}", exc_info=True)
         return False
 
-def commit_and_push_etf_list(etf_count: int, source: str) -> None:
+def commit_and_push_etf_list(etf_count: int, source: str, etf_list_path: str) -> None:
     """
     专门用于提交ETF列表更新的Git提交函数
     
     Args:
         etf_count: ETF数量
         source: 数据来源（如"AkShare"、"新浪"等）
+        etf_list_path: ETF列表文件的相对路径（相对于仓库根目录）
     
     Raises:
         Exception: 如果Git操作失败
@@ -166,16 +167,16 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
         repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
         logger.info(f"🔍 检测到仓库根目录: {repo_root}")
         
-        # 获取ETF列表文件的绝对路径
-        etf_list_path = os.path.join(repo_root, Config.ALL_ETFS_PATH)
+        # 使用传入的相对路径构建绝对路径
+        etf_list_abs_path = os.path.join(repo_root, etf_list_path)
         
         # 检查文件是否存在
-        if not os.path.exists(etf_list_path):
-            logger.error(f"ETF列表文件不存在，无法提交: {etf_list_path}")
-            raise FileNotFoundError(f"ETF列表文件不存在: {etf_list_path}")
+        if not os.path.exists(etf_list_abs_path):
+            logger.error(f"ETF列表文件不存在，无法提交: {etf_list_abs_path}")
+            raise FileNotFoundError(f"ETF列表文件不存在: {etf_list_abs_path}")
         
         # 获取文件相对于仓库根目录的路径
-        relative_path = os.path.relpath(etf_list_path, repo_root)
+        relative_path = etf_list_path  # 已经是相对路径
         logger.info(f"ETF列表相对路径: {relative_path}")
         
         # 创建提交消息
@@ -221,7 +222,7 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
             # 拉取远程仓库的最新更改（添加 --no-rebase 参数避免冲突）
             logger.debug("尝试拉取远程仓库最新更改")
             try:
-                subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase', '--rebase'], 
+                subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], 
                               check=True, cwd=repo_root)
             except subprocess.CalledProcessError:
                 logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
@@ -241,7 +242,3 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
         error_msg = f"ETF列表提交过程中发生错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
         raise RuntimeError(error_msg) from e
-            
-    except Exception as e:
-        logger.error(f"❌ ETF列表Git操作失败: {str(e)}", exc_info=True)
-        raise

@@ -161,45 +161,86 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
     Raises:
         Exception: 如果Git操作失败
     """
-    # 检查GitPython是否可用
-    if not GIT_AVAILABLE:
-        error_msg = "GitPython模块未安装，无法执行Git操作"
-        logger.error(error_msg)
-        raise ImportError(error_msg) from None
-    
     try:
-        # 获取项目根目录
-        repo_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        logger.info(f"🔍 检测到项目根目录: {repo_path}")
+        # 获取仓库根目录 - 使用与commit_and_push_file相同的方式
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        logger.info(f"🔍 检测到仓库根目录: {repo_root}")
         
-        # 初始化git仓库
-        repo = git.Repo(repo_path)
+        # 获取ETF列表文件的绝对路径
+        etf_list_path = os.path.join(repo_root, Config.ALL_ETFS_PATH)
         
-        # 检查是否在主分支
-        if repo.active_branch.name not in ['main', 'master']:
-            logger.warning(f"⚠️ 当前在分支 '{repo.active_branch.name}' 上，建议在main/master分支操作")
+        # 检查文件是否存在
+        if not os.path.exists(etf_list_path):
+            logger.error(f"ETF列表文件不存在，无法提交: {etf_list_path}")
+            raise FileNotFoundError(f"ETF列表文件不存在: {etf_list_path}")
         
-        # 只添加ETF列表文件
-        etf_list_path = os.path.join(repo_path, Config.ALL_ETFS_PATH)
-        repo.git.add(etf_list_path)
-        logger.info(f"✅ 添加ETF列表文件到暂存区: {etf_list_path}")
+        # 获取文件相对于仓库根目录的路径
+        relative_path = os.path.relpath(etf_list_path, repo_root)
+        logger.info(f"ETF列表相对路径: {relative_path}")
+        
+        # 创建提交消息
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_message = f"feat: 更新ETF列表 - {etf_count}只ETF (来源: {source}) [{current_time}]"
+        
+        # 在GitHub Actions环境中设置Git用户信息
+        if 'GITHUB_ACTIONS' in os.environ:
+            logger.debug("检测到GitHub Actions环境，设置Git用户信息")
+            # 使用GitHub Actor作为用户名
+            actor = os.environ.get('GITHUB_ACTOR', 'ETF-List-Updater')
+            # 使用GitHub提供的noreply邮箱
+            email = f"{actor}@users.noreply.github.com"
+            
+            # 设置Git用户信息
+            subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
+            subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+            logger.debug(f"已设置Git用户: {actor} <{email}>")
+        
+        # 添加文件到暂存区
+        add_cmd = ['git', 'add', relative_path]
+        subprocess.run(add_cmd, check=True, cwd=repo_root)
+        logger.debug(f"已添加ETF列表文件到暂存区: {relative_path}")
         
         # 检查是否有更改需要提交
-        if repo.is_dirty():
-            # 创建提交消息
-            commit_message = f"更新ETF列表: {etf_count}只ETF (来源: {source})"
-            
+        status = subprocess.run(['git', 'status', '--porcelain'], 
+                               capture_output=True, text=True, check=True, cwd=repo_root)
+        
+        if status.stdout.strip():
             # 提交更改
-            repo.index.commit(commit_message)
-            logger.info(f"✅ 已提交: {commit_message}")
+            commit_cmd = ['git', 'commit', '-m', commit_message]
+            subprocess.run(commit_cmd, check=True, cwd=repo_root)
+            logger.info(f"✅ 已提交ETF列表更改: {commit_message}")
             
             # 推送到远程仓库
-            origin = repo.remote(name='origin')
-            logger.info(f"📤 推送到远程仓库: {origin.url}")
-            origin.push()
-            logger.info("✅ 成功推送到远程仓库")
+            branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+            # 使用GITHUB_TOKEN进行身份验证
+            if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
+                remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+                subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], 
+                              check=True, cwd=repo_root)
+            
+            # 拉取远程仓库的最新更改（添加 --no-rebase 参数避免冲突）
+            logger.debug("尝试拉取远程仓库最新更改")
+            try:
+                subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase', '--rebase'], 
+                              check=True, cwd=repo_root)
+            except subprocess.CalledProcessError:
+                logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
+            
+            # 推送更改
+            push_cmd = ['git', 'push', 'origin', branch]
+            subprocess.run(push_cmd, check=True, cwd=repo_root)
+            logger.info(f"✅ ETF列表已推送到远程仓库: origin/{branch}")
         else:
             logger.info("ℹ️ 没有需要提交的ETF列表更改")
+            
+    except subprocess.CalledProcessError as e:
+        error_msg = f"ETF列表Git操作失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RuntimeError(error_msg) from e
+    except Exception as e:
+        error_msg = f"ETF列表提交过程中发生错误: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RuntimeError(error_msg) from e
             
     except Exception as e:
         logger.error(f"❌ ETF列表Git操作失败: {str(e)}", exc_info=True)

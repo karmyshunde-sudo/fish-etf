@@ -296,75 +296,46 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
     
     return volatility
 
-def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> Optional[float]:
-    """计算股票市值（优先使用缓存数据）
+# ========== 以下是关键修复 ==========
+def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
+    """计算股票市值（直接使用基础信息文件中的数据）
     
     Returns:
-        Optional[float]: 市值(亿元)，None表示市值数据不可靠
+        float: 市值(亿元)
     """
     try:
-        # 检查是否需要缓存市值数据
-        cache_file = os.path.join(os.path.dirname(BASIC_INFO_FILE), "market_cap_cache.csv")
-        cache_days = 3  # 市值数据缓存3天
-        
-        # 如果存在缓存文件，尝试读取
-        if os.path.exists(cache_file):
-            try:
-                cache_df = pd.read_csv(cache_file)
-                record = cache_df[cache_df["code"] == stock_code]
-                if not record.empty:
-                    last_update = record["last_update"].values[0]
-                    try:
-                        last_update_time = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
-                        if (datetime.now() - last_update_time).days <= cache_days:
-                            market_cap = record["market_cap"].values[0]
-                            if not pd.isna(market_cap) and market_cap > 0:
-                                logger.debug(f"使用缓存的市值数据: {market_cap:.2f}亿元 (最后更新: {last_update})")
-                                return market_cap
-                    except Exception as e:
-                        logger.warning(f"解析市值缓存更新时间失败: {str(e)}")
-            except Exception as e:
-                logger.warning(f"读取市值缓存文件失败: {str(e)}")
-        
-        # 从基础信息文件中获取市值
+        # 1. 优先使用基础信息文件中的市值数据
         basic_info_df = load_stock_basic_info()
         if not basic_info_df.empty:
             stock_info = basic_info_df[basic_info_df["code"] == stock_code]
             if not stock_info.empty:
                 market_cap = stock_info["market_cap"].values[0]
                 if not pd.isna(market_cap) and market_cap > 0:
-                    # 更新缓存
-                    if not os.path.exists(os.path.dirname(cache_file)):
-                        os.makedirs(os.path.dirname(cache_file))
-                    
-                    if os.path.exists(cache_file):
-                        cache_df = pd.read_csv(cache_file)
-                        cache_df = cache_df[cache_df["code"] != stock_code]
-                        new_record = pd.DataFrame([{
-                            "code": stock_code,
-                            "market_cap": market_cap,
-                            "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }])
-                        cache_df = pd.concat([cache_df, new_record], ignore_index=True)
-                    else:
-                        cache_df = pd.DataFrame([{
-                            "code": stock_code,
-                            "market_cap": market_cap,
-                            "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }])
-                    
-                    cache_df.to_csv(cache_file, index=False)
-                    logger.debug(f"市值缓存已更新: {stock_code} - {market_cap:.2f}亿元")
-                    
+                    logger.debug(f"使用基础信息文件中的市值数据: {market_cap:.2f}亿元")
                     return market_cap
         
-        # 如果无法获取市值，返回默认值（但不返回None，避免后续问题）
+        # 2. 如果基础信息中没有，尝试使用历史数据估算
+        if df is not None and not df.empty and len(df) >= 250:
+            if "成交量" in df.columns and "收盘" in df.columns:
+                avg_volume = df["成交量"].iloc[-250:].mean()
+                avg_price = df["收盘"].iloc[-250:].mean()
+                if avg_volume > 0 and avg_price > 0:
+                    # 估算日均成交额(万元)
+                    daily_turnover = avg_volume * avg_price / 10000
+                    # 假设换手率为2%，估算总市值
+                    if daily_turnover > 0:
+                        estimated_market_cap = daily_turnover / 0.02  # 换手率2%
+                        logger.debug(f"使用历史数据估算市值: {estimated_market_cap:.2f}亿元")
+                        return estimated_market_cap
+        
+        # 3. 如果无法获取市值，返回默认值
         logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，使用默认市值 50亿元")
         return 50.0
     
     except Exception as e:
         logger.error(f"估算{stock_code}市值失败: {str(e)}", exc_info=True)
         return 50.0  # 返回默认市值
+# ========== 以上是关键修复 ==========
 
 def is_stock_suitable(stock_code: str, df: pd.DataFrame, data_level: str, data_days: int) -> bool:
     """判断个股是否适合策略（流动性、波动率、市值三重过滤）"""
@@ -906,6 +877,10 @@ def generate_strategy_summary(top_stocks_by_section: Dict[str, List[Dict]]) -> s
     summary_lines.append("💡 操作指南:")
     summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
     summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
+    summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
+    summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
+    summary_lines.append("──────────────────")
+    summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
     
     summary_message = "\n".join(summary_lines)
     return summary_message

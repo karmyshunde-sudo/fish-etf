@@ -161,6 +161,12 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
     Raises:
         Exception: 如果Git操作失败
     """
+    # 检查GitPython是否可用
+    if not GIT_AVAILABLE:
+        error_msg = "GitPython模块未安装，无法执行Git操作"
+        logger.error(error_msg)
+        raise ImportError(error_msg) from None
+    
     try:
         # 获取项目根目录
         repo_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -173,7 +179,7 @@ def commit_and_push_etf_list(etf_count: int, source: str) -> None:
         if repo.active_branch.name not in ['main', 'master']:
             logger.warning(f"⚠️ 当前在分支 '{repo.active_branch.name}' 上，建议在main/master分支操作")
         
-        # 添加ETF列表文件
+        # 只添加ETF列表文件
         etf_list_path = os.path.join(repo_path, Config.ALL_ETFS_PATH)
         repo.git.add(etf_list_path)
         logger.info(f"✅ 添加ETF列表文件到暂存区: {etf_list_path}")

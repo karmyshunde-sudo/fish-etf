@@ -129,7 +129,15 @@ def update_all_etf_list() -> pd.DataFrame:
     beijing_time = get_beijing_time()
     # 判断是否为周日（星期日的索引是6，星期一的索引是0）
     is_sunday = beijing_time.weekday() == 6
-    
+
+    # 检查GitPython是否可用
+    try:
+        from utils.git_utils import GIT_AVAILABLE
+        if not GIT_AVAILABLE:
+            logger.warning("⚠️ GitPython模块不可用，ETF列表更新后将不会提交到Git仓库")
+    except ImportError:
+        logger.warning("⚠️ 无法导入git_utils模块，ETF列表更新后将不会提交到Git仓库")
+        
     # 检查是否需要更新 - 周日强制更新
     if is_sunday or not os.path.exists(Config.ALL_ETFS_PATH) or is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
         logger.info(f"{'[强制更新] ' if is_sunday else ''}ETF列表文件不存在或已过期，尝试从网络获取...")

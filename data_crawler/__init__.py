@@ -128,6 +128,9 @@ def crawl_etf_daily_incremental() -> None:
         batch_size = Config.CRAWL_BATCH_SIZE
         num_batches = (total + batch_size - 1) // batch_size
         
+        # 初始化一个列表来跟踪需要提交的文件
+        files_to_commit = []
+        
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, total)
@@ -237,18 +240,16 @@ def crawl_etf_daily_incremental() -> None:
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
                 
-                # 立即提交到Git仓库（每成功保存1个ETF就提交一次）
+                # ===== 关键修改：使用新的git_utils函数 =====
+                # 调用commit_files_in_batches，它会自动处理每10个文件提交一次
                 try:
-                    from utils.git_utils import commit_and_push_file
-                    commit_message = f"feat: 自动更新ETF {etf_code} 日线数据 - {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}"
-                    if commit_and_push_file(save_path, commit_message):
-                        logger.info(f"✅ 已提交ETF {etf_code} 数据到Git仓库")
-                    else:
-                        logger.error(f"❌ 提交ETF {etf_code} 数据到Git仓库失败")
+                    from utils.git_utils import commit_files_in_batches
+                    commit_files_in_batches(save_path)
+                    logger.info(f"✅ ETF {etf_code} 数据已标记用于批量提交")
                 except ImportError:
                     logger.warning("未找到git_utils模块，跳过Git提交")
                 except Exception as e:
-                    logger.error(f"提交ETF {etf_code} 数据到Git仓库时出错: {str(e)}", exc_info=True)
+                    logger.error(f"标记ETF {etf_code} 数据用于批量提交时出错: {str(e)}", exc_info=True)
                 
                 # 标记为已完成（仅用于进度显示）
                 with open(completed_file, "a", encoding="utf-8") as f:
@@ -276,6 +277,9 @@ def save_all_etf_data(etf_data_cache: Dict[str, pd.DataFrame], etf_daily_dir: st
     """
     logger.info("开始批量保存ETF数据到文件...")
     try:
+        # 初始化一个列表来跟踪需要提交的文件
+        files_to_commit = []
+        
         for etf_code, df in etf_data_cache.items():
             save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
             try:
@@ -299,6 +303,17 @@ def save_all_etf_data(etf_data_cache: Dict[str, pd.DataFrame], etf_daily_dir: st
                 else:
                     df.to_csv(save_path, index=False, encoding="utf-8-sig")
                     logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                
+                # ===== 关键修改：使用新的git_utils函数 =====
+                # 调用commit_files_in_batches，它会自动处理每10个文件提交一次
+                try:
+                    from utils.git_utils import commit_files_in_batches
+                    commit_files_in_batches(save_path)
+                    logger.info(f"✅ ETF {etf_code} 数据已标记用于批量提交")
+                except ImportError:
+                    logger.warning("未找到git_utils模块，跳过Git提交")
+                except Exception as e:
+                    logger.error(f"标记ETF {etf_code} 数据用于批量提交时出错: {str(e)}", exc_info=True)
             except Exception as e:
                 logger.error(f"保存ETF {etf_code} 数据失败: {str(e)}", exc_info=True)
         logger.info(f"批量保存完成，共处理 {len(etf_data_cache)} 个ETF")

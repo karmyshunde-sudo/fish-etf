@@ -130,14 +130,6 @@ def update_all_etf_list() -> pd.DataFrame:
     # 判断是否为周日（星期日的索引是6，星期一的索引是0）
     is_sunday = beijing_time.weekday() == 6
 
-    # 检查GitPython是否可用
-    try:
-        from utils.git_utils import GIT_AVAILABLE
-        if not GIT_AVAILABLE:
-            logger.warning("⚠️ GitPython模块不可用，ETF列表更新后将不会提交到Git仓库")
-    except ImportError:
-        logger.warning("⚠️ 无法导入git_utils模块，ETF列表更新后将不会提交到Git仓库")
-        
     # 检查是否需要更新 - 周日强制更新
     if is_sunday or not os.path.exists(Config.ALL_ETFS_PATH) or is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
         logger.info(f"{'[强制更新] ' if is_sunday else ''}ETF列表文件不存在或已过期，尝试从网络获取...")
@@ -178,11 +170,10 @@ def update_all_etf_list() -> pd.DataFrame:
                     # 标记数据来源
                     primary_etf_list.source = "AkShare"
                     
-                    # ===== 关键修复：添加ETF列表Git提交逻辑 =====
+                    # ===== 关键修改：使用新的git_utils函数 =====
                     try:
-                        from utils.git_utils import commit_and_push_etf_list
-                        # commit_and_push_etf_list(len(primary_etf_list), "AkShare")
-                        commit_and_push_etf_list(len(primary_etf_list), "AkShare", Config.ALL_ETFS_PATH)
+                        from utils.git_utils import commit_files_in_batches
+                        commit_files_in_batches(Config.ALL_ETFS_PATH)
                         logger.info("✅ ETF列表已成功提交到Git仓库")
                     except ImportError:
                         logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
@@ -228,11 +219,10 @@ def update_all_etf_list() -> pd.DataFrame:
                         # 标记数据来源
                         primary_etf_list.source = "新浪"
                         
-                        # ===== 关键修复：添加ETF列表Git提交逻辑 =====
+                        # ===== 关键修改：使用新的git_utils函数 =====
                         try:
-                            from utils.git_utils import commit_and_push_etf_list
-                            # commit_and_push_etf_list(len(primary_etf_list), "新浪")
-                            commit_and_push_etf_list(len(primary_etf_list), "新浪", Config.ALL_ETFS_PATH)
+                            from utils.git_utils import commit_files_in_batches
+                            commit_files_in_batches(Config.ALL_ETFS_PATH)
                             logger.info("✅ ETF列表已成功提交到Git仓库")
                         except ImportError:
                             logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
@@ -500,7 +490,7 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从新浪获取ETF列表...")
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList  "
+        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList    "
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
         response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
         response.raise_for_status()

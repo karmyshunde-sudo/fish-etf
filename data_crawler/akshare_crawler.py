@@ -319,7 +319,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str
         
         symbol = symbol_map.get(index_code, index_code)
         
-        # 检查是否已安装yfinance
+        # 指查是否已安装yfinance
         try:
             import yfinance as yf
         except ImportError:
@@ -373,7 +373,7 @@ def try_fund_etf_hist_em_with_net_value(etf_code: str, start_date: str, end_date
             # 记录返回的列名，用于调试
             logger.info(f"📊 fund_etf_hist_em 接口返回的原始列名: {list(df.columns)}")
             
-            # 检查是否有净值数据（fund_etf_hist_em 可能返回的净值列）
+            # 指查是否有净值数据（fund_etf_hist_em 可能返回的净值列）
             net_value_columns = [col for col in df.columns if "净值" in col or "net" in col.lower()]
             if net_value_columns:
                 # 选择第一个净值列
@@ -546,7 +546,7 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     确保DataFrame包含所有必需的交易数据列，缺失的列用默认值填充
     Args:
-        df: 原始DataFrame
+        df: 县始DataFrame
     Returns:
         pd.DataFrame: 包含所有必需列的DataFrame
     """
@@ -579,7 +579,7 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     else:
         # 2. 检查原始折溢价率数据是否有效
         if df["折溢价率"].isna().all() or (df["折溢价率"] == 0).all():
-            logger.warning("⚠️ 原始折溢价率数据全为0或空值，将尝试重新计算")
+            logger.warning("⚠️ 县始折溢价率数据全为0或空值，将尝试重新计算")
             # 尝试从净值重新计算
             if "净值" in df.columns and "收盘" in df.columns:
                 df["折溢价率"] = ((df["收盘"] - df["净值"]) / df["净值"] * 100).round(2)
@@ -589,7 +589,7 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df["折溢价率"] = ((df["收盘"] - df["IOPV"]) / df["IOPV"] * 100).round(2)
                 logger.info("✅ 通过IOPV重新计算折溢价率")
             else:
-                logger.warning("ℹ️ 无法重新计算折溢价率，保留原始数据（可能全为0）")
+                logger.warning("ℹ️ 无法重新计算折溢价率，保留原数据（可能全为0）")
     
     # 3. 处理其他衍生列
     derived_columns = ["成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
@@ -683,7 +683,7 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
                     # 格式化为字符串
                     df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
                 else:
-                    logger.warning("日期列转换为datetime失败，保留原始值")
+                    logger.warning("日期列转换为datetime失败，保留原值")
             except Exception as e:
                 logger.error(f"日期列处理失败: {str(e)}", exc_info=True)
         # 确保所有必需列都存在
@@ -720,7 +720,7 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     限制数据为最近1年的数据
     
     Args:
-        df: 原始DataFrame
+        df: 县始DataFrame
         end_date: 结束日期
         
     Returns:
@@ -753,3 +753,31 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"限制数据为1年时发生错误: {str(e)}", exc_info=True)
         return df
+
+def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
+    """保存ETF日线数据到CSV文件"""
+    try:
+        # 确保目录存在
+        etf_daily_dir = Config.ETFS_DAILY_DIR
+        os.makedirs(etf_daily_dir, exist_ok=True)
+        
+        # 构建文件路径
+        file_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
+        
+        # 保存数据
+        df.to_csv(file_path, index=False, encoding="utf-8")
+        logger.info(f"ETF {etf_code} 日线数据已保存至: {file_path}")
+        
+        # ===== 关键修改：提交文件到仓库 =====
+        try:
+            from utils.git_utils import commit_files_in_batches
+            commit_files_in_batches(file_path)
+            logger.info(f"ETF {etf_code} 日线数据已提交到Git仓库")
+        except ImportError:
+            logger.warning("未找到git_utils模块，跳过Git提交")
+        except Exception as e:
+            logger.error(f"提交ETF {etf_code} 日线数据到Git仓库失败: {str(e)}", exc_info=True)
+    
+    except Exception as e:
+        logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+        raise

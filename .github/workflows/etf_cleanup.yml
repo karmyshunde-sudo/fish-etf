@@ -1,4 +1,4 @@
-name: ETF仓位折溢套利 - 清理任务
+name: 清理数据文件任务-akshare信息
 on:
   workflow_dispatch:
     inputs:
@@ -7,19 +7,12 @@ on:
         required: true
         type: choice
         options:
-          - 'update_etf_list'
-          - 'etf_yesno'
-          - 'stock_fourty'
-          - 'stock_crawler'
-          - 'crawl_etf_daily'
-          - 'calculate_arbitrage'
-          - 'calculate_position'
-          - 'clean_daily_data'
+          - 'show_akshare_info'
           - 'clean_stock_daily_data'  # 新增：清理股票日线数据任务
+          - 'clean_daily_data'
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
           - 'clean_numeric_csv'
-          - 'show_akshare_info'
       interface_name:
         description: 'AkShare接口名称（可选）'
         required: false

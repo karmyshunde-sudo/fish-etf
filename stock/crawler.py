@@ -140,7 +140,7 @@ class DataSourceManager:
             source["success_count"] = max(0, source["success_count"] - 5)
             source["failure_count"] = max(0, source["failure_count"] - 3)
             
-            # 恙复被限流的数据源
+            # 恢复被限流的数据源
             if (source["status"] == "throttled" and 
                 source["last_throttle_time"] and 
                 time.time() - source["last_throttle_time"] > 1800):  # 30分钟后尝试恢复
@@ -281,7 +281,7 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
         try:
             # 获取最佳数据源
             source = DATA_SOURCE_MANAGER.get_best_source(stock_code)
-            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 尝试使用数据源: {source} (尝试 {attempt+1}/{MAX_RETRIES})")
+            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试使用数据源: {source} (尝试 {attempt+1}/{MAX_RETRIES})")
             
             # 根据数据源获取数据
             if source == "akshare":
@@ -298,14 +298,14 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
                 
                 # 确保日期列存在
                 if "日期" not in df.columns:
-                    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 数据缺少'日期'列")
+                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少'日期'列")
                     return None
                 
                 # 检查是否有必要的列
                 required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
                 missing_columns = [col for col in required_columns if col not in df.columns]
                 if missing_columns:
-                    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
+                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
                     return None
                 
                 # 确保日期列格式正确
@@ -339,20 +339,20 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
                 one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
                 df = df[df["日期"] >= one_year_ago]
                 
-                logger.info(f"股票 {stock_code} (原姶: {original_stock_code}) ✅ 成功通过 {source} 获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
+                logger.info(f"股票 {stock_code} (原始: {original_stock_code}) ✅ 成功通过 {source} 获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
                 return df
             
             # 如果数据为空，视为失败
-            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 从 {source} 获取数据为空")
+            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据为空")
             DATA_SOURCE_MANAGER.report_failure(source)
             
         except Exception as e:
             # 检测是否是限流错误
             is_throttled = "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e)
             DATA_SOURCE_MANAGER.report_failure(source, is_throttled)
-            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 从 {source} 获取数据失败: {str(e)}")
+            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据失败: {str(e)}")
     
-    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 获取数据失败，所有数据源均无效")
+    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败，所有数据源均无效")
     return None
 
 def get_stock_section(stock_code: str) -> str:
@@ -447,21 +447,92 @@ def main():
         # 确保日线数据目录存在
         ensure_daily_data_dir()
         
-        # 1. 加载股票基础信息
+        # 1. 加载股票基础信息 - 修复：如果不存在则自动获取
         if not os.path.exists(BASIC_INFO_FILE):
-            logger.error(f"股票基础信息文件 {BASIC_INFO_FILE} 不存在，请先运行策略获取基础信息")
-            return
-        
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("股票基础信息为空，无法继续")
-            return
-        
-        # 确保股票代码是6位字符串
-        basic_info_df["code"] = basic_info_df["code"].astype(str).str.zfill(6)
-        # 保存修改后的基础信息
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录")
+            logger.warning(f"股票基础信息文件 {BASIC_INFO_FILE} 不存在，正在自动获取...")
+            
+            try:
+                logger.info("从AkShare获取全市场股票列表...")
+                # 获取A股股票列表
+                stock_list = ak.stock_info_a_code_name()
+                
+                if stock_list.empty:
+                    logger.error("获取股票列表失败：返回为空")
+                    return
+                
+                # 记录初始股票数量
+                initial_count = len(stock_list)
+                logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
+                
+                # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
+                stock_list = stock_list[~stock_list['name'].str.contains('ST')]
+                stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
+                
+                filtered_count = len(stock_list)
+                logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
+                
+                # 准备基础信息DataFrame
+                basic_info_df = pd.DataFrame({
+                    'code': stock_list['code'],
+                    'name': stock_list['name'],
+                    'market_cap': 0,  # 初始市值设为0
+                    'section': stock_list['code'].apply(get_stock_section),
+                    'next_crawl_index': 0
+                })
+                
+                # 保存基础信息
+                basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+                logger.info(f"已自动创建股票基础信息文件，共 {len(basic_info_df)} 条记录")
+            except Exception as e:
+                logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
+                return
+        else:
+            basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+            
+            # 如果基础信息为空，尝试重新获取
+            if basic_info_df.empty:
+                logger.warning(f"股票基础信息为空，正在尝试重新获取...")
+                try:
+                    logger.info("从AkShare获取全市场股票列表...")
+                    # 获取A股股票列表
+                    stock_list = ak.stock_info_a_code_name()
+                    
+                    if stock_list.empty:
+                        logger.error("获取股票列表失败：返回为空")
+                        return
+                    
+                    # 记录初始股票数量
+                    initial_count = len(stock_list)
+                    logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
+                    
+                    # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
+                    stock_list = stock_list[~stock_list['name'].str.contains('ST')]
+                    stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
+                    
+                    filtered_count = len(stock_list)
+                    logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
+                    
+                    # 准备基础信息DataFrame
+                    basic_info_df = pd.DataFrame({
+                        'code': stock_list['code'],
+                        'name': stock_list['name'],
+                        'market_cap': 0,  # 初始市值设为0
+                        'section': stock_list['code'].apply(get_stock_section),
+                        'next_crawl_index': 0
+                    })
+                    
+                    # 保存基础信息
+                    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+                    logger.info(f"已重新创建股票基础信息文件，共 {len(basic_info_df)} 条记录")
+                except Exception as e:
+                    logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
+                    return
+            else:
+                # 确保股票代码是6位字符串
+                basic_info_df["code"] = basic_info_df["code"].astype(str).str.zfill(6)
+                # 保存修改后的基础信息
+                basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+                logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录")
         
         # 2. 确保 next_crawl_index 列存在
         if "next_crawl_index" not in basic_info_df.columns:

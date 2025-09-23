@@ -1,4 +1,4 @@
-name: 清理文件任务-akshare接口
+name: ETF仓位折溢套利 - 清理任务
 on:
   workflow_dispatch:
     inputs:
@@ -15,6 +15,7 @@ on:
           - 'calculate_arbitrage'
           - 'calculate_position'
           - 'clean_daily_data'
+          - 'clean_stock_daily_data'  # 新增：清理股票日线数据任务
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
           - 'clean_numeric_csv'
@@ -25,6 +26,53 @@ on:
         type: string
         default: ''
 jobs:
+  # ========================
+  # 显示AkShare信息（移到最前）
+  # ========================
+  show-akshare-info:
+    name: 显示AkShare信息
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      - name: 获取AkShare信息
+        run: |
+          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+          python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
+      - name: 提交信息文件
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main
+
   # ========================
   # 清理任务 - 每个任务都有独立Job
   # ========================
@@ -60,6 +108,39 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\\n北京时间: ${BEIJING_TIME}\"}}"
+
+  # 新增：手动清理股票日线数据
+  manual-clean-stock-daily-data:
+    name: 手动清理股票日线数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_stock_daily_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理股票日线数据
+        run: |
+          echo "删除 data/daily/*.csv"
+          rm -rf data/daily/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/daily/ && git commit -m "【手动清理】清除股票日线数据文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】股票日线数据文件已清理完成\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # 手动清理ETF套利数据
   manual-clean-arbitrage-data:
@@ -159,48 +240,3 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\\n北京时间: ${BEIJING_TIME}\"}}"
-
-  # 显示AkShare信息
-  show-akshare-info:
-    name: 显示AkShare信息
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
-    permissions:
-      contents: write
-    steps:
-      - name: 验证时区设置
-        run: |
-          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      - name: 拉取仓库代码
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          clean: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: 配置Python环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-      - name: 安装依赖包
-        run: |
-          # 首先确认当前目录
-          echo "当前工作目录: $(pwd)"
-          # 检查文件是否存在
-          if [ -f "requirements.txt" ]; then
-            echo "✅ requirements.txt 文件存在，开始安装依赖..."
-            pip install -r requirements.txt
-          else
-            echo "❌ 错误: requirements.txt 文件不存在"
-            ls -la  # 列出当前目录内容以帮助诊断
-            exit 1
-          fi
-      - name: 获取AkShare信息
-        run: |
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
-      - name: 提交信息文件
-        run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main

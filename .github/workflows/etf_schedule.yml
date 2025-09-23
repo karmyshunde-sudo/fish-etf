@@ -16,22 +16,12 @@ on:
         type: choice
         options:
           - 'update_etf_list'
-          - 'etf_yesno'
-          - 'stock_fourty'
-          - 'stock_crawler'
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
           - 'calculate_position'
-          - 'clean_daily_data'
-          - 'clean_arbitrage_data'
-          - 'clean_trade_records'
-          - 'clean_numeric_csv'
-          - 'show_akshare_info'
-      interface_name:
-        description: 'AkShare接口名称（可选）'
-        required: false
-        type: string
-        default: ''
+          - 'etf_yesno'
+          - 'stock_fourty'
+          - 'stock_crawler'
 jobs:
   # ========================
   # 定时任务 - 每个任务都有独立Job

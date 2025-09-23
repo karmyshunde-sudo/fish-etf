@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import Config
 from utils.date_utils import get_beijing_time, get_utc_time
-from utils.git_utils import commit_and_push_file
+from utils.git_utils import commit_files_in_batches
 from concurrent.futures import ThreadPoolExecutor
 import random
 import requests
@@ -140,7 +140,7 @@ class DataSourceManager:
             source["success_count"] = max(0, source["success_count"] - 5)
             source["failure_count"] = max(0, source["failure_count"] - 3)
             
-            # 恢复被限流的数据源
+            # 恙复被限流的数据源
             if (source["status"] == "throttled" and 
                 source["last_throttle_time"] and 
                 time.time() - source["last_throttle_time"] > 1800):  # 30分钟后尝试恢复
@@ -259,7 +259,7 @@ def fetch_from_sina(stock_code: str, start_date: str, end_date: str) -> Optional
             try:
                 data = json.loads(json_data)
                 # 处理数据...
-                # 这里简化了，实际需要解析JSON结构
+                # 这简化了，实际需要解析JSON结构
                 if 'data' in data and 'hq' in data['data']:
                     hq_data = data['data']['hq']
                     # 转换为DataFrame
@@ -281,7 +281,7 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
         try:
             # 获取最佳数据源
             source = DATA_SOURCE_MANAGER.get_best_source(stock_code)
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试使用数据源: {source} (尝试 {attempt+1}/{MAX_RETRIES})")
+            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 尝试使用数据源: {source} (尝试 {attempt+1}/{MAX_RETRIES})")
             
             # 根据数据源获取数据
             if source == "akshare":
@@ -298,14 +298,14 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
                 
                 # 确保日期列存在
                 if "日期" not in df.columns:
-                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少'日期'列")
+                    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 数据缺少'日期'列")
                     return None
                 
                 # 检查是否有必要的列
                 required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
                 missing_columns = [col for col in required_columns if col not in df.columns]
                 if missing_columns:
-                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
+                    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
                     return None
                 
                 # 确保日期列格式正确
@@ -339,20 +339,20 @@ def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str)
                 one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
                 df = df[df["日期"] >= one_year_ago]
                 
-                logger.info(f"股票 {stock_code} (原始: {original_stock_code}) ✅ 成功通过 {source} 获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
+                logger.info(f"股票 {stock_code} (原姶: {original_stock_code}) ✅ 成功通过 {source} 获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
                 return df
             
             # 如果数据为空，视为失败
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据为空")
+            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 从 {source} 获取数据为空")
             DATA_SOURCE_MANAGER.report_failure(source)
             
         except Exception as e:
             # 检测是否是限流错误
             is_throttled = "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e)
             DATA_SOURCE_MANAGER.report_failure(source, is_throttled)
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据失败: {str(e)}")
+            logger.debug(f"股票 {stock_code} (原姶: {original_stock_code}) 从 {source} 获取数据失败: {str(e)}")
     
-    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败，所有数据源均无效")
+    logger.warning(f"股票 {stock_code} (原姶: {original_stock_code}) 获取数据失败，所有数据源均无效")
     return None
 
 def get_stock_section(stock_code: str) -> str:
@@ -422,6 +422,16 @@ def process_stock_for_crawl(stock_code: str) -> Optional[str]:
                 # 新建文件
                 df.to_csv(file_path, index=False)
             
+            # ===== 关键修改：提交文件到仓库 =====
+            try:
+                from utils.git_utils import commit_files_in_batches
+                commit_files_in_batches(file_path)
+                logger.info(f"股票 {stock_code} 日线数据已提交到Git仓库")
+            except ImportError:
+                logger.warning("未找到git_utils模块，跳过Git提交")
+            except Exception as e:
+                logger.error(f"提交股票 {stock_code} 日线数据到Git仓库失败: {str(e)}", exc_info=True)
+            
             return file_path  # 返回需要提交的文件路径
         
         return None
@@ -483,9 +493,6 @@ def main():
         
         logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")
         
-        # 收集需要提交的文件
-        files_to_commit = []
-        
         # 并行处理股票
         success_count = 0
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数，因为有多个数据源
@@ -493,41 +500,8 @@ def main():
             for i, file_path in enumerate(results):
                 if file_path:
                     success_count += 1
-                    files_to_commit.append(file_path)
-                    
-                    # 每10个股票提交一次
-                    if len(files_to_commit) >= BATCH_COMMIT_SIZE:
-                        commit_message = f"批量更新{BATCH_COMMIT_SIZE}只股票数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-                        logger.info(f"正在批量提交 {len(files_to_commit)} 个股票数据文件到GitHub仓库...")
-                        
-                        for f in files_to_commit:
-                            stock_code = os.path.basename(f).replace(".csv", "")
-                            try:
-                                if commit_and_push_file(f, commit_message):
-                                    logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
-                                else:
-                                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行爬取")
-                            except Exception as e:
-                                logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
-                        
-                        files_to_commit = []  # 重置列表
                 
                 logger.info(f"已处理 {i+1}/{len(stocks_to_crawl)} 只股票，成功: {success_count}")
-        
-        # 提交剩余的文件
-        if files_to_commit:
-            commit_message = f"批量更新剩余{len(files_to_commit)}只股票数据 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-            logger.info(f"正在提交剩余的 {len(files_to_commit)} 个股票数据文件到GitHub仓库...")
-            
-            for f in files_to_commit:
-                stock_code = os.path.basename(f).replace(".csv", "")
-                try:
-                    if commit_and_push_file(f, commit_message):
-                        logger.info(f"股票 {stock_code} 数据已成功提交并推送到GitHub仓库")
-                    else:
-                        logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败，但继续执行爬取")
-                except Exception as e:
-                    logger.warning(f"提交股票 {stock_code} 数据到GitHub仓库失败: {str(e)}，但继续执行爬取")
         
         # 5. 更新 next_crawl_index
         next_index = end_index if end_index < total_stocks else 0
@@ -539,11 +513,9 @@ def main():
         # 提交更新后的股票基础信息
         try:
             logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
-            commit_message = f"自动更新 next_crawl_index 为 {next_index} [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-            if commit_and_push_file(BASIC_INFO_FILE, commit_message):
-                logger.info("股票基础信息已成功提交并推送到GitHub仓库")
-            else:
-                logger.warning("提交股票基础信息到GitHub仓库失败，但爬取任务已完成")
+            from utils.git_utils import commit_files_in_batches
+            commit_files_in_batches(BASIC_INFO_FILE)
+            logger.info("股票基础信息已成功提交到GitHub仓库")
         except Exception as e:
             logger.warning(f"提交股票基础信息到GitHub仓库失败: {str(e)}，但爬取任务已完成")
         

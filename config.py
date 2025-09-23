@@ -204,6 +204,7 @@ class Config:
     # 数据存储路径
     DATA_DIR: str = os.path.join(BASE_DIR, "data")
     ETFS_DAILY_DIR: str = os.path.join(DATA_DIR, "etf_daily")
+    STOCK_DAILY_DIR: str = os.path.join(DATA_DIR, "daily")
     
     # ETF元数据（记录最后爬取日期）
     METADATA_PATH: str = os.path.join(DATA_DIR, "etf_metadata.csv")

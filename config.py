@@ -114,7 +114,7 @@ class Config:
     ARBITRAGE_PROFIT_THRESHOLD: float = 0.005  # 0.5%
     
     # 显示阈值（折溢价率超过该值才在消息中显示）
-    MIN_ARBITRAGE_DISPLAY_THRESHOLD: float = 1.0  # 1.0% - 仅显示显著的套利机会
+    MIN_ARBITRAGE_DISPLAY_THRESHOLD: float = 5.0  # 1.0% - 仅显示显著的套利机会
     
     # 综合评分筛选阈值（仅保留评分前N%的ETF）
     SCORE_TOP_PERCENT: int = 20  # 保留前20%高分ETF

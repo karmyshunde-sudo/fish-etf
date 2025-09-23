@@ -203,7 +203,11 @@ class Config:
     
     # 数据存储路径
     DATA_DIR: str = os.path.join(BASE_DIR, "data")
+
+    #ETF日线数据目录
     ETFS_DAILY_DIR: str = os.path.join(DATA_DIR, "etf_daily")
+
+    #股票日线数据目录
     STOCK_DAILY_DIR: str = os.path.join(DATA_DIR, "daily")
     
     # ETF元数据（记录最后爬取日期）
@@ -294,6 +298,9 @@ class Config:
     
     # 全市场ETF列表存储路径
     ALL_ETFS_PATH: str = os.path.join(DATA_DIR, "all_etfs.csv")
+
+    # 全市场股票列表存储路径
+    ALL_STOCK_PATH: str = os.path.join(DATA_DIR, "all_stocks.csv")
     
     # 兜底ETF列表路径
     BACKUP_ETFS_PATH: str = os.path.join(DATA_DIR, "karmy_etf.csv")

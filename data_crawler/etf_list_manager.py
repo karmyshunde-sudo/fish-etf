@@ -169,18 +169,6 @@ def update_all_etf_list() -> pd.DataFrame:
                     logger.info(f"✅ AkShare更新成功（{len(primary_etf_list)}只ETF）")
                     # 标记数据来源
                     primary_etf_list.source = "AkShare"
-                    
-                    # ===== 关键修改：使用新的git_utils函数 =====
-                    try:
-                        from utils.git_utils import commit_files_in_batches
-                        commit_files_in_batches(Config.ALL_ETFS_PATH)
-                        logger.info("✅ ETF列表已成功提交到Git仓库")
-                    except ImportError:
-                        logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
-                    except Exception as e:
-                        logger.error(f"❌ ETF列表提交到Git仓库失败: {str(e)}", exc_info=True)
-                        # 重要：提交失败应被视为严重错误
-                        raise RuntimeError("ETF列表Git提交失败") from e
                 else:
                     logger.error("ETF列表验证失败，跳过保存")
             else:
@@ -218,18 +206,6 @@ def update_all_etf_list() -> pd.DataFrame:
                         logger.info(f"✅ 新浪接口更新成功（{len(primary_etf_list)}只ETF）")
                         # 标记数据来源
                         primary_etf_list.source = "新浪"
-                        
-                        # ===== 关键修改：使用新的git_utils函数 =====
-                        try:
-                            from utils.git_utils import commit_files_in_batches
-                            commit_files_in_batches(Config.ALL_ETFS_PATH)
-                            logger.info("✅ ETF列表已成功提交到Git仓库")
-                        except ImportError:
-                            logger.error("❌ 未找到git_utils模块，无法提交到Git仓库")
-                        except Exception as e:
-                            logger.error(f"❌ ETF列表提交到Git仓库失败: {str(e)}", exc_info=True)
-                            # 重要：提交失败应被视为严重错误
-                            raise RuntimeError("ETF列表Git提交失败") from e
                     else:
                         logger.error("ETF列表验证失败，跳过保存")
                 else:
@@ -490,7 +466,7 @@ def fetch_all_etfs_sina() -> pd.DataFrame:
     :return: 包含ETF信息的DataFrame"""
     try:
         logger.info("尝试从新浪获取ETF列表...")
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList    "
+        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getETFList      "
         params = {"page": 1, "num": 1000, "sort": "symbol", "asc": 1}
         response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
         response.raise_for_status()

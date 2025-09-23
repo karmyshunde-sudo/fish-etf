@@ -81,11 +81,9 @@ jobs:
       - name: 检查信息文件状态
         if: steps.get_akshare_info.outputs.task_status == 'success'
         run: |
-          echo "检查 data/flags/ 目录状态:"
-          ls -la data/flags/
-          git status
-          echo "信息文件内容预览:"
-          head -n 5 data/flags/*.txt 2>/dev/null || echo "无信息文件或为空"
+          echo "检查 data/flags/ 目录状态（仅显示与AkShare信息相关的文件）:"
+          ls -la data/flags/*.txt 2>/dev/null || echo "无AkShare信息文件"
+          git status -- data/flags/*.txt
       
       - name: 提交信息文件
         if: steps.get_akshare_info.outputs.task_status == 'success'
@@ -93,14 +91,14 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
-          # 检查是否有文件需要提交
+          # 检查是否有变化
           git add data/flags/*.txt
-          if [ -n "$(git status --porcelain data/flags/)" ]; then
+          if [ -n "$(git status --porcelain data/flags/*.txt)" ]; then
             echo "检测到AkShare信息文件变化，准备提交..."
             git commit -m "更新AkShare信息文件 [${{ github.event.inputs.interface_name }}]"
             git push origin main
-            echo "✅ 信息文件已成功提交到Git仓库"
             echo "commit_status=success" >> $GITHUB_OUTPUT
+            echo "✅ 信息文件已成功提交到Git仓库"
           else
             echo "ℹ️ AkShare信息文件无变化，跳过提交"
             echo "commit_status=skipped" >> $GITHUB_OUTPUT
@@ -191,9 +189,9 @@ jobs:
       - name: 检查文件状态（诊断）
         if: steps.clean_task.outputs.task_status == 'success' || steps.clean_task.conclusion == 'skipped'
         run: |
-          echo "清理后 data/etf_daily/ 目录状态:"
+          echo "清理后 data/etf_daily/ 目录状态（仅显示ETF日线数据相关文件）:"
           ls -la data/etf_daily/ 2>/dev/null || echo "目录不存在或为空"
-          git status
+          git status -- data/etf_daily/
       
       - name: 提交清理变更
         if: steps.clean_task.outputs.task_status == 'success'
@@ -296,9 +294,9 @@ jobs:
       - name: 检查文件状态（诊断）
         if: steps.clean_task.outputs.task_status == 'success' || steps.clean_task.conclusion == 'skipped'
         run: |
-          echo "清理后 data/daily/ 目录状态:"
+          echo "清理后 data/daily/ 目录状态（仅显示股票日线数据相关文件）:"
           ls -la data/daily/ 2>/dev/null || echo "目录不存在或为空"
-          git status
+          git status -- data/daily/
       
       - name: 提交清理变更
         if: steps.clean_task.outputs.task_status == 'success'
@@ -401,9 +399,9 @@ jobs:
       - name: 检查文件状态（诊断）
         if: steps.clean_task.outputs.task_status == 'success' || steps.clean_task.conclusion == 'skipped'
         run: |
-          echo "清理后 data/arbitrage/ 目录状态:"
+          echo "清理后 data/arbitrage/ 目录状态（仅显示ETF套利数据相关文件）:"
           ls -la data/arbitrage/ 2>/dev/null || echo "目录不存在或为空"
-          git status
+          git status -- data/arbitrage/
       
       - name: 提交清理变更
         if: steps.clean_task.outputs.task_status == 'success'
@@ -506,9 +504,9 @@ jobs:
       - name: 检查文件状态（诊断）
         if: steps.clean_task.outputs.task_status == 'success' || steps.clean_task.conclusion == 'skipped'
         run: |
-          echo "清理后 data/trade_records.csv 状态:"
+          echo "清理后 data/trade_records.csv 状态（仅显示交易记录相关文件）:"
           ls -la data/trade_records.csv 2>/dev/null || echo "文件不存在"
-          git status
+          git status -- data/trade_records.csv
       
       - name: 提交清理变更
         if: steps.clean_task.outputs.task_status == 'success'
@@ -615,9 +613,9 @@ jobs:
       - name: 检查文件状态（诊断）
         if: steps.clean_task.outputs.task_status == 'success' || steps.clean_task.conclusion == 'skipped'
         run: |
-          echo "清理后纯数字CSV文件状态:"
+          echo "清理后纯数字CSV文件状态（仅显示数字CSV相关文件）:"
           find data/ -type f -name '[0-9]*.csv' || echo "无纯数字CSV文件"
-          git status
+          git status -- data/
       
       - name: 提交清理变更
         if: steps.clean_task.outputs.task_status == 'success'

@@ -104,12 +104,6 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      - name: 提交数据变更
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
-          git commit -m "自动更新ETF日线数据 [定时]" && git push origin main
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -565,18 +559,6 @@ jobs:
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      - name: 提交更新的数据
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add data/daily/
-          git add data/all_stocks.csv
-          if [ -n "$(git diff --cached --name-only data/daily/ data/all_stocks.csv)" ]; then
-            git commit -m "自动更新股票日线数据 [定时]" && git push origin main
-          else
-            echo "没有数据变化，无需提交"
-          fi
       - name: 发送爬取通知
         if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
         run: |
@@ -882,18 +864,6 @@ jobs:
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      - name: 提交更新的股票日线数据（手动）
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add data/daily/
-          git add data/all_stocks.csv
-          if [ -n "$(git diff --cached --name-only data/daily/ data/all_stocks.csv)" ]; then
-            git commit -m "手动更新股票日线数据" && git push origin main
-          else
-            echo "股票日线数据没有变化，无需提交"
-          fi
       - name: 发送爬取通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -971,12 +941,6 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      - name: 提交数据变更
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
-          git commit -m "手动更新ETF日线数据" && git push origin main
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |

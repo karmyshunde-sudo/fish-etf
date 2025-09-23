@@ -1005,30 +1005,6 @@ def main():
                 # 适当延时，避免消息推送过于频繁
                 time.sleep(2)
         
-        # 3. 生成并推送整体总结
-        beijing_time = get_beijing_time()
-        summary_lines = []
-        summary_lines.append(f"📊 个股趋势策略执行总结 ({beijing_time.strftime('%Y-%m-%d %H:%M')})")
-        summary_lines.append("──────────────────")
-        summary_lines.append(f"✅ 共筛选出 {total_stocks} 只优质股票（按板块分布）:")
-        
-        for section, stocks in top_stocks_by_section.items():
-            if stocks:
-                summary_lines.append(f"  • {section}: {len(stocks)} 只")
-        
-        summary_lines.append("──────────────────")
-        summary_lines.append("💡 操作指南:")
-        summary_lines.append("1. 评分越高，趋势越强，可考虑适当增加仓位")
-        summary_lines.append("2. 每只个股仓位≤15%，分散投资5-8只")
-        summary_lines.append("3. 持续关注趋势变化，及时调整持仓")
-        summary_lines.append("4. 科创板/创业板波动较大，注意控制风险")
-        summary_lines.append("──────────────────")
-        summary_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
-        
-        summary_message = "\n".join(summary_lines)
-        logger.info("推送整体策略执行总结")
-        send_wechat_message(summary_message, message_type="stock_tickten")
-        
         logger.info("个股策略报告已成功发送至企业微信")
         logger.info("===== 个股趋势策略(TickTen)执行完成 =====")
     

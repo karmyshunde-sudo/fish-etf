@@ -173,6 +173,15 @@ MAX_RETRIES = 3
 # 全局数据源管理器
 DATA_SOURCE_MANAGER = DataSourceManager()
 
+# ====== 新增：导入tickten策略模块 ======
+try:
+    from stock.tickten import filter_stocks_for_tickten_strategy
+    TICKTEN_AVAILABLE = True
+    logger.info("成功导入 tickten 策略模块")
+except ImportError:
+    TICKTEN_AVAILABLE = False
+    logger.warning("无法导入 tickten 策略模块，将跳过策略筛选")
+
 def ensure_daily_data_dir():
     """确保日线数据目录存在"""
     os.makedirs(DAILY_DATA_DIR, exist_ok=True)
@@ -560,6 +569,22 @@ def main():
         
         # 4. 爬取指定范围的股票
         stock_codes = basic_info_df["code"].tolist()
+        
+        # ====== 新增：应用tickten策略筛选股票 ======
+        if TICKTEN_AVAILABLE:
+            logger.info("正在应用TickTen策略筛选股票...")
+            try:
+                # 使用tickten策略筛选股票
+                stock_codes = filter_stocks_for_tickten_strategy(stock_codes)
+                logger.info(f"TickTen策略筛选完成，剩余 {len(stock_codes)} 只股票")
+                
+                # 如果筛选后股票数量为0，使用原始列表
+                if len(stock_codes) == 0:
+                    logger.warning("TickTen策略筛选后股票数量为0，使用原始股票列表")
+                    stock_codes = basic_info_df["code"].tolist()
+            except Exception as e:
+                logger.error(f"TickTen策略筛选失败: {str(e)}，将使用原始股票列表", exc_info=True)
+        
         stocks_to_crawl = stock_codes[start_index:end_index]
         
         logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")

@@ -27,6 +27,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       
@@ -73,6 +81,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       
@@ -119,6 +135,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       
@@ -176,6 +200,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       
@@ -234,6 +266,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       
@@ -280,6 +320,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: 设置环境
         uses: ./.github/actions/setup_environment
       

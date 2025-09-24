@@ -2,12 +2,12 @@ name: 定时任务
 on:
   schedule:
     - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (ETF日线爬取)
-    - cron: '*/85 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (ETF套利计算)
+    - cron: '*/5 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (ETF套利计算)
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (ETF仓位策略)
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
     - cron: '0 8 * * *'       # UTC 08:00 = 北京时间 16:00 (指数Yes/No)
     - cron: '30 0 * * 1-5'    # UTC 0:30 = 北京时间 8:30 (个股趋势策略)
-    - cron: '*/10 12-22 * * *'    # UTC 11:00 = 北京时间 20:00-06：00 (股票日线爬取)
+    - cron: '*/10 12-22 * * *'    # UTC 11:00 = 北京时间 20:00-06:00 (股票日线爬取)
   workflow_dispatch:
     inputs:
       task:
@@ -102,15 +102,6 @@ jobs:
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/etf_daily/ 目录状态:"
-          ls -la data/etf_daily/ | head -n 20
-          echo "已爬取ETF数量: $(ls -1 data/etf_daily/*.csv 2>/dev/null | wc -l)"
-          echo "最近提交的文件:"
-          git log -1 --name-status HEAD -- data/etf_daily/
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
@@ -138,7 +129,7 @@ jobs:
   calculate-arbitrage-schedule:
     name: ETF套利计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '*/85 2-7 * * 1-5'
+    if: github.event_name == 'schedule' && github.event.schedule == '*/5 2-7 * * 1-5'
     permissions:
       contents: write
     steps:
@@ -197,51 +188,31 @@ jobs:
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/arbitrage/ 目录状态:"
-          ls -la data/arbitrage/
-          git status
-          echo "部分文件内容预览:"
-          head -n 3 data/arbitrage/*.csv 2>/dev/null || echo "无CSV文件或为空"
-      
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           
-          # 检查arbitrage目录是否有CSV文件
-          if [ -n "$(ls -A data/arbitrage/*.csv 2>/dev/null)" ]; then
-            git add data/arbitrage/ data/flags/{discount,premium}_status.json
-            if [ -n "$(git status --porcelain data/arbitrage/ data/flags/)" ]; then
-              echo "检测到ETF套利数据变化，准备提交..."
-              git commit -m "自动更新ETF套利数据 [定时]"
-              git push origin main
-              echo "commit_status=success" >> $GITHUB_OUTPUT
-              echo "✅ 文件已成功提交到Git仓库"
-            else
-              echo "ℹ️ ETF套利数据无变化，跳过提交"
-              echo "commit_status=skipped" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "ℹ️ data/arbitrage/ 目录为空，无需提交"
-            echo "commit_status=skipped" >> $GITHUB_OUTPUT
+          # 只添加套利相关文件
+          git add data/arbitrage/ data/flags/{discount,premium}_status.json
+          
+          # 检查暂存区是否有变化（关键修复）
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            echo "检测到ETF套利数据变化，准备提交..."
+            git commit -m "自动更新套利数据 [定时]" && git push origin main
           fi
-      
+
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_STATUS=${{ steps.commit_task.outputs.commit_status }} || 'n/a'
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/arbitrage/ | wc -l)
           
-          if [ "$COMMIT_STATUS" = "success" ]; then
-            MSG="✅ 【ETF套利计算（定时）】执行成功并提交"
-          elif [ "$COMMIT_STATUS" = "skipped" ]; then
-            MSG="ℹ️ 【ETF套利计算（定时）】执行成功但无变化"
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
+            MSG="✅ 【ETF套利计算（定时）】执行成功并已提交"
           else
-            MSG="⚠️ 【ETF套利计算（定时）】执行成功但提交失败"
+            MSG="ℹ️ 【ETF套利计算（定时）】执行成功但无新提交（可能数据无变化）"
           fi
           
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
@@ -329,46 +300,30 @@ jobs:
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/flags/ 目录状态:"
-          ls -la data/flags/
-          git status
-          echo "position_pushed文件内容:"
-          cat data/flags/position_pushed_$(TZ=Asia/Shanghai date '+%Y-%m-%d').txt || echo "文件不存在"
-      
       - name: 创建ETF仓位推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "执行完成" > "data/flags/position_pushed_${BEIJING_DATE}.txt"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           
           git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
-          if [ -n "$(git status --porcelain data/flags/position_pushed_${BEIJING_DATE}.txt)" ]; then
-            git commit -m "ETF仓位策略已推送标志 [定时]"
-            git push origin main
-            echo "commit_status=success" >> $GITHUB_OUTPUT
-            echo "✅ 推送标志文件已成功提交到Git仓库"
-          else
-            echo "ℹ️ 推送标志文件无变化，跳过提交"
-            echo "commit_status=skipped" >> $GITHUB_OUTPUT
+          # 检查暂存区是否有变化（关键修复）
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            git commit -m "ETF仓位策略已推送标志 [定时]" && git push origin main
           fi
       
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_STATUS=${{ steps.commit_task.outputs.commit_status }} || 'n/a'
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/flags/position_pushed_${BEIJING_DATE}.txt | wc -l)
           
-          if [ "$COMMIT_STATUS" = "success" ]; then
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
             MSG="✅ 【ETF仓位策略计算（定时）】执行成功并提交"
-          elif [ "$COMMIT_STATUS" = "skipped" ]; then
-            MSG="ℹ️ 【ETF仓位策略计算（定时）】执行成功但无变化"
           else
-            MSG="⚠️ 【ETF仓位策略计算（定时）】执行成功但提交失败"
+            MSG="ℹ️ 【ETF仓位策略计算（定时）】执行成功但无新提交（可能数据无变化）"
           fi
           
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
@@ -444,52 +399,27 @@ jobs:
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/all_etfs.csv 文件状态:"
-          ls -la data/
-          git status
-          echo "文件内容预览:"
-          head -n 3 data/all_etfs.csv || echo "文件为空或不存在"
-      
       - name: 提交ETF列表数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          # 检查文件是否存在且有变化
-          if [ -f "data/all_etfs.csv" ]; then
-            git add data/all_etfs.csv
-            if [ -n "$(git status --porcelain data/all_etfs.csv)" ]; then
-              echo "检测到ETF列表文件变化，准备提交..."
-              git commit -m "自动更新ETF列表 [定时]"
-              git push origin main
-              echo "commit_status=success" >> $GITHUB_OUTPUT
-              echo "✅ 文件已成功提交到Git仓库"
-            else
-              echo "ℹ️ ETF列表文件无变化，跳过提交"
-              echo "commit_status=skipped" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "❌ data/all_etfs.csv 文件不存在，无法提交"
-            echo "commit_status=failed" >> $GITHUB_OUTPUT
-            exit 1
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/all_etfs.csv
+          # 检查暂存区是否有变化（关键修复）
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            git commit -m "自动更新ETF列表 [定时]" && git push origin main
           fi
       
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_STATUS=${{ steps.commit_task.outputs.commit_status }} || 'n/a'
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/all_etfs.csv | wc -l)
           
-          if [ "$COMMIT_STATUS" = "success" ]; then
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
             MSG="✅ 【ETF列表更新（定时）】执行成功并提交"
-          elif [ "$COMMIT_STATUS" = "skipped" ]; then
-            MSG="ℹ️ 【ETF列表更新（定时）】执行成功但无变化"
           else
-            MSG="⚠️ 【ETF列表更新（定时）】执行成功但提交失败"
+            MSG="ℹ️ 【ETF列表更新（定时）】执行成功但无新提交（可能数据无变化）"
           fi
           
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
@@ -565,45 +495,17 @@ jobs:
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/flags/ 目录状态:"
-          ls -la data/flags/
-          git status
-          echo "文件内容预览:"
-          cat data/flags/yesno_*.txt 2>/dev/null || echo "无Yes/No文件或为空"
-      
-      - name: 提交数据变更
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          git add data/flags/yesno_*.txt
-          if [ -n "$(git status --porcelain data/flags/yesno_*.txt)" ]; then
-            echo "检测到Yes/No策略文件变化，准备提交..."
-            git commit -m "自动更新指数Yes/No策略 [定时]"
-            git push origin main
-            echo "commit_status=success" >> $GITHUB_OUTPUT
-            echo "✅ 文件已成功提交到Git仓库"
-          else
-            echo "ℹ️ Yes/No策略文件无变化，跳过提交"
-            echo "commit_status=skipped" >> $GITHUB_OUTPUT
-          fi
-      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_STATUS=${{ steps.commit_task.outputs.commit_status }} || 'n/a'
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/flags/yesno_*.txt | wc -l)
           
-          if [ "$COMMIT_STATUS" = "success" ]; then
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
             MSG="✅ 【指数Yes/No策略（定时）】执行成功并提交"
-          elif [ "$COMMIT_STATUS" = "skipped" ]; then
-            MSG="ℹ️ 【指数Yes/No策略（定时）】执行成功但无变化"
           else
-            MSG="⚠️ 【指数Yes/No策略（定时）】执行成功但提交失败"
+            MSG="ℹ️ 【指数Yes/No策略（定时）】执行成功但无新提交（可能数据无变化）"
           fi
           
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
@@ -707,48 +609,29 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
       
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/all_stocks.csv 文件状态:"
-          ls -la data/
-          git status
-          echo "文件内容预览:"
-          head -n 3 data/all_stocks.csv || echo "文件为空或不存在"
-      
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "执行完成" > "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          # 检查文件是否存在且有变化
-          git add data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt data/all_stocks.csv
-          if [ -n "$(git status --porcelain data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt data/all_stocks.csv)" ]; then
-            echo "检测到个股趋势策略文件变化，准备提交..."
-            git commit -m "个股趋势策略已推送标志 [定时]"
-            git push origin main
-            echo "commit_status=success" >> $GITHUB_OUTPUT
-            echo "✅ 文件已成功提交到Git仓库"
-          else
-            echo "ℹ️ 个股趋势策略文件无变化，跳过提交"
-            echo "commit_status=skipped" >> $GITHUB_OUTPUT
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt" data/all_stocks.csv
+          # 检查暂存区是否有变化（关键修复）
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            git commit -m "个股趋势策略已推送标志 [定时]" && git push origin main
           fi
       
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_STATUS=${{ steps.commit_task.outputs.commit_status }} || 'n/a'
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt data/all_stocks.csv | wc -l)
           
-          if [ "$COMMIT_STATUS" = "success" ]; then
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
             MSG="✅ 【个股趋势策略（定时）】执行成功并提交"
-          elif [ "$COMMIT_STATUS" = "skipped" ]; then
-            MSG="ℹ️ 【个股趋势策略（定时）】执行成功但无变化"
           else
-            MSG="⚠️ 【个股趋势策略（定时）】执行成功但提交失败"
+            MSG="ℹ️ 【个股趋势策略（定时）】执行成功但无新提交（可能数据无变化）"
           fi
           
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
@@ -803,6 +686,17 @@ jobs:
         run: |
           mkdir -p data/{daily,flags,logs} && chmod -R 777 data/
       
+      - name: 检查交易日
+        id: check_trading_day
+        run: |
+          IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
+          echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
+      
+      - name: 跳过非交易日
+        if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
+      
       - name: 执行股票日线数据爬取（定时）
         id: execute_task
         if: env.skip_execution != 'true'
@@ -829,15 +723,6 @@ jobs:
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/daily/ 目录状态:"
-          ls -la data/daily/ | head -n 20
-          echo "已爬取股票数量: $(ls -1 data/daily/*.csv 2>/dev/null | wc -l)"
-          echo "最近提交的文件:"
-          git log -1 --name-status HEAD -- data/daily/
       
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK

@@ -96,15 +96,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF列表更新（手动）】执行成功\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF列表更新（手动）】执行成功\北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF列表更新（手动）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF列表更新（手动）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # 指数Yes/No 策略（手动）
   etf-yesno-manual:
     name: 指数Yes/No策略（手动）
@@ -167,15 +165,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【指数Yes/No策略（手动）】执行成功\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【指数Yes/No策略（手动）】执行成功\北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【指数Yes/No策略（手动）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【指数Yes/No策略（手动）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
  # 个股趋势策略（手动）
   stock-fourty-manual:
     name: 个股趋势策略（手动）
@@ -258,8 +254,7 @@ jobs:
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略（手动）】执行${STATUS}\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略（手动）】执行${STATUS}\北京时间: ${BEIJING_TIME}\"}}"
   # 股票日线数据爬取（手动）
   stock-crawler-manual:
     name: 股票日线数据爬取（手动）
@@ -342,8 +337,7 @@ jobs:
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取（手动）】执行${STATUS}\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取（手动）】执行${STATUS}\北京时间: ${BEIJING_TIME}\"}}"
   # ETF日线数据爬取（手动）
   crawl-etf-daily-manual:
     name: ETF日线数据爬取（手动）
@@ -423,15 +417,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF日线数据爬取（手动）】执行成功\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF日线数据爬取（手动）】执行成功\北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF日线数据爬取（手动）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF日线数据爬取（手动）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ETF套利计算（手动）
   calculate-arbitrage-manual:
     name: ETF套利计算（手动）
@@ -501,15 +493,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF套利计算（手动）】执行成功\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF套利计算（手动）】执行成功\北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF套利计算（手动）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF套利计算（手动）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ETF仓位策略计算（手动）
   calculate-position-manual:
     name: ETF仓位策略计算（手动）
@@ -590,15 +580,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF仓位策略计算（手动）】执行成功\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF仓位策略计算（手动）】执行成功\北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ========================
   # 清理任务 - 每个任务都有独立Job
   # ========================
@@ -633,8 +621,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
   # 手动清理ETF套利数据
   manual-clean-arbitrage-data:
     name: 手动清理ETF套利数据
@@ -666,8 +653,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF套利数据文件已清理完成\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF套利数据文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
   # 手动清理ETF交易记录
   manual-clean-trade-records:
     name: 手动清理ETF交易记录
@@ -699,8 +685,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF交易记录文件已清理完成\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF交易记录文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
   # 手动清理纯数字CSV
   manual-clean-numeric-csv:
     name: 手动清理纯数字CSV
@@ -732,8 +717,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
   # 显示AkShare信息
   show-akshare-info:
     name: 显示AkShare信息

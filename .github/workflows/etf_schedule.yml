@@ -22,7 +22,6 @@ on:
           - 'etf_yesno'
           - 'stock_fourty'
           - 'stock_crawler'
-
 jobs:
   # ========================
   # 定时任务 - 每个任务都有独立Job
@@ -69,17 +68,21 @@ jobs:
           skip-check: "env.skip_execution != 'true'"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【ETF日线数据爬取（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【ETF日线数据爬取（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
@@ -113,17 +116,21 @@ jobs:
           command: "python main.py"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【ETF套利计算（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【ETF套利计算（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
@@ -175,17 +182,21 @@ jobs:
           echo "执行完成" > "data/flags/position_pushed_${BEIJING_DATE}.txt"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【ETF仓位策略计算（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【ETF仓位策略计算（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
@@ -219,22 +230,26 @@ jobs:
           command: "python main.py"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【ETF列表更新（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【ETF列表更新（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
-  # 指数Yes/No 策略（定时）
+  # 指数Yes/No 筁略（定时）
   etf-yesno-schedule:
     name: 指数Yes/No 策略（定时）
     runs-on: ubuntu-latest
@@ -263,17 +278,21 @@ jobs:
           command: "python main.py"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【指数Yes/No策略（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【指数Yes/No策略（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
@@ -352,19 +371,21 @@ jobs:
           echo "执行完成" > "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
-          EMOJI=${STATUS == 'success' && '✅' || '❌'}
-          MSG="$EMOJI 【个股趋势策略（定时）】执行成功"
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【个股趋势策略（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【个股趋势策略（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
@@ -411,17 +432,21 @@ jobs:
           skip-check: "env.skip_execution != 'true'"
       
       - name: 发送完成通知
-        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        if: steps.execute_task.outputs.task_status == 'success'
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【股票日线数据爬取（定时）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
-        if: failure() && env.WECOM_WEBHOOK
+        if: failure()
+        env:
+          TZ: Asia/Shanghai
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          BEIJING_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           MSG="❌ 【股票日线数据爬取（定时）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"

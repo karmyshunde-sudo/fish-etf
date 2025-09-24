@@ -67,11 +67,20 @@ jobs:
           head -n 3 data/all_etfs.csv || echo "文件为空或不存在"
       
       - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "ETF列表更新（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "WECOM_WEBHOOK"
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【ETF列表更新（手动）】执行成功"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="❌ 【ETF列表更新（手动）】执行失败"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # 指数Yes/No 策略（手动）
   etf-yesno-manual:
@@ -121,11 +130,20 @@ jobs:
           head -n 3 data/flags/*.txt 2>/dev/null || echo "无标志文件或为空"
       
       - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "指数Yes/No策略（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "WECOM_ETFYESNO"
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【指数Yes/No策略（手动）】执行成功"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="❌ 【指数Yes/No策略（手动）】执行失败"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # 个股趋势策略（手动）
   stock-fourty-manual:
@@ -151,7 +169,7 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
           echo "正在执行: 个股趋势策略（手动）"
           echo "日志文件: $LOG_FILE"
@@ -185,12 +203,15 @@ jobs:
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "执行完成" > "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
       
-      - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "个股趋势策略（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "STOCK_WEBHOOK"
+      - name: 发送策略通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
+          EMOJI=${STATUS == 'success' && '✅' || '❌'}
+          MSG="$EMOJI 【个股趋势策略（手动）】执行${STATUS}"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ETF日线数据爬取（手动）
   crawl-etf-daily-manual:
@@ -252,11 +273,20 @@ jobs:
           echo "已爬取ETF数量: $(ls -1 data/etf_daily/*.csv 2>/dev/null | wc -l)"
       
       - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "ETF日线数据爬取（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "WECOM_WEBHOOK"
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【ETF日线数据爬取（手动）】执行成功"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="❌ 【ETF日线数据爬取（手动）】执行失败"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ETF套利计算（手动）
   calculate-arbitrage-manual:
@@ -306,11 +336,20 @@ jobs:
           head -n 3 data/arbitrage/*.csv 2>/dev/null || echo "无CSV文件或为空"
       
       - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "ETF套利计算（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "WECOM_WEBHOOK"
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【ETF套利计算（手动）】执行成功"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="❌ 【ETF套利计算（手动）】执行失败"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ETF仓位策略计算（手动）
   calculate-position-manual:
@@ -378,8 +417,17 @@ jobs:
           echo "执行完成" > "data/flags/position_pushed_${BEIJING_DATE}.txt"
       
       - name: 发送通知
-        uses: ./.github/actions/send_notification
-        with:
-          task-name: "ETF仓位策略计算（手动）"
-          status: ${{ steps.execute_task.outputs.task_status }}
-          webhook-secret: "WECOM_WEBHOOK"
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【ETF仓位策略计算（手动）】执行成功"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="❌ 【ETF仓位策略计算（手动）】执行失败"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"

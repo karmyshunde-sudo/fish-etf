@@ -48,6 +48,13 @@ jobs:
           # 执行获取信息
           python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
       
+      - name: 检查文件状态（诊断）
+        run: |
+          echo "检查 data/flags/ 目录状态:"
+          ls -la data/flags/ 2>/dev/null || echo "目录不存在"
+          echo "文件内容预览:"
+          head -n 3 data/flags/*.txt 2>/dev/null || echo "无标志文件或为空"
+      
       - name: 发送完成通知
         if: success()
         run: |
@@ -92,7 +99,6 @@ jobs:
           rm -rf data/etf_daily/*.csv
       
       - name: 检查文件状态（诊断）
-        if: success()
         run: |
           echo "清理后 data/etf_daily/ 目录状态:"
           ls -la data/etf_daily/ 2>/dev/null || echo "目录不存在或为空"
@@ -136,7 +142,6 @@ jobs:
           rm -rf data/daily/*.csv
       
       - name: 检查文件状态（诊断）
-        if: success()
         run: |
           echo "清理后 data/daily/ 目录状态:"
           ls -la data/daily/ 2>/dev/null || echo "目录不存在或为空"
@@ -180,7 +185,6 @@ jobs:
           rm -rf data/arbitrage/*.csv
       
       - name: 检查文件状态（诊断）
-        if: success()
         run: |
           echo "清理后 data/arbitrage/ 目录状态:"
           ls -la data/arbitrage/ 2>/dev/null || echo "目录不存在或为空"
@@ -224,7 +228,6 @@ jobs:
           rm -f data/trade_records.csv
       
       - name: 检查文件状态（诊断）
-        if: success()
         run: |
           echo "清理后 data/trade_records.csv 状态:"
           ls -la data/trade_records.csv 2>/dev/null || echo "文件不存在"
@@ -268,7 +271,6 @@ jobs:
           find data/ -type f -name '[0-9]*.csv' -delete
       
       - name: 检查文件状态（诊断）
-        if: success()
         run: |
           echo "清理后纯数字CSV文件状态:"
           find data/ -type f -name '[0-9]*.csv' || echo "无纯数字CSV文件"

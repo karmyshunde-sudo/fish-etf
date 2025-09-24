@@ -19,7 +19,7 @@ _file_count = 0
 
 def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     """
-    批量提交文件到Git仓库（每10个文件提交一次）
+    批量提交文件到Git仓库（每10个文件提交一次），特殊处理基础信息文件
     
     Args:
         file_path: 要提交的文件路径
@@ -31,6 +31,10 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     global _file_count
     
     try:
+        # 检查是否是基础信息文件 - 立即提交
+        if "all_stocks.csv" in file_path:
+            return _immediate_commit(file_path, commit_message or "feat: 更新股票基础信息 [skip ci]")
+        
         # 递增文件计数器
         _file_count += 1
         logger.debug(f"文件计数器: {_file_count}")
@@ -57,11 +61,15 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
         
         # 检查是否达到10个文件或这是最后一个文件
         if _file_count % 10 == 0 or commit_message == "LAST_FILE":
-            # 创建提交消息
+            # 创建提交消息 - 添加 [skip ci] 标记
             if commit_message == "LAST_FILE":
-                commit_message = f"feat: 批量提交最后一批文件 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                commit_message = f"feat: 批量提交最后一批文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
             elif not commit_message:
-                commit_message = f"feat: 批量提交文件 (第 {_file_count//10 + 1} 批) [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                commit_message = f"feat: 批量提交文件 (第 {_file_count//10 + 1} 批) [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            else:
+                # 确保所有自定义提交消息也包含 [skip ci]
+                if "[skip ci]" not in commit_message:
+                    commit_message = f"{commit_message} [skip ci]"
             
             # 提交更改
             subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
@@ -88,6 +96,46 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     
     except subprocess.CalledProcessError as e:
         logger.error(f"Git操作失败: {str(e)}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"提交文件失败: {str(e)}", exc_info=True)
+        return False
+
+def _immediate_commit(file_path: str, commit_message: str) -> bool:
+    """立即提交文件，不等待计数器，并添加 [skip ci]"""
+    try:
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        relative_path = os.path.relpath(file_path, repo_root)
+        
+        # 在GitHub Actions环境中设置Git用户信息
+        if 'GITHUB_ACTIONS' in os.environ:
+            actor = os.environ.get('GITHUB_ACTOR', 'fish-etf-bot')
+            email = f"{actor}@users.noreply.github.com"
+            subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
+            subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+        
+        # 添加并提交
+        subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
+        subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
+        
+        # 推送
+        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+        if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
+            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
+        
+        try:
+            subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], check=True, cwd=repo_root)
+        except subprocess.CalledProcessError:
+            pass
+        
+        subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+        
+        logger.info(f"✅ 立即提交成功: {commit_message}")
+        return True
+    
+    except subprocess.CalledProcessError as e:
+        logger.error(f"立即提交失败: {str(e)}", exc_info=True)
         return False
     except Exception as e:
         logger.error(f"提交文件失败: {str(e)}", exc_info=True)

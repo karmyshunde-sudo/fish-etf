@@ -91,8 +91,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF日线数据爬取（定时）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF日线数据爬取（定时）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ETF套利计算（定时）
   calculate-arbitrage-schedule:
     name: ETF套利计算（定时）
@@ -162,8 +161,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF套利计算（定时）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF套利计算（定时）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ETF仓位策略计算（定时）
   calculate-position-schedule:
     name: ETF仓位策略计算（定时）
@@ -244,8 +242,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（定时）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（定时）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # ETF列表更新（定时）
   update-etf-list-schedule:
     name: ETF列表更新（定时）
@@ -314,8 +311,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF列表更新（定时）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF列表更新（定时）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # 指数Yes/No 策略（定时）
   etf-yesno-schedule:
     name: 指数Yes/No 策略（定时）
@@ -378,8 +374,7 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【指数Yes/No策略（定时）】执行失败\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【指数Yes/No策略（定时）】执行失败\北京时间: ${BEIJING_TIME}\"}}"
   # 个股趋势策略（定时）
   stock-fourty-schedule:
     name: 个股趋势策略 (TickTen) - 定时
@@ -476,8 +471,7 @@ jobs:
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略（定时）】执行${STATUS}\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略（定时）】执行${STATUS}\北京时间: ${BEIJING_TIME}\"}}"
   # 股票日线数据爬取（定时）
   stock-crawler-schedule:
     name: 股票日线数据爬取（定时）
@@ -560,5 +554,4 @@ jobs:
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取（定时）】执行${STATUS}\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取（定时）】执行${STATUS}\北京时间: ${BEIJING_TIME}\"}}"

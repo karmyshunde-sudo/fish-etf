@@ -85,8 +85,8 @@ jobs:
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           echo "检查 data/all_etfs.csv 文件状态:"
-          ls -la data/
-          git status
+          ls -la data/all_etfs.csv
+          git status -- data/all_etfs.csv
           echo "文件内容预览:"
           head -n 3 data/all_etfs.csv || echo "文件为空或不存在"
       
@@ -275,8 +275,8 @@ jobs:
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           echo "检查 data/all_stocks.csv 文件状态:"
-          ls -la data/
-          git status
+          ls -la data/all_stocks.csv
+          git status -- data/all_stocks.csv
           echo "文件内容预览:"
           head -n 3 data/all_stocks.csv || echo "文件为空或不存在"
       
@@ -387,6 +387,21 @@ jobs:
           echo "最近提交的文件:"
           git log -1 --name-status HEAD -- data/daily/
       
+      - name: 提交股票日线数据
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/daily/*.csv
+          if [ -n "$(git status --porcelain data/daily/*.csv)" ]; then
+            echo "检测到股票日线数据变化，准备提交..."
+            git commit -m "自动更新股票日线数据 [手动]"
+            git push origin main
+            echo "✅ 股票日线数据已成功提交"
+          else
+            echo "ℹ️ 股票日线数据无变化，跳过提交"
+          fi
+      
       - name: 发送爬取通知
         if: env.WECOM_WEBHOOK
         run: |
@@ -490,6 +505,21 @@ jobs:
           echo "最近提交的文件:"
           git log -1 --name-status HEAD -- data/etf_daily/
       
+      - name: 提交ETF日线数据
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/etf_daily/*.csv
+          if [ -n "$(git status --porcelain data/etf_daily/*.csv)" ]; then
+            echo "检测到ETF日线数据变化，准备提交..."
+            git commit -m "手动更新ETF日线数据 [${{ github.event.inputs.task }}]"
+            git push origin main
+            echo "✅ ETF日线数据已成功提交"
+          else
+            echo "ℹ️ ETF日线数据无变化，跳过提交"
+          fi
+      
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
@@ -582,7 +612,7 @@ jobs:
         run: |
           echo "检查 data/arbitrage/ 目录状态:"
           ls -la data/arbitrage/
-          git status
+          git status -- data/arbitrage/ data/flags/{discount,premium}_status.json
           echo "部分文件内容预览:"
           head -n 3 data/arbitrage/*.csv 2>/dev/null || echo "无CSV文件或为空"
       
@@ -701,7 +731,7 @@ jobs:
         run: |
           echo "检查 data/flags/ 目录状态:"
           ls -la data/flags/
-          git status
+          git status -- data/flags/
           echo "position_pushed文件内容:"
           cat data/flags/position_pushed_$(TZ=Asia/Shanghai date '+%Y-%m-%d').txt || echo "文件不存在"
       

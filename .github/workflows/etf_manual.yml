@@ -1,4 +1,4 @@
-name: 手动任务
+name: 手动任务-清理数据文件
 on:
   workflow_dispatch:
     inputs:
@@ -8,25 +8,36 @@ on:
         type: choice
         options:
           - 'update_etf_list'
+          - 'etf_yesno'
+          - 'stock_fourty'
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
           - 'calculate_position'
-          - 'etf_yesno'
-          - 'stock_fourty'
-          - 'stock_crawler'
-
+          - 'clean_daily_data'
+          - 'clean_arbitrage_data'
+          - 'clean_trade_records'
+          - 'clean_numeric_csv'
+          - 'show_akshare_info'
+      interface_name:
+        description: 'AkShare接口名称（可选）'
+        required: false
+        type: string
+        default: ''
 jobs:
   # ========================
   # 手动任务 - 每个任务都有独立Job
   # ========================
   # ETF列表更新（手动）
   update-etf-list-manual:
-    name: ETF列表更新（手动）
+    name: ETF列表更新
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'update_etf_list'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -34,22 +45,28 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data/
       - name: 执行ETF列表更新
-        id: execute_task
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TASK: 'update_etf_list'
+          TZ: Asia/Shanghai
+          TASK: 'update_etf_list'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/update_etf_list_${BEIJING_TIME}.log"
-          echo "正在执行: ETF列表更新（手动）"
+          echo "正在执行: ETF列表更新"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"
-          
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -57,39 +74,37 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
-      - name: 检查文件状态（诊断）
+      - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          echo "检查 data/all_etfs.csv 文件状态:"
-          ls -la data/all_etfs.csv 2>/dev/null || echo "文件不存在"
-          echo "文件内容预览:"
-          head -n 3 data/all_etfs.csv || echo "文件为空或不存在"
-      
-      - name: 发送通知
-        if: success()
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/all_etfs.csv && [ -n "$(git diff --cached --name-only data/all_etfs.csv)" ] && 
+          git commit -m "手动更新ETF列表" && git push origin main
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="✅ 【ETF列表更新（手动）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-      
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF列表更新】执行成功\
+北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
-        if: failure()
+        if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="❌ 【ETF列表更新（手动）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-
-  # 指数Yes/No 策略（手动）
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF列表更新】执行失败\
+北京时间: ${BEIJING_TIME}\"}}"
+  # ETF Yes/No 策略（手动）
   etf-yesno-manual:
-    name: 指数Yes/No策略（手动）
+    name: ETF Yes/No 策略
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'etf_yesno'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -97,22 +112,28 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
-      - name: 执行指数Yes/No策略
-        id: execute_task
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data/
+      - name: 执行ETF Yes/No 策略
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
-          TASK: 'etf_yesno'
+          TZ: Asia/Shanghai
+          TASK: 'etf_yesno'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
-          echo "正在执行: 指数Yes/No 策略（手动）"
+          echo "正在执行: ETF Yes/No 策略"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"
-          
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -120,39 +141,31 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/flags/ 目录状态:"
-          ls -la data/flags/ 2>/dev/null || echo "目录不存在"
-          echo "文件内容预览:"
-          head -n 3 data/flags/*.txt 2>/dev/null || echo "无标志文件或为空"
-      
-      - name: 发送通知
-        if: success()
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="✅ 【指数Yes/No策略（手动）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-      
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【ETF Yes/No 策略】执行成功\
+北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
-        if: failure()
+        if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="❌ 【指数Yes/No策略（手动）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF Yes/No 策略】执行失败\
+北京时间: ${BEIJING_TIME}\"}}"
   # 个股趋势策略（手动）
   stock-fourty-manual:
-    name: 个股趋势策略（手动）
+    name: 个股趋势策略 (TickTen)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_fourty'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -160,67 +173,60 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
-      - name: 执行个股趋势策略
-        id: execute_task
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data/
+      - name: 执行个股策略
         env:
-          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          TZ: Asia/Shanghai
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_tickten_${BEIJING_TIME}.log"
-          echo "正在执行: 个股趋势策略（手动）"
+          echo "正在执行: 个股趋势策略 (TickTen)"
           echo "日志文件: $LOG_FILE"
-          
-          if [ -f "stock/tickten.py" ]; then
-            echo "找到策略文件: stock/tickten.py"
-            python -m stock.tickten 2>&1 | tee "$LOG_FILE"
+          # 执行策略（stock_tickten.py在根目录）
+          if [ -f "stock_tickten.py" ]; then
+            echo "找到策略文件: stock_tickten.py"
+            python stock_tickten.py 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到个股趋势策略文件 stock/tickten.py"
+            echo "错误: 未找到个股趋势策略文件 stock_tickten.py"
             exit 1
           fi
-          
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/all_stocks.csv 文件状态:"
-          ls -la data/all_stocks.csv 2>/dev/null || echo "文件不存在"
-          echo "文件内容预览:"
-          head -n 3 data/all_stocks.csv || echo "文件为空或不存在"
-      
-      - name: 创建推送标志
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
-          echo "执行完成" > "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt"
-      
       - name: 发送策略通知
         if: env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
-          MSG="$EMOJI 【个股趋势策略（手动）】执行${STATUS}"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-
-  # ETF日线数据爬取（手动）
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【个股趋势策略】执行${STATUS}\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 日线数据爬取（手动）
   crawl-etf-daily-manual:
-    name: ETF日线数据爬取（手动）
+    name: 日线数据爬取
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'crawl_etf_daily'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -228,35 +234,39 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
       - name: 检查交易日
         id: check_trading_day
         run: |
           IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
           echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
           echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
       - name: 跳过非交易日
         if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
-      - name: 执行ETF日线数据爬取
-        id: execute_task
+      - name: 执行日线数据爬取
         if: env.skip_execution != 'true'
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TASK: 'crawl_etf_daily'
+          TZ: Asia/Shanghai
+          TASK: 'crawl_etf_daily'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/crawl_etf_daily_${BEIJING_TIME}.log"
-          echo "正在执行: ETF日线数据爬取（手动）"
+          echo "正在执行: 日线数据爬取"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"
-          
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -264,38 +274,37 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
+      - name: 提交数据变更
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
-          echo "检查 data/etf_daily/ 目录状态:"
-          ls -la data/etf_daily/ 2>/dev/null || echo "目录不存在或为空"
-          echo "已爬取ETF数量: $(ls -1 data/etf_daily/*.csv 2>/dev/null | wc -l)"
-      
-      - name: 发送通知
-        if: success()
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
+          git commit -m "手动更新ETF日线数据" && git push origin main
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="✅ 【ETF日线数据爬取（手动）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-      
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【日线数据爬取】执行成功\
+北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
-        if: failure()
+        if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="❌ 【ETF日线数据爬取（手动）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-
-  # ETF套利计算（手动）
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【日线数据爬取】执行失败\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 套利计算（手动）
   calculate-arbitrage-manual:
-    name: ETF套利计算（手动）
+    name: 套利计算
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'calculate_arbitrage'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -303,22 +312,28 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
-      - name: 执行ETF套利计算
-        id: execute_task
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{arbitrage,flags,logs} && chmod -R 777 data/
+      - name: 执行套利计算
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TASK: 'calculate_arbitrage'
+          TZ: Asia/Shanghai
+          TASK: 'calculate_arbitrage'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_arbitrage_${BEIJING_TIME}.log"
-          echo "正在执行: ETF套利计算（手动）"
+          echo "正在执行: 套利计算"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"
-          
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -326,39 +341,38 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
-      - name: 检查文件状态（诊断）
+      - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          echo "检查 data/arbitrage/ 目录状态:"
-          ls -la data/arbitrage/ 2>/dev/null || echo "目录不存在"
-          echo "部分文件内容预览:"
-          head -n 3 data/arbitrage/*.csv 2>/dev/null || echo "无CSV文件或为空"
-      
-      - name: 发送通知
-        if: success()
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
+          [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
+          git commit -m "手动更新套利数据" && git push origin main
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="✅ 【ETF套利计算（手动）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-      
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【套利计算】执行成功\
+北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
-        if: failure()
+        if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="❌ 【ETF套利计算（手动）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-
-  # ETF仓位策略计算（手动）
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【套利计算】执行失败\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 仓位策略计算（手动）
   calculate-position-manual:
-    name: ETF仓位策略计算（手动）
+    name: 仓位策略计算
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'calculate_position'
     permissions:
       contents: write
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -366,34 +380,38 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
-      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data/
       - name: 检查推送标志
         id: check_flags
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "position_pushed=$( [ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
-      
       - name: 跳过已推送任务
         if: steps.check_flags.outputs.position_pushed == 'true'
         run: |
           echo "skip_execution=true" >> $GITHUB_ENV
-      
-      - name: 执行ETF仓位策略计算
-        id: execute_task
+      - name: 执行仓位策略计算
         if: env.skip_execution != 'true'
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TASK: 'calculate_position'
+          TZ: Asia/Shanghai
+          TASK: 'calculate_position'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_position_${BEIJING_TIME}.log"
-          echo "正在执行: ETF仓位策略计算（手动）"
+          echo "正在执行: 仓位策略计算"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"
-          
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -401,33 +419,204 @@ jobs:
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
-      
-      - name: 检查文件状态（诊断）
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          echo "检查 data/flags/ 目录状态:"
-          ls -la data/flags/ 2>/dev/null || echo "目录不存在"
-          echo "position_pushed文件内容:"
-          cat data/flags/position_pushed_$(TZ=Asia/Shanghai date '+%Y-%m-%d').txt 2>/dev/null || echo "文件不存在"
-      
       - name: 创建推送标志
         if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "执行完成" > "data/flags/position_pushed_${BEIJING_DATE}.txt"
-      
-      - name: 发送通知
-        if: success()
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
+          git commit -m "仓位策略已推送标志 [手动]" && git push origin main
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="✅ 【ETF仓位策略计算（手动）】执行成功"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
-      
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【仓位策略计算】执行成功\
+北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
-        if: failure()
+        if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          MSG="❌ 【ETF仓位策略计算（手动）】执行失败"
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【仓位策略计算】执行失败\
+北京时间: ${BEIJING_TIME}\"}}"
+  # ========================
+  # 清理任务 - 每个任务都有独立Job
+  # ========================
+  # 手动清理日线数据
+  manual-clean-daily-data:
+    name: 手动清理日线数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_daily_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理日线数据
+        run: |
+          echo "删除 data/etf_daily/*.csv"
+          rm -rf data/etf_daily/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/etf_daily/ && git commit -m "【手动清理】清除ETF日线数据文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 手动清理套利数据
+  manual-clean-arbitrage-data:
+    name: 手动清理套利数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_arbitrage_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理套利数据
+        run: |
+          echo "删除 data/arbitrage/*.csv"
+          rm -rf data/arbitrage/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/arbitrage/ && git commit -m "【手动清理】清除套利数据文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】套利数据文件已清理完成\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 手动清理交易记录
+  manual-clean-trade-records:
+    name: 手动清理交易记录
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_trade_records'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理交易记录
+        run: |
+          echo "删除 data/trade_records.csv"
+          rm -f data/trade_records.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/trade_records.csv && git commit -m "【手动清理】清除交易记录文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】交易记录文件已清理完成\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 手动清理纯数字CSV
+  manual-clean-numeric-csv:
+    name: 手动清理纯数字CSV
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_numeric_csv'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理纯数字CSV
+        run: |
+          echo "删除纯数字CSV文件"
+          find data/ -type f -name '[0-9]*.csv' -delete
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add -u data/ && git commit -m "【手动清理】清除纯数字CSV文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\
+北京时间: ${BEIJING_TIME}\"}}"
+  # 显示AkShare信息
+  show-akshare-info:
+    name: 显示AkShare信息
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt || echo "警告: requirements.txt 文件不存在"
+      - name: 获取AkShare信息
+        run: |
+          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+          python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
+      - name: 提交信息文件
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main
+      - name: 发送完成通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+          MSG="✅ AkShare信息已生成"
+          [ -n "$INTERFACE_NAME" ] && MSG="✅ 已查询AkShare接口信息: $INTERFACE_NAME"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\
+北京时间: ${BEIJING_TIME}\"}}"

@@ -86,6 +86,26 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
           git commit -m "自动更新ETF日线数据 [定时]" && git push origin main
+      - name: 清理无关变更
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF套利数据
+          if [ -d "data/arbitrage" ]; then
+            git restore --staged data/arbitrage/ 2>/dev/null || true
+            git restore data/arbitrage/ 2>/dev/null || true
+          fi
+          
+          # 恢复股票数据
+          if [ -d "data/daily" ]; then
+            git restore --staged data/daily/ 2>/dev/null || true
+            git restore data/daily/ 2>/dev/null || true
+            git restore --staged data/all_stocks.csv 2>/dev/null || true
+            git restore data/all_stocks.csv 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "ETF日线数据变更："
+          git status -- data/etf_daily/
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -156,6 +176,26 @@ jobs:
           git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
           [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
           git commit -m "自动更新ETF套利数据 [定时]" && git push origin main
+      - name: 清理无关变更
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF日线数据
+          if [ -d "data/etf_daily" ]; then
+            git restore --staged data/etf_daily/ 2>/dev/null || true
+            git restore data/etf_daily/ 2>/dev/null || true
+          fi
+          
+          # 恢复股票数据
+          if [ -d "data/daily" ]; then
+            git restore --staged data/daily/ 2>/dev/null || true
+            git restore data/daily/ 2>/dev/null || true
+            git restore --staged data/all_stocks.csv 2>/dev/null || true
+            git restore data/all_stocks.csv 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "ETF套利数据变更："
+          git status -- data/arbitrage/ data/flags/
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -237,6 +277,32 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
           git commit -m "ETF仓位策略已推送标志 [定时]" && git push origin main
+      - name: 清理无关变更
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF日线数据
+          if [ -d "data/etf_daily" ]; then
+            git restore --staged data/etf_daily/ 2>/dev/null || true
+            git restore data/etf_daily/ 2>/dev/null || true
+          fi
+          
+          # 恢复ETF套利数据
+          if [ -d "data/arbitrage" ]; then
+            git restore --staged data/arbitrage/ 2>/dev/null || true
+            git restore data/arbitrage/ 2>/dev/null || true
+          fi
+          
+          # 恢复股票数据
+          if [ -d "data/daily" ]; then
+            git restore --staged data/daily/ 2>/dev/null || true
+            git restore data/daily/ 2>/dev/null || true
+            git restore --staged data/all_stocks.csv 2>/dev/null || true
+            git restore data/all_stocks.csv 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "ETF仓位策略变更："
+          git status -- data/flags/
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -306,6 +372,32 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/all_etfs.csv && [ -n "$(git diff --cached --name-only data/all_etfs.csv)" ] && 
           git commit -m "自动更新ETF列表 [定时]" && git push origin main
+      - name: 清理无关变更
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF日线数据
+          if [ -d "data/etf_daily" ]; then
+            git restore --staged data/etf_daily/ 2>/dev/null || true
+            git restore data/etf_daily/ 2>/dev/null || true
+          fi
+          
+          # 恢复ETF套利数据
+          if [ -d "data/arbitrage" ]; then
+            git restore --staged data/arbitrage/ 2>/dev/null || true
+            git restore data/arbitrage/ 2>/dev/null || true
+          fi
+          
+          # 恢复股票数据
+          if [ -d "data/daily" ]; then
+            git restore --staged data/daily/ 2>/dev/null || true
+            git restore data/daily/ 2>/dev/null || true
+            git restore --staged data/all_stocks.csv 2>/dev/null || true
+            git restore data/all_stocks.csv 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "ETF列表更新变更："
+          git status -- data/all_etfs.csv
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
@@ -464,6 +556,24 @@ jobs:
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt" data/all_stocks.csv
           git commit -m "个股趋势策略已推送标志 [定时]" && git push origin main
+      - name: 清理无关变更
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF日线数据
+          if [ -d "data/etf_daily" ]; then
+            git restore --staged data/etf_daily/ 2>/dev/null || true
+            git restore data/etf_daily/ 2>/dev/null || true
+          fi
+          
+          # 恢复ETF套利数据
+          if [ -d "data/arbitrage" ]; then
+            git restore --staged data/arbitrage/ 2>/dev/null || true
+            git restore data/arbitrage/ 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "个股趋势策略变更："
+          git status -- data/flags/ data/all_stocks.csv
       - name: 发送策略通知
         if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
         run: |
@@ -547,6 +657,24 @@ jobs:
           else
             echo "没有数据变化，无需提交"
           fi
+      - name: 清理无关变更
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          # 恢复ETF日线数据
+          if [ -d "data/etf_daily" ]; then
+            git restore --staged data/etf_daily/ 2>/dev/null || true
+            git restore data/etf_daily/ 2>/dev/null || true
+          fi
+          
+          # 恢复ETF套利数据
+          if [ -d "data/arbitrage" ]; then
+            git restore --staged data/arbitrage/ 2>/dev/null || true
+            git restore data/arbitrage/ 2>/dev/null || true
+          fi
+          
+          # 显示当前任务相关的变更
+          echo "股票日线数据变更："
+          git status -- data/daily/ data/all_stocks.csv
       - name: 发送爬取通知
         if: env.skip_execution != 'true' && env.WECOM_WEBHOOK
         run: |

@@ -1,0 +1,110 @@
+name: ETF仓位策略计算定时任务
+on:
+  schedule:
+    - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (ETF仓位策略)
+jobs:
+  calculate-position-schedule:
+    name: ETF仓位策略计算（定时）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && github.event.schedule == '30 5 * * 1-5'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          echo "当前工作目录: $(pwd)"
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la
+            exit 1
+          fi
+      
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data/
+      
+      - name: 检查推送标志
+        id: check_flags
+        run: |
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
+          echo "position_pushed=$( [ -f "data/flags/position_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
+      
+      - name: 跳过已推送任务
+        if: steps.check_flags.outputs.position_pushed == 'true'
+        run: |
+          echo "skip_execution=true" >> $GITHUB_ENV
+      
+      - name: 执行ETF仓位策略计算（定时）
+        id: execute_task
+        if: env.skip_execution != 'true'
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          TZ: Asia/Shanghai
+          TASK: 'calculate_position'
+        run: |
+          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/calculate_position_${BEIJING_TIME}.log"
+          echo "正在执行: ETF仓位策略计算（定时）"
+          echo "日志文件: $LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+          [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
+      
+      - name: 创建ETF仓位推送标志
+        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        run: |
+          BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
+          echo "执行完成" > "data/flags/position_pushed_${BEIJING_DATE}.txt"
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add "data/flags/position_pushed_${BEIJING_DATE}.txt"
+          git commit -m "ETF仓位策略已推送标志 [定时]" && git push origin main
+      
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          # 检查是否有新提交
+          HAS_NEW_COMMITS=$(git log -1 --since="1 hour ago" -- data/flags/position_pushed_${BEIJING_DATE}.txt | wc -l)
+          
+          if [ "$HAS_NEW_COMMITS" -gt 0 ]; then
+            MSG="✅ 【ETF仓位策略计算（定时）】执行成功并提交"
+          else
+            MSG="ℹ️ 【ETF仓位策略计算（定时）】执行成功但无新提交（可能数据无变化）"
+          fi
+          
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure() && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【ETF仓位策略计算（定时）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"

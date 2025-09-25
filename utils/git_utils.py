@@ -17,6 +17,80 @@ logger = logging.getLogger(__name__)
 # 文件计数器
 _file_count = 0
 
+def _wait_for_git_unlock(repo_root, max_retries=15, retry_delay=2):
+    """等待 Git 索引锁释放"""
+    index_lock = os.path.join(repo_root, '.git', 'index.lock')
+    retry_count = 0
+    
+    while os.path.exists(index_lock) and retry_count < max_retries:
+        logger.warning(f"Git索引锁存在，等待解锁... ({retry_count+1}/{max_retries})")
+        time.sleep(retry_delay)
+        retry_count += 1
+    
+    if os.path.exists(index_lock):
+        logger.error("Git索引锁长时间存在，强制删除")
+        try:
+            os.remove(index_lock)
+            return True
+        except Exception as e:
+            logger.error(f"无法删除索引锁: {str(e)}")
+            return False
+    
+    return True
+
+def _immediate_commit(file_path: str, commit_message: str) -> bool:
+    """立即提交文件，不等待计数器，并添加 [skip ci]"""
+    try:
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        
+        # 确保索引锁已释放
+        if not _wait_for_git_unlock(repo_root):
+            return False
+            
+        relative_path = os.path.relpath(file_path, repo_root)
+        
+        # 在GitHub Actions环境中设置Git用户信息
+        if 'GITHUB_ACTIONS' in os.environ:
+            actor = os.environ.get('GITHUB_ACTOR', 'fish-etf-bot')
+            email = f"{actor}@users.noreply.github.com"
+            
+            # 设置Git用户信息
+            subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
+            subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+        
+        # 添加并提交
+        subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
+        
+        # 创建提交消息 - 确保包含 [skip ci]
+        if "[skip ci]" not in commit_message:
+            commit_message = f"{commit_message} [skip ci]"
+        
+        # 提交更改
+        subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
+        
+        # 推送
+        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+        if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
+            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
+        
+        try:
+            subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], check=True, cwd=repo_root)
+        except subprocess.CalledProcessError:
+            pass
+        
+        subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+        
+        logger.info(f"✅ 立即提交成功: {commit_message}")
+        return True
+    
+    except subprocess.CalledProcessError as e:
+        logger.error(f"立即提交失败: {str(e)}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"提交文件失败: {str(e)}", exc_info=True)
+        return False
+
 def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     """
     批量提交文件到Git仓库（每10个文件提交一次），特殊处理基础信息文件
@@ -31,16 +105,20 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     global _file_count
     
     try:
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        
+        # 确保索引锁已释放
+        if not _wait_for_git_unlock(repo_root):
+            return False
+        
         # 检查是否是基础信息文件 - 立即提交
         if "all_stocks.csv" in file_path:
-            return _immediate_commit(file_path, commit_message or "feat: 更新股票基础信息 [skip ci]")
+            # 特殊处理基础信息文件，立即提交
+            return _immediate_commit(file_path, commit_message or "feat: 更新股票基础信息")
         
         # 递增文件计数器
         _file_count += 1
         logger.debug(f"文件计数器: {_file_count}")
-        
-        # 获取仓库根目录
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
         
         # 获取文件相对于仓库根目录的路径
         relative_path = os.path.relpath(file_path, repo_root)
@@ -71,20 +149,20 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                 if "[skip ci]" not in commit_message:
                     commit_message = f"{commit_message} [skip ci]"
             
-            # 提交更改
-            subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
-            
-            # 推送到远程仓库
+            # 拉取远程仓库的最新更改（先拉取再推送，减少冲突）
             branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
-            if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
-                remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
-                subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
-            
-            # 拉取远程仓库的最新更改
             try:
                 subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], check=True, cwd=repo_root)
             except subprocess.CalledProcessError:
                 logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
+            
+            # 提交更改
+            subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
+            
+            # 推送到远程仓库
+            if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
+                remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+                subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
             
             # 推送更改
             subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
@@ -96,46 +174,6 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     
     except subprocess.CalledProcessError as e:
         logger.error(f"Git操作失败: {str(e)}", exc_info=True)
-        return False
-    except Exception as e:
-        logger.error(f"提交文件失败: {str(e)}", exc_info=True)
-        return False
-
-def _immediate_commit(file_path: str, commit_message: str) -> bool:
-    """立即提交文件，不等待计数器，并添加 [skip ci]"""
-    try:
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        relative_path = os.path.relpath(file_path, repo_root)
-        
-        # 在GitHub Actions环境中设置Git用户信息
-        if 'GITHUB_ACTIONS' in os.environ:
-            actor = os.environ.get('GITHUB_ACTOR', 'fish-etf-bot')
-            email = f"{actor}@users.noreply.github.com"
-            subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
-            subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
-        
-        # 添加并提交
-        subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
-        subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
-        
-        # 推送
-        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
-        if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
-            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
-            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
-        
-        try:
-            subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], check=True, cwd=repo_root)
-        except subprocess.CalledProcessError:
-            pass
-        
-        subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
-        
-        logger.info(f"✅ 立即提交成功: {commit_message}")
-        return True
-    
-    except subprocess.CalledProcessError as e:
-        logger.error(f"立即提交失败: {str(e)}", exc_info=True)
         return False
     except Exception as e:
         logger.error(f"提交文件失败: {str(e)}", exc_info=True)

@@ -9,6 +9,7 @@ jobs:
     if: github.event_name == 'schedule' && github.event.schedule == '*/30 2-7 * * 1-5'
     permissions:
       contents: write
+      actions: read
     steps:
       - name: 验证时区设置
         run: |
@@ -68,10 +69,41 @@ jobs:
       - name: 提交数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
-          [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
-          git commit -m "自动更新ETF套利数据 [定时]" && git push origin main
+          # 详细诊断信息
+          echo "当前工作目录: $(pwd)"
+          echo "Git版本: $(git --version)"
+          echo "Git用户配置: $(git config --list | grep user)"
+          echo "仓库状态: $(git status --porcelain)"
+          echo "需要提交的文件: $(ls -la data/arbitrage/ data/flags/ 2>/dev/null || echo '无')"
+          
+          # 添加安全目录配置
+          git config --global --add safe.directory /home/runner/work/fish-etf/fish-etf
+          
+          # 重置Git配置
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 添加并提交更改
+          git add data/arbitrage/ data/flags/{discount,premium}_status.json
+          
+          # 检查是否有变化
+          if [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ]; then
+            echo "发现变化，准备提交..."
+            git commit -m "自动更新ETF套利数据 [定时]"
+            # 添加重试机制
+            for i in {1..3}; do
+              if git push origin main; then
+                echo "✅ 数据提交成功"
+                exit 0
+              fi
+              echo "⚠️ 提交失败，重试 ($i/3)"
+              sleep 5
+            done
+            echo "❌ 最终提交失败"
+            exit 1
+          else
+            echo "没有数据变化，无需提交"
+          fi
       
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK

@@ -1,4 +1,3 @@
-# 这是stock/crawler.py代码
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -7,6 +6,7 @@
 使用智能多源调度系统确保"快、稳、准"
 """
 import os
+import sys
 import logging
 import pandas as pd
 import time
@@ -20,6 +20,7 @@ from utils.git_utils import commit_files_in_batches
 from concurrent.futures import ThreadPoolExecutor
 import random
 import requests
+import json  # 添加缺失的json导入
 
 # ===== 智能数据源管理器（核心组件）=====
 class DataSourceManager:
@@ -672,8 +673,14 @@ def main():
                 if len(filtered_stock_codes) == 0:
                     logger.warning("TickTen策略筛选后股票数量为0，使用原始股票列表")
                     filtered_stock_codes = basic_info_df["code"].tolist()
-
-        stocks_to_crawl = stock_codes[start_index:end_index]
+            except Exception as e:
+                logger.error(f"TickTen策略筛选失败: {str(e)}，使用原始股票列表")
+                filtered_stock_codes = basic_info_df["code"].tolist()
+        else:
+            # 如果tickten不可用，使用原始股票列表
+            filtered_stock_codes = basic_info_df["code"].tolist()
+        
+        stocks_to_crawl = filtered_stock_codes[start_index:end_index]
         
         logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")
         
@@ -707,9 +714,6 @@ def main():
     
     except Exception as e:
         logger.error(f"股票日线数据增量爬取失败: {str(e)}", exc_info=True)
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-name: ETF仓位策略计算定时任务
+name: 定时-ETF仓位策略计算
 on:
   schedule:
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (ETF仓位策略)

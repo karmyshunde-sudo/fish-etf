@@ -172,6 +172,68 @@ CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
 
+def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    专门处理恒生指数数据获取
+    
+    Args:
+        index_code: 指数代码（如"HSNDXIT.HI"）
+        start_date: 开始日期（YYYYMMDD）
+        end_date: 结束日期（YYYYMMDD）
+        
+    Returns:
+        pd.DataFrame: 指数日线数据
+    """
+    index_name = index_code.replace('.HI', '')
+    
+    # 首先尝试yfinance（更可靠）
+    yfinance_symbol = f"^{index_name}"  # yfinance格式：^HSNDXIT
+    logger.info(f"尝试通过yfinance获取恒生指数 {yfinance_symbol}")
+    df = fetch_us_index_from_yfinance(yfinance_symbol, start_date, end_date)
+    
+    if not df.empty:
+        logger.info(f"✅ 通过yfinance成功获取恒生指数 {index_code} 数据")
+        return df
+    
+    # 如果yfinance失败，再尝试akshare方法
+    try:
+        # 尝试使用 index_hk_hist 方法（akshare最新API）
+        df = ak.index_hk_hist(symbol=index_name, period="daily", 
+                             start_date=start_date, end_date=end_date)
+        if not df.empty:
+            logger.info(f"📊 index_hk_hist 接口返回的原始列名: {list(df.columns)}")
+            logger.info(f"✅ 通过 index_hk_hist 方法成功获取恒生指数 {index_code} 数据")
+            return df
+    except Exception as e:
+        logger.warning(f"index_hk_hist 方法失败: {str(e)}")
+    
+    try:
+        # 尝试使用 stock_hk_index_hist 方法（akshare备选API）
+        df = ak.stock_hk_index_hist(symbol=index_name, period="daily", 
+                                  start_date=start_date, end_date=end_date)
+        if not df.empty:
+            logger.info(f"📊 stock_hk_index_hist 接口返回的原始列名: {list(df.columns)}")
+            logger.info(f"✅ 通过 stock_hk_index_hist 方法成功获取恒生指数 {index_code} 数据")
+            return df
+    except Exception as e:
+        logger.warning(f"stock_hk_index_hist 方法失败: {str(e)}")
+    
+    # 尝试使用 fund_etf_spot_em 获取（作为最后手段）
+    try:
+        df = ak.fund_etf_spot_em()
+        if not df.empty:
+            # 过滤指定ETF
+            df = df[df["代码"] == index_name]
+            if not df.empty:
+                logger.info(f"📊 fund_etf_spot_em 接口返回的原始列名: {list(df.columns)}")
+                logger.info(f"✅ 通过 fund_etf_spot_em 方法成功获取恒生指数 {index_code} 数据")
+                return df
+    except Exception as e:
+        logger.warning(f"fund_etf_spot_em 方法失败: {str(e)}")
+    
+    logger.warning(f"无法获取恒生指数 {index_code} 数据")
+    return pd.DataFrame()
+
 def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从可靠数据源获取指数历史数据
@@ -206,58 +268,8 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             )
         
         elif index_code.endswith('.HI'):
-            # 恒生系列指数 - 修复：使用yfinance作为主要备选方案
-            index_name = index_code.replace('.HI', '')
-            
-            # ========== 以下是关键修复 ==========
-            # 首先尝试yfinance（更可靠）
-            yfinance_symbol = f"^{index_name}"  # yfinance格式：^HSNDXIT
-            logger.info(f"尝试通过yfinance获取恒生指数 {yfinance_symbol}")
-            df = fetch_us_index_from_yfinance(yfinance_symbol, start_date, end_date)
-            
-            if not df.empty:
-                logger.info(f"✅ 通过yfinance成功获取恒生指数 {index_code} 数据")
-                return df
-            
-            # 如果yfinance失败，再尝试akshare方法
-            try:
-                # 尝试使用 index_hk_hist 方法（akshare最新API）
-                df = ak.index_hk_hist(symbol=index_name, period="daily", 
-                                     start_date=start_date, end_date=end_date)
-                if not df.empty:
-                    logger.info(f"📊 index_hk_hist 接口返回的原始列名: {list(df.columns)}")
-                    logger.info(f"✅ 通过 index_hk_hist 方法成功获取恒生指数 {index_code} 数据")
-                    return df
-            except Exception as e:
-                logger.warning(f"index_hk_hist 方法失败: {str(e)}")
-            
-            try:
-                # 尝试使用 stock_hk_index_hist 方法（akshare备选API）
-                df = ak.stock_hk_index_hist(symbol=index_name, period="daily", 
-                                          start_date=start_date, end_date=end_date)
-                if not df.empty:
-                    logger.info(f"📊 stock_hk_index_hist 接口返回的原始列名: {list(df.columns)}")
-                    logger.info(f"✅ 通过 stock_hk_index_hist 方法成功获取恒生指数 {index_code} 数据")
-                    return df
-            except Exception as e:
-                logger.warning(f"stock_hk_index_hist 方法失败: {str(e)}")
-            
-            # 尝试使用 fund_etf_spot_em 获取（作为最后手段）
-            try:
-                df = ak.fund_etf_spot_em()
-                if not df.empty:
-                    # 过滤指定ETF
-                    df = df[df["代码"] == index_name]
-                    if not df.empty:
-                        logger.info(f"📊 fund_etf_spot_em 接口返回的原始列名: {list(df.columns)}")
-                        logger.info(f"✅ 通过 fund_etf_spot_em 方法成功获取恒生指数 {index_code} 数据")
-                        return df
-            except Exception as e:
-                logger.warning(f"fund_etf_spot_em 方法失败: {str(e)}")
-            # ========== 以上是关键修复 ==========
-            
-            logger.warning(f"无法获取恒生指数 {index_code} 数据")
-            return pd.DataFrame()
+            # 恒生系列指数 - 现在使用单独的函数处理
+            return fetch_hang_seng_index_data(index_code, start_date, end_date)
         
         else:
             # A股指数
@@ -831,7 +843,7 @@ def generate_report():
                 message = "\n".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据获取失败）\n")
                 send_wechat_message(message)
-                time.sleep(1)
+                time.sleep 1
                 continue
             
             # 确保有足够数据

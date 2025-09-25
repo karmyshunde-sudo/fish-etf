@@ -1,4 +1,4 @@
-name: 清理数据文件任务-akshare信息
+name: 手动-清理数据文件任务-akshare信息
 on:
   workflow_dispatch:
     inputs:

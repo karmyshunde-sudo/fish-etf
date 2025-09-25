@@ -186,6 +186,19 @@ def crawl_etf_daily_incremental() -> None:
                 # 确保所有必需列都存在
                 df = ensure_required_columns(df)
                 
+                # 检查关键字段是否完整
+                missing_columns = []
+                required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率', '折溢价率']
+                for col in required_columns:
+                    if col not in df.columns:
+                        missing_columns.append(col)
+                
+                if missing_columns:
+                    logger.error(f"ETF {etf_code} 数据缺少关键字段: {missing_columns}")
+                    # 不尝试修复，直接跳过保存
+                    record_failed_etf(etf_daily_dir, etf_code, etf_name)
+                    continue
+                
                 # 补充ETF基本信息
                 df["ETF代码"] = etf_code
                 df["ETF名称"] = etf_name
@@ -296,13 +309,27 @@ def save_all_etf_data(etf_data_cache: Dict[str, pd.DataFrame], etf_daily_dir: st
                     combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
                     combined_df = combined_df.sort_values("日期", ascending=False)
                     
-                    # 保存合并后的数据
-                    combined_df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                    
-                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                    # 使用临时文件进行原子操作
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                    try:
+                        combined_df.to_csv(temp_file.name, index=False)
+                        # 原子替换
+                        shutil.move(temp_file.name, save_path)
+                        logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
+                    finally:
+                        if os.path.exists(temp_file.name):
+                            os.unlink(temp_file.name)
                 else:
-                    df.to_csv(save_path, index=False, encoding="utf-8-sig")
-                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                    # 使用临时文件进行原子操作
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                    try:
+                        df.to_csv(temp_file.name, index=False)
+                        # 原子替换
+                        shutil.move(temp_file.name, save_path)
+                        logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                    finally:
+                        if os.path.exists(temp_file.name):
+                            os.unlink(temp_file.name)
                 
                 # ===== 关键修改：使用新的git_utils函数 =====
                 # 调用commit_files_in_batches，它会自动处理每10个文件提交一次

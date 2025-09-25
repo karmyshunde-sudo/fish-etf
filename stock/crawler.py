@@ -174,14 +174,19 @@ MAX_RETRIES = 3
 # 全局数据源管理器
 DATA_SOURCE_MANAGER = DataSourceManager()
 
-# ====== 新增：导入tickten策略模块 ======
+# ====== 修改：确保正确导入tickten模块 ======
 try:
-    from stock.tickten import filter_stocks_for_tickten_strategy
+    from stock.tickten import get_top_stocks_for_strategy
     TICKTEN_AVAILABLE = True
     logger.info("成功导入 tickten 策略模块")
-except ImportError:
+except ImportError as e:
     TICKTEN_AVAILABLE = False
-    logger.warning("无法导入 tickten 策略模块，将跳过策略筛选")
+    logger.error(f"无法导入 tickten 策略模块: {str(e)}，股票筛选功能将不可用")
+    logger.error("请确保 stock/tickten.py 文件存在且无语法错误")
+    logger.error("当前工作目录: " + os.getcwd())
+    logger.error("当前Python路径: " + str(sys.path))
+    import traceback
+    logger.error("完整的错误堆栈:\n" + traceback.format_exc())
 
 def ensure_daily_data_dir():
     """确保日线数据目录存在"""
@@ -641,21 +646,33 @@ def main():
         # 4. 爬取指定范围的股票
         stock_codes = basic_info_df["code"].tolist()
         
-        # ====== 新增：应用tickten策略筛选股票 ======
+        # ====== 修改：应用tickten策略筛选股票 ======
         if TICKTEN_AVAILABLE:
             logger.info("正在应用TickTen策略筛选股票...")
             try:
                 # 使用tickten策略筛选股票
-                stock_codes = filter_stocks_for_tickten_strategy(stock_codes)
-                logger.info(f"TickTen策略筛选完成，剩余 {len(stock_codes)} 只股票")
-                
-                # 如果筛选后股票数量为0，使用原始列表
-                if len(stock_codes) == 0:
-                    logger.warning("TickTen策略筛选后股票数量为0，使用原始股票列表")
-                    stock_codes = basic_info_df["code"].tolist()
-            except Exception as e:
-                logger.error(f"TickTen策略筛选失败: {str(e)}，将使用原始股票列表", exc_info=True)
+                top_stocks_by_section = get_top_stocks_for_strategy()
+                # stock_codes = filter_stocks_for_tickten_strategy(stock_codes)
         
+                # 从所有板块中提取股票代码
+                filtered_stock_codes = []
+                for section, stocks in top_stocks_by_section.items():
+                    filtered_stock_codes.extend([stock["code"] for stock in stocks])
+        
+                # 确保股票代码是字符串且为6位
+                filtered_stock_codes = [str(code).zfill(6) for code in filtered_stock_codes]
+        
+                # 去重并过滤无效代码
+                filtered_stock_codes = list(set(filtered_stock_codes))
+                filtered_stock_codes = [code for code in filtered_stock_codes if len(code) == 6 and code.isdigit()]
+        
+                logger.info(f"TickTen策略筛选完成，剩余 {len(filtered_stock_codes)} 只股票")
+        
+                # 如果筛选后股票数量为0，使用原始列表
+                if len(filtered_stock_codes) == 0:
+                    logger.warning("TickTen策略筛选后股票数量为0，使用原始股票列表")
+                    filtered_stock_codes = basic_info_df["code"].tolist()
+
         stocks_to_crawl = stock_codes[start_index:end_index]
         
         logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")

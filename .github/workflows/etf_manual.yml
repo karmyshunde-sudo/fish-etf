@@ -18,12 +18,7 @@ on:
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
           - 'clean_numeric_csv'
-          - 'show_akshare_info'
-      interface_name:
-        description: 'AkShare接口名称（可选）'
-        required: false
-        type: string
-        default: ''
+
 jobs:
   # ========================
   # 手动任务 - 每个任务都有独立Job
@@ -718,47 +713,3 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
-  # 显示AkShare信息
-  show-akshare-info:
-    name: 显示AkShare信息
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
-    permissions:
-      contents: write
-    steps:
-      - name: 验证时区设置
-        run: |
-          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
-      - name: 拉取仓库代码
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          clean: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: 配置Python环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-      - name: 安装依赖包
-        run: |
-          # 首先确认当前目录
-          echo "当前工作目录: $(pwd)"
-          # 检查文件是否存在
-          if [ -f "requirements.txt" ]; then
-            echo "✅ requirements.txt 文件存在，开始安装依赖..."
-            pip install -r requirements.txt
-          else
-            echo "❌ 错误: requirements.txt 文件不存在"
-            ls -la  # 列出当前目录内容以帮助诊断
-            exit 1
-          fi
-      - name: 获取AkShare信息
-        run: |
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
-      - name: 提交信息文件
-        run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/flags/*.txt && git commit -m "更新AkShare信息文件" && git push origin main

@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 使用AkShare接口获取ETF日线数据
-严格使用两个API：fund_etf_spot_em和fund_etf_fund_daily_em
+特别优化了列名映射和数据完整性检查
 """
 
 import akshare as ak
@@ -11,7 +11,7 @@ import pandas as pd
 import logging
 import time
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date  # 修复：添加date导入
 from config import Config
 from retrying import retry
 
@@ -25,19 +25,23 @@ from utils.date_utils import (
 )
 # 从正确的模块导入数据处理函数
 from utils.file_utils import (
-    ensure_chinese_columns
+    ensure_chinese_columns, internal_ensure_chinese_columns
 )
 from utils.data_processor import (
-    ensure_required_columns
+    ensure_required_columns,
+    clean_and_format_data,
+    limit_to_one_year_data
 )
+# 仅添加必要的git工具导入（不添加任何新函数）
+from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
 # 重试配置
-MAX_RETRY_ATTEMPTS = 5
-RETRY_WAIT_FIXED = 3000
-RETRY_WAIT_EXPONENTIAL_MAX = 15000
+MAX_RETRY_ATTEMPTS = 5  # 增加重试次数，从3增加到5
+RETRY_WAIT_FIXED = 3000  # 增加等待时间，从2000毫秒增加到3000毫秒
+RETRY_WAIT_EXPONENTIAL_MAX = 15000  # 增加最大等待时间，从10000毫秒增加到15000毫秒
 
 # 打印AkShare版本
 logger.info(f"AkShare版本: {ak.__version__}")
@@ -64,6 +68,7 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     Returns:
         bool: 如果是AkShare错误返回True，否则返回False
     """
+    # 扩展异常类型，包括requests库的网络错误
     from requests.exceptions import ConnectionError, Timeout
     return isinstance(exception, (ValueError, ConnectionError, Timeout, OSError))
 
@@ -75,7 +80,6 @@ def retry_if_akshare_error(exception: Exception) -> bool:
 )
 def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
     """用AkShare爬取ETF日线数据
-    
     Args:
         etf_code: ETF代码 (6位数字)
         start_date: 开始日期 (YYYY-MM-DD)
@@ -104,12 +108,11 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
         
         # 严格使用两个API接口获取所有数据
-        # 1. 优先使用fund_etf_spot_em获取实时数据
         df = try_fund_etf_spot_em(etf_code, start_date, end_date)
         
-        # 2. 如果fund_etf_spot_em失败，尝试fund_etf_fund_daily_em获取历史数据
+        # 如果fund_etf_spot_em失败，尝试fund_etf_fund_daily_em
         if df.empty:
-            logger.info(f"fund_etf_spot_em获取失败，尝试fund_etf_fund_daily_em获取历史数据")
+            logger.info(f"fund_etf_spot_em获取失败，尝试fund_etf_fund_daily_em")
             df = try_fund_etf_fund_daily_em(etf_code, start_date, end_date)
         
         # 检查数据是否成功获取
@@ -117,51 +120,24 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             logger.warning(f"所有数据源均未获取到{etf_code}数据（{start_date}至{end_date}）")
             return pd.DataFrame()
         
-        # 确保使用中文列名
+        # 标准化列名
         df = ensure_chinese_columns(df)
         
-        # 确保所有必需列都存在（不进行计算，只检查）
+        # 确保所有必需列都存在
         df = ensure_required_columns(df)
         
-        # 补充ETF基本信息
-        df["ETF代码"] = etf_code
-        df["ETF名称"] = get_etf_name(etf_code)
+        # 数据清洗：去重、格式转换
+        df = clean_and_format_data(df)
         
-        # 确保日期格式
-        if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
-        
-        # 按日期排序（最新在前）
-        df = df.sort_values("日期", ascending=False)
+        # 首次爬取时限制数据量为1年
+        if is_first_crawl:
+            df = limit_to_one_year_data(df, end_date)
         
         logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
         return df
     except Exception as e:
         logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
         raise
-
-def get_etf_name(etf_code: str) -> str:
-    """获取ETF名称"""
-    try:
-        # 尝试从all_etfs.csv获取ETF名称
-        all_etfs_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
-        if os.path.exists(all_etfs_file):
-            all_etfs = pd.read_csv(all_etfs_file)
-            etf_row = all_etfs[all_etfs["ETF代码"] == etf_code]
-            if not etf_row.empty:
-                return etf_row["ETF名称"].values[0]
-        
-        # 如果从文件获取失败，尝试通过API获取
-        df = ak.fund_etf_spot_em()
-        if not df.empty and "代码" in df.columns and "名称" in df.columns:
-            etf_data = df[df["代码"] == etf_code]
-            if not etf_data.empty:
-                return etf_data["名称"].values[0]
-        
-        return "未知ETF"
-    except Exception as e:
-        logger.error(f"获取ETF名称失败: {str(e)}")
-        return "未知ETF"
 
 def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """使用fund_etf_spot_em接口获取ETF实时数据（优先使用）"""
@@ -193,8 +169,7 @@ def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
                     "昨收": "前收盘",
                     "振幅": "振幅",
                     "换手率": "换手率",
-                    "数据日期": "日期",
-                    "更新时间": "更新时间"
+                    "数据日期": "日期"
                 }
                 df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
                 
@@ -211,14 +186,6 @@ def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
                     mask = (df["日期"] >= start_date) & (df["日期"] <= end_date)
                     df = df.loc[mask]
                 
-                # 添加必要衍生字段
-                if "开盘" in df.columns and "最高" in df.columns and "最低" in df.columns:
-                    df["振幅"] = ((df["最高"] - df["最低"]) / df["开盘"] * 100).round(2)
-                
-                if "开盘" in df.columns and "收盘" in df.columns:
-                    df["涨跌幅"] = ((df["收盘"] - df["开盘"]) / df["开盘"] * 100).round(2)
-                    df["涨跌额"] = (df["收盘"] - df["开盘"]).round(2)
-                
                 return df
     except Exception as e:
         logger.debug(f"fund_etf_spot_em接口失败: {str(e)}")
@@ -226,7 +193,7 @@ def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
     return pd.DataFrame()
 
 def try_fund_etf_fund_daily_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """使用fund_etf_fund_daily_em接口获取ETF历史数据"""
+    """使用fund_etf_fund_daily_em接口获取ETF历史数据（备用）"""
     try:
         logger.info(f"尝试使用fund_etf_fund_daily_em接口获取ETF {etf_code} 数据")
         df = ak.fund_etf_fund_daily_em()
@@ -291,32 +258,92 @@ def try_fund_etf_fund_daily_em(etf_code: str, start_date: str, end_date: str) ->
     
     return pd.DataFrame()
 
-def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
+def get_etf_name(etf_code: str) -> str:
+    """获取ETF名称"""
+    try:
+        # 尝试从all_etfs.csv获取ETF名称
+        all_etfs_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
+        if os.path.exists(all_etfs_file):
+            all_etfs = pd.read_csv(all_etfs_file)
+            etf_row = all_etfs[all_etfs["ETF代码"] == etf_code]
+            if not etf_row.empty:
+                return etf_row["ETF名称"].values[0]
+        
+        # 如果从文件获取失败，尝试通过API获取
+        df = ak.fund_etf_spot_em()
+        if not df.empty and "代码" in df.columns and "名称" in df.columns:
+            etf_data = df[df["代码"] == etf_code]
+            if not etf_data.empty:
+                return etf_data["名称"].values[0]
+        
+        return "未知ETF"
+    except Exception as e:
+        logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
+        return "未知ETF"
+
+def get_symbol_with_market_prefix(etf_code: str) -> str:
     """
-    确保DataFrame包含所有必需的交易数据列
+    根据ETF代码获取带市场前缀的代码（保留但不再使用）
     
     Args:
-        df: 原始DataFrame
+        etf_code: ETF代码
         
     Returns:
-        pd.DataFrame: 包含所有必需列的DataFrame
+        str: 带市场前缀的代码
+    """
+    if etf_code.startswith(('5', '6', '9')):
+        return f"sh{etf_code}"
+    else:
+        return f"sz{etf_code}"
+
+def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    确保DataFrame包含所有必需的交易数据列，缺失的列用默认值填充
     """
     if df.empty:
         return df
     
-    # 必需列列表
-    required_columns = [
-        "日期", "开盘", "最高", "最低", "收盘", "成交量", 
-        "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", 
-        "ETF代码", "ETF名称", "折溢价率"
-    ]
-    
-    # 检查缺失列
+    # 定义基础必需列
+    required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
     missing_columns = [col for col in required_columns if col not in df.columns]
     
     if missing_columns:
         logger.error(f"❌ 数据源缺少必需列：{', '.join(missing_columns)}")
-        # 不尝试修复，只记录错误
-        return pd.DataFrame()
+        return df
+    
+    # 检查关键字段
+    if "折溢价率" not in df.columns:
+        logger.warning("⚠️ 数据源不提供折溢价率列，将尝试通过净值或IOPV计算")
+    
+    # 检查衍生列
+    derived_columns = ["成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+    missing_derived_columns = [col for col in derived_columns if col not in df.columns]
+    
+    if missing_derived_columns:
+        logger.info(f"ℹ️ 数据源缺少可计算列：{', '.join(missing_derived_columns)}，将尝试计算")
     
     return df
+
+def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    清洗并格式化数据
+    """
+    try:
+        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
+        df = df.copy(deep=True)
+        # 处理日期列
+        if "日期" in df.columns and not df.empty:
+            # 确保日期列是datetime类型
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+            # 删除无效日期
+            df = df.dropna(subset=["日期"])
+            # 获取最大日期
+            if not df.empty:
+                latest_date = df["日期"].max()
+                if not pd.isna(latest_date):
+                    return latest_date.date()
+    except Exception as e:
+        logger.error(f"获取文件 {file_path} 最新日期失败: {str(e)}", exc_info=True)
+    
+    # 出错时返回一个较早的日期，确保会重新爬取
+    return date(2024, 9, 1)

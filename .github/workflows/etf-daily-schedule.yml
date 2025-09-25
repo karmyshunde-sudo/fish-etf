@@ -1,4 +1,4 @@
-name: ETF日线数据爬取定时任务
+name: 定时-ETF日线爬取
 on:
   schedule:
     - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (ETF日线爬取)

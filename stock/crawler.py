@@ -485,7 +485,7 @@ def main():
                 basic_info_df = pd.DataFrame({
                     'code': stock_list['code'],
                     'name': stock_list['name'],
-                    'market_cap': 0,  # 初始市值设为0
+                    'market_cap': stock_list['market_cap'],  
                     'section': stock_list['code'].apply(get_stock_section),
                     'next_crawl_index': 0
                 })

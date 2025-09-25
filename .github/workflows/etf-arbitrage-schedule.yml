@@ -1,12 +1,12 @@
 name: ETF套利计算定时任务
 on:
   schedule:
-    - cron: '*/30 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (ETF套利计算)
+    - cron: '*/60 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (ETF套利计算)
 jobs:
   calculate-arbitrage-schedule:
     name: ETF套利计算（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '*/30 2-7 * * 1-5'
+    if: github.event_name == 'schedule' && github.event.schedule == '*/60 2-7 * * 1-5'
     permissions:
       contents: write
       actions: read

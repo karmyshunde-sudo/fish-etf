@@ -449,6 +449,27 @@ def process_stock_for_crawl(stock_code: str) -> Optional[str]:
         logger.error(f"处理股票 {stock_code} 时出错: {str(e)}", exc_info=True)
         return None
 
+def _process_market_cap(market_cap):
+    """处理市值数据，确保为有效数值"""
+    if pd.isna(market_cap) or market_cap in [None, 'nan', '']:
+        return 0
+    
+    try:
+        # 尝试直接转换为数字
+        return float(market_cap)
+    except (TypeError, ValueError):
+        # 尝试从字符串中提取数字
+        import re
+        matches = re.findall(r'[\d.,]+', str(market_cap))
+        if matches:
+            # 只取第一个匹配项
+            num_str = matches[0].replace(',', '')
+            try:
+                return float(num_str)
+            except:
+                return 0
+        return 0
+
 def main():
     """主函数：股票日线数据增量爬取"""
     try:
@@ -475,24 +496,36 @@ def main():
                 logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
                 
                 # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
-                stock_list = stock_list[~stock_list['name'].str.contains('ST')]
+                stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
                 stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
                 
                 filtered_count = len(stock_list)
                 logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
                 
+                # 修复：正确获取市值数据，并添加数据清洗
+                market_cap_values = []
+                for _, row in stock_list.iterrows():
+                    # 尝试从多个可能的列获取市值
+                    cap = row.get('market_cap', 0)
+                    if cap == 0 and '总市值' in row:
+                        cap = row['总市值']
+                    market_cap_values.append(_process_market_cap(cap))
+                
                 # 准备基础信息DataFrame
                 basic_info_df = pd.DataFrame({
                     'code': stock_list['code'],
                     'name': stock_list['name'],
-                    'market_cap': stock_list['market_cap'],  
+                    'market_cap': market_cap_values,  # 修复：使用实际市值数据
                     'section': stock_list['code'].apply(get_stock_section),
                     'next_crawl_index': 0
                 })
                 
+                # 确保市值列是数字类型
+                basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
+                
                 # 保存基础信息
                 basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                logger.info(f"已自动创建股票基础信息文件，共 {len(basic_info_df)} 条记录")
+                logger.info(f"已自动创建股票基础信息文件，共 {len(basic_info_df)} 条记录，市值数据已正确初始化")
             except Exception as e:
                 logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
                 return
@@ -516,33 +549,70 @@ def main():
                     logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
                     
                     # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
-                    stock_list = stock_list[~stock_list['name'].str.contains('ST')]
+                    stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
                     stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
                     
                     filtered_count = len(stock_list)
                     logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
                     
+                    # 修复：正确获取市值数据，并添加数据清洗
+                    market_cap_values = []
+                    for _, row in stock_list.iterrows():
+                        # 尝试从多个可能的列获取市值
+                        cap = row.get('market_cap', 0)
+                        if cap == 0 and '总市值' in row:
+                            cap = row['总市值']
+                        market_cap_values.append(_process_market_cap(cap))
+                    
                     # 准备基础信息DataFrame
                     basic_info_df = pd.DataFrame({
                         'code': stock_list['code'],
                         'name': stock_list['name'],
-                        'market_cap': 0,  # 初始市值设为0
+                        'market_cap': market_cap_values,  # 修复：使用实际市值数据
                         'section': stock_list['code'].apply(get_stock_section),
                         'next_crawl_index': 0
                     })
                     
+                    # 确保市值列是数字类型
+                    basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
+                    
                     # 保存基础信息
                     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                    logger.info(f"已重新创建股票基础信息文件，共 {len(basic_info_df)} 条记录")
+                    logger.info(f"已重新创建股票基础信息文件，共 {len(basic_info_df)} 条记录，市值数据已正确初始化")
                 except Exception as e:
                     logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
                     return
             else:
                 # 确保股票代码是6位字符串
                 basic_info_df["code"] = basic_info_df["code"].astype(str).str.zfill(6)
+                
+                # 修复：添加市值列如果不存在
+                if "market_cap" not in basic_info_df.columns:
+                    logger.warning("基础信息文件缺少market_cap列，正在补充...")
+                    
+                    # 获取最新股票列表以获取市值数据
+                    try:
+                        stock_list = ak.stock_info_a_code_name()
+                        stock_list["code"] = stock_list["code"].astype(str).str.zfill(6)
+                        
+                        # 创建一个映射字典
+                        cap_map = {}
+                        for _, row in stock_list.iterrows():
+                            cap = _process_market_cap(row.get('market_cap', 0))
+                            cap_map[row['code']] = cap
+                        
+                        # 为现有股票添加市值
+                        basic_info_df["market_cap"] = basic_info_df["code"].map(cap_map).fillna(0)
+                    except Exception as e:
+                        logger.error(f"获取市值数据失败，将使用默认值: {str(e)}")
+                        basic_info_df["market_cap"] = 0
+                
+                # 确保市值列是数字类型
+                basic_info_df["market_cap"] = pd.to_numeric(basic_info_df["market_cap"], errors='coerce').fillna(0)
+                
                 # 保存修改后的基础信息
                 basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录")
+                logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录，市值数据已正确处理")
         
         # 2. 确保 next_crawl_index 列存在
         if "next_crawl_index" not in basic_info_df.columns:
@@ -620,6 +690,9 @@ def main():
     
     except Exception as e:
         logger.error(f"股票日线数据增量爬取失败: {str(e)}", exc_info=True)
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

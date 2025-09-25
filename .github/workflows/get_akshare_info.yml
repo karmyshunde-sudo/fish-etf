@@ -1,0 +1,67 @@
+name: Get-akshare接口信息
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '任务类型'
+        required: true
+        type: choice
+        options:
+          - 'show_akshare_info'
+      interface_name:
+        description: '填充具体AkShare接口名称（可选）'
+        required: false
+        type: string
+        default: ''
+jobs:
+  # ========================
+  # 显示AkShare信息
+  # ========================
+  show-akshare-info:
+    name: 显示AkShare信息
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
+    permissions:
+      contents: write
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置环境
+        uses: ./.github/actions/setup_environment
+      
+      - name: 获取AkShare信息
+        run: |
+          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
+          echo "正在获取AkShare信息: ${INTERFACE_NAME:-默认接口}"
+          
+          # 执行获取信息
+          python data_crawler/get_akshare_info.py ${INTERFACE_NAME:+$INTERFACE_NAME}
+      
+      - name: 检查文件状态（诊断）
+        run: |
+          echo "检查 data/flags/ 目录状态:"
+          ls -la data/flags/ 2>/dev/null || echo "目录不存在"
+          echo "文件内容预览:"
+          head -n 3 data/flags/*.txt 2>/dev/null || echo "无标志文件或为空"
+      
+      - name: 发送完成通知
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【AkShare信息】获取成功"
+          [ -n "${{ github.event.inputs.interface_name }}" ] && MSG="✅ 【AkShare信息】已查询接口: ${{ github.event.inputs.interface_name }}"
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【AkShare信息】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"

@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 使用AkShare接口获取ETF日线数据
-特别优化了列名映射和数据完整性检查
+严格使用两个API：fund_etf_spot_em和fund_etf_fund_daily_em
 """
 
 import akshare as ak
@@ -11,7 +11,7 @@ import pandas as pd
 import logging
 import time
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from config import Config
 from retrying import retry
 
@@ -25,15 +25,11 @@ from utils.date_utils import (
 )
 # 从正确的模块导入数据处理函数
 from utils.file_utils import (
-    ensure_chinese_columns, internal_ensure_chinese_columns
+    ensure_chinese_columns
 )
 from utils.data_processor import (
-    ensure_required_columns,
-    clean_and_format_data,
-    limit_to_one_year_data
+    ensure_required_columns
 )
-# 仅添加必要的git工具导入（不添加任何新函数）
-from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -107,36 +103,36 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         
         logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
         
-        # 优先使用stock_zh_a_hist获取完整数据（最完整接口）
-        df = try_stock_zh_a_hist(etf_code, start_date, end_date)
+        # 严格使用两个API接口获取所有数据
+        # 1. 优先使用fund_etf_spot_em获取实时数据
+        df = try_fund_etf_spot_em(etf_code, start_date, end_date)
         
-        # 如果stock_zh_a_hist失败，尝试fund_etf_hist_sina
+        # 2. 如果fund_etf_spot_em失败，尝试fund_etf_fund_daily_em获取历史数据
         if df.empty:
-            logger.info(f"stock_zh_a_hist获取失败，尝试fund_etf_hist_sina")
-            df = try_fund_etf_hist_sina(etf_code, start_date, end_date)
-        
-        # 如果主要接口都失败，尝试fund_etf_spot_em获取实时数据
-        if df.empty:
-            logger.info(f"主要接口获取失败，尝试fund_etf_spot_em获取实时数据")
-            df = try_fund_etf_spot_em(etf_code, start_date, end_date)
+            logger.info(f"fund_etf_spot_em获取失败，尝试fund_etf_fund_daily_em获取历史数据")
+            df = try_fund_etf_fund_daily_em(etf_code, start_date, end_date)
         
         # 检查数据是否成功获取
         if df.empty:
             logger.warning(f"所有数据源均未获取到{etf_code}数据（{start_date}至{end_date}）")
             return pd.DataFrame()
         
-        # 标准化列名
+        # 确保使用中文列名
         df = ensure_chinese_columns(df)
         
         # 确保所有必需列都存在（不进行计算，只检查）
         df = ensure_required_columns(df)
         
-        # 数据清洗：去重、格式转换
-        df = clean_and_format_data(df)
+        # 补充ETF基本信息
+        df["ETF代码"] = etf_code
+        df["ETF名称"] = get_etf_name(etf_code)
         
-        # 首次爬取时限制数据量为1年
-        if is_first_crawl:
-            df = limit_to_one_year_data(df, end_date)
+        # 确保日期格式
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+        
+        # 按日期排序（最新在前）
+        df = df.sort_values("日期", ascending=False)
         
         logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
         return df
@@ -144,122 +140,33 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
         raise
 
-def try_stock_zh_a_hist(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """使用stock_zh_a_hist接口获取ETF数据（优先使用）"""
+def get_etf_name(etf_code: str) -> str:
+    """获取ETF名称"""
     try:
-        logger.info(f"尝试使用stock_zh_a_hist接口获取ETF {etf_code} 数据")
-        # 关键修复：为510300等上交所ETF添加"sh"前缀
-        symbol = f"sh{etf_code}" if etf_code.startswith('5') else f"sz{etf_code}"
-        df = ak.index_zh_a_hist(
-            symbol=symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date
-        )
+        # 尝试从all_etfs.csv获取ETF名称
+        all_etfs_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
+        if os.path.exists(all_etfs_file):
+            all_etfs = pd.read_csv(all_etfs_file)
+            etf_row = all_etfs[all_etfs["ETF代码"] == etf_code]
+            if not etf_row.empty:
+                return etf_row["ETF名称"].values[0]
         
-        if not df.empty:
-            logger.info(f"stock_zh_a_hist 接口成功获取ETF {etf_code} 数据")
-            logger.info(f"📊 stock_zh_a_hist 接口返回的原始列名: {list(df.columns)}")
-            
-            # 标准化列名
-            df = df.rename(columns={
-                '日期': '日期',
-                '开盘': '开盘',
-                '最高': '最高',
-                '最低': '最低',
-                '收盘': '收盘',
-                '成交量': '成交量',
-                '成交额': '成交额',
-                '振幅': '振幅',
-                '涨跌幅': '涨跌幅',
-                '涨跌额': '涨跌额',
-                '换手率': '换手率'
-            })
-            
-            # 确保日期格式
-            if '日期' in df.columns:
-                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-            
-            # 添加ETF代码和名称（但不在此处计算折溢价率）
-            if 'ETF代码' not in df.columns:
-                df['ETF代码'] = etf_code
-            if 'ETF名称' not in df.columns:
-                # 名称需要在外部获取，这里留空
-                df['ETF名称'] = ""
-                
-            return df
-    except Exception as e:
-        logger.debug(f"stock_zh_a_hist接口失败: {str(e)}")
-    
-    return pd.DataFrame()
-
-def try_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """使用fund_etf_hist_sina接口获取ETF数据"""
-    try:
-        logger.info(f"尝试使用fund_etf_hist_sina接口获取ETF {etf_code} 数据")
-        # 关键修复：使用正确的市场前缀
-        symbol = get_symbol_with_market_prefix(etf_code)
-        df = ak.fund_etf_hist_sina(symbol=symbol)
+        # 如果从文件获取失败，尝试通过API获取
+        df = ak.fund_etf_spot_em()
+        if not df.empty and "代码" in df.columns and "名称" in df.columns:
+            etf_data = df[df["代码"] == etf_code]
+            if not etf_data.empty:
+                return etf_data["名称"].values[0]
         
-        if not df.empty:
-            logger.info(f"fund_etf_hist_sina 接口成功获取ETF {etf_code} 数据")
-            logger.info(f"📊 fund_etf_hist_sina 接口返回的原始列名: {list(df.columns)}")
-            
-            # 标准化列名
-            column_mapping = {
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量',
-                'amount': '成交额',
-                'amplitude': '振幅',
-                'percent': '涨跌幅',
-                'change': '涨跌额',
-                'turnover_rate': '换手率',
-                'trade_date': '日期',
-                'open_price': '开盘',
-                'high_price': '最高',
-                'low_price': '最低',
-                'close_price': '收盘',
-                'vol': '成交量',
-                'amount_volume': '成交额',
-                'amplitude_percent': '振幅',
-                'pct_chg': '涨跌幅',
-                'price_change': '涨跌额',
-                'turnover_ratio': '换手率',
-                'net_value': '净值',
-                'iopv': 'IOPV'
-            }
-            # 重命名列
-            df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
-            # 确保日期列存在
-            if '日期' not in df.columns and 'date' in df.columns:
-                df = df.rename(columns={'date': '日期'})
-            
-            # 日期过滤
-            if '日期' in df.columns:
-                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-                mask = (df['日期'] >= start_date) & (df['日期'] <= end_date)
-                df = df.loc[mask]
-            
-            # 添加ETF代码和名称
-            if 'ETF代码' not in df.columns:
-                df['ETF代码'] = etf_code
-            if 'ETF名称' not in df.columns:
-                df['ETF名称'] = ""
-                
-            return df
+        return "未知ETF"
     except Exception as e:
-        logger.debug(f"fund_etf_hist_sina接口失败: {str(e)}")
-    
-    return pd.DataFrame()
+        logger.error(f"获取ETF名称失败: {str(e)}")
+        return "未知ETF"
 
 def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """使用fund_etf_spot_em接口获取ETF实时数据（仅最新数据）"""
+    """使用fund_etf_spot_em接口获取ETF实时数据（优先使用）"""
     try:
-        logger.info(f"尝试使用fund_etf_spot_em接口获取ETF {etf_code} 实时数据")
+        logger.info(f"尝试使用fund_etf_spot_em接口获取ETF {etf_code} 数据")
         df = ak.fund_etf_spot_em()
         
         if not df.empty:
@@ -286,7 +193,8 @@ def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
                     "昨收": "前收盘",
                     "振幅": "振幅",
                     "换手率": "换手率",
-                    "数据日期": "日期"
+                    "数据日期": "日期",
+                    "更新时间": "更新时间"
                 }
                 df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
                 
@@ -303,31 +211,89 @@ def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.Da
                     mask = (df["日期"] >= start_date) & (df["日期"] <= end_date)
                     df = df.loc[mask]
                 
+                # 添加必要衍生字段
+                if "开盘" in df.columns and "最高" in df.columns and "最低" in df.columns:
+                    df["振幅"] = ((df["最高"] - df["最低"]) / df["开盘"] * 100).round(2)
+                
+                if "开盘" in df.columns and "收盘" in df.columns:
+                    df["涨跌幅"] = ((df["收盘"] - df["开盘"]) / df["开盘"] * 100).round(2)
+                    df["涨跌额"] = (df["收盘"] - df["开盘"]).round(2)
+                
                 return df
     except Exception as e:
         logger.debug(f"fund_etf_spot_em接口失败: {str(e)}")
     
     return pd.DataFrame()
 
-def get_symbol_with_market_prefix(etf_code: str) -> str:
-    """
-    根据ETF代码获取带市场前缀的代码
-    
-    Args:
-        etf_code: ETF代码
+def try_fund_etf_fund_daily_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """使用fund_etf_fund_daily_em接口获取ETF历史数据"""
+    try:
+        logger.info(f"尝试使用fund_etf_fund_daily_em接口获取ETF {etf_code} 数据")
+        df = ak.fund_etf_fund_daily_em()
         
-    Returns:
-        str: 带市场前缀的代码
-    """
-    if etf_code.startswith(('5', '6', '9')):
-        return f"sh{etf_code}"
-    else:
-        return f"sz{etf_code}"
+        if not df.empty:
+            logger.info(f"fund_etf_fund_daily_em 接口返回的原始列名: {list(df.columns)}")
+            
+            # 过滤指定ETF
+            df = df[df["基金代码"] == etf_code]
+            
+            if not df.empty:
+                # 处理包含日期的列名
+                date_columns = [col for col in df.columns if col.startswith(('20', '21'))]
+                if date_columns:
+                    # 创建新的DataFrame用于存储结果
+                    result_df = pd.DataFrame()
+                    
+                    for date_col in date_columns:
+                        # 提取日期部分
+                        date_str = date_col.split("-")[0]
+                        date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                        
+                        # 提取相关数据
+                        daily_data = {
+                            "日期": date,
+                            "单位净值": df[f"{date_col}-单位净值"].values[0] if f"{date_col}-单位净值" in df else None,
+                            "累计净值": df[f"{date_col}-累计净值"].values[0] if f"{date_col}-累计净值" in df else None,
+                            "增长率": df["增长率"].values[0] if "增长率" in df else None,
+                            "市价": df["市价"].values[0] if "市价" in df else None,
+                            "折价率": df["折价率"].values[0] if "折价率" in df else None
+                        }
+                        
+                        # 添加到结果DataFrame
+                        result_df = pd.concat([result_df, pd.DataFrame([daily_data])], ignore_index=True)
+                    
+                    # 标准化列名
+                    result_df = result_df.rename(columns={
+                        "单位净值": "收盘",
+                        "折价率": "折溢价率"
+                    })
+                    
+                    # 确保日期格式
+                    if "日期" in result_df.columns:
+                        result_df["日期"] = pd.to_datetime(result_df["日期"]).dt.strftime("%Y-%m-%d")
+                    
+                    # 添加基础列
+                    result_df["ETF代码"] = etf_code
+                    result_df["ETF名称"] = get_etf_name(etf_code)
+                    
+                    # 仅保留在指定日期范围内的数据
+                    if "日期" in result_df.columns:
+                        mask = (result_df["日期"] >= start_date) & (result_df["日期"] <= end_date)
+                        result_df = result_df.loc[mask]
+                    
+                    # 添加必要衍生字段
+                    if "收盘" in result_df.columns and "增长率" in result_df.columns:
+                        result_df["涨跌幅"] = result_df["增长率"]
+                    
+                    return result_df
+    except Exception as e:
+        logger.debug(f"fund_etf_fund_daily_em接口失败: {str(e)}")
+    
+    return pd.DataFrame()
 
 def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     确保DataFrame包含所有必需的交易数据列
-    注意：此函数仅检查列是否存在，不进行任何计算
     
     Args:
         df: 原始DataFrame
@@ -354,86 +320,3 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     
     return df
-
-def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    清洗并格式化数据
-    """
-    try:
-        # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 处理日期列
-        if "日期" in df.columns:
-            # 尝试将日期列转换为datetime类型
-            try:
-                # 先确保是字符串类型，便于处理各种可能的日期格式
-                df["日期"] = df["日期"].astype(str)
-                # 尝试转换为datetime
-                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-                # 格式化为字符串
-                df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
-            except Exception as e:
-                logger.error(f"日期列处理失败: {str(e)}", exc_info=True)
-        
-        # 保持原始列顺序
-        required_columns = [
-            "日期", "开盘", "最高", "最低", "收盘", "成交量", 
-            "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", 
-            "ETF代码", "ETF名称", "折溢价率"
-        ]
-        
-        # 确保列顺序一致
-        final_columns = [col for col in required_columns if col in df.columns]
-        if final_columns:
-            df = df[final_columns]
-        
-        # 移除重复行
-        df = df.drop_duplicates(subset=["日期"], keep="last")
-        
-        # 按日期排序
-        df = df.sort_values("日期", ascending=False)
-        
-        return df
-    except Exception as e:
-        logger.error(f"数据清洗过程中发生错误: {str(e)}", exc_info=True)
-        return pd.DataFrame()
-
-def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
-    """
-    限制数据为最近1年的数据
-    
-    Args:
-        df: 原始DataFrame
-        end_date: 结束日期
-        
-    Returns:
-        pd.DataFrame: 限制为1年数据后的DataFrame
-    """
-    if df.empty:
-        return df
-    
-    try:
-        # 计算1年前的日期
-        one_year_ago = (pd.to_datetime(end_date) - timedelta(days=365)).strftime("%Y-%m-%d")
-        
-        # 确保日期列存在
-        if "日期" not in df.columns:
-            logger.warning("数据中缺少日期列，无法限制为1年数据")
-            return df
-        
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
-        df = df.copy(deep=True)
-        
-        # 转换日期列
-        df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
-        
-        # 过滤数据
-        mask = df["日期"] >= pd.to_datetime(one_year_ago)
-        df = df.loc[mask]
-        
-        logger.info(f"数据已限制为最近1年（从 {one_year_ago} 至 {end_date}），剩余 {len(df)} 条数据")
-        return df
-    except Exception as e:
-        logger.error(f"限制数据为1年时发生错误: {str(e)}", exc_info=True)
-        return df

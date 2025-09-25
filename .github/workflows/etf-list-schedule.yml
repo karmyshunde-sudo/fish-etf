@@ -1,4 +1,4 @@
-name: ETF列表更新定时任务
+name: 定时-ETF列表更新
 on:
   schedule:
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)

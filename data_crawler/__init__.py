@@ -42,7 +42,7 @@ from utils.data_processor import (
     limit_to_one_year_data
 )
 from data_crawler.akshare_crawler import crawl_etf_daily_akshare
-from data_crawler.sina_crawler import crawl_etf_daily_sina
+# 从akshare_crawler.py移除了sina_crawler的导入
 from data_crawler.etf_list_manager import (
     get_filtered_etf_codes,
     get_etf_name,
@@ -165,17 +165,12 @@ def crawl_etf_daily_incremental() -> None:
                         continue
                     logger.info(f"📅 增量爬取，获取新数据：{start_date} 至 {end_date}")
                 
-                # 先尝试AkShare爬取
+                # 只尝试AkShare爬取（已修改为只使用两个API）
                 df = crawl_etf_daily_akshare(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
                 
-                # AkShare失败则尝试新浪爬取
+                # 不再尝试其他接口
                 if df.empty:
-                    logger.warning("⚠️ AkShare未获取到数据，尝试使用新浪接口")
-                    df = crawl_etf_daily_sina(etf_code, start_date, end_date, is_first_crawl=is_first_crawl)
-                
-                # 数据校验
-                if df.empty:
-                    logger.warning(f"⚠️ 所有接口均未获取到数据，跳过保存")
+                    logger.warning(f"⚠️ AkShare未获取到数据，不再尝试其他接口")
                     # 记录失败日志，但不标记为已完成，以便下次重试
                     record_failed_etf(etf_daily_dir, etf_code, etf_name)
                     continue

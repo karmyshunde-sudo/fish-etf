@@ -94,6 +94,47 @@ def fetch_market_cap_data():
         logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
         return {}
 
+def fetch_single_stock_market_cap(stock_code):
+    """获取单只股票的市值数据"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 确定市场前缀
+        market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
+        ak_code = f"{market_prefix}{stock_code}"
+        
+        # 获取单只股票数据
+        df = ak.stock_zh_a_spot_em(symbol=ak_code)
+        
+        if df.empty:
+            logger.warning(f"股票 {stock_code} 的市值数据为空")
+            return None
+        
+        # 确保必要列存在
+        required_columns = ["流通市值"]
+        for col in required_columns:
+            if col not in df.columns:
+                logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                return None
+        
+        # 流通市值单位是万元，转换为亿元
+        try:
+            market_cap = float(df["流通市值"].values[0]) / 10000
+            if not np.isnan(market_cap) and market_cap > 0:
+                logger.info(f"成功获取股票 {stock_code} 的市值数据: {market_cap:.2f}亿元")
+                return market_cap
+            else:
+                logger.warning(f"股票 {stock_code} 的市值数据无效: {market_cap}")
+                return None
+        except Exception as e:
+            logger.warning(f"股票 {stock_code} 市值数据类型错误: {str(e)}")
+            return None
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 市值数据失败: {str(e)}", exc_info=True)
+        return None
+
 def create_or_update_basic_info():
     """创建或更新股票基础信息文件"""
     ensure_directory_exists()
@@ -123,40 +164,47 @@ def create_or_update_basic_info():
     # 确保市值列是数值类型
     basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
     
-    # 关键修复：不再移除无市值股票，而是记录并尝试修复
-    initial_count = len(basic_info_df)
-    invalid_mask = (basic_info_df['market_cap'].isna()) | (basic_info_df['market_cap'] <= 0)
+    # 关键修复：对无市值股票进行补充
+    invalid_mask = (basic_info_df['market_cap'] <= 0) | basic_info_df['market_cap'].isna()
     invalid_count = invalid_mask.sum()
     
     if invalid_count > 0:
-        logger.warning(f"检测到 {invalid_count} 条无有效市值数据的股票")
-        # 尝试修复无市值股票
-        for idx, row in basic_info_df[invalid_mask].iterrows():
-            stock_code = row['code']
-            logger.info(f"尝试修复股票 {stock_code} 的市值数据")
-            # 尝试重新获取单只股票数据
-            stock_data = ak.stock_zh_a_spot_em(symbol=stock_code)
-            if not stock_data.empty and '流通市值' in stock_data.columns:
-                try:
-                    market_cap = float(stock_data['流通市值'].values[0]) / 10000
-                    if not np.isnan(market_cap) and market_cap > 0:
-                        basic_info_df.at[idx, 'market_cap'] = market_cap
-                        logger.info(f"成功修复股票 {stock_code} 的市值数据: {market_cap:.2f}亿元")
-                except:
-                    pass
+        logger.warning(f"检测到 {invalid_count} 条无有效市值数据的股票，正在尝试补充...")
+        
+        # 获取需要补充市值的股票列表
+        invalid_stocks = basic_info_df[invalid_mask]['code'].tolist()
+        
+        # 逐只股票尝试获取市值
+        for stock_code in invalid_stocks:
+            stock_code = str(stock_code).zfill(6)
+            logger.info(f"尝试补充股票 {stock_code} 的市值数据")
+            
+            # 尝试获取单只股票市值
+            market_cap = fetch_single_stock_market_cap(stock_code)
+            
+            # 如果获取成功，更新数据
+            if market_cap is not None:
+                idx = basic_info_df[basic_info_df['code'] == stock_code].index[0]
+                basic_info_df.at[idx, 'market_cap'] = market_cap
+                # 从市值字典中添加
+                market_cap_dict[stock_code] = market_cap
     
     # 再次检查
-    invalid_mask = (basic_info_df['market_cap'].isna()) | (basic_info_df['market_cap'] <= 0)
+    invalid_mask = (basic_info_df['market_cap'] <= 0) | basic_info_df['market_cap'].isna()
     invalid_count = invalid_mask.sum()
     
     if invalid_count > 0:
-        logger.warning(f"仍然有 {invalid_count} 条无有效市值数据的股票")
-        # 为无市值股票设置默认值，而不是移除
-        basic_info_df.loc[invalid_mask, 'market_cap'] = 50.0  # 设置为50亿元默认值
+        logger.warning(f"仍有 {invalid_count} 条无法获取市值数据的股票，这些股票可能存在数据问题")
+        # 为这些股票保留0值，而不是设置默认值
+        # 关键修改：不再设置默认值，而是保留0值，但标记为"数据异常"
+        basic_info_df.loc[invalid_mask, 'market_cap'] = 0.0
+        # 添加一列标识数据异常
+        basic_info_df['data_status'] = 'normal'
+        basic_info_df.loc[invalid_mask, 'data_status'] = 'market_cap_missing'
     
     # 保存基础信息
     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-    logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录，所有股票都有有效市值数据")
+    logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录，其中 {len(basic_info_df[basic_info_df['market_cap'] > 0])} 条有有效市值数据")
     
     return True
 
@@ -373,7 +421,7 @@ def ensure_market_cap_data():
             return
         
         # 检查是否有无市值数据
-        invalid_mask = (basic_info_df['market_cap'].isna()) | (basic_info_df['market_cap'] <= 0)
+        invalid_mask = (basic_info_df['market_cap'] <= 0) | basic_info_df['market_cap'].isna()
         invalid_count = invalid_mask.sum()
         
         if invalid_count > 0:
@@ -382,25 +430,35 @@ def ensure_market_cap_data():
             # 获取市值数据
             market_cap_dict = fetch_market_cap_data()
             
-            # 修复无效数据
+            # 尝试修复无效数据
             for idx, row in basic_info_df[invalid_mask].iterrows():
                 stock_code = row['code']
-                if stock_code in market_cap_dict:
-                    basic_info_df.at[idx, 'market_cap'] = market_cap_dict[stock_code]
-                    logger.info(f"成功修复股票 {stock_code} 的市值数据: {market_cap_dict[stock_code]:.2f}亿元")
+                logger.info(f"尝试补充股票 {stock_code} 的市值数据")
+                
+                # 尝试获取单只股票市值
+                market_cap = fetch_single_stock_market_cap(stock_code)
+                
+                # 如果获取成功，更新数据
+                if market_cap is not None:
+                    basic_info_df.at[idx, 'market_cap'] = market_cap
+                    market_cap_dict[stock_code] = market_cap
             
             # 检查是否还有无效数据
-            invalid_mask = (basic_info_df['market_cap'].isna()) | (basic_info_df['market_cap'] <= 0)
+            invalid_mask = (basic_info_df['market_cap'] <= 0) | basic_info_df['market_cap'].isna()
             invalid_count = invalid_mask.sum()
             
             if invalid_count > 0:
-                logger.warning(f"仍然有 {invalid_count} 条无效市值数据，使用默认值50亿元修复")
-                # 为无市值股票设置默认值
-                basic_info_df.loc[invalid_mask, 'market_cap'] = 50.0
+                logger.warning(f"仍有 {invalid_count} 条无法获取市值数据的股票")
+                # 为这些股票保留0值，而不是设置默认值
+                basic_info_df.loc[invalid_mask, 'market_cap'] = 0.0
+                # 添加一列标识数据异常
+                if 'data_status' not in basic_info_df.columns:
+                    basic_info_df['data_status'] = 'normal'
+                basic_info_df.loc[invalid_mask, 'data_status'] = 'market_cap_missing'
             
             # 保存更新
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            logger.info(f"已更新基础信息文件，所有股票都有有效市值数据")
+            logger.info(f"已更新基础信息文件，共 {len(basic_info_df)} 条记录，其中 {len(basic_info_df[basic_info_df['market_cap'] > 0])} 条有有效市值数据")
         
     except Exception as e:
         logger.error(f"确保市值数据完整时出错: {str(e)}", exc_info=True)
@@ -416,7 +474,7 @@ def main():
     else:
         logger.error("基础信息文件更新失败")
     
-    # 2. 确保市值数据完整
+    # 2. 确保市值数据完整（重点：补充市值）
     ensure_market_cap_data()
     
     # 3. 更新所有股票日线数据

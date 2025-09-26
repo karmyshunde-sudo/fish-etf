@@ -843,7 +843,7 @@ def generate_report():
                 message = "\n".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据获取失败）\n")
                 send_wechat_message(message)
-                time.sleep 1
+                time.sleep(1)
                 continue
             
             # 确保有足够数据

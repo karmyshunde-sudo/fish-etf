@@ -1,158 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票日线数据增量爬取器
-每5分钟运行一次，每次只爬取100只股票
-使用智能多源调度系统确保"快、稳、准"
+股票数据爬取模块
+负责爬取股票基础信息和日线数据，确保数据完整性
 """
+
 import os
-import sys
 import logging
 import pandas as pd
-import time
 import akshare as ak
-import subprocess
+import time
+import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from config import Config
-from utils.date_utils import get_beijing_time, get_utc_time
-from utils.git_utils import commit_files_in_batches
+import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
-import random
-import requests
-import json  # 添加缺失的json导入
+from config import Config
 
-# ===== 智能数据源管理器（核心组件）=====
-class DataSourceManager:
-    """智能数据源管理器，实现动态负载均衡"""
-    
-    def __init__(self):
-        # 定义所有可用数据源及其特性
-        self.sources = {
-            "akshare": {
-                "status": "active",  # active, throttled, failed
-                "last_throttle_time": None,
-                "throttle_count": 0,
-                "current_delay": 0.3,  # 初始延迟较低
-                "success_count": 0,
-                "failure_count": 0,
-                "priority": 1,  # 优先级（越低越好）
-                "max_concurrent": 3,  # 最大并发数
-                "last_used": 0,
-                "success_rate": 1.0  # 初始成功率100%
-            },
-            "sina": {
-                "status": "active",
-                "last_throttle_time": None,
-                "throttle_count": 0,
-                "current_delay": 0.4,
-                "success_count": 0,
-                "failure_count": 0,
-                "priority": 2,
-                "max_concurrent": 2,
-                "last_used": 0,
-                "success_rate": 1.0
-            }
-        }
-        self.total_requests = 0
-        self.successful_requests = 0
-        self.last_reset_time = time.time()
-        
-    def get_best_source(self, stock_code: str = None) -> str:
-        """获取当前最佳数据源，考虑多种因素"""
-        # 每小时重置统计
-        if time.time() - self.last_reset_time > 3600:
-            self._reset_statistics()
-        
-        # 获取可用数据源
-        available_sources = [
-            (name, info) for name, info in self.sources.items() 
-            if info["status"] == "active" and 
-               (time.time() - info["last_used"] > info["current_delay"])
-        ]
-        
-        if not available_sources:
-            # 所有数据源都在冷却中，等待最短冷却时间
-            min_wait = min(
-                info["current_delay"] - (time.time() - info["last_used"])
-                for _, info in self.sources.items()
-                if info["status"] == "active"
-            )
-            time.sleep(max(0.1, min_wait))
-            return self.get_best_source(stock_code)
-        
-        # 按优先级、延迟、成功率排序
-        available_sources.sort(key=lambda x: (
-            x[1]["priority"],
-            x[1]["current_delay"],
-            -x[1]["success_rate"],
-            x[1]["last_used"]
-        ))
-        
-        return available_sources[0][0]
-    
-    def report_success(self, source_name: str):
-        """报告请求成功，更新数据源状态"""
-        if source_name in self.sources:
-            source = self.sources[source_name]
-            source["success_count"] += 1
-            source["failure_count"] = 0
-            source["last_used"] = time.time()
-            
-            # 更新成功率
-            self.successful_requests += 1
-            self.total_requests += 1
-            source["success_rate"] = source["success_count"] / max(1, source["success_count"] + source["failure_count"])
-            
-            # 如果连续成功，可以尝试降低延迟
-            if source["success_count"] > 5 and source["current_delay"] > 0.3:
-                source["current_delay"] = max(0.3, source["current_delay"] * 0.9)
-    
-    def report_failure(self, source_name: str, is_throttled: bool = False):
-        """报告请求失败，更新数据源状态"""
-        if source_name in self.sources:
-            source = self.sources[source_name]
-            source["failure_count"] += 1
-            source["success_count"] = max(0, source["success_count"] - 2)  # 成功率降低
-            self.total_requests += 1
-            
-            # 更新成功率
-            source["success_rate"] = source["success_count"] / max(1, source["success_count"] + source["failure_count"])
-            
-            if is_throttled:
-                source["throttle_count"] += 1
-                source["last_throttle_time"] = time.time()
-                
-                # 被限流，增加延迟
-                source["current_delay"] = min(5.0, source["current_delay"] * 1.2)
-                
-                # 如果频繁被限流，暂时禁用
-                if source["throttle_count"] > 3:
-                    source["status"] = "throttled"
-                    logger.warning(f"数据源 {source_name} 被限流，暂时禁用")
-            
-            # 如果失败次数过多，暂时禁用
-            if source["failure_count"] > 8:
-                source["status"] = "throttled"
-                logger.warning(f"数据源 {source_name} 失败次数过多，暂时禁用")
-    
-    def _reset_statistics(self):
-        """每小时重置统计，给数据源恢复机会"""
-        for source in self.sources.values():
-            source["success_count"] = max(0, source["success_count"] - 5)
-            source["failure_count"] = max(0, source["failure_count"] - 3)
-            
-            # 恢复被限流的数据源
-            if (source["status"] == "throttled" and 
-                source["last_throttle_time"] and 
-                time.time() - source["last_throttle_time"] > 1800):  # 30分钟后尝试恢复
-                source["status"] = "active"
-                source["current_delay"] = max(0.5, source["current_delay"] * 0.7)
-                logger.info(f"数据源 {list(self.sources.keys())[list(self.sources.values()).index(source)]} 已恢复")
-        
-        self.last_reset_time = time.time()
-
-# 初始化日志
+# 配置日志
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -160,216 +24,109 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 股票基础信息文件路径
-BASIC_INFO_FILE = "data/all_stocks.csv"
-# 日线数据存储目录
-DAILY_DATA_DIR = os.path.join(Config.DATA_DIR, "daily")
+# 数据目录配置
+DATA_DIR = Config.DATA_DIR
+DAILY_DIR = os.path.join(DATA_DIR, "daily")
+BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 
-# 每次爬取的股票数量
-STOCKS_PER_RUN = 100
-# 每批提交的股票数量
-BATCH_COMMIT_SIZE = 10
-# 最大重试次数
-MAX_RETRIES = 3
+# 确保目录存在
+os.makedirs(DAILY_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 
-# 全局数据源管理器
-DATA_SOURCE_MANAGER = DataSourceManager()
+def ensure_directory_exists():
+    """确保数据目录存在"""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    if not os.path.exists(DAILY_DIR):
+        os.makedirs(DAILY_DIR)
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR)
 
-# ====== 修改：确保正确导入tickten模块 ======
-try:
-    from stock.tickten import get_top_stocks_for_strategy
-    TICKTEN_AVAILABLE = True
-    logger.info("成功导入 tickten 策略模块")
-except ImportError as e:
-    TICKTEN_AVAILABLE = False
-    logger.error(f"无法导入 tickten 策略模块: {str(e)}，股票筛选功能将不可用")
-    logger.error("请确保 stock/tickten.py 文件存在且无语法错误")
-    logger.error("当前工作目录: " + os.getcwd())
-    logger.error("当前Python路径: " + str(sys.path))
-    import traceback
-    logger.error("完整的错误堆栈:\n" + traceback.format_exc())
-
-def ensure_daily_data_dir():
-    """确保日线数据目录存在"""
-    os.makedirs(DAILY_DATA_DIR, exist_ok=True)
-    logger.info(f"已确保日线数据目录存在: {DAILY_DATA_DIR}")
-
-def fetch_from_akshare(stock_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    """从AkShare获取股票数据"""
-    # 确定市场前缀
-    section = get_stock_section(stock_code)
-    if section == "沪市主板" or section == "科创板":
-        market_prefix = "sh"
-    else:  # 深市主板、创业板
-        market_prefix = "sz"
-    
-    # 尝试多种可能的股票代码格式
-    possible_codes = [
-        f"{market_prefix}{stock_code}",  # "sh000001"
-        f"{stock_code}.{'SZ' if market_prefix == 'sz' else 'SH'}",  # "000001.SZ"
-        stock_code,  # "000001"
-        f"{stock_code}.{market_prefix.upper()}",  # "000001.SH"
-        f"{market_prefix}{stock_code}.XSHG" if market_prefix == "sh" else f"{market_prefix}{stock_code}.XSHE",  # 交易所格式
-    ]
-    
-    # 尝试使用多种接口获取数据
-    df = None
-    successful_code = None
-    
-    # 先尝试使用stock_zh_a_hist接口
-    for code in possible_codes:
-        try:
-            df = ak.stock_zh_a_hist(symbol=code, period="daily", 
-                                  start_date=start_date, end_date=end_date, 
-                                  adjust="qfq")
-            if not df.empty:
-                successful_code = code
-                break
-        except Exception as e:
-            logger.debug(f"使用stock_zh_a_hist接口获取股票 {code} 失败: {str(e)}")
-    
-    # 如果stock_zh_a_hist接口失败，尝试其他接口
-    if df is None or df.empty:
-        for code in possible_codes:
-            try:
-                df = ak.stock_zh_a_daily(symbol=code, 
-                                       start_date=start_date, 
-                                       end_date=end_date, 
-                                       adjust="qfq")
-                if not df.empty:
-                    successful_code = code
-                    break
-            except Exception as e:
-                logger.debug(f"使用stock_zh_a_daily接口获取股票 {code} 失败: {str(e)}")
-    
-    if df is not None and not df.empty and successful_code:
-        logger.debug(f"成功通过AkShare获取股票 {successful_code} 数据")
-        return df
-    
-    return None
-
-def fetch_from_sina(stock_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    """从新浪获取股票数据"""
-    # 确定市场前缀
-    section = get_stock_section(stock_code)
-    if section == "沪市主板" or section == "科创板":
-        market_prefix = "sh"
-    else:  # 深市主板、创业板
-        market_prefix = "sz"
-    
-    # 构造股票代码（新浪格式）
-    full_code = f"{market_prefix}{stock_code}"
-    
+def get_stock_list():
+    """获取股票列表"""
     try:
-        # 新浪接口
-        url = f"https://stock.finance.sina.com.cn/hq/api/jsonp_v2.php/WizardService2/stockhq?symbol={full_code}"
-        response = requests.get(url, timeout=10)
+        # 获取A股股票列表
+        stock_list = ak.stock_info_a_code_name()
+        if stock_list.empty:
+            logger.error("获取股票列表失败：返回为空")
+            return pd.DataFrame()
         
-        # 处理JSONP响应
-        if response.status_code == 200:
-            # 提取JSON数据（需要处理JSONP格式）
-            json_data = response.text
-            if json_data.startswith('var data='):
-                json_data = json_data.replace('var data=', '').rstrip(';')
-            
-            try:
-                data = json.loads(json_data)
-                # 处理数据...
-                # 这简化了，实际需要解析JSON结构
-                if 'data' in data and 'hq' in data['data']:
-                    hq_data = data['data']['hq']
-                    # 转换为DataFrame
-                    df = pd.DataFrame(hq_data, columns=['日期', '开盘', '最高', '最低', '收盘', '成交量'])
-                    return df
-            except Exception as e:
-                logger.debug(f"解析新浪数据失败: {str(e)}")
+        # 过滤ST股票和非主板/科创板/创业板股票
+        stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
+        stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
+        
+        logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
+        return stock_list
     except Exception as e:
-        logger.debug(f"通过新浪获取股票 {full_code} 失败: {str(e)}")
-    
-    return None
+        logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
-def fetch_stock_data_with_retry(stock_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    """使用最佳数据源获取股票数据"""
-    original_stock_code = str(stock_code)
-    stock_code = original_stock_code.zfill(6)
+def fetch_market_cap_data():
+    """获取股票流通市值数据"""
+    try:
+        # 获取流通市值数据
+        df = ak.stock_zh_a_spot_em()
+        
+        # 创建市值字典
+        market_cap_dict = {}
+        
+        for _, row in df.iterrows():
+            stock_code = str(row['代码']).zfill(6)
+            # 流通市值单位是万元，转换为亿元
+            try:
+                market_cap = float(row['流通市值']) / 10000
+                if not np.isnan(market_cap) and market_cap > 0:
+                    market_cap_dict[stock_code] = market_cap
+            except (TypeError, ValueError, KeyError) as e:
+                logger.warning(f"处理股票 {stock_code} 流通市值时出错: {str(e)}")
+        
+        logger.info(f"成功获取 {len(market_cap_dict)} 只股票的流通市值数据")
+        return market_cap_dict
+    except Exception as e:
+        logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
+        return {}
+
+def create_or_update_basic_info():
+    """创建或更新股票基础信息文件"""
+    ensure_directory_exists()
     
-    for attempt in range(MAX_RETRIES):
-        try:
-            # 获取最佳数据源
-            source = DATA_SOURCE_MANAGER.get_best_source(stock_code)
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 尝试使用数据源: {source} (尝试 {attempt+1}/{MAX_RETRIES})")
-            
-            # 根据数据源获取数据
-            if source == "akshare":
-                df = fetch_from_akshare(stock_code, start_date, end_date)
-            elif source == "sina":
-                df = fetch_from_sina(stock_code, start_date, end_date)
-            else:
-                logger.error(f"未知数据源: {source}")
-                df = None
-            
-            if df is not None and not df.empty:
-                # 报告成功
-                DATA_SOURCE_MANAGER.report_success(source)
-                
-                # 确保日期列存在
-                if "日期" not in df.columns:
-                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少'日期'列")
-                    return None
-                
-                # 检查是否有必要的列
-                required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
-                missing_columns = [col for col in required_columns if col not in df.columns]
-                if missing_columns:
-                    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 数据缺少必要列: {', '.join(missing_columns)}")
-                    return None
-                
-                # 确保日期列格式正确
-                if "日期" in df.columns:
-                    # 处理不同的日期格式
-                    if df["日期"].dtype == 'object':
-                        # 尝试多种日期格式
-                        try:
-                            df["日期"] = pd.to_datetime(df["日期"], format='%Y-%m-%d')
-                        except:
-                            try:
-                                df["日期"] = pd.to_datetime(df["日期"], format='%Y%m%d')
-                            except:
-                                df["日期"] = pd.to_datetime(df["日期"])
-                    
-                    # 转换为字符串格式
-                    df["日期"] = df["日期"].astype(str)
-                    # 确保日期格式为YYYY-MM-DD
-                    df["日期"] = df["日期"].str.replace(r'(\d{4})/(\d{1,2})/(\d{1,2})', 
-                                                      lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
-                                                      regex=True)
-                    # 处理其他可能的格式
-                    df["日期"] = df["日期"].str.replace(r'(\d{4})-(\d{1,2}) (\d{1,2})', 
-                                                      lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", 
-                                                      regex=True)
-                    # 移除可能存在的空格
-                    df["日期"] = df["日期"].str.strip()
-                    df = df.sort_values("日期", ascending=True)
-                
-                # 限制为最近1年的数据
-                one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-                df = df[df["日期"] >= one_year_ago]
-                
-                logger.info(f"股票 {stock_code} (原始: {original_stock_code}) ✅ 成功通过 {source} 获取数据，共 {len(df)} 天（{start_date} 至 {end_date}）")
-                return df
-            
-            # 如果数据为空，视为失败
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据为空")
-            DATA_SOURCE_MANAGER.report_failure(source)
-            
-        except Exception as e:
-            # 检测是否是限流错误
-            is_throttled = "429" in str(e) or "Too Many Requests" in str(e) or "请求过于频繁" in str(e)
-            DATA_SOURCE_MANAGER.report_failure(source, is_throttled)
-            logger.debug(f"股票 {stock_code} (原始: {original_stock_code}) 从 {source} 获取数据失败: {str(e)}")
+    # 获取股票列表
+    stock_list = get_stock_list()
+    if stock_list.empty:
+        logger.error("无法获取股票列表，基础信息文件更新失败")
+        return False
     
-    logger.warning(f"股票 {stock_code} (原始: {original_stock_code}) 获取数据失败，所有数据源均无效")
-    return None
+    # 获取市值数据
+    market_cap_dict = fetch_market_cap_data()
+    
+    # 准备基础信息DataFrame
+    basic_info_df = pd.DataFrame({
+        'code': stock_list['code'],
+        'name': stock_list['name'],
+        'section': stock_list['code'].apply(get_stock_section),
+        'next_crawl_index': 0
+    })
+    
+    # 添加市值数据
+    basic_info_df['market_cap'] = basic_info_df['code'].apply(
+        lambda x: market_cap_dict.get(str(x).zfill(6), 0.0)
+    )
+    
+    # 确保市值列是数值类型
+    basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
+    
+    # 移除市值为0的记录
+    initial_count = len(basic_info_df)
+    basic_info_df = basic_info_df[basic_info_df['market_cap'] > 0]
+    if len(basic_info_df) < initial_count:
+        logger.warning(f"移除了 {initial_count - len(basic_info_df)} 条无效市值数据")
+    
+    # 保存基础信息
+    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+    logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录，其中 {len(basic_info_df[basic_info_df['market_cap'] > 0])} 条有有效市值数据")
+    
+    return True
 
 def get_stock_section(stock_code: str) -> str:
     """
@@ -391,334 +148,221 @@ def get_stock_section(stock_code: str) -> str:
     # 确保股票代码是6位数字
     stock_code = stock_code.zfill(6)
     
-    # 股票板块配置
-    MARKET_SECTIONS = {
-        "沪市主板": {"prefix": ["60"]},
-        "深市主板": {"prefix": ["00"]},
-        "创业板": {"prefix": ["30"]},
-        "科创板": {"prefix": ["688"]}
-    }
-    
     # 根据股票代码前缀判断板块
-    for section, config in MARKET_SECTIONS.items():
-        for prefix in config["prefix"]:
-            if stock_code.startswith(prefix):
-                return section
-    
-    return "其他板块"
+    if stock_code.startswith('60'):
+        return "沪市主板"
+    elif stock_code.startswith('00'):
+        return "深市主板"
+    elif stock_code.startswith('30'):
+        return "创业板"
+    elif stock_code.startswith('688'):
+        return "科创板"
+    else:
+        return "其他板块"
 
-def process_stock_for_crawl(stock_code: str) -> Optional[str]:
-    """处理单只股票的爬取任务，返回需要提交的文件路径"""
+def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
+    """获取单只股票的日线数据"""
     try:
-        # 计算日期范围
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 确定市场前缀
+        market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
+        ak_code = f"{market_prefix}{stock_code}"
         
         # 获取日线数据
-        df = fetch_stock_data_with_retry(stock_code, start_date, end_date)
+        df = ak.stock_zh_a_hist(
+            symbol=ak_code,
+            period="daily",
+            start_date=(datetime.now() - timedelta(days=730)).strftime("%Y%m%d"),
+            end_date=datetime.now().strftime("%Y%m%d"),
+            adjust=""
+        )
         
-        if df is not None and not df.empty:
-            # 保存数据
-            file_path = os.path.join(DAILY_DATA_DIR, f"{stock_code}.csv")
-            
-            # 如果文件已存在，先读取并合并
-            if os.path.exists(file_path):
-                existing_df = pd.read_csv(file_path)
-                # 合并数据
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                # 去重并按日期排序
-                combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                combined_df = combined_df.sort_values("日期", ascending=True)
-                # 限制为最近1年数据
-                one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-                combined_df = combined_df[combined_df["日期"] >= one_year_ago]
-                # 保存更新后的数据
-                combined_df.to_csv(file_path, index=False)
-            else:
-                # 新建文件
-                df.to_csv(file_path, index=False)
-            
-            # ===== 关键修改：提交文件到仓库 =====
-            try:
-                from utils.git_utils import commit_files_in_batches
-                commit_files_in_batches(file_path)
-                logger.info(f"股票 {stock_code} 日线数据已提交到Git仓库")
-            except ImportError:
-                logger.warning("未找到git_utils模块，跳过Git提交")
-            except Exception as e:
-                logger.error(f"提交股票 {stock_code} 日线数据到Git仓库失败: {str(e)}", exc_info=True)
-            
-            return file_path  # 返回需要提交的文件路径
+        if df.empty:
+            logger.warning(f"股票 {stock_code} 的日线数据为空")
+            return pd.DataFrame()
         
-        return None
+        # 标准化列名
+        df = df.rename(columns={
+            '日期': 'date',
+            '开盘': 'open',
+            '最高': 'high',
+            '最低': 'low',
+            '收盘': 'close',
+            '成交量': 'volume',
+            '成交额': 'turnover',
+            '振幅': 'amplitude',
+            '涨跌幅': 'change_percent',
+            '换手率': 'turnover_rate'
+        })
+        
+        # 确保必要列存在
+        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+        for col in required_columns:
+            if col not in df.columns:
+                logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                return pd.DataFrame()
+        
+        # 确保日期格式正确
+        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+        df = df.sort_values('date').reset_index(drop=True)
+        
+        logger.info(f"成功获取股票 {stock_code} 的日线数据，共 {len(df)} 条记录")
+        return df
+    
     except Exception as e:
-        logger.error(f"处理股票 {stock_code} 时出错: {str(e)}", exc_info=True)
-        return None
+        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
-def _process_market_cap(market_cap):
-    """处理市值数据，确保为有效数值"""
-    if pd.isna(market_cap) or market_cap in [None, 'nan', '']:
-        return 0
+def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
+    """保存股票日线数据到CSV文件"""
+    if df.empty:
+        return
     
     try:
-        # 尝试直接转换为数字
-        return float(market_cap)
-    except (TypeError, ValueError):
-        # 尝试从字符串中提取数字
-        import re
-        matches = re.findall(r'[\d.,]+', str(market_cap))
-        if matches:
-            # 只取第一个匹配项
-            num_str = matches[0].replace(',', '')
-            try:
-                return float(num_str)
-            except:
-                return 0
-        return 0
-
-def fetch_market_cap_data(stock_codes: list) -> dict:
-    """获取股票流通市值数据"""
-    try:
-        # 获取流通市值数据
-        df = ak.stock_zh_a_spot_em()
-        
-        # 创建市值字典
-        market_cap_dict = {}
-        
-        for _, row in df.iterrows():
-            stock_code = str(row['代码']).zfill(6)
-            # 流通市值单位是万元，转换为亿元
-            market_cap = float(row['流通市值']) / 10000
-            market_cap_dict[stock_code] = market_cap
-        
-        return market_cap_dict
+        file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
+        df.to_csv(file_path, index=False)
+        logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
     except Exception as e:
-        logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
-        return {}
+        logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+
+def update_all_stocks_daily_data():
+    """更新所有股票的日线数据"""
+    ensure_directory_exists()
+    
+    # 获取基础信息文件
+    if not os.path.exists(BASIC_INFO_FILE):
+        logger.error(f"基础信息文件 {BASIC_INFO_FILE} 不存在，无法更新日线数据")
+        return False
+    
+    basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+    if basic_info_df.empty:
+        logger.error("基础信息文件为空，无法更新日线数据")
+        return False
+    
+    # 获取需要更新的股票列表
+    stock_codes = basic_info_df['code'].tolist()
+    logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据")
+    
+    def process_stock(stock_code):
+        df = fetch_stock_daily_data(stock_code)
+        if not df.empty:
+            save_stock_daily_data(stock_code, df)
+    
+    # 使用线程池并发处理
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(process_stock, stock_codes)
+    
+    logger.info("所有股票日线数据更新完成")
+    return True
+
+def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
+    """获取股票日线数据（从本地）"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 日线数据目录
+        daily_dir = DAILY_DIR
+        
+        # 检查本地是否有历史数据
+        file_path = os.path.join(daily_dir, f"{stock_code}.csv")
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_csv(file_path)
+                
+                # 确保必要列存在
+                required_columns = ["date", "open", "high", "low", "close", "volume"]
+                for col in required_columns:
+                    if col not in df.columns:
+                        logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                        return pd.DataFrame()
+                
+                # 确保日期列是字符串类型
+                if "date" in df.columns:
+                    df["date"] = df["date"].astype(str)
+                    # 移除可能存在的空格
+                    df["date"] = df["date"].str.strip()
+                    df = df.sort_values("date", ascending=True)
+                
+                # 移除NaN值
+                df = df.dropna(subset=['close', 'volume'])
+                
+                logger.debug(f"成功加载股票 {stock_code} 的本地日线数据，共 {len(df)} 条有效记录")
+                return df
+            except Exception as e:
+                logger.warning(f"读取股票 {stock_code} 数据失败: {str(e)}")
+                logger.debug(traceback.format_exc())
+        
+        logger.warning(f"股票 {stock_code} 的日线数据不存在")
+        return pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def ensure_market_cap_data():
+    """确保所有股票都有有效的市值数据"""
+    if not os.path.exists(BASIC_INFO_FILE):
+        logger.info("基础信息文件不存在，正在创建...")
+        create_or_update_basic_info()
+        return
+    
+    try:
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if 'market_cap' not in basic_info_df.columns:
+            logger.warning("基础信息文件缺少市值列，重新获取基础信息")
+            create_or_update_basic_info()
+            return
+        
+        # 检查是否有市值为0或空的记录
+        invalid_mask = (basic_info_df['market_cap'].isna()) | (basic_info_df['market_cap'] <= 0)
+        invalid_count = invalid_mask.sum()
+        
+        if invalid_count > 0:
+            logger.warning(f"检测到 {invalid_count} 条无效市值数据，正在重新获取...")
+            
+            # 获取市值数据
+            market_cap_dict = fetch_market_cap_data()
+            
+            # 更新无效数据
+            for idx, row in basic_info_df[invalid_mask].iterrows():
+                stock_code = row['code']
+                if stock_code in market_cap_dict:
+                    basic_info_df.at[idx, 'market_cap'] = market_cap_dict[stock_code]
+                else:
+                    # 如果网络获取不到，尝试使用默认值
+                    basic_info_df.at[idx, 'market_cap'] = 50.0  # 默认50亿元
+            
+            # 保存更新
+            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+            logger.info(f"已更新基础信息文件，修复了 {invalid_count} 条无效市值数据")
+        
+    except Exception as e:
+        logger.error(f"确保市值数据完整时出错: {str(e)}", exc_info=True)
+        logger.error(traceback.format_exc())
 
 def main():
-    """主函数：股票日线数据增量爬取"""
-    try:
-        logger.info("===== 开始执行股票日线数据增量爬取 =====")
-        
-        # 确保日线数据目录存在
-        ensure_daily_data_dir()
-        
-        # 1. 加载股票基础信息 - 修复：如果不存在则自动获取
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"股票基础信息文件 {BASIC_INFO_FILE} 不存在，正在自动获取...")
-            
-            try:
-                logger.info("从AkShare获取全市场股票列表...")
-                # 获取A股股票列表
-                stock_list = ak.stock_info_a_code_name()
-                
-                if stock_list.empty:
-                    logger.error("获取股票列表失败：返回为空")
-                    return
-                
-                # 记录初始股票数量
-                initial_count = len(stock_list)
-                logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
-                
-                # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
-                stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
-                stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
-                
-                filtered_count = len(stock_list)
-                logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
-                
-                # 修复：正确获取市值数据，并添加数据清洗
-                market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
-                
-                # 准备基础信息DataFrame
-                basic_info_df = pd.DataFrame({
-                    'code': stock_list['code'],
-                    'name': stock_list['name'],
-                    'market_cap': [market_cap_dict.get(str(code).zfill(6), 0) for code in stock_list['code']],
-                    'section': stock_list['code'].apply(get_stock_section),
-                    'next_crawl_index': 0
-                })
-                
-                # 确保市值列是数字类型
-                basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
-                
-                # 保存基础信息
-                basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                logger.info(f"已自动创建股票基础信息文件，共 {len(basic_info_df)} 条记录，市值数据已正确初始化")
-            except Exception as e:
-                logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
-                return
-        else:
-            basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-            
-            # 如果基础信息为空，尝试重新获取
-            if basic_info_df.empty:
-                logger.warning(f"股票基础信息为空，正在尝试重新获取...")
-                try:
-                    logger.info("从AkShare获取全市场股票列表...")
-                    # 获取A股股票列表
-                    stock_list = ak.stock_info_a_code_name()
-                    
-                    if stock_list.empty:
-                        logger.error("获取股票列表失败：返回为空")
-                        return
-                    
-                    # 记录初始股票数量
-                    initial_count = len(stock_list)
-                    logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
-                    
-                    # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
-                    stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
-                    stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
-                    
-                    filtered_count = len(stock_list)
-                    logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
-                    
-                    # 修复：正确获取市值数据，并添加数据清洗
-                    market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
-                    
-                    # 准备基础信息DataFrame
-                    basic_info_df = pd.DataFrame({
-                        'code': stock_list['code'],
-                        'name': stock_list['name'],
-                        'market_cap': [market_cap_dict.get(str(code).zfill(6), 0) for code in stock_list['code']],
-                        'section': stock_list['code'].apply(get_stock_section),
-                        'next_crawl_index': 0
-                    })
-                    
-                    # 确保市值列是数字类型
-                    basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
-                    
-                    # 保存基础信息
-                    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                    logger.info(f"已重新创建股票基础信息文件，共 {len(basic_info_df)} 条记录，市值数据已正确初始化")
-                except Exception as e:
-                    logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
-                    return
-            else:
-                # 确保股票代码是6位字符串
-                basic_info_df["code"] = basic_info_df["code"].astype(str).str.zfill(6)
-                
-                # 修复：添加市值列如果不存在
-                if "market_cap" not in basic_info_df.columns:
-                    logger.warning("基础信息文件缺少market_cap列，正在补充...")
-                    
-                    # 获取最新股票列表以获取市值数据
-                    try:
-                        stock_list = ak.stock_info_a_code_name()
-                        stock_list["code"] = stock_list["code"].astype(str).str.zfill(6)
-                        
-                        # 创建市值字典
-                        market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
-                        
-                        # 为现有股票添加市值
-                        basic_info_df["market_cap"] = basic_info_df["code"].map(market_cap_dict).fillna(0)
-                    except Exception as e:
-                        logger.error(f"获取市值数据失败，将使用默认值: {str(e)}")
-                        basic_info_df["market_cap"] = 0
-                
-                # 确保市值列是数字类型
-                basic_info_df["market_cap"] = pd.to_numeric(basic_info_df["market_cap"], errors='coerce').fillna(0)
-                
-                # 保存修改后的基础信息
-                basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-                logger.info(f"已确保股票代码为6位格式，共 {len(basic_info_df)} 条记录，市值数据已正确处理")
-        
-        # 2. 确保 next_crawl_index 列存在
-        if "next_crawl_index" not in basic_info_df.columns:
-            basic_info_df["next_crawl_index"] = 0
-            # 保存修改
-            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            logger.info("已添加 next_crawl_index 列到股票基础信息")
-        
-        # 获取当前爬取索引
-        current_index = int(basic_info_df["next_crawl_index"].iloc[0])
-        total_stocks = len(basic_info_df)
-        
-        logger.info(f"当前爬取索引: {current_index} (共 {total_stocks} 只股票)")
-        
-        # 3. 确定要爬取的股票范围
-        start_index = current_index
-        end_index = min(current_index + STOCKS_PER_RUN, total_stocks)
-        
-        # 如果到达末尾，从头开始
-        if start_index >= total_stocks:
-            start_index = 0
-            end_index = min(STOCKS_PER_RUN, total_stocks)
-            current_index = 0
-            logger.info("已到达股票列表末尾，从头开始爬取")
-        
-        # 4. 爬取指定范围的股票
-        stock_codes = basic_info_df["code"].tolist()
-        
-        # ====== 修改：应用tickten策略筛选股票 ======
-        if TICKTEN_AVAILABLE:
-            logger.info("正在应用TickTen策略筛选股票...")
-            try:
-                # 使用tickten策略筛选股票
-                top_stocks_by_section = get_top_stocks_for_strategy()
-                # stock_codes = filter_stocks_for_tickten_strategy(stock_codes)
-        
-                # 从所有板块中提取股票代码
-                filtered_stock_codes = []
-                for section, stocks in top_stocks_by_section.items():
-                    filtered_stock_codes.extend([stock["code"] for stock in stocks])
-        
-                # 确保股票代码是字符串且为6位
-                filtered_stock_codes = [str(code).zfill(6) for code in filtered_stock_codes]
-        
-                # 去重并过滤无效代码
-                filtered_stock_codes = list(set(filtered_stock_codes))
-                filtered_stock_codes = [code for code in filtered_stock_codes if len(code) == 6 and code.isdigit()]
-        
-                logger.info(f"TickTen策略筛选完成，剩余 {len(filtered_stock_codes)} 只股票")
-        
-                # 如果筛选后股票数量为0，使用原始列表
-                if len(filtered_stock_codes) == 0:
-                    logger.warning("TickTen策略筛选后股票数量为0，使用原始股票列表")
-                    filtered_stock_codes = basic_info_df["code"].tolist()
-            except Exception as e:
-                logger.error(f"TickTen策略筛选失败: {str(e)}，使用原始股票列表")
-                filtered_stock_codes = basic_info_df["code"].tolist()
-        else:
-            # 如果tickten不可用，使用原始股票列表
-            filtered_stock_codes = basic_info_df["code"].tolist()
-        
-        stocks_to_crawl = filtered_stock_codes[start_index:end_index]
-        
-        logger.info(f"本次将爬取 {len(stocks_to_crawl)} 只股票 (索引 {start_index} 到 {end_index-1})")
-        
-        # 并行处理股票
-        success_count = 0
-        with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数，因为有多个数据源
-            results = executor.map(process_stock_for_crawl, stocks_to_crawl)
-            for i, file_path in enumerate(results):
-                if file_path:
-                    success_count += 1
-                
-                logger.info(f"已处理 {i+1}/{len(stocks_to_crawl)} 只股票，成功: {success_count}")
-        
-        # 5. 更新 next_crawl_index
-        next_index = end_index if end_index < total_stocks else 0
-        basic_info_df["next_crawl_index"] = next_index
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        
-        logger.info(f"股票基础信息已更新，next_crawl_index 设置为 {next_index}")
-        
-        # 提交更新后的股票基础信息
-        try:
-            logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
-            from utils.git_utils import commit_files_in_batches
-            commit_files_in_batches(BASIC_INFO_FILE)
-            logger.info("股票基础信息已成功提交到GitHub仓库")
-        except Exception as e:
-            logger.warning(f"提交股票基础信息到GitHub仓库失败: {str(e)}，但爬取任务已完成")
-        
-        logger.info("===== 股票日线数据增量爬取完成 =====")
+    """主函数：更新所有股票数据"""
+    logger.info("===== 开始更新股票数据 =====")
     
-    except Exception as e:
-        logger.error(f"股票日线数据增量爬取失败: {str(e)}", exc_info=True)
+    # 1. 创建/更新基础信息文件
+    if create_or_update_basic_info():
+        logger.info("基础信息文件更新成功")
+    else:
+        logger.error("基础信息文件更新失败")
+    
+    # 2. 确保市值数据完整
+    ensure_market_cap_data()
+    
+    # 3. 更新所有股票日线数据
+    if update_all_stocks_daily_data():
+        logger.info("日线数据更新成功")
+    else:
+        logger.error("日线数据更新失败")
+    
+    logger.info("===== 股票数据更新完成 =====")
 
 if __name__ == "__main__":
     main()

@@ -29,7 +29,7 @@ from utils.date_utils import (
     get_utc_time
 )
 from wechat_push.push import send_wechat_message
-from utils.git_utils import commit_and_push_file  # 确保导入这个函数
+from utils.git_utils import commit_files_in_batches  # 确保导入这个函数
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -968,7 +968,7 @@ def get_top_stocks_for_strategy() -> Dict[str, List[Dict]]:
             try:
                 logger.info("正在提交更新后的股票基础信息到GitHub仓库...")
                 commit_message = "自动更新股票基础信息 [策略执行]"
-                if commit_and_push_file(BASIC_INFO_FILE, commit_message):
+                if commit_files_in_batches(BASIC_INFO_FILE, commit_message):
                     logger.info("更新后的股票基础信息已成功提交并推送到GitHub仓库")
                 else:
                     logger.warning("提交更新后的股票基础信息到GitHub仓库失败，但继续执行策略")

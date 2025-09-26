@@ -78,7 +78,7 @@ def get_stock_section(stock_code: str) -> str:
         return "其他板块"
 
 def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """从本地加载股票日线数据"""
+    """从本地加载股票日线数据，严格使用API返回的列名"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
@@ -92,11 +92,16 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
             try:
                 df = pd.read_csv(file_path)
                 
-                # 确保必要列存在
+                # 严格检查API返回的必要列名
+                # 根据API文档 stock_zh_a_hist 返回的列名:
+                # 日期, 股票代码, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率
+                # 经crawler.py映射后的列名:
+                # date, code, open, close, high, low, volume, turnover, amplitude, change_percent, change_amount, turnover_rate
+                
                 required_columns = ["date", "open", "high", "low", "close", "volume"]
                 for col in required_columns:
                     if col not in df.columns:
-                        logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                        logger.error(f"股票 {stock_code} 数据缺少必要列: {col} (必须使用API映射的列名)")
                         return pd.DataFrame()
                 
                 # 确保日期列是字符串类型
@@ -199,7 +204,7 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
             logger.warning("数据量不足，无法计算成交量变化")
             return 0.0
         
-        # 获取最新两个交易日的成交量
+        # 严格使用API映射后的列名
         current_volume = df['volume'].values[-1]
         previous_volume = df['volume'].values[-2]
         
@@ -306,15 +311,11 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     return is_volatile, cross_count, (min_deviation, max_deviation)
 
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
-    """检测M头和头肩顶形态
-    
-    Returns:
-        dict: 形态检测结果
-    """
+    """检测M头和头肩顶形态，严格使用API返回的列名"""
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
-    # 获取收盘价
+    # 严格使用API返回的收盘价列名
     close_prices = df["close"].values
     
     # 寻找局部高点
@@ -587,7 +588,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     return message
 
 def load_stock_basic_info() -> pd.DataFrame:
-    """加载股票基础信息，确保数据完整性"""
+    """加载股票基础信息，严格使用API返回的列名"""
     try:
         # 检查基础信息文件是否存在
         if not os.path.exists(BASIC_INFO_FILE):
@@ -597,11 +598,12 @@ def load_stock_basic_info() -> pd.DataFrame:
         # 尝试加载现有文件
         df = pd.read_csv(BASIC_INFO_FILE)
         
-        # 确保必要的列存在
+        # 严格检查API返回的必要列名
+        # crawler.py中定义的列名
         required_columns = ['code', 'name', 'section', 'market_cap']
         for col in required_columns:
             if col not in df.columns:
-                logger.error(f"基础信息文件缺少必要列: {col}")
+                logger.error(f"基础信息文件缺少必要列: {col} (必须使用API映射的列名)")
                 return pd.DataFrame()
         
         # 确保股票代码是6位字符串
@@ -629,18 +631,18 @@ def load_stock_basic_info() -> pd.DataFrame:
         return pd.DataFrame()
 
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
-    """计算股票策略评分（更精细化的评分机制）"""
+    """计算股票策略评分，严格使用API返回的列名"""
     try:
         if df is None or df.empty or len(df) < 40:
             logger.debug(f"股票 {stock_code} 数据不足，无法计算策略评分")
             return 0.0
         
-        # 检查必要列
+        # 严格检查API返回的必要列名
         required_columns = ['open', 'high', 'low', 'close', 'volume']
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
-            logger.debug(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}，无法计算策略评分")
+            logger.error(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)} (必须使用API映射的列名)")
             return 0.0
         
         # 获取最新数据
@@ -655,6 +657,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         # 1. 趋势指标评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
+            # 严格使用API返回的列名
             # 计算移动平均线
             df["ma5"] = df["close"].rolling(window=5).mean()
             df["ma10"] = df["close"].rolling(window=10).mean()

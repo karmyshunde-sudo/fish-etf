@@ -298,7 +298,7 @@ def calculate_annual_volatility(df: pd.DataFrame) -> float:
 
 # ========== 以下是关键修复 ==========
 def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
-    """计算股票市值（直接使用基础信息文件中的数据）
+    """计算股票市值（优先使用基础信息，其次使用网络接口）
     
     Returns:
         float: 市值(亿元)
@@ -314,7 +314,23 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                     logger.debug(f"使用基础信息文件中的市值数据: {market_cap:.2f}亿元")
                     return market_cap
         
-        # 2. 如果基础信息中没有，尝试使用历史数据估算
+        # 2. 如果基础信息中没有，尝试通过接口获取
+        logger.debug(f"基础信息中未获取到股票 {stock_code} 的市值，尝试通过接口获取")
+        try:
+            # 获取流通市值数据
+            df_market = ak.stock_zh_a_spot_em()
+            
+            # 查找该股票
+            stock_data = df_market[df_market['代码'] == stock_code]
+            if not stock_data.empty:
+                # 流通市值单位是万元，转换为亿元
+                market_cap = float(stock_data['流通市值'].values[0]) / 10000
+                logger.debug(f"从网络接口获取到市值: {market_cap:.2f}亿元")
+                return market_cap
+        except Exception as e:
+            logger.debug(f"从网络接口获取市值失败: {str(e)}")
+        
+        # 3. 如果基础信息中没有，尝试使用历史数据估算
         if df is not None and not df.empty and len(df) >= 250:
             if "成交量" in df.columns and "收盘" in df.columns:
                 avg_volume = df["成交量"].iloc[-250:].mean()
@@ -328,7 +344,7 @@ def calculate_market_cap(df: pd.DataFrame, stock_code: str) -> float:
                         logger.debug(f"使用历史数据估算市值: {estimated_market_cap:.2f}亿元")
                         return estimated_market_cap
         
-        # 3. 如果无法获取市值，返回默认值
+        # 4. 如果无法获取市值，返回默认值
         logger.warning(f"⚠️ 无法获取股票 {stock_code} 的准确市值，使用默认市值 50亿元")
         return 50.0
     
@@ -668,7 +684,7 @@ def generate_section_report(section: str, stocks: List[Dict]) -> str:
         report_lines.append("──────────────────")
         report_lines.append("💡 操作建议: 当前市场环境下，该板块暂无符合策略标准的标的")
         report_lines.append("──────────────────")
-        report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
+        report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf  )")
         return "\n".join(report_lines)
     
     # 添加筛选出的股票详情
@@ -711,7 +727,7 @@ def generate_section_report(section: str, stocks: List[Dict]) -> str:
     report_lines.append("3. 持续关注趋势变化，及时调整持仓")
     report_lines.append("4. 科创板/创业板波动较大，注意控制风险")
     report_lines.append("──────────────────")
-    report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf)")
+    report_lines.append("📊 数据来源: fish-etf (https://github.com/karmyshunde-sudo/fish-etf  )")
     
     return "\n".join(report_lines)
 # ========== 以上是关键修改：为每个板块生成详细报告 ==========

@@ -11,7 +11,7 @@ import pandas as pd
 import akshare as ak
 import time
 import numpy as np
-import yfinance as yf  # 直接导入yfinance
+import yfinance as yf
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -202,18 +202,73 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         logger.error("网络连接不可用，无法获取数据")
         return pd.DataFrame()
     
-    # 1. 首先尝试使用yfinance获取
-    # 恒生科技指数的正确代码是^HSTECH
-    yfinance_symbol = "^HSTECH"
-    logger.info(f"尝试通过yfinance获取恒生科技指数 {yfinance_symbol}")
+    # 1. 尝试使用akshare获取恒生科技指数 (800373)
+    try:
+        # 检查akshare版本是否支持所需方法
+        if hasattr(ak, 'index_hk_hist'):
+            logger.info("使用ak.index_hk_hist方法获取恒生科技指数数据")
+            df = ak.index_hk_hist(symbol="800373", period="daily", 
+                                 start_date=start_date, end_date=end_date)
+        elif hasattr(ak, 'stock_hk_index_hist'):
+            logger.info("使用ak.stock_hk_index_hist方法获取恒生科技指数数据")
+            df = ak.stock_hk_index_hist(symbol="800373", period="daily", 
+                                       start_date=start_date, end_date=end_date)
+        else:
+            logger.info("akshare版本不支持恒生指数专用方法，尝试其他方法")
+            # 尝试使用通用的港股历史数据获取方法
+            df = ak.stock_hk_hist(symbol="800373", period="daily", 
+                                 start_date=start_date, end_date=end_date)
+        
+        if not df.empty:
+            # 标准化列名
+            if '日期' in df.columns:
+                df = df.rename(columns={
+                    '日期': 'date',
+                    '开盘': 'open',
+                    '最高': 'high',
+                    '最低': 'low',
+                    '收盘': 'close',
+                    '成交量': 'volume'
+                })
+            elif 'date' in df.columns:
+                # 如果已经是英文列名，直接使用
+                pass
+            else:
+                logger.warning("无法识别数据列名，尝试使用默认列名")
+                df.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+            
+            # 确保有必要的列
+            required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+            if all(col in df.columns for col in required_columns):
+                # 标准化列名
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘',
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘',
+                    'volume': '成交量'
+                })
+                
+                # 排序
+                df = df.sort_values('日期').reset_index(drop=True)
+                
+                logger.info(f"✅ 通过akshare方法成功获取恒生科技指数数据，共{len(df)}条记录")
+                return df
+            else:
+                logger.warning("获取的恒生指数数据缺少必要列")
+    except Exception as e:
+        logger.warning(f"akshare方法获取恒生科技指数数据失败: {str(e)}")
     
+    # 2. 尝试使用yfinance获取恒生科技指数
+    # 恒生科技指数在yfinance中代码是^HSTECH
     try:
         # 转换日期格式
         start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
         
         # 获取数据
-        df = yf.download(yfinance_symbol, start=start_dt, end=end_dt)
+        df = yf.download('^HSTECH', start=start_dt, end=end_dt)
         
         if not df.empty:
             # 标准化列名
@@ -234,88 +289,20 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
             
-            logger.info(f"✅ 通过yfinance成功获取恒生科技指数数据，共{len(df)}条记录")
-            return df
-        else:
-            logger.warning("yfinance返回空数据")
-    except Exception as e:
-        logger.warning(f"通过yfinance获取恒生科技指数数据失败: {str(e)}")
-    
-    # 2. 尝试使用akshare的index_hk_hist方法
-    try:
-        # 恒生科技指数的正确代码是800373
-        df = ak.index_hk_hist(symbol="800373", period="daily", 
-                             start_date=start_date, end_date=end_date)
-        if not df.empty:
-            # 重命名列
-            df = df.rename(columns={
-                '日期': 'date',
-                '开盘': 'open',
-                '最高': 'high',
-                '最低': 'low',
-                '收盘': 'close',
-                '成交量': 'volume'
-            })
-            
-            # 标准化列名
-            df = df.rename(columns={
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量'
-            })
-            
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            
-            logger.info(f"✅ 通过akshare index_hk_hist 方法成功获取恒生科技指数数据，共{len(df)}条记录")
+            logger.info(f"✅ 通过yfinance获取恒生科技指数数据，共{len(df)}条记录")
             return df
     except Exception as e:
-        logger.warning(f"index_hk_hist 方法失败: {str(e)}")
+        logger.warning(f"yfinance方法获取恒生科技指数数据失败: {str(e)}")
     
-    # 3. 尝试使用akshare的stock_hk_index_hist方法
+    # 3. 尝试使用fund_etf_spot_em获取ETF数据
     try:
-        # 恒生科技指数的正确代码是800373
-        df = ak.stock_hk_index_hist(symbol="800373", period="daily", 
-                                  start_date=start_date, end_date=end_date)
-        if not df.empty:
-            # 重命名列
-            df = df.rename(columns={
-                '日期': 'date',
-                '开盘': 'open',
-                '最高': 'high',
-                '最低': 'low',
-                '收盘': 'close',
-                '成交量': 'volume'
-            })
-            
-            # 标准化列名
-            df = df.rename(columns={
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量'
-            })
-            
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            
-            logger.info(f"✅ 通过akshare stock_hk_index_hist 方法成功获取恒生科技指数数据，共{len(df)}条记录")
-            return df
-    except Exception as e:
-        logger.warning(f"stock_hk_index_hist 方法失败: {str(e)}")
-    
-    # 4. 作为最后手段，尝试使用fund_etf_spot_em
-    try:
-        # 恒生科技指数的ETF代码
+        # 获取所有ETF数据
         df = ak.fund_etf_spot_em()
+        
         if not df.empty:
-            # 过滤恒生科技指数ETF
-            df = df[df["代码"].str.contains("513400")]
+            # 过滤华夏恒生互联网ETF (513400)
+            df = df[df["代码"] == "513400"]
+            
             if not df.empty:
                 # 标准化列名
                 df = df.rename(columns={
@@ -332,18 +319,48 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 # 只保留我们需要的列
                 df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
                 
-                logger.info(f"✅ 通过fund_etf_spot_em 方法成功获取恒生科技指数数据，共{len(df)}条记录")
+                logger.info(f"✅ 通过fund_etf_spot_em获取华夏恒生互联网ETF数据，共{len(df)}条记录")
                 return df
     except Exception as e:
-        logger.warning(f"fund_etf_spot_em 方法失败: {str(e)}")
+        logger.warning(f"fund_etf_spot_em方法获取数据失败: {str(e)}")
     
-    # 5. 最后尝试获取恒生指数数据
+    # 4. 尝试使用stock_zh_a_spot_em获取指数数据
     try:
-        # 恒生指数代码：800001
+        df = ak.stock_zh_a_spot_em()
+        if not df.empty:
+            # 恒生科技指数在stock_zh_a_spot_em中的标识
+            df = df[df["代码"].str.contains("HSTECH") | df["名称"].str.contains("恒生科技")]
+            if not df.empty:
+                # 标准化列名
+                df = df.rename(columns={
+                    '最新价': '收盘',
+                    '开盘价': '开盘',
+                    '最高价': '最高',
+                    '最低价': '最低',
+                    '成交量': '成交量',
+                    '代码': 'symbol',
+                    '名称': 'name'
+                })
+                
+                # 添加日期列
+                df["日期"] = datetime.now().strftime("%Y-%m-%d")
+                
+                # 只保留我们需要的列
+                df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
+                
+                logger.info(f"✅ 通过stock_zh_a_spot_em获取恒生科技指数数据，共{len(df)}条记录")
+                return df
+    except Exception as e:
+        logger.warning(f"stock_zh_a_spot_em方法获取数据失败: {str(e)}")
+    
+    # 5. 尝试使用通用方法获取恒生指数作为替代
+    try:
+        # 恒生指数代码为800001
         df = ak.index_hk_hist(symbol="800001", period="daily", 
                              start_date=start_date, end_date=end_date)
+        
         if not df.empty:
-            # 重命名列
+            # 标准化列名
             df = df.rename(columns={
                 '日期': 'date',
                 '开盘': 'open',
@@ -408,7 +425,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             )
         
         elif index_code.endswith('.HI'):
-            # 恒生系列指数 - 现在使用单独的函数处理
+            # 恒生系列指数 - 使用专门的函数处理
             return fetch_hang_seng_index_data(index_code, start_date, end_date)
         
         else:
@@ -446,7 +463,6 @@ def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str
             '^NDX': '^NDX',  # 纳斯达克100
             '^DJI': '^DJI',  # 道琼斯工业指数
             '^GSPC': '^GSPC', # 标准普尔500
-            '^HSI': '^HSI',   # 恒生指数
             '^HSTECH': '^HSTECH' # 恒生科技指数
         }
         
@@ -473,9 +489,6 @@ def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str
         
         # 确保日期格式正确
         df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
-        
-        # 排序
-        df = df.sort_values('日期').reset_index(drop=True)
         
         logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
         return df
@@ -561,8 +574,13 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
         
         # 确保是数值类型
         if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
-            logger.warning("成交量数据类型错误")
-            return 0.0
+            # 尝试转换为浮点数
+            try:
+                current_volume = float(current_volume)
+                previous_volume = float(previous_volume)
+            except:
+                logger.warning("成交量数据无法转换为数值类型")
+                return 0.0
         
         # 计算变化率
         if previous_volume > 0:
@@ -785,9 +803,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     # 1. YES信号：当前价格 ≥ 20日均线
     if current >= critical:
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
-        if consecutive_above == 1 and volume_change > 20:
+        if consecutive_above == 1 and volume_change > 0.2:
             message = (
-                f"【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
                 f"  • 核心宽基ETF（{index_info['etf_code']}）立即建仓30%\n"
                 f"  • 卫星行业ETF立即建仓20%\n"
@@ -795,9 +813,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）\n"
             )
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
-        elif 2 <= consecutive_above <= 3 and volume_change > 20:
+        elif 2 <= consecutive_above <= 3 and volume_change > 0.2:
             message = (
-                f"【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
                 f"  • 核心宽基ETF（{index_info['etf_code']}）可加仓至50%\n"
                 f"  • 卫星行业ETF可加仓至35%\n"
@@ -873,10 +891,10 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
         loss_percentage = calculate_loss_percentage(df)
         
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
-        if consecutive_below == 1 and volume_change > 20:
+        if consecutive_below == 1 and volume_change > 0.2:
             if loss_percentage > -15.0:  # 亏损<15%
                 message = (
-                    f"【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change:.1f}%\n"
+                    f"【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 核心宽基ETF（{index_info['etf_code']}）立即减仓50%\n"
                     f"  • 卫星行业ETF立即减仓70%-80%\n"
@@ -885,7 +903,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 )
             else:  # 亏损≥15%
                 message = (
-                    f"【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change:.1f}%，亏损{loss_percentage:.2f}%\n"
+                    f"【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%，亏损{loss_percentage:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 核心宽基ETF（{index_info['etf_code']}）立即清仓\n"
                     f"  • 卫星行业ETF保留20%-30%底仓观察\n"
@@ -893,9 +911,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"⚠️ 重大亏损信号，避免盲目抄底\n"
                 )
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
-        elif consecutive_below == 2 and volume_change > 20:
+        elif consecutive_below == 2 and volume_change > 0.2:
             message = (
-                f"【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change:.1f}%\n"
+                f"【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
                 f"  • 核心宽基ETF（{index_info['etf_code']}）严格止损清仓\n"
                 f"  • 卫星行业ETF仅保留20%-30%底仓\n"

@@ -106,6 +106,12 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     df["date"] = df["date"].str.strip()
                     df = df.sort_values("date", ascending=True)
                 
+                # 确保数值列是数值类型
+                numeric_columns = ["open", "high", "low", "close", "volume"]
+                for col in numeric_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
                 # 移除NaN值
                 df = df.dropna(subset=['close', 'volume'])
                 
@@ -581,7 +587,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     return message
 
 def load_stock_basic_info() -> pd.DataFrame:
-    """加载股票基础信息，确保市值数据有效"""
+    """加载股票基础信息，确保数据完整性"""
     try:
         # 检查基础信息文件是否存在
         if not os.path.exists(BASIC_INFO_FILE):
@@ -601,16 +607,21 @@ def load_stock_basic_info() -> pd.DataFrame:
         # 确保股票代码是6位字符串
         df['code'] = df['code'].astype(str).str.zfill(6)
         
-        # 确保市值列是数字类型
+        # 确保市值列是数值类型
         df['market_cap'] = pd.to_numeric(df['market_cap'], errors='coerce')
         
-        # 移除市值为0或NaN的记录
-        initial_count = len(df)
-        df = df[df['market_cap'] > 0]
-        if len(df) < initial_count:
-            logger.warning(f"移除了 {initial_count - len(df)} 条无效市值数据")
+        # 保留无市值股票，但标记它们
+        invalid_mask = (df['market_cap'] <= 0) | df['market_cap'].isna()
+        invalid_count = invalid_mask.sum()
         
-        logger.info(f"成功加载基础信息文件，共 {len(df)} 条记录，包含 {len(df[df['market_cap'] > 0])} 条有效市值数据")
+        if invalid_count > 0:
+            # 为无市值股票添加状态标记
+            if 'data_status' not in df.columns:
+                df['data_status'] = 'normal'
+            df.loc[invalid_mask, 'data_status'] = 'market_cap_missing'
+            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'market_cap_missing'")
+        
+        logger.info(f"成功加载基础信息文件，共 {len(df)} 条记录")
         return df
     
     except Exception as e:
@@ -824,7 +835,12 @@ def get_top_stocks_for_strategy() -> dict:
                 logger.debug(f"股票 {stock_code} 数据不完整，跳过")
                 return None
             
-            # 4. 计算策略得分
+            # 4. 检查市值数据状态
+            if 'data_status' in stock and stock['data_status'] == 'market_cap_missing':
+                logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
+                return None
+            
+            # 5. 计算策略评分
             score = calculate_stock_strategy_score(stock_code, df)
             
             if score > 0:
@@ -845,7 +861,7 @@ def get_top_stocks_for_strategy() -> dict:
             if result is not None:
                 section_stocks[result["section"]].append(result)
         
-        # 6. 对每个板块的股票按得分排序，并取前8只
+        # 6. 对每个板块的股票按评分排序，并取前8只
         top_stocks_by_section = {}
         for section, stocks in section_stocks.items():
             if stocks:

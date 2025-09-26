@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 股票数据爬取模块
-负责爬取股票基础信息和日线数据，确保数据完整性
+严格遵循API提供的列名，确保数据处理准确
 """
 
 import os
@@ -64,7 +64,7 @@ def get_stock_list():
         return pd.DataFrame()
 
 def fetch_market_cap_data():
-    """获取股票流通市值数据，添加防限流机制"""
+    """获取股票流通市值数据，严格使用API提供的列名"""
     try:
         # 添加随机延时，避免请求过于频繁
         time.sleep(random.uniform(0.5, 1.5))
@@ -77,11 +77,11 @@ def fetch_market_cap_data():
             logger.error("获取流通市值数据失败：返回为空")
             return {}
         
-        # 检查必要列
+        # 严格检查API提供的必要列
         required_columns = ["代码", "名称", "流通市值"]
         for col in required_columns:
             if col not in df.columns:
-                logger.error(f"获取流通市值数据失败: 缺少必要列 {col}")
+                logger.error(f"获取流通市值数据失败: 缺少必要列 {col} (API要求的列名)")
                 return {}
         
         # 创建市值字典
@@ -128,7 +128,7 @@ def fetch_single_stock_market_cap(stock_code):
         return None
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息文件，添加防限流机制"""
+    """创建或更新股票基础信息文件，严格使用API列名"""
     ensure_directory_exists()
     
     # 添加随机延时，避免请求过于频繁
@@ -235,7 +235,7 @@ def get_stock_section(stock_code: str) -> str:
         return "其他板块"
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """获取单只股票的日线数据，添加防限流机制"""
+    """获取单只股票的日线数据，严格使用API提供的列名"""
     try:
         # 添加随机延时，避免请求过于频繁
         time.sleep(random.uniform(0.5, 1.5))
@@ -260,35 +260,31 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             logger.warning(f"股票 {stock_code} 的日线数据为空")
             return pd.DataFrame()
         
-        # 正确映射中文列名到英文列名
-        if "日期" in df.columns:
-            df = df.rename(columns={
-                '日期': 'date',
-                '股票代码': 'code',
-                '开盘': 'open',
-                '最高': 'high',
-                '最低': 'low',
-                '收盘': 'close',
-                '成交量': 'volume',
-                '成交额': 'turnover',
-                '振幅': 'amplitude',
-                '涨跌幅': 'change_percent',
-                '涨跌额': 'change_amount',
-                '换手率': 'turnover_rate'
-            })
-        elif "date" in df.columns:
-            # 已经是英文列名，无需处理
-            pass
-        else:
-            logger.warning(f"股票 {stock_code} 数据列名不匹配")
-            return pd.DataFrame()
+        # 严格处理stock_zh_a_hist返回的列名（根据API文档）
+        # 列名: 日期, 股票代码, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率
         
-        # 确保必要列存在
-        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+        # 检查API要求的必要列
+        required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
         for col in required_columns:
             if col not in df.columns:
-                logger.warning(f"股票 {stock_code} 数据缺少必要列: {col}")
+                logger.error(f"股票 {stock_code} 数据缺少API要求的必要列: {col}")
                 return pd.DataFrame()
+        
+        # 重命名列以符合内部使用标准
+        df = df.rename(columns={
+            '日期': 'date',
+            '股票代码': 'code',
+            '开盘': 'open',
+            '最高': 'high',
+            '最低': 'low',
+            '收盘': 'close',
+            '成交量': 'volume',
+            '成交额': 'turnover',
+            '振幅': 'amplitude',
+            '涨跌幅': 'change_percent',
+            '涨跌额': 'change_amount',
+            '换手率': 'turnover_rate'
+        })
         
         # 确保日期格式正确
         if 'date' in df.columns:
@@ -325,7 +321,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 
 def update_all_stocks_daily_data():
-    """更新所有股票的日线数据，添加防限流机制"""
+    """更新所有股票的日线数据，严格使用API列名"""
     ensure_directory_exists()
     
     # 获取基础信息文件
@@ -408,7 +404,7 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 def ensure_market_cap_data():
-    """确保所有股票都有有效的市值数据，添加防限流机制"""
+    """确保所有股票都有有效的市值数据"""
     if not os.path.exists(BASIC_INFO_FILE):
         logger.info("基础信息文件不存在，正在创建...")
         create_or_update_basic_info()

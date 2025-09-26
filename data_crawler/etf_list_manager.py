@@ -740,4 +740,29 @@ def repair_etf_list(etf_list: pd.DataFrame) -> pd.DataFrame:
             else:
                 repaired_list[col] = 0.0 if col == "基金规模" else ""
     
+    # ===== 关键修复：添加完整代码列的修复逻辑 =====
+    if "完整代码" in repaired_list.columns:
+        # 如果"完整代码"列为空，根据ETF代码生成
+        mask = (repaired_list["完整代码"].isna()) | (repaired_list["完整代码"] == "")
+        if mask.any():
+            # 根据ETF代码前缀生成完整代码
+            def generate_full_code(code):
+                code = str(code).strip()
+                # 上交所ETF：51x, 588, 510, 511, 512, 513, 515, 516, 517, 518, 519
+                if code.startswith(('51', '58')):
+                    return f"sh{code}"
+                # 深交所ETF：159, 150
+                elif code.startswith(('15', '51')):
+                    return f"sz{code}"
+                # 默认处理
+                return f"sh{code}"  # 作为默认值
+            
+            repaired_list.loc[mask, "完整代码"] = repaired_list.loc[mask, "ETF代码"].apply(generate_full_code)
+    else:
+        # 如果"完整代码"列不存在，创建它
+        if "ETF代码" in repaired_list.columns:
+            repaired_list["完整代码"] = repaired_list["ETF代码"].apply(
+                lambda x: f"sh{x}" if str(x).startswith(('51', '58')) else f"sz{x}"
+            )
+    
     return repaired_list

@@ -45,6 +45,26 @@ BASIC_INFO_FILE = "data/all_stocks.csv"
 
 # 数据更新间隔（天）
 DATA_UPDATE_INTERVAL = 1
+
+def fetch_market_cap_data(stock_codes: list) -> dict:
+    """获取股票流通市值数据"""
+    try:
+        # 获取流通市值数据
+        df = ak.stock_zh_a_spot_em()
+        
+        # 创建市值字典
+        market_cap_dict = {}
+        
+        for _, row in df.iterrows():
+            stock_code = str(row['代码']).zfill(6)
+            # 流通市值单位是万元，转换为亿元
+            market_cap = float(row['流通市值']) / 10000
+            market_cap_dict[stock_code] = market_cap
+        
+        return market_cap_dict
+    except Exception as e:
+        logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
+        return {}
 # ========== 以上是关键修改 ==========
 
 # 股票板块配置
@@ -171,10 +191,54 @@ def load_stock_basic_info() -> pd.DataFrame:
             logger.info(f"成功加载股票基础信息，共 {len(df)} 条记录")
             return df
         else:
-            logger.error(f"股票基础信息文件 {BASIC_INFO_FILE} 不存在")
-            return pd.DataFrame()
+            logger.warning(f"股票基础信息文件 {BASIC_INFO_FILE} 不存在，正在自动获取...")
+            
+            try:
+                logger.info("从AkShare获取全市场股票列表...")
+                # 获取A股股票列表
+                stock_list = ak.stock_info_a_code_name()
+                
+                if stock_list.empty:
+                    logger.error("获取股票列表失败：返回为空")
+                    return pd.DataFrame()
+                
+                # 记录初始股票数量
+                initial_count = len(stock_list)
+                logger.info(f"成功获取股票列表，共 {initial_count} 只股票（初始数量）")
+                
+                # 前置筛选条件：过滤ST股票和非主板/科创板/创业板股票
+                stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
+                stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
+                
+                filtered_count = len(stock_list)
+                logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
+                
+                # ========== 修复：从stock_zh_a_spot_em获取流通市值 ==========
+                # 获取流通市值数据
+                market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
+                
+                # 准备基础信息DataFrame
+                basic_info_df = pd.DataFrame({
+                    'code': stock_list['code'],
+                    'name': stock_list['name'],
+                    'market_cap': [market_cap_dict.get(str(code).zfill(6), 0) for code in stock_list['code']],
+                    'section': stock_list['code'].apply(get_stock_section),
+                    'next_crawl_index': 0
+                })
+                
+                # 确保市值列是数字类型
+                basic_info_df['market_cap'] = pd.to_numeric(basic_info_df['market_cap'], errors='coerce').fillna(0)
+                
+                # 保存基础信息
+                basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+                logger.info(f"已自动创建股票基础信息文件，共 {len(basic_info_df)} 条记录，市值数据已正确初始化")
+                
+                return basic_info_df
+            except Exception as e:
+                logger.error(f"自动获取股票列表失败: {str(e)}", exc_info=True)
+                return pd.DataFrame()
     except Exception as e:
-        logger.error(f"加载股票基础信息失败: {str(e)}")
+        logger.error(f"加载股票基础信息失败: {str(e)}", exc_info=True)
         logger.error(traceback.format_exc())
         return pd.DataFrame()
 

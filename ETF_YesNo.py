@@ -11,6 +11,7 @@ import pandas as pd
 import akshare as ak
 import time
 import numpy as np
+import yfinance as yf  # 直接导入yfinance
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -172,6 +173,15 @@ CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
 
+def check_network_connection():
+    """检查网络连接是否正常"""
+    try:
+        import requests
+        response = requests.get('https://www.baidu.com', timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
 def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     专门处理恒生指数数据获取
@@ -185,53 +195,183 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         pd.DataFrame: 指数日线数据
     """
     index_name = index_code.replace('.HI', '')
+    logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
     
-    # 首先尝试yfinance（更可靠）
-    yfinance_symbol = f"^{index_name}"  # yfinance格式：^HSNDXIT
-    logger.info(f"尝试通过yfinance获取恒生指数 {yfinance_symbol}")
-    df = fetch_us_index_from_yfinance(yfinance_symbol, start_date, end_date)
+    # 网络连接检查
+    if not check_network_connection():
+        logger.error("网络连接不可用，无法获取数据")
+        return pd.DataFrame()
     
-    if not df.empty:
-        logger.info(f"✅ 通过yfinance成功获取恒生指数 {index_code} 数据")
-        return df
+    # 1. 首先尝试使用yfinance获取
+    # 恒生科技指数的正确代码是^HSTECH
+    yfinance_symbol = "^HSTECH"
+    logger.info(f"尝试通过yfinance获取恒生科技指数 {yfinance_symbol}")
     
-    # 如果yfinance失败，再尝试akshare方法
     try:
-        # 尝试使用 index_hk_hist 方法（akshare最新API）
-        df = ak.index_hk_hist(symbol=index_name, period="daily", 
+        # 转换日期格式
+        start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
+        
+        # 获取数据
+        df = yf.download(yfinance_symbol, start=start_dt, end=end_dt)
+        
+        if not df.empty:
+            # 标准化列名
+            df = df.reset_index()
+            df = df.rename(columns={
+                'Date': '日期',
+                'Open': '开盘',
+                'High': '最高',
+                'Low': '最低',
+                'Close': '收盘',
+                'Volume': '成交量',
+                'Adj Close': '复权收盘'
+            })
+            
+            # 确保日期格式正确
+            df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            logger.info(f"✅ 通过yfinance成功获取恒生科技指数数据，共{len(df)}条记录")
+            return df
+        else:
+            logger.warning("yfinance返回空数据")
+    except Exception as e:
+        logger.warning(f"通过yfinance获取恒生科技指数数据失败: {str(e)}")
+    
+    # 2. 尝试使用akshare的index_hk_hist方法
+    try:
+        # 恒生科技指数的正确代码是800373
+        df = ak.index_hk_hist(symbol="800373", period="daily", 
                              start_date=start_date, end_date=end_date)
         if not df.empty:
-            logger.info(f"📊 index_hk_hist 接口返回的原始列名: {list(df.columns)}")
-            logger.info(f"✅ 通过 index_hk_hist 方法成功获取恒生指数 {index_code} 数据")
+            # 重命名列
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume'
+            })
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            logger.info(f"✅ 通过akshare index_hk_hist 方法成功获取恒生科技指数数据，共{len(df)}条记录")
             return df
     except Exception as e:
         logger.warning(f"index_hk_hist 方法失败: {str(e)}")
     
+    # 3. 尝试使用akshare的stock_hk_index_hist方法
     try:
-        # 尝试使用 stock_hk_index_hist 方法（akshare备选API）
-        df = ak.stock_hk_index_hist(symbol=index_name, period="daily", 
+        # 恒生科技指数的正确代码是800373
+        df = ak.stock_hk_index_hist(symbol="800373", period="daily", 
                                   start_date=start_date, end_date=end_date)
         if not df.empty:
-            logger.info(f"📊 stock_hk_index_hist 接口返回的原始列名: {list(df.columns)}")
-            logger.info(f"✅ 通过 stock_hk_index_hist 方法成功获取恒生指数 {index_code} 数据")
+            # 重命名列
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume'
+            })
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            logger.info(f"✅ 通过akshare stock_hk_index_hist 方法成功获取恒生科技指数数据，共{len(df)}条记录")
             return df
     except Exception as e:
         logger.warning(f"stock_hk_index_hist 方法失败: {str(e)}")
     
-    # 尝试使用 fund_etf_spot_em 获取（作为最后手段）
+    # 4. 作为最后手段，尝试使用fund_etf_spot_em
     try:
+        # 恒生科技指数的ETF代码
         df = ak.fund_etf_spot_em()
         if not df.empty:
-            # 过滤指定ETF
-            df = df[df["代码"] == index_name]
+            # 过滤恒生科技指数ETF
+            df = df[df["代码"].str.contains("513400")]
             if not df.empty:
-                logger.info(f"📊 fund_etf_spot_em 接口返回的原始列名: {list(df.columns)}")
-                logger.info(f"✅ 通过 fund_etf_spot_em 方法成功获取恒生指数 {index_code} 数据")
+                # 标准化列名
+                df = df.rename(columns={
+                    '最新价': '收盘',
+                    '开盘价': '开盘',
+                    '最高价': '最高',
+                    '最低价': '最低',
+                    '成交量': '成交量'
+                })
+                
+                # 添加日期列
+                df["日期"] = datetime.now().strftime("%Y-%m-%d")
+                
+                # 只保留我们需要的列
+                df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
+                
+                logger.info(f"✅ 通过fund_etf_spot_em 方法成功获取恒生科技指数数据，共{len(df)}条记录")
                 return df
     except Exception as e:
         logger.warning(f"fund_etf_spot_em 方法失败: {str(e)}")
     
-    logger.warning(f"无法获取恒生指数 {index_code} 数据")
+    # 5. 最后尝试获取恒生指数数据
+    try:
+        # 恒生指数代码：800001
+        df = ak.index_hk_hist(symbol="800001", period="daily", 
+                             start_date=start_date, end_date=end_date)
+        if not df.empty:
+            # 重命名列
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume'
+            })
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            logger.info(f"✅ 通过akshare获取恒生指数数据（作为替代），共{len(df)}条记录")
+            return df
+    except Exception as e:
+        logger.warning(f"获取恒生指数数据失败: {str(e)}")
+    
+    logger.error(f"❌ 无法获取恒生指数数据: {index_code}")
     return pd.DataFrame()
 
 def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
@@ -254,7 +394,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         # 根据指数类型使用不同的数据接口
         if index_code.startswith('^'):
-            # 美股指数处理 - 使用YFinance替代方案
+            # 美股指数处理 - 使用YFinance
             return fetch_us_index_from_yfinance(index_code, start_date, end_date)
         
         elif index_code.endswith('.CSI'):
@@ -286,7 +426,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
 
 def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
-    使用YFinance获取美股指数数据（最可靠的替代方案）
+    使用YFinance获取美股指数数据
     
     Args:
         index_code: 指数代码（如"^NDX"）
@@ -305,17 +445,12 @@ def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str
         symbol_map = {
             '^NDX': '^NDX',  # 纳斯达克100
             '^DJI': '^DJI',  # 道琼斯工业指数
-            '^GSPC': '^GSPC' # 标准普尔500
+            '^GSPC': '^GSPC', # 标准普尔500
+            '^HSI': '^HSI',   # 恒生指数
+            '^HSTECH': '^HSTECH' # 恒生科技指数
         }
         
         symbol = symbol_map.get(index_code, index_code)
-        
-        # 检查是否已安装yfinance
-        try:
-            import yfinance as yf
-        except ImportError:
-            logger.error("需要安装yfinance: pip install yfinance")
-            return pd.DataFrame()
         
         # 获取数据
         df = yf.download(symbol, start=start_dt, end=end_dt)
@@ -338,6 +473,9 @@ def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str
         
         # 确保日期格式正确
         df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+        
+        # 排序
+        df = df.sort_values('日期').reset_index(drop=True)
         
         logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
         return df
@@ -417,27 +555,16 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
             logger.warning("数据量不足，无法计算成交量变化")
             return 0.0
         
-        # 关键修复：确保获取标量值而不是Series
-        # 使用iloc获取单个值，并确保转换为标量
-        current_volume = df['成交量'].iloc[-1]
-        previous_volume = df['成交量'].iloc[-2]
-        
-        # 如果是Series，获取值
-        if isinstance(current_volume, pd.Series):
-            current_volume = current_volume.item()
-        if isinstance(previous_volume, pd.Series):
-            previous_volume = previous_volume.item()
-            
-        # 转换为浮点数
-        current_volume = float(current_volume)
-        previous_volume = float(previous_volume)
+        # 获取最新两个交易日的成交量
+        current_volume = df['成交量'].values[-1]
+        previous_volume = df['成交量'].values[-2]
         
         # 确保是数值类型
         if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
             logger.warning("成交量数据类型错误")
             return 0.0
         
-        # 现在previous_volume是标量值，可以安全比较
+        # 计算变化率
         if previous_volume > 0:
             volume_change = (current_volume - previous_volume) / previous_volume
             return volume_change

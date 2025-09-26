@@ -476,6 +476,26 @@ def _process_market_cap(market_cap):
                 return 0
         return 0
 
+def fetch_market_cap_data(stock_codes: list) -> dict:
+    """获取股票流通市值数据"""
+    try:
+        # 获取流通市值数据
+        df = ak.stock_zh_a_spot_em()
+        
+        # 创建市值字典
+        market_cap_dict = {}
+        
+        for _, row in df.iterrows():
+            stock_code = str(row['代码']).zfill(6)
+            # 流通市值单位是万元，转换为亿元
+            market_cap = float(row['流通市值']) / 10000
+            market_cap_dict[stock_code] = market_cap
+        
+        return market_cap_dict
+    except Exception as e:
+        logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
+        return {}
+
 def main():
     """主函数：股票日线数据增量爬取"""
     try:
@@ -509,19 +529,13 @@ def main():
                 logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
                 
                 # 修复：正确获取市值数据，并添加数据清洗
-                market_cap_values = []
-                for _, row in stock_list.iterrows():
-                    # 尝试从多个可能的列获取市值
-                    cap = row.get('market_cap', 0)
-                    if cap == 0 and '总市值' in row:
-                        cap = row['总市值']
-                    market_cap_values.append(_process_market_cap(cap))
+                market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
                 
                 # 准备基础信息DataFrame
                 basic_info_df = pd.DataFrame({
                     'code': stock_list['code'],
                     'name': stock_list['name'],
-                    'market_cap': market_cap_values,  # 修复：使用实际市值数据
+                    'market_cap': [market_cap_dict.get(str(code).zfill(6), 0) for code in stock_list['code']],
                     'section': stock_list['code'].apply(get_stock_section),
                     'next_crawl_index': 0
                 })
@@ -562,19 +576,13 @@ def main():
                     logger.info(f"【前置筛选】过滤ST股票和非主板/科创板/创业板股票后，剩余 {filtered_count} 只（过滤了 {initial_count - filtered_count} 只）")
                     
                     # 修复：正确获取市值数据，并添加数据清洗
-                    market_cap_values = []
-                    for _, row in stock_list.iterrows():
-                        # 尝试从多个可能的列获取市值
-                        cap = row.get('market_cap', 0)
-                        if cap == 0 and '总市值' in row:
-                            cap = row['总市值']
-                        market_cap_values.append(_process_market_cap(cap))
+                    market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
                     
                     # 准备基础信息DataFrame
                     basic_info_df = pd.DataFrame({
                         'code': stock_list['code'],
                         'name': stock_list['name'],
-                        'market_cap': market_cap_values,  # 修复：使用实际市值数据
+                        'market_cap': [market_cap_dict.get(str(code).zfill(6), 0) for code in stock_list['code']],
                         'section': stock_list['code'].apply(get_stock_section),
                         'next_crawl_index': 0
                     })
@@ -601,14 +609,11 @@ def main():
                         stock_list = ak.stock_info_a_code_name()
                         stock_list["code"] = stock_list["code"].astype(str).str.zfill(6)
                         
-                        # 创建一个映射字典
-                        cap_map = {}
-                        for _, row in stock_list.iterrows():
-                            cap = _process_market_cap(row.get('market_cap', 0))
-                            cap_map[row['code']] = cap
+                        # 创建市值字典
+                        market_cap_dict = fetch_market_cap_data(stock_list['code'].tolist())
                         
                         # 为现有股票添加市值
-                        basic_info_df["market_cap"] = basic_info_df["code"].map(cap_map).fillna(0)
+                        basic_info_df["market_cap"] = basic_info_df["code"].map(market_cap_dict).fillna(0)
                     except Exception as e:
                         logger.error(f"获取市值数据失败，将使用默认值: {str(e)}")
                         basic_info_df["market_cap"] = 0

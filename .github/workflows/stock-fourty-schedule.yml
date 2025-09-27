@@ -44,22 +44,11 @@ jobs:
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data/
       
-      - name: 检查交易日（定时）
-        id: check_trading_day
-        run: |
-          IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
-          echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
-      
       - name: 检查推送标志（定时）
         id: check_flags
         run: |
           BEIJING_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d')
           echo "stock_tickten_pushed=$( [ -f "data/flags/stock_tickten_pushed_${BEIJING_DATE}.txt" ] && echo true || echo false )" >> $GITHUB_OUTPUT
-      
-      - name: 跳过非交易日（定时）
-        if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
-        run: |
-          echo "skip_execution=true" >> $GITHUB_ENV
       
       - name: 跳过已推送任务（定时）
         if: steps.check_flags.outputs.stock_tickten_pushed == 'true'

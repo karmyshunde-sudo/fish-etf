@@ -23,7 +23,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
     permissions:
       contents: write
+    env:
+      WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+
       - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
@@ -34,6 +40,34 @@ jobs:
       
       - name: 配置Python环境
         uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          echo "当前工作目录: $(pwd)"
+          # 检查 requirements.txt 是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # 验证 akshare 是否安装成功
+            if ! python -c "import akshare; print('akshare 版本:', akshare.__version__)"; then
+              echo "❌ akshare 未正确安装，尝试单独安装..."
+              pip install akshare
+            fi
+            # 再次验证
+            if ! python -c "import akshare"; then
+              echo "❌ akshare 安装失败"
+              exit 1
+            fi
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la
+            exit 1
+          fi
       
       - name: 获取AkShare信息
         run: |
@@ -56,12 +90,20 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           MSG="✅ 【AkShare信息】获取成功"
           [ -n "${{ github.event.inputs.interface_name }}" ] && MSG="✅ 【AkShare信息】已查询接口: ${{ github.event.inputs.interface_name }}"
-          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi
       
       - name: 发送失败通知
         if: failure()
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【AkShare信息】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【AkShare信息】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi

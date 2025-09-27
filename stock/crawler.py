@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 仅负责数据获取和基础信息存储
-严格使用中文列名，确保与API返回格式一致
+股票数据爬取模块 - 严格使用API返回的原始列名
+不修改API返回的列名，直接使用原始列名
 """
 
 import os
@@ -74,7 +74,7 @@ def get_stock_section(stock_code: str) -> str:
         return "其他板块"
 
 def fetch_market_cap_data():
-    """获取股票流通市值数据，严格使用中文列名"""
+    """获取股票流通市值数据，严格使用API返回的列名"""
     try:
         # 添加随机延时，避免请求过于频繁
         time.sleep(random.uniform(0.5, 1.5))
@@ -87,20 +87,18 @@ def fetch_market_cap_data():
             logger.error("获取流通市值数据失败：返回为空")
             return {}
         
-        # 创建市值字典
+        # 打印API返回的列名，用于调试
+        logger.info(f"API返回的列名: {df.columns.tolist()}")
+        
+        # 创建市值字典 - 严格使用API返回的列名
         market_cap_dict = {}
         
-        # API返回的列名已经是中文
-        required_columns = ["代码", "名称", "流通市值"]
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"获取流通市值数据失败: 缺少必要列 {col}")
-                return {}
-        
-        # 创建市值字典，确保使用中文列名
+        # 使用API返回的原始列名
         for _, row in df.iterrows():
-            stock_code = str(row['代码']).zfill(6)
             try:
+                # 确保股票代码是6位
+                stock_code = str(row['代码']).zfill(6)
+                
                 # 流通市值单位是万元，转换为亿元
                 market_cap = float(row['流通市值']) / 10000
                 if market_cap > 0:
@@ -115,7 +113,7 @@ def fetch_market_cap_data():
         return {}
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息文件，使用中文列名"""
+    """创建或更新股票基础信息文件，严格使用API返回的列名"""
     ensure_directory_exists()
     
     # 添加随机延时，避免请求过于频繁
@@ -124,9 +122,20 @@ def create_or_update_basic_info():
     try:
         # 获取股票列表 - API返回的是中文列名
         stock_list = ak.stock_info_a_code_name()
+        
+        # 打印API返回的列名，用于调试
+        logger.info(f"API返回的列名: {stock_list.columns.tolist()}")
+        
         if stock_list.empty:
             logger.error("获取股票列表失败：返回为空")
             return False
+        
+        # 确保列名存在
+        required_columns = ['代码', '名称']
+        for col in required_columns:
+            if col not in stock_list.columns:
+                logger.error(f"股票列表缺少必要列: {col}")
+                return False
         
         # 过滤ST股票和非主板/科创板/创业板股票
         stock_list = stock_list[~stock_list['名称'].str.contains('ST', na=False)]
@@ -137,11 +146,11 @@ def create_or_update_basic_info():
         # 获取市值数据
         market_cap_dict = fetch_market_cap_data()
         
-        # 准备基础信息DataFrame - 严格使用中文列名
-        # 注意：API返回的列名已经是中文，直接使用
+        # 准备基础信息DataFrame - 严格使用API返回的原始列名
+        # 不修改API返回的列名，直接使用
         basic_info_df = pd.DataFrame({
-            "股票代码": stock_list['代码'],
-            "股票名称": stock_list['名称'],
+            "代码": stock_list['代码'],
+            "名称": stock_list['名称'],
             "所属板块": stock_list['代码'].apply(get_stock_section),
             "流通市值": stock_list['代码'].apply(lambda x: market_cap_dict.get(str(x).zfill(6), 0.0))
         })
@@ -235,7 +244,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 
 def update_all_stocks_daily_data():
-    """更新所有股票的日线数据，使用中文列名，包含 next_crawl_index 逻辑"""
+    """更新所有股票的日线数据，严格使用API返回的列名"""
     ensure_directory_exists()
     
     # 确保基础信息文件存在
@@ -256,7 +265,7 @@ def update_all_stocks_daily_data():
         return False
     
     # 获取需要更新的股票列表（next_crawl_index 为 True 的股票）
-    stock_codes = basic_info_df[basic_info_df["next_crawl_index"]]["股票代码"].tolist()
+    stock_codes = basic_info_df[basic_info_df["next_crawl_index"]]["代码"].tolist()
     if not stock_codes:
         logger.info("没有需要爬取的股票，next_crawl_index 均为 False")
         
@@ -265,7 +274,7 @@ def update_all_stocks_daily_data():
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         
         # 尝试获取新的股票列表
-        stock_codes = basic_info_df["股票代码"].tolist()
+        stock_codes = basic_info_df["代码"].tolist()
         logger.info(f"重置 next_crawl_index，将爬取所有 {len(stock_codes)} 只股票")
     
     logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据（基于 next_crawl_index 标记）")
@@ -284,7 +293,7 @@ def update_all_stocks_daily_data():
                 save_stock_daily_data(stock_code, df)
         
         # 更新 next_crawl_index
-        basic_info_df.loc[basic_info_df["股票代码"].isin(batch), "next_crawl_index"] = False
+        basic_info_df.loc[basic_info_df["代码"].isin(batch), "next_crawl_index"] = False
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         logger.info(f"已更新基础信息文件的 next_crawl_index 列")
     

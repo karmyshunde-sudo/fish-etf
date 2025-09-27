@@ -3,7 +3,7 @@
 """
 股票数据爬取模块
 严格使用中文列名，确保与日线数据文件格式一致
-日线爬取必须以 all_stocks.csv 为依据，不能无依无据乱爬
+包含 next_crawl_index 逻辑，用于分批爬取股票日线数据
 """
 
 import os
@@ -38,6 +38,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # 文件过期检查
 MAX_AGE_DAYS = 7  # 基础信息文件最大有效天数
+BATCH_SIZE = 100  # 每批处理的股票数量
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -157,7 +158,7 @@ def fetch_single_stock_market_cap(stock_code):
         return None
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息文件，使用中文列名"""
+    """创建或更新股票基础信息文件，使用中文列名，包含 next_crawl_index 逻辑"""
     ensure_directory_exists()
     
     # 添加随机延时，避免请求过于频繁
@@ -227,6 +228,11 @@ def create_or_update_basic_info():
         basic_info_df.loc[invalid_mask, "流通市值"] = 0.0
         basic_info_df["数据状态"] = '正常'
         basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
+    
+    # 添加 next_crawl_index 列（如果不存在）
+    if "next_crawl_index" not in basic_info_df.columns:
+        # 初始时，所有股票都标记为需要爬取
+        basic_info_df["next_crawl_index"] = True
     
     # 保存基础信息
     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
@@ -302,7 +308,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 
 def update_all_stocks_daily_data():
-    """更新所有股票的日线数据，使用中文列名"""
+    """更新所有股票的日线数据，使用中文列名，包含 next_crawl_index 逻辑"""
     ensure_directory_exists()
     
     # 确保基础信息文件存在且不过期
@@ -322,33 +328,61 @@ def update_all_stocks_daily_data():
         logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
         return False
     
-    # 获取需要更新的股票列表
-    stock_codes = basic_info_df["股票代码"].tolist()
-    logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据")
+    # 获取需要更新的股票列表（next_crawl_index 为 True 的股票）
+    stock_codes = basic_info_df[basic_info_df["next_crawl_index"]]["股票代码"].tolist()
+    if not stock_codes:
+        logger.info("没有需要爬取的股票，next_crawl_index 均为 False")
+        
+        # 重置 next_crawl_index，标记所有股票为需要爬取
+        basic_info_df["next_crawl_index"] = True
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        
+        # 尝试获取新的股票列表
+        stock_codes = basic_info_df["股票代码"].tolist()
+        logger.info(f"重置 next_crawl_index，将爬取所有 {len(stock_codes)} 只股票")
     
-    # 分批处理（每批最多100只）
-    batch_size = 100
-    total_batches = (len(stock_codes) + batch_size - 1) // batch_size
+    logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据（基于 next_crawl_index 标记）")
     
-    for batch_idx in range(total_batches):
-        start_idx = batch_idx * batch_size
-        end_idx = min((batch_idx + 1) * batch_size, len(stock_codes))
-        current_batch = stock_codes[start_idx:end_idx]
+    # 处理股票
+    def process_stock(stock_code):
+        # 添加随机延时，避免请求过于频繁
+        time.sleep(random.uniform(0.5, 1.5))
+        df = fetch_stock_daily_data(stock_code)
+        if not df.empty:
+            save_stock_daily_data(stock_code, df)
+    
+    # 使用线程池并发处理
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        executor.map(process_stock, stock_codes)
+    
+    # 更新 next_crawl_index
+    try:
+        # 读取最新的基础信息文件
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
         
-        logger.info(f"正在处理第 {batch_idx+1}/{total_batches} 批，共 {len(current_batch)} 只股票...")
+        # 更新 next_crawl_index
+        basic_info_df.loc[basic_info_df["股票代码"].isin(stock_codes), "next_crawl_index"] = False
         
-        def process_stock(stock_code):
-            # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(0.5, 1.5))
-            df = fetch_stock_daily_data(stock_code)
-            if not df.empty:
-                save_stock_daily_data(stock_code, df)
+        # 如果有超过 BATCH_SIZE 的股票未爬取，设置下一批股票的 next_crawl_index 为 True
+        not_crawled_mask = ~basic_info_df["next_crawl_index"]
+        not_crawled_count = not_crawled_mask.sum()
         
-        # 使用线程池并发处理
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            executor.map(process_stock, current_batch)
+        if not_crawled_count > 0:
+            # 获取未爬取的股票索引
+            not_crawled_indices = basic_info_df[not_crawled_mask].index
+            
+            # 设置下一批股票的 next_crawl_index 为 True
+            next_batch_indices = not_crawled_indices[:BATCH_SIZE]
+            basic_info_df.loc[next_batch_indices, "next_crawl_index"] = True
+            
+            logger.info(f"设置下一批 {min(BATCH_SIZE, len(next_batch_indices))} 只股票的 next_crawl_index 为 True")
         
-        logger.info(f"第 {batch_idx+1}/{total_batches} 批股票数据更新完成")
+        # 保存更新
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        logger.info(f"已更新基础信息文件的 next_crawl_index 列")
+        
+    except Exception as e:
+        logger.error(f"更新 next_crawl_index 失败: {str(e)}", exc_info=True)
     
     logger.info("所有股票日线数据更新完成")
     return True
@@ -472,7 +506,7 @@ def main():
     # 2. 确保市值数据完整
     ensure_market_cap_data()
     
-    # 3. 更新所有股票日线数据
+    # 3. 更新所有股票日线数据（基于 next_crawl_index 逻辑）
     if update_all_stocks_daily_data():
         logger.info("日线数据更新成功")
     else:

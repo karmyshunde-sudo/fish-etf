@@ -3,6 +3,7 @@
 """
 股票数据爬取模块
 严格使用中文列名，确保与日线数据文件格式一致
+日线爬取必须以 all_stocks.csv 为依据，不能无依无据乱爬
 """
 
 import os
@@ -14,6 +15,8 @@ import random
 import numpy as np
 from datetime import datetime, timedelta
 from config import Config
+import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -33,6 +36,9 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
+# 文件过期检查
+MAX_AGE_DAYS = 7  # 基础信息文件最大有效天数
+
 def ensure_directory_exists():
     """确保数据目录存在"""
     if not os.path.exists(DATA_DIR):
@@ -42,24 +48,49 @@ def ensure_directory_exists():
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)
 
-def get_stock_list():
-    """获取股票列表"""
-    try:
-        # 获取A股股票列表
-        stock_list = ak.stock_info_a_code_name()
-        if stock_list.empty:
-            logger.error("获取股票列表失败：返回为空")
-            return pd.DataFrame()
-        
-        # 过滤ST股票和非主板/科创板/创业板股票
-        stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
-        stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
-        
-        logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
-        return stock_list
-    except Exception as e:
-        logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
+def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
+    """检查文件是否过期（超过指定天数）"""
+    if not os.path.exists(file_path):
+        return True
+    
+    # 获取文件最后修改时间
+    mtime = os.path.getmtime(file_path)
+    mtime_date = datetime.fromtimestamp(mtime)
+    
+    # 检查是否超过指定天数
+    return (datetime.now() - mtime_date).days > max_age_days
+
+def get_stock_section(stock_code: str) -> str:
+    """
+    获取股票所属板块
+    
+    Args:
+        stock_code: 股票代码（不带市场前缀）
+    
+    Returns:
+        str: 板块名称
+    """
+    # 确保股票代码是字符串
+    stock_code = str(stock_code).zfill(6)
+    
+    # 移除可能的市场前缀
+    if stock_code.lower().startswith(('sh', 'sz')):
+        stock_code = stock_code[2:]
+    
+    # 确保股票代码是6位数字
+    stock_code = stock_code.zfill(6)
+    
+    # 根据股票代码前缀判断板块
+    if stock_code.startswith('60'):
+        return "沪市主板"
+    elif stock_code.startswith('00'):
+        return "深市主板"
+    elif stock_code.startswith('30'):
+        return "创业板"
+    elif stock_code.startswith('688'):
+        return "科创板"
+    else:
+        return "其他板块"
 
 def fetch_market_cap_data():
     """获取股票流通市值数据，严格使用中文列名"""
@@ -133,9 +164,19 @@ def create_or_update_basic_info():
     time.sleep(random.uniform(1.0, 2.0))
     
     # 获取股票列表
-    stock_list = get_stock_list()
-    if stock_list.empty:
-        logger.error("获取股票列表失败，基础信息文件更新失败")
+    try:
+        stock_list = ak.stock_info_a_code_name()
+        if stock_list.empty:
+            logger.error("获取股票列表失败：返回为空")
+            return False
+        
+        # 过滤ST股票和非主板/科创板/创业板股票
+        stock_list = stock_list[~stock_list['name'].str.contains('ST', na=False)]
+        stock_list = stock_list[stock_list['code'].str.startswith(('0', '3', '6'))]
+        
+        logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
+    except Exception as e:
+        logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
         return False
     
     # 获取市值数据
@@ -192,38 +233,6 @@ def create_or_update_basic_info():
     logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录，其中 {len(basic_info_df[basic_info_df['流通市值'] > 0])} 条有有效市值数据")
     
     return True
-
-def get_stock_section(stock_code: str) -> str:
-    """
-    获取股票所属板块
-    
-    Args:
-        stock_code: 股票代码（不带市场前缀）
-    
-    Returns:
-        str: 板块名称
-    """
-    # 确保股票代码是字符串
-    stock_code = str(stock_code).zfill(6)
-    
-    # 移除可能的市场前缀
-    if stock_code.lower().startswith(('sh', 'sz')):
-        stock_code = stock_code[2:]
-    
-    # 确保股票代码是6位数字
-    stock_code = stock_code.zfill(6)
-    
-    # 根据股票代码前缀判断板块
-    if stock_code.startswith('60'):
-        return "沪市主板"
-    elif stock_code.startswith('00'):
-        return "深市主板"
-    elif stock_code.startswith('30'):
-        return "创业板"
-    elif stock_code.startswith('688'):
-        return "科创板"
-    else:
-        return "其他板块"
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
@@ -296,30 +305,50 @@ def update_all_stocks_daily_data():
     """更新所有股票的日线数据，使用中文列名"""
     ensure_directory_exists()
     
-    # 获取基础信息文件
-    if not os.path.exists(BASIC_INFO_FILE):
-        logger.error(f"基础信息文件 {BASIC_INFO_FILE} 不存在，无法更新日线数据")
-        return False
+    # 确保基础信息文件存在且不过期
+    if not os.path.exists(BASIC_INFO_FILE) or is_file_expired(BASIC_INFO_FILE):
+        logger.info("基础信息文件不存在或已过期，正在创建...")
+        if not create_or_update_basic_info():
+            logger.error("基础信息文件创建失败，无法更新日线数据")
+            return False
     
-    basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-    if basic_info_df.empty:
-        logger.error("基础信息文件为空，无法更新日线数据")
+    # 获取基础信息文件
+    try:
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("基础信息文件为空，无法更新日线数据")
+            return False
+    except Exception as e:
+        logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
         return False
     
     # 获取需要更新的股票列表
     stock_codes = basic_info_df["股票代码"].tolist()
     logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据")
     
-    def process_stock(stock_code):
-        # 添加随机延时，避免请求过于频繁
-        time.sleep(random.uniform(0.5, 1.5))
-        df = fetch_stock_daily_data(stock_code)
-        if not df.empty:
-            save_stock_daily_data(stock_code, df)
+    # 分批处理（每批最多100只）
+    batch_size = 100
+    total_batches = (len(stock_codes) + batch_size - 1) // batch_size
     
-    # 使用线程池并发处理
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        executor.map(process_stock, stock_codes)
+    for batch_idx in range(total_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min((batch_idx + 1) * batch_size, len(stock_codes))
+        current_batch = stock_codes[start_idx:end_idx]
+        
+        logger.info(f"正在处理第 {batch_idx+1}/{total_batches} 批，共 {len(current_batch)} 只股票...")
+        
+        def process_stock(stock_code):
+            # 添加随机延时，避免请求过于频繁
+            time.sleep(random.uniform(0.5, 1.5))
+            df = fetch_stock_daily_data(stock_code)
+            if not df.empty:
+                save_stock_daily_data(stock_code, df)
+        
+        # 使用线程池并发处理
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            executor.map(process_stock, current_batch)
+        
+        logger.info(f"第 {batch_idx+1}/{total_batches} 批股票数据更新完成")
     
     logger.info("所有股票日线数据更新完成")
     return True
@@ -433,11 +462,12 @@ def main():
     # 添加初始延时，避免立即请求
     time.sleep(random.uniform(1.0, 2.0))
     
-    # 1. 创建/更新基础信息文件
-    if create_or_update_basic_info():
-        logger.info("基础信息文件更新成功")
-    else:
-        logger.error("基础信息文件更新失败")
+    # 1. 确保基础信息文件存在且不过期
+    if not os.path.exists(BASIC_INFO_FILE) or is_file_expired(BASIC_INFO_FILE):
+        logger.info("基础信息文件不存在或已过期，正在更新...")
+        if not create_or_update_basic_info():
+            logger.error("基础信息文件更新失败，无法继续")
+            return
     
     # 2. 确保市值数据完整
     ensure_market_cap_data()

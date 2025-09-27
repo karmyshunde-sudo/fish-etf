@@ -3,6 +3,7 @@
 """
 股票趋势策略 (TickTen)
 严格使用中文列名，与日线数据文件格式保持一致
+自动处理all_stocks.csv文件缺失或过期的问题
 """
 
 import os
@@ -36,6 +37,7 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
+MAX_AGE_DAYS = 7  # 基础信息文件最大有效天数
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -45,6 +47,44 @@ def ensure_directory_exists():
         os.makedirs(DAILY_DIR)
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)
+
+def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
+    """检查文件是否过期（超过指定天数）"""
+    if not os.path.exists(file_path):
+        return True
+    
+    # 获取文件最后修改时间
+    mtime = os.path.getmtime(file_path)
+    mtime_date = datetime.fromtimestamp(mtime)
+    
+    # 检查是否超过指定天数
+    return (datetime.now() - mtime_date).days > max_age_days
+
+def create_basic_info_file():
+    """创建基础信息文件，如果存在则更新"""
+    try:
+        logger.info("尝试创建或更新基础信息文件 all_stocks.csv...")
+        
+        # 尝试导入股票爬取模块
+        try:
+            from stock.crawler import create_or_update_basic_info
+            success = create_or_update_basic_info()
+            if success:
+                logger.info("基础信息文件 all_stocks.csv 已创建/更新")
+                return True
+            else:
+                logger.error("基础信息文件创建/更新失败")
+                return False
+        except ImportError:
+            logger.error("无法导入 stock.crawler 模块，无法创建基础信息文件")
+            return False
+        except Exception as e:
+            logger.error(f"创建基础信息文件时出错: {str(e)}", exc_info=True)
+            return False
+            
+    except Exception as e:
+        logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
+        return False
 
 def get_stock_section(stock_code: str) -> str:
     """
@@ -584,12 +624,15 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     return message
 
 def load_stock_basic_info() -> pd.DataFrame:
-    """加载股票基础信息，严格使用中文列名"""
+    """加载股票基础信息，严格使用中文列名，并处理文件缺失或过期情况"""
     try:
-        # 检查基础信息文件是否存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.error(f"基础信息文件 {BASIC_INFO_FILE} 不存在")
-            return pd.DataFrame()
+        # 检查基础信息文件是否存在或是否过期
+        if not os.path.exists(BASIC_INFO_FILE) or is_file_expired(BASIC_INFO_FILE):
+            logger.warning(f"基础信息文件 {BASIC_INFO_FILE} 不存在或已过期，尝试创建...")
+            success = create_basic_info_file()
+            if not success:
+                logger.error(f"无法创建基础信息文件 {BASIC_INFO_FILE}")
+                return pd.DataFrame()
         
         # 尝试加载现有文件
         df = pd.read_csv(BASIC_INFO_FILE)
@@ -788,7 +831,7 @@ def get_top_stocks_for_strategy() -> dict:
     try:
         logger.info("===== 开始执行个股趋势策略(TickTen) =====")
         
-        # 1. 获取股票基础信息
+        # 1. 获取股票基础信息（自动处理文件缺失或过期）
         basic_info_df = load_stock_basic_info()
         if basic_info_df.empty:
             logger.error("获取股票基础信息失败，无法继续")
@@ -936,6 +979,12 @@ def main():
     
     # 确保目录存在
     ensure_directory_exists()
+    
+    # 获取基础信息（自动处理文件缺失或过期）
+    basic_info = load_stock_basic_info()
+    if basic_info.empty:
+        logger.error("基础信息文件处理失败，策略无法执行")
+        return
     
     # 生成并发送策略报告
     generate_strategy_report()

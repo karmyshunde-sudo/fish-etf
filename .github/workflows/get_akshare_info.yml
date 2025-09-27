@@ -32,8 +32,8 @@ jobs:
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: 设置环境
-        uses: ./.github/actions/setup_environment
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
       
       - name: 获取AkShare信息
         run: |

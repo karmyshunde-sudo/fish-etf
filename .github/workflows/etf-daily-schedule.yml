@@ -44,21 +44,8 @@ jobs:
         run: |
           mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data/
       
-      - name: 检查交易日
-        id: check_trading_day
-        run: |
-          IS_TRADING_DAY=$(TZ=Asia/Shanghai date '+%u' | awk '$1 <= 5 {print "true"}')
-          echo "IS_TRADING_DAY=${IS_TRADING_DAY:-false}" >> $GITHUB_OUTPUT
-          echo "交易日检查: ${IS_TRADING_DAY:-false}"
-      
-      - name: 跳过非交易日
-        if: steps.check_trading_day.outputs.IS_TRADING_DAY == 'false'
-        run: |
-          echo "skip_execution=true" >> $GITHUB_ENV
-      
       - name: 执行ETF日线数据爬取（定时）
         id: execute_task
-        if: env.skip_execution != 'true'
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
@@ -79,7 +66,7 @@ jobs:
           [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
       
       - name: 提交数据变更
-        if: env.skip_execution != 'true' && steps.execute_task.outputs.task_status == 'success'
+        if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 

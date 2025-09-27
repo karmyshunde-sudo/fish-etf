@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 股票趋势策略 (TickTen)
-基于20日均线和成交量变化判断股票趋势
+严格使用中文列名，与日线数据文件格式保持一致
 """
 
 import os
 import logging
 import pandas as pd
 import time
+import random
 import numpy as np
 from datetime import datetime, timedelta
 from config import Config
@@ -78,7 +79,7 @@ def get_stock_section(stock_code: str) -> str:
         return "其他板块"
 
 def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """从本地加载股票日线数据，严格使用API返回的列名"""
+    """从本地加载股票日线数据，严格使用中文列名"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
@@ -92,33 +93,28 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
             try:
                 df = pd.read_csv(file_path)
                 
-                # 严格检查API返回的必要列名
-                # 根据API文档 stock_zh_a_hist 返回的列名:
-                # 日期, 股票代码, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率
-                # 经crawler.py映射后的列名:
-                # date, code, open, close, high, low, volume, turnover, amplitude, change_percent, change_amount, turnover_rate
-                
-                required_columns = ["date", "open", "high", "low", "close", "volume"]
+                # 严格检查中文列名
+                required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
                 for col in required_columns:
                     if col not in df.columns:
-                        logger.error(f"股票 {stock_code} 数据缺少必要列: {col} (必须使用API映射的列名)")
+                        logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
                         return pd.DataFrame()
                 
                 # 确保日期列是字符串类型
-                if "date" in df.columns:
-                    df["date"] = df["date"].astype(str)
+                if "日期" in df.columns:
+                    df["日期"] = df["日期"].astype(str)
                     # 移除可能存在的空格
-                    df["date"] = df["date"].str.strip()
-                    df = df.sort_values("date", ascending=True)
+                    df["日期"] = df["日期"].str.strip()
+                    df = df.sort_values("日期", ascending=True)
                 
                 # 确保数值列是数值类型
-                numeric_columns = ["open", "high", "low", "close", "volume"]
+                numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
                 for col in numeric_columns:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce')
                 
                 # 移除NaN值
-                df = df.dropna(subset=['close', 'volume'])
+                df = df.dropna(subset=['收盘', '成交量'])
                 
                 logger.debug(f"成功加载股票 {stock_code} 的本地日线数据，共 {len(df)} 条有效记录")
                 return df
@@ -137,9 +133,9 @@ def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
     if len(df) < CRITICAL_VALUE_DAYS:
         logger.warning(f"数据不足{CRITICAL_VALUE_DAYS}天，无法准确计算临界值")
-        return df["close"].mean() if not df.empty else 0.0
+        return df["收盘"].mean() if not df.empty else 0.0
     
-    return df['close'].rolling(window=CRITICAL_VALUE_DAYS).mean().iloc[-1]
+    return df['收盘'].rolling(window=CRITICAL_VALUE_DAYS).mean().iloc[-1]
 
 def calculate_deviation(current: float, critical: float) -> float:
     """计算偏离率"""
@@ -151,8 +147,8 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) ->
         return 0
     
     # 获取收盘价和均线序列
-    close_prices = df["close"].values
-    ma_values = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    close_prices = df["收盘"].values
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
     
     # 从最新日期开始向前检查
     consecutive_days = 0
@@ -173,8 +169,8 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
         return 0
     
     # 获取收盘价和均线序列
-    close_prices = df["close"].values
-    ma_values = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    close_prices = df["收盘"].values
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
     
     # 从最新日期开始向前检查
     consecutive_days = 0
@@ -204,9 +200,9 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
             logger.warning("数据量不足，无法计算成交量变化")
             return 0.0
         
-        # 严格使用API映射后的列名
-        current_volume = df['volume'].values[-1]
-        previous_volume = df['volume'].values[-2]
+        # 获取最新两个交易日的成交量
+        current_volume = df['成交量'].values[-1]
+        previous_volume = df['成交量'].values[-2]
         
         # 确保是数值类型
         if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
@@ -235,8 +231,8 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
         return 0.0
     
     # 获取收盘价和均线序列
-    close_prices = df["close"].values
-    ma_values = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    close_prices = df["收盘"].values
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
     
     # 从最新日期开始向前检查，找到最近一次站上均线的点
     buy_index = -1
@@ -268,8 +264,8 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
         return False, 0, (0, 0)
     
     # 获取收盘价和均线序列
-    close_prices = df["close"].values
-    ma_values = df["close"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    close_prices = df["收盘"].values
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
     
     # 检查是否连续10天在均线附近波动（-5%~+5%）
     last_10_days = df.tail(10)
@@ -311,12 +307,12 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     return is_volatile, cross_count, (min_deviation, max_deviation)
 
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
-    """检测M头和头肩顶形态，严格使用API返回的列名"""
+    """检测M头和头肩顶形态"""
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
-    # 严格使用API返回的收盘价列名
-    close_prices = df["close"].values
+    # 获取收盘价
+    close_prices = df["收盘"].values
     
     # 寻找局部高点
     peaks = []
@@ -588,7 +584,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     return message
 
 def load_stock_basic_info() -> pd.DataFrame:
-    """加载股票基础信息，严格使用API返回的列名"""
+    """加载股票基础信息，严格使用中文列名"""
     try:
         # 检查基础信息文件是否存在
         if not os.path.exists(BASIC_INFO_FILE):
@@ -598,30 +594,29 @@ def load_stock_basic_info() -> pd.DataFrame:
         # 尝试加载现有文件
         df = pd.read_csv(BASIC_INFO_FILE)
         
-        # 严格检查API返回的必要列名
-        # crawler.py中定义的列名
-        required_columns = ['code', 'name', 'section', 'market_cap']
+        # 严格检查中文列名
+        required_columns = ["股票代码", "股票名称", "所属板块", "流通市值"]
         for col in required_columns:
             if col not in df.columns:
-                logger.error(f"基础信息文件缺少必要列: {col} (必须使用API映射的列名)")
+                logger.error(f"基础信息文件缺少必要列: {col}")
                 return pd.DataFrame()
         
         # 确保股票代码是6位字符串
-        df['code'] = df['code'].astype(str).str.zfill(6)
+        df["股票代码"] = df["股票代码"].astype(str).str.zfill(6)
         
-        # 确保市值列是数值类型
-        df['market_cap'] = pd.to_numeric(df['market_cap'], errors='coerce')
+        # 确保流通市值列是数值类型
+        df["流通市值"] = pd.to_numeric(df["流通市值"], errors='coerce')
         
         # 保留无市值股票，但标记它们
-        invalid_mask = (df['market_cap'] <= 0) | df['market_cap'].isna()
+        invalid_mask = (df["流通市值"] <= 0) | df["流通市值"].isna()
         invalid_count = invalid_mask.sum()
         
         if invalid_count > 0:
             # 为无市值股票添加状态标记
-            if 'data_status' not in df.columns:
-                df['data_status'] = 'normal'
-            df.loc[invalid_mask, 'data_status'] = 'market_cap_missing'
-            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'market_cap_missing'")
+            if '数据状态' not in df.columns:
+                df['数据状态'] = '正常'
+            df.loc[invalid_mask, '数据状态'] = '流通市值缺失'
+            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
         
         logger.info(f"成功加载基础信息文件，共 {len(df)} 条记录")
         return df
@@ -631,22 +626,22 @@ def load_stock_basic_info() -> pd.DataFrame:
         return pd.DataFrame()
 
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
-    """计算股票策略评分，严格使用API返回的列名"""
+    """计算股票策略评分（更精细化的评分机制）"""
     try:
         if df is None or df.empty or len(df) < 40:
             logger.debug(f"股票 {stock_code} 数据不足，无法计算策略评分")
             return 0.0
         
-        # 严格检查API返回的必要列名
-        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        # 检查必要列
+        required_columns = ["开盘", "最高", "最低", "收盘", "成交量"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
-            logger.error(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)} (必须使用API映射的列名)")
+            logger.debug(f"股票 {stock_code} 数据缺少必要列: {', '.join(missing_columns)}，无法计算策略评分")
             return 0.0
         
         # 获取最新数据
-        current = df["close"].iloc[-1]
+        current = df["收盘"].iloc[-1]
         if pd.isna(current) or current <= 0:
             logger.debug(f"股票 {stock_code} 无效的收盘价: {current}")
             return 0.0
@@ -657,12 +652,11 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         # 1. 趋势指标评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
-            # 严格使用API返回的列名
             # 计算移动平均线
-            df["ma5"] = df["close"].rolling(window=5).mean()
-            df["ma10"] = df["close"].rolling(window=10).mean()
-            df["ma20"] = df["close"].rolling(window=20).mean()
-            df["ma40"] = df["close"].rolling(window=40).mean()
+            df["ma5"] = df["收盘"].rolling(window=5).mean()
+            df["ma10"] = df["收盘"].rolling(window=10).mean()
+            df["ma20"] = df["收盘"].rolling(window=20).mean()
+            df["ma40"] = df["收盘"].rolling(window=40).mean()
             
             # 1.1 多头排列评分 (20分) - 基于均线间距和角度
             ma5 = df["ma5"].iloc[-1] if "ma5" in df.columns else current
@@ -697,7 +691,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
                 # 计算连续在均线上方的天数
                 above_ma_days = 0
                 for i in range(1, min(20, len(df))):
-                    if df["close"].iloc[-i] > df["ma20"].iloc[-i]:
+                    if df["收盘"].iloc[-i] > df["ma20"].iloc[-i]:
                         above_ma_days += 1
                     else:
                         break
@@ -709,12 +703,12 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         
         # 1.3 趋势强度评分 (10分) - 基于20日涨幅和趋势稳定性
         if len(df) >= 20:
-            price_change_20 = (current - df["close"].iloc[-20]) / df["close"].iloc[-20] * 100
+            price_change_20 = (current - df["收盘"].iloc[-20]) / df["收盘"].iloc[-20] * 100
             
             # 计算趋势稳定性 (价格在20日均线之上的比例)
             above_ma_ratio = 0
             if "ma20" in df.columns:
-                above_ma_ratio = sum(1 for i in range(20) if df["close"].iloc[-i-1] > df["ma20"].iloc[-i-1]) / 20
+                above_ma_ratio = sum(1 for i in range(20) if df["收盘"].iloc[-i-1] > df["ma20"].iloc[-i-1]) / 20
             
             # 趋势强度评分 (0-10分)
             change_score = min(7, max(0, price_change_20 * 0.2))  # 每1%涨幅得0.2分，最高7分
@@ -724,9 +718,9 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         # 2. 动量指标评分 (20%)
         momentum_score = 0.0
         # 计算MACD
-        if "close" in df.columns:
-            df["ema12"] = df["close"].ewm(span=12, adjust=False).mean()
-            df["ema26"] = df["close"].ewm(span=26, adjust=False).mean()
+        if "收盘" in df.columns:
+            df["ema12"] = df["收盘"].ewm(span=12, adjust=False).mean()
+            df["ema26"] = df["收盘"].ewm(span=26, adjust=False).mean()
             df["macd"] = df["ema12"] - df["ema26"]
             df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
             df["hist"] = df["macd"] - df["signal"]
@@ -750,16 +744,16 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         
         # 2.2 价格动量评分 (10分) - 基于短期价格动量
         if len(df) >= 5:
-            price_momentum_5 = (current - df["close"].iloc[-5]) / df["close"].iloc[-5] * 100
+            price_momentum_5 = (current - df["收盘"].iloc[-5]) / df["收盘"].iloc[-5] * 100
             
             # 价格动量评分 (0-10分)
             momentum_score += min(10, max(0, price_momentum_5 * 0.5))
         
         # 3. 流动性指标评分 (20%)
         liquidity_score = 0.0
-        if "volume" in df.columns and len(df) >= 20:
+        if "成交量" in df.columns and len(df) >= 20:
             # 3.1 日均成交量评分 (10分)
-            avg_volume = df["volume"].rolling(window=20).mean().iloc[-1]
+            avg_volume = df["成交量"].rolling(window=20).mean().iloc[-1]
             # 换手率评分
             turnover_score = min(10, max(0, avg_volume * 0.0001))
             liquidity_score += turnover_score
@@ -768,7 +762,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         volatility_score = 0.0
         if len(df) >= 20:
             # 计算20日波动率
-            daily_returns = df["close"].pct_change().dropna()
+            daily_returns = df["收盘"].pct_change().dropna()
             volatility = daily_returns.rolling(window=20).std().iloc[-1]
             
             # 波动率评分 (0-10分)
@@ -817,14 +811,14 @@ def get_top_stocks_for_strategy() -> dict:
         
         # 确保所有股票代码是字符串格式（6位，前面补零）
         for stock in stock_list:
-            stock["code"] = str(stock["code"]).zfill(6)
+            stock["股票代码"] = str(stock["股票代码"]).zfill(6)
         
         logger.info(f"今天实际处理 {len(stock_list)} 只股票（完整处理）")
         
         def process_stock(stock):
-            stock_code = stock["code"]
-            stock_name = stock["name"]
-            section = stock["section"]
+            stock_code = stock["股票代码"]
+            stock_name = stock["股票名称"]
+            section = stock["所属板块"]
             
             # 检查板块是否有效
             if section not in section_stocks:
@@ -839,7 +833,7 @@ def get_top_stocks_for_strategy() -> dict:
                 return None
             
             # 4. 检查市值数据状态
-            if 'data_status' in stock and stock['data_status'] == 'market_cap_missing':
+            if '数据状态' in stock and stock['数据状态'] == '流通市值缺失':
                 logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
                 return None
             
@@ -912,7 +906,7 @@ def generate_strategy_report():
                 report.append(f"【{section}】")
                 for i, stock in enumerate(stocks):
                     # 生成股票信号
-                    current = stock["df"]["close"].iloc[-1]
+                    current = stock["df"]["收盘"].iloc[-1]
                     critical = calculate_critical_value(stock["df"])
                     deviation = calculate_deviation(current, critical)
                     signal_msg = generate_signal_message(stock, stock["df"], current, critical, deviation)

@@ -56,7 +56,12 @@ def empty_result_check(result: pd.DataFrame) -> bool:
     Returns:
         bool: 如果结果为空返回True，否则返回False
     """
-    return result is None or result.empty
+    # 【关键修复】空结果不触发重试，避免RetryError
+    # 空数据是正常情况（如周末无交易），不应重试
+    if result is None or result.empty:
+        return False  # 不重试空结果
+    
+    return False
 
 def retry_if_akshare_error(exception: Exception) -> bool:
     """
@@ -121,8 +126,8 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         # 记录成功获取的数据条数
         logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
         
-        # 数据清洗和标准化
-        df = clean_and_standardize_etf_data(df, etf_code)
+        # 【关键修复】使用正确的数据清洗函数
+        df = clean_and_format_data(df)
         
         return df
         
@@ -320,21 +325,22 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
     清洗并格式化数据
     """
     try:
+        if df.empty:
+            return df
+            
         # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
         df = df.copy(deep=True)
+        
         # 处理日期列
         if "日期" in df.columns and not df.empty:
             # 确保日期列是datetime类型
             df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
             # 删除无效日期
             df = df.dropna(subset=["日期"])
-            # 获取最大日期
-            if not df.empty:
-                latest_date = df["日期"].max()
-                if not pd.isna(latest_date):
-                    return latest_date.date()
+        
+        # 【关键修复】正确返回DataFrame，而不是date对象
+        return df
+        
     except Exception as e:
-        logger.error(f"获取文件 {file_path} 最新日期失败: {str(e)}", exc_info=True)
-    
-    # 出错时返回一个较早的日期，确保会重新爬取
-    return date(2024, 9, 1)
+        logger.error(f"清洗数据失败: {str(e)}", exc_info=True)
+        return df  # 即使出错也返回DataFrame

@@ -79,65 +79,56 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     retry_on_exception=retry_if_akshare_error
 )
 def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
-    """用AkShare爬取ETF日线数据
+    """
+    使用AkShare爬取ETF日线数据
+    
     Args:
-        etf_code: ETF代码 (6位数字)
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
-        is_first_crawl: 是否是首次爬取
+        etf_code: ETF代码
+        start_date: 开始日期 (YYYYMMDD)
+        end_date: 结束日期 (YYYYMMDD)
+        is_first_crawl: 是否首次爬取
     
     Returns:
-        pd.DataFrame: 包含ETF日线数据的DataFrame
+        pd.DataFrame: ETF日线数据
     """
     try:
-        # 修复：将字符串日期转换为date对象
-        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-        # 获取最近交易日
-        last_trading_day = get_last_trading_day(end_date_obj)
-        # 转换回字符串格式
-        end_date = last_trading_day.strftime("%Y-%m-%d")
+        logger.debug(f"开始爬取ETF {etf_code} 日线数据: {start_date} ~ {end_date}")
         
-        # 关键修复：处理单日请求问题
-        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-        if start_date_obj == last_trading_day:
-            # 如果是单日请求，扩展为至少3天的范围
-            start_date_obj = start_date_obj - timedelta(days=2)
-            start_date = start_date_obj.strftime("%Y-%m-%d")
-            logger.info(f"单日请求扩展为 {start_date} 至 {end_date}")
+        # 爬取ETF日线数据
+        df = ak.fund_etf_hist_em(
+            symbol=etf_code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust="qfq" if is_first_crawl else ""
+        )
         
-        logger.info(f"开始爬取ETF {etf_code} 的数据，时间范围：{start_date} 至 {end_date}")
-        
-        # 严格使用两个API接口获取所有数据
-        df = try_fund_etf_spot_em(etf_code, start_date, end_date)
-        
-        # 如果fund_etf_spot_em失败，尝试fund_etf_fund_daily_em
-        if df.empty:
-            logger.info(f"fund_etf_spot_em获取失败，尝试fund_etf_fund_daily_em")
-            df = try_fund_etf_fund_daily_em(etf_code, start_date, end_date)
-        
-        # 检查数据是否成功获取
-        if df.empty:
-            logger.warning(f"所有数据源均未获取到{etf_code}数据（{start_date}至{end_date}）")
+        # 【关键修复】添加类型检查，确保 df 是 DataFrame
+        if df is None:
+            logger.warning(f"ETF {etf_code} 返回空数据")
             return pd.DataFrame()
         
-        # 标准化列名
-        df = ensure_chinese_columns(df)
+        # 【关键修复】检查 df 是否为 DataFrame 类型
+        if not isinstance(df, pd.DataFrame):
+            logger.error(f"ETF {etf_code} 返回的数据类型错误: {type(df)}")
+            return pd.DataFrame()
         
-        # 确保所有必需列都存在
-        df = ensure_required_columns(df)
+        # 【关键修复】检查 DataFrame 是否为空
+        if df.empty:
+            logger.warning(f"ETF {etf_code} 返回空的DataFrame")
+            return pd.DataFrame()
         
-        # 数据清洗：去重、格式转换
-        df = clean_and_format_data(df)
-        
-        # 首次爬取时限制数据量为1年
-        if is_first_crawl:
-            df = limit_to_one_year_data(df, end_date)
-        
+        # 记录成功获取的数据条数
         logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
+        
+        # 数据清洗和标准化
+        df = clean_and_standardize_etf_data(df, etf_code)
+        
         return df
+        
     except Exception as e:
         logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
-        raise
+        return pd.DataFrame()
 
 def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """使用fund_etf_spot_em接口获取ETF实时数据（优先使用）"""

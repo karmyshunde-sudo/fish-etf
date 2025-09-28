@@ -122,13 +122,13 @@ def create_or_update_basic_info():
             basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
             logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
         
-        # 【关键修改】直接调用 tickten.py 中已有的筛选函数
+        # 【关键修改】调用 tickten.py 中的筛选函数
         try:
             from stock.tickten import filter_valid_stocks
             filtered_df = filter_valid_stocks(basic_info_df)
-            logger.info(f"筛选后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
+            logger.info(f"调用 tickten.py 筛选函数后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
         except Exception as e:
-            logger.error(f"无法调用 tickten.py 中的筛选函数: {str(e)}", exc_info=True)
+            logger.error(f"调用 tickten.py 筛选函数失败: {str(e)}", exc_info=True)
             return False
         
         # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
@@ -174,10 +174,14 @@ def test_akshare_api():
         ("688001", "华兴源创")   # 科创板
     ]
     
+    # 测试不同复权参数
+    api_test_results = {}  # 记录测试结果
+    working_params = []    # 记录可用的参数
+    
     for stock_code, name in test_stocks:
         logger.info(f"--- 测试股票 {stock_code} ({name}) ---")
+        api_test_results[stock_code] = {}
         
-        # 测试不同复权参数
         for adjust_param in ["qfq", "hfq", ""]:
             try:
                 logger.info(f"  测试复权参数: {adjust_param or '无复权'}")
@@ -197,17 +201,52 @@ def test_akshare_api():
                 
                 if df.empty:
                     logger.warning(f"  股票 {stock_code} 使用 {adjust_param or '无复权'} 参数返回空数据")
+                    api_test_results[stock_code][adjust_param or 'none'] = False
                 else:
                     logger.info(f"  股票 {stock_code} 使用 {adjust_param or '无复权'} 参数成功获取 {len(df)} 条数据")
-                    logger.debug(f"  数据列名: {df.columns.tolist()}")
-                    if not df.empty:
-                        logger.debug(f"  首条数据: {df.iloc[0].to_dict()}")
+                    api_test_results[stock_code][adjust_param or 'none'] = True
+                    # 如果这个参数对这个股票有效，记录下来
+                    if adjust_param not in working_params:
+                        working_params.append(adjust_param)
             except Exception as e:
                 logger.error(f"  测试 {stock_code} 使用 {adjust_param or '无复权'} 参数时出错: {str(e)}", exc_info=True)
+                api_test_results[stock_code][adjust_param or 'none'] = False
     
     logger.info("===== akshare API 测试完成 =====")
+    
+    # 分析测试结果
+    logger.info("=== API测试结果分析 ===")
+    total_tests = 0
+    successful_tests = 0
+    
+    for stock_code, results in api_test_results.items():
+        for param, success in results.items():
+            total_tests += 1
+            if success:
+                successful_tests += 1
+    
+    success_rate = successful_tests / total_tests if total_tests > 0 else 0
+    logger.info(f"总测试数: {total_tests}, 成功数: {successful_tests}, 成功率: {success_rate:.2%}")
+    
+    if success_rate < 0.5:  # 如果成功率低于50%，认为API有问题
+        logger.error("API测试失败率过高，停止执行爬取任务")
+        return False, None
+    
+    # 确定最佳复权参数
+    best_param = ""
+    if "qfq" in working_params:
+        best_param = "qfq"
+    elif "hfq" in working_params:
+        best_param = "hfq"
+    elif "" in working_params:
+        best_param = ""
+    else:
+        best_param = "qfq"  # 默认使用前复权
+    
+    logger.info(f"推荐使用的复权参数: {best_param or '无复权'}")
+    return True, best_param
 
-def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
+def fetch_stock_daily_data(stock_code: str, adjust_param="qfq") -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
@@ -216,9 +255,6 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 确定市场前缀
         market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
         ak_code = f"{market_prefix}{stock_code}"
-        
-        # 重要：使用正确的复权参数
-        adjust_param = "qfq"  # 前复权
         
         logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {ak_code}, 复权参数: {adjust_param})")
         
@@ -257,21 +293,6 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 【关键修改】添加详细的API响应检查
         if df.empty:
             logger.warning(f"股票 {stock_code} 的日线数据为空 - 可能原因: 1) 无效的复权参数 2) API限制 3) 股票代码格式问题")
-            # 尝试用其他复权参数再试一次（用于诊断）
-            for test_adjust in ["hfq", ""]:
-                try:
-                    test_df = ak.stock_zh_a_hist(
-                        symbol=ak_code,
-                        period="daily",
-                        start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
-                        end_date=datetime.now().strftime("%Y%m%d"),
-                        adjust=test_adjust
-                    )
-                    if not test_df.empty:
-                        logger.error(f"!!! 诊断发现: 股票 {stock_code} 使用 {test_adjust or '无复权'} 复权参数可以获取数据，但 {adjust_param} 不行 !!!")
-                        return test_df
-                except Exception as e:
-                    logger.debug(f"测试复权参数 {test_adjust or '无复权'} 失败: {str(e)}")
             return pd.DataFrame()
         
         # 添加列名检查日志
@@ -416,7 +437,10 @@ def main():
     time.sleep(random.uniform(1.0, 2.0))
     
     # 1. 运行 akshare API 测试（关键诊断工具）
-    test_akshare_api()
+    api_ok, best_param = test_akshare_api()
+    if not api_ok:
+        logger.error("akshare API 测试失败，停止执行爬取任务")
+        return
     
     # 2. 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:

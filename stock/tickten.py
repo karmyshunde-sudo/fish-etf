@@ -31,7 +31,6 @@ logger.addHandler(handler)
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
-VALID_STOCKS_FILE = os.path.join(DATA_DIR, "valid_stocks.csv")  # 新增有效股票列表文件
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 策略参数
@@ -636,7 +635,7 @@ def load_stock_basic_info() -> pd.DataFrame:
         df = pd.read_csv(BASIC_INFO_FILE)
         
         # 严格检查中文列名
-        required_columns = ["代码", "名称", "所属板块", "流通市值"]
+        required_columns = ["代码", "名称", "所属板块", "流通市值", "next_crawl_index"]
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"基础信息文件缺少必要列: {col}")
@@ -824,67 +823,53 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
 
-def get_valid_stock_codes() -> list:
+def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     """
-    获取所有符合策略要求的有效股票代码列表
-    这是tickten.py的核心功能：定义哪些股票应该被爬取
+    过滤出符合策略要求的有效股票
+    这是tickten.py的核心筛选逻辑
+    
+    Args:
+        basic_info_df: 原始股票基础信息DataFrame
     
     Returns:
-        list: 有效股票代码列表
+        pd.DataFrame: 过滤后的有效股票DataFrame
     """
     logger.info("===== 正在筛选符合策略要求的有效股票 =====")
     
-    # 1. 获取基础信息
-    basic_info_df = load_stock_basic_info()
-    if basic_info_df.empty:
-        logger.error("无法获取股票基础信息，无法筛选有效股票")
-        return []
+    # 创建副本，避免修改原始数据
+    filtered_df = basic_info_df.copy()
     
-    # 2. 筛选有效股票
-    valid_stocks = []
+    # 1. 排除新上市股票（名称以"N"开头）
+    initial_count = len(filtered_df)
+    filtered_df = filtered_df[~filtered_df["名称"].str.startswith("N")]
+    removed = initial_count - len(filtered_df)
+    if removed > 0:
+        logger.info(f"已排除 {removed} 只新上市股票（名称以'N'开头）")
     
-    for idx, row in basic_info_df.iterrows():
-        stock_code = str(row["代码"]).zfill(6)
-        stock_name = row["名称"]
-        
-        # 【关键筛选】排除新上市股票（名称以"N"开头）
-        if stock_name.startswith("N"):
-            logger.debug(f"排除新上市股票: {stock_code} - {stock_name}")
-            continue
-        
-        # 【关键筛选】排除ST股票
-        if "ST" in stock_name:
-            logger.debug(f"排除ST股票: {stock_code} - {stock_name}")
-            continue
-        
-        # 【关键筛选】排除市值过小的股票
-        market_cap = row["流通市值"]
-        if pd.isna(market_cap) or market_cap <= 0:
-            logger.debug(f"排除无市值数据股票: {stock_code} - {stock_name}")
-            continue
-        if market_cap < 5e8:  # 5亿流通市值
-            logger.debug(f"排除小市值股票({market_cap:.2f}): {stock_code} - {stock_name}")
-            continue
-        
-        # 【关键筛选】排除非主板/科创板/创业板股票
-        if not stock_code.startswith(("00", "30", "60", "688")):
-            logger.debug(f"排除非目标板块股票: {stock_code} - {stock_name}")
-            continue
-        
-        # 通过所有筛选条件，加入有效股票列表
-        valid_stocks.append(stock_code)
+    # 2. 排除ST股票
+    initial_count = len(filtered_df)
+    filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST", na=False)]
+    removed = initial_count - len(filtered_df)
+    if removed > 0:
+        logger.info(f"已排除 {removed} 只ST股票")
     
-    # 3. 保存有效股票列表（供crawler.py使用）
-    if valid_stocks:
-        valid_df = pd.DataFrame({
-            "代码": valid_stocks
-        })
-        valid_df.to_csv(VALID_STOCKS_FILE, index=False)
-        logger.info(f"筛选完成，共 {len(valid_stocks)} 只有效股票，已保存到 {VALID_STOCKS_FILE}")
-    else:
-        logger.warning("没有筛选出有效股票")
+    # 3. 排除市值过小的股票
+    initial_count = len(filtered_df)
+    filtered_df = filtered_df[filtered_df["流通市值"] >= 5e8]  # 5亿流通市值
+    removed = initial_count - len(filtered_df)
+    if removed > 0:
+        logger.info(f"已排除 {removed} 只小市值股票（流通市值<5亿）")
     
-    return valid_stocks
+    # 4. 排除非主板/科创板/创业板股票
+    initial_count = len(filtered_df)
+    filtered_df = filtered_df[filtered_df["代码"].str.startswith(("00", "30", "60", "688"))]
+    removed = initial_count - len(filtered_df)
+    if removed > 0:
+        logger.info(f"已排除 {removed} 只非目标板块股票")
+    
+    logger.info(f"筛选完成，共 {len(filtered_df)} 只有效股票")
+    
+    return filtered_df
 
 def get_top_stocks_for_strategy() -> dict:
     """获取各板块中适合策略的股票（使用本地已保存数据）"""
@@ -897,13 +882,7 @@ def get_top_stocks_for_strategy() -> dict:
             logger.error("获取股票基础信息失败，无法继续")
             return {}
         
-        # 2. 获取有效股票列表
-        valid_stock_codes = get_valid_stock_codes()
-        if not valid_stock_codes:
-            logger.error("没有有效股票，无法继续")
-            return {}
-        
-        logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录，其中 {len(valid_stock_codes)} 条为有效股票")
+        logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
         
         # 3. 按板块分组处理
         section_stocks = {
@@ -915,15 +894,14 @@ def get_top_stocks_for_strategy() -> dict:
         }
         
         # 4. 处理每只股票
-        # 只处理有效股票
-        stock_list = [row for _, row in basic_info_df.iterrows() if str(row["代码"]).zfill(6) in valid_stock_codes]
-        logger.info(f"开始处理 {len(stock_list)} 只有效股票...")
+        stock_list = basic_info_df.to_dict('records')
+        logger.info(f"开始处理 {len(stock_list)} 只股票...")
         
         # 确保所有股票代码是字符串格式（6位，前面补零）
         for stock in stock_list:
             stock["代码"] = str(stock["代码"]).zfill(6)
         
-        logger.info(f"今天实际处理 {len(stock_list)} 只有效股票（完整处理）")
+        logger.info(f"今天实际处理 {len(stock_list)} 只股票（完整处理）")
         
         def process_stock(stock):
             stock_code = stock["代码"]

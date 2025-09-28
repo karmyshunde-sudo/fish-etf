@@ -77,6 +77,75 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     from requests.exceptions import ConnectionError, Timeout
     return isinstance(exception, (ValueError, ConnectionError, Timeout, OSError))
 
+def test_etf_api_call():
+    """测试ETF API调用方式，找出正确的参数组合"""
+    logger.info("===== 开始测试ETF API调用方式 =====")
+    
+    # 使用有问题的ETF代码进行测试
+    test_etf_code = "589780"  # 消费电子ETF
+    logger.info(f"测试ETF代码: {test_etf_code}")
+    
+    # 获取最近一周的日期
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+    
+    # 测试不同的参数组合
+    test_cases = [
+        # (symbol, period, start_date, end_date, adjust)
+        (test_etf_code, "daily", start_date, end_date, ""),
+        (test_etf_code, "daily", start_date, end_date, "qfq"),
+        (test_etf_code, "daily", start_date, end_date, "hfq"),
+        (f"sh{test_etf_code}", "daily", start_date, end_date, ""),
+        (f"sz{test_etf_code}", "daily", start_date, end_date, ""),
+        (test_etf_code, "daily", start_date, end_date, "bfq"),
+    ]
+    
+    successful_calls = []
+    
+    for i, (symbol, period, start, end, adjust) in enumerate(test_cases):
+        try:
+            logger.info(f"--- 测试案例 {i+1}: symbol={symbol}, period={period}, adjust={adjust} ---")
+            
+            df = ak.fund_etf_hist_em(
+                symbol=symbol,
+                period=period,
+                start_date=start,
+                end_date=end,
+                adjust=adjust
+            )
+            
+            if df is not None and not df.empty:
+                logger.info(f"  ✅ 成功获取 {len(df)} 条数据")
+                logger.debug(f"  数据列名: {list(df.columns)}")
+                successful_calls.append({
+                    'symbol': symbol,
+                    'period': period,
+                    'start_date': start,
+                    'end_date': end,
+                    'adjust': adjust,
+                    'data_count': len(df)
+                })
+            else:
+                logger.warning(f"  ❌ 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"  ❌ 调用失败: {str(e)}")
+    
+    # 如果有成功的调用，记录最佳参数
+    if successful_calls:
+        best_call = successful_calls[0]
+        logger.info(f"===== API测试完成，最佳调用参数 =====")
+        logger.info(f"symbol: {best_call['symbol']}")
+        logger.info(f"period: {best_call['period']}")
+        logger.info(f"start_date: {best_call['start_date']}")
+        logger.info(f"end_date: {best_call['end_date']}")
+        logger.info(f"adjust: {best_call['adjust']}")
+        logger.info(f"数据条数: {best_call['data_count']}")
+        return best_call
+    else:
+        logger.error("===== API测试失败，所有测试案例都失败 =====")
+        return None
+        
 @retry(
     stop_max_attempt_number=MAX_RETRY_ATTEMPTS,
     wait_fixed=RETRY_WAIT_FIXED,

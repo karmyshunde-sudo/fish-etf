@@ -105,7 +105,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             period="daily",
             start_date=start_date,
             end_date=end_date,
-            adjust="qfq" if is_first_crawl else ""
+            adjust=""
         )
         
         # 【关键修复】添加类型检查，确保 df 是 DataFrame

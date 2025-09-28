@@ -147,7 +147,6 @@ def crawl_etf_daily_incremental() -> None:
             
             for etf_code in batch_codes:
                 etf_name = get_etf_name(etf_code)
-                logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                 
                 # 确定爬取时间范围（增量爬取）
                 save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
@@ -157,6 +156,7 @@ def crawl_etf_daily_incremental() -> None:
                 if is_first_crawl:
                     # 首次爬取：获取1年历史数据
                     start_date = (last_trading_day - timedelta(days=365)).strftime("%Y-%m-%d")
+                    logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                     logger.info(f"📅 首次爬取，获取1年历史数据：{start_date} 至 {end_date}")
                 else:
                     # 增量爬取：获取上次爬取后的数据
@@ -165,6 +165,7 @@ def crawl_etf_daily_incremental() -> None:
                     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
                     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
                     if start_date_obj > end_date_obj:
+                        logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                         logger.info(f"📅 无新数据需要爬取（上次爬取至{start_date}）")
                         # 标记为已完成（仅用于进度显示）
                         with open(completed_file, "a", encoding="utf-8") as f:
@@ -172,11 +173,13 @@ def crawl_etf_daily_incremental() -> None:
                         continue
                     # 【关键修复】如果开始日期等于结束日期，说明数据已最新，无需爬取
                     elif start_date_obj == end_date_obj:
+                        logger.debug(f"ETF代码：{etf_code}| 名称：{etf_name}")
                         logger.debug(f"📅 数据已更新至最新（{start_date}），无需爬取")
                         # 标记为已完成（仅用于进度显示）
                         with open(completed_file, "a", encoding="utf-8") as f:
                             f.write(f"{etf_code}\n")
                         continue
+                    logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                     logger.info(f"📅 增量爬取，获取新数据：{start_date} 至 {end_date}")
                 
                 # 只尝试AkShare爬取（已修改为只使用两个API）
@@ -184,6 +187,7 @@ def crawl_etf_daily_incremental() -> None:
                 
                 # 不再尝试其他接口
                 if df.empty:
+                    logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                     logger.warning(f"⚠️ AkShare未获取到数据，不再尝试其他接口")
                     # 记录失败日志，但不标记为已完成，以便下次重试
                     record_failed_etf(etf_daily_dir, etf_code, etf_name)
@@ -203,6 +207,7 @@ def crawl_etf_daily_incremental() -> None:
                         missing_columns.append(col)
                 
                 if missing_columns:
+                    logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
                     logger.error(f"ETF {etf_code} 数据缺少关键字段: {missing_columns}")
                     # 不尝试修复，直接跳过保存
                     record_failed_etf(etf_daily_dir, etf_code, etf_name)
@@ -287,6 +292,7 @@ def crawl_etf_daily_incremental() -> None:
                 time.sleep(batch_pause_seconds)
     
     except Exception as e:
+        logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
         logger.error(f"ETF日线数据增量爬取任务执行失败: {str(e)}", exc_info=True)
         raise
 

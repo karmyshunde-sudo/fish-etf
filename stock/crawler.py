@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 增强网络连接错误处理
-严格使用API返回的原始列名，添加完善的网络重试机制
+股票数据爬取模块 - 仅调用一次API获取所有必要数据
+严格使用API返回的原始列名，确保高效获取股票数据
 """
 
 import os
@@ -11,10 +11,8 @@ import pandas as pd
 import akshare as ak
 import time
 import random
-import requests
 from datetime import datetime, timedelta
 from config import Config
-import traceback
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -33,11 +31,6 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 # 确保目录存在
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
-
-# 网络配置
-MAX_RETRIES = 5  # 最大重试次数
-BASE_DELAY = 2   # 初始延迟（秒）
-MAX_DELAY = 30   # 最大延迟（秒）
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -80,200 +73,133 @@ def get_stock_section(stock_code: str) -> str:
     else:
         return "其他板块"
 
-def fetch_market_cap_data():
-    """获取股票流通市值数据，添加完善的网络错误处理"""
-    attempts = 0
-    while attempts < MAX_RETRIES:
-        try:
-            # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(0.5, 1.5))
-            
-            # 正确调用 stock_zh_a_spot_em
-            df = ak.stock_zh_a_spot_em()
-            
-            # 检查返回结果
-            if df.empty:
-                logger.error("获取流通市值数据失败：返回为空")
-                # 不重试空数据，因为空数据不是网络问题
-                return {}
-            
-            # 打印API返回的列名，用于调试
-            logger.info(f"API返回的列名: {df.columns.tolist()}")
-            
-            # 创建市值字典 - 严格使用API返回的列名
-            market_cap_dict = {}
-            
-            # 使用API返回的原始列名
-            for _, row in df.iterrows():
-                try:
-                    # 确保股票代码是6位
-                    stock_code = str(row['代码']).zfill(6)
-                    
-                    # 流通市值单位是万元，转换为亿元
-                    market_cap = float(row['流通市值']) / 10000
-                    if market_cap > 0:
-                        market_cap_dict[stock_code] = market_cap
-                except (TypeError, ValueError, KeyError) as e:
-                    logger.warning(f"处理股票 {stock_code} 流通市值时出错: {str(e)}")
-            
-            logger.info(f"成功获取 {len(market_cap_dict)} 只股票的流通市值数据")
-            return market_cap_dict
-        except Exception as e:
-            attempts += 1
-            if attempts >= MAX_RETRIES:
-                logger.error(f"获取流通市值数据失败（已重试{attempts}次）: {str(e)}", exc_info=True)
-                return {}
-            
-            # 计算指数退避延迟
-            delay = min(BASE_DELAY * (2 ** (attempts - 1)) + random.uniform(0, 1), MAX_DELAY)
-            logger.warning(f"网络连接错误，将在 {delay:.1f} 秒后重试... ({attempts}/{MAX_RETRIES})")
-            time.sleep(delay)
-
 def create_or_update_basic_info():
-    """创建或更新股票基础信息文件，添加完善的网络错误处理"""
+    """创建或更新股票基础信息文件，仅调用一次API"""
     ensure_directory_exists()
     
     # 添加随机延时，避免请求过于频繁
     time.sleep(random.uniform(1.0, 2.0))
     
-    attempts = 0
-    while attempts < MAX_RETRIES:
-        try:
-            # 获取股票列表 - 使用 stock_zh_a_spot_em 接口
-            df = ak.stock_zh_a_spot_em()
-            
-            # 打印API返回的列名，用于调试
-            logger.info(f"API返回的列名: {df.columns.tolist()}")
-            
-            if df.empty:
-                logger.error("获取股票列表失败：返回为空")
-                # 不重试空数据
-                return False
-            
-            # 确保列名存在
-            required_columns = ['代码', '名称']
-            for col in required_columns:
-                if col not in df.columns:
-                    logger.error(f"股票列表缺少必要列: {col}")
-                    # 不重试列名问题
-                    return False
-            
-            # 过滤ST股票和非主板/科创板/创业板股票
-            stock_list = df.copy()
-            
-            # 过滤ST股票
-            stock_list = stock_list[~stock_list['名称'].str.contains('ST', na=False)]
-            
-            # 过滤非主板/科创板/创业板股票
-            stock_list = stock_list[stock_list['代码'].str.startswith(('0', '3', '6'))]
-            
-            logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
-            
-            # 获取市值数据
-            market_cap_dict = fetch_market_cap_data()
-            
-            # 准备基础信息DataFrame - 严格使用API返回的原始列名
-            basic_info_df = pd.DataFrame({
-                "代码": stock_list['代码'],
-                "名称": stock_list['名称'],
-                "所属板块": stock_list['代码'].apply(get_stock_section),
-                "流通市值": stock_list['代码'].apply(lambda x: market_cap_dict.get(str(x).zfill(6), 0.0))
-            })
-            
-            # 确保流通市值列是数值类型
-            basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
-            
-            # 保留无市值股票，但标记它们
-            invalid_mask = (basic_info_df["流通市值"] <= 0) | basic_info_df["流通市值"].isna()
-            invalid_count = invalid_mask.sum()
-            
-            if invalid_count > 0:
-                basic_info_df["数据状态"] = '正常'
-                basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
-                logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
-            
-            # 添加 next_crawl_index 列（如果不存在）
-            if "next_crawl_index" not in basic_info_df.columns:
-                basic_info_df["next_crawl_index"] = True
-            
-            # 保存基础信息
-            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录")
-            
-            return True
-        except requests.exceptions.ConnectionError as e:
-            attempts += 1
-            if "Remote end closed connection without response" in str(e):
-                logger.warning(f"远程服务器关闭连接，尝试重试... ({attempts}/{MAX_RETRIES})")
-                # 计算指数退避延迟
-                delay = min(BASE_DELAY * (2 ** (attempts - 1)) + random.uniform(0, 1), MAX_DELAY)
-                logger.warning(f"将在 {delay:.1f} 秒后重试...")
-                time.sleep(delay)
-            else:
-                logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
-                return False
-        except Exception as e:
-            logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
+    try:
+        # 正确调用 stock_zh_a_spot_em 获取所有必要数据
+        df = ak.stock_zh_a_spot_em()
+        
+        # 检查返回结果
+        if df.empty:
+            logger.error("获取股票列表失败：返回为空")
             return False
+        
+        # 打印API返回的列名，用于调试
+        logger.info(f"API返回的列名: {df.columns.tolist()}")
+        
+        # 确保必要列存在
+        required_columns = ['代码', '名称', '流通市值']
+        for col in required_columns:
+            if col not in df.columns:
+                logger.error(f"获取股票列表失败: 缺少必要列 {col}")
+                return False
+        
+        # 过滤ST股票和非主板/科创板/创业板股票
+        stock_list = df.copy()
+        
+        # 过滤ST股票
+        stock_list = stock_list[~stock_list['名称'].str.contains('ST', na=False)]
+        
+        # 过滤非主板/科创板/创业板股票
+        stock_list = stock_list[stock_list['代码'].str.startswith(('0', '3', '6'))]
+        
+        logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
+        
+        # 准备基础信息DataFrame - 严格使用API返回的原始列名
+        basic_info_df = pd.DataFrame({
+            "代码": stock_list['代码'],
+            "名称": stock_list['名称'],
+            "所属板块": stock_list['代码'].apply(get_stock_section),
+            "流通市值": stock_list['流通市值']
+        })
+        
+        # 确保流通市值列是数值类型
+        basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
+        
+        # 保留无市值股票，但标记它们
+        invalid_mask = (basic_info_df["流通市值"] <= 0) | basic_info_df["流通市值"].isna()
+        invalid_count = invalid_mask.sum()
+        
+        if invalid_count > 0:
+            basic_info_df["数据状态"] = '正常'
+            basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
+            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
+        
+        # 添加 next_crawl_index 列（如果不存在）
+        if "next_crawl_index" not in basic_info_df.columns:
+            basic_info_df["next_crawl_index"] = True
+        
+        # 保存基础信息
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录")
+        
+        # 确认文件已保存
+        if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
+            logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
+            return True
+        else:
+            logger.error(f"基础信息文件保存失败: {BASIC_INFO_FILE} 不存在或为空")
+            return False
+            
+    except Exception as e:
+        logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
+        return False
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """获取单只股票的日线数据，添加完善的网络错误处理"""
-    attempts = 0
-    while attempts < MAX_RETRIES:
-        try:
-            # 确保股票代码是字符串，并且是6位（前面补零）
-            stock_code = str(stock_code).zfill(6)
-            
-            # 确定市场前缀
-            market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
-            ak_code = f"{market_prefix}{stock_code}"
-            
-            # 获取日线数据
-            df = ak.stock_zh_a_hist(
-                symbol=ak_code,
-                period="daily",
-                start_date=(datetime.now() - timedelta(days=730)).strftime("%Y%m%d"),
-                end_date=datetime.now().strftime("%Y%m%d"),
-                adjust=""
-            )
-            
-            if df.empty:
-                logger.warning(f"股票 {stock_code} 的日线数据为空")
+    """获取单只股票的日线数据，使用中文列名"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 确定市场前缀
+        market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
+        ak_code = f"{market_prefix}{stock_code}"
+        
+        # 获取日线数据
+        df = ak.stock_zh_a_hist(
+            symbol=ak_code,
+            period="daily",
+            start_date=(datetime.now() - timedelta(days=730)).strftime("%Y%m%d"),
+            end_date=datetime.now().strftime("%Y%m%d"),
+            adjust=""
+        )
+        
+        if df.empty:
+            logger.warning(f"股票 {stock_code} 的日线数据为空")
+            return pd.DataFrame()
+        
+        # 确保必要列存在
+        required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+        for col in required_columns:
+            if col not in df.columns:
+                logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
                 return pd.DataFrame()
-            
-            # 确保必要列存在
-            required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-            for col in required_columns:
-                if col not in df.columns:
-                    logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
-                    return pd.DataFrame()
-            
-            # 确保日期格式正确
-            if '日期' in df.columns:
-                df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
-                df = df.sort_values('日期').reset_index(drop=True)
-            
-            # 确保数值列是数值类型
-            numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
-            for col in numeric_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 移除NaN值
-            df = df.dropna(subset=['收盘', '成交量'])
-            
-            logger.info(f"成功获取股票 {stock_code} 的日线数据，共 {len(df)} 条记录")
-            return df
-        except Exception as e:
-            attempts += 1
-            if attempts >= MAX_RETRIES:
-                logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
-                return pd.DataFrame()
-            
-            # 计算指数退避延迟
-            delay = min(BASE_DELAY * (2 ** (attempts - 1)) + random.uniform(0, 1), MAX_DELAY)
-            logger.warning(f"网络错误，将在 {delay:.1f} 秒后重试... ({attempts}/{MAX_RETRIES})")
-            time.sleep(delay)
+        
+        # 确保日期格式正确
+        if '日期' in df.columns:
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df = df.sort_values('日期').reset_index(drop=True)
+        
+        # 确保数值列是数值类型
+        numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 移除NaN值
+        df = df.dropna(subset=['收盘', '成交量'])
+        
+        logger.info(f"成功获取股票 {stock_code} 的日线数据，共 {len(df)} 条记录")
+        return df
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
     """保存股票日线数据到CSV文件，使用中文列名"""
@@ -288,7 +214,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 
 def update_all_stocks_daily_data():
-    """更新所有股票的日线数据，添加完善的网络错误处理"""
+    """更新所有股票的日线数据，使用中文列名"""
     ensure_directory_exists()
     
     # 确保基础信息文件存在

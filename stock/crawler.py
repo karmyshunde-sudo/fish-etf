@@ -81,86 +81,110 @@ def create_or_update_basic_info():
     ensure_directory_exists()
     
     # 添加随机延时，避免请求过于频繁
-    time.sleep(random.uniform(1.0, 2.0))
+    time.sleep(random.uniform(2.0, 3.0))  # 增加延时
     
-    try:
-        # 正确调用 stock_zh_a_spot_em 获取所有必要数据
-        df = ak.stock_zh_a_spot_em()
-        
-        # 检查返回结果
-        if df.empty:
-            logger.error("获取股票列表失败：返回为空")
-            return False
-        
-        # 打印API返回的列名，用于调试
-        logger.info(f"API返回的列名: {df.columns.tolist()}")
-        
-        # 确保必要列存在
-        required_columns = ['代码', '名称', '流通市值']
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"获取股票列表失败: 缺少必要列 {col}")
-                return False
-        
-        # 准备基础信息DataFrame - 严格使用API返回的原始列名
-        basic_info_df = pd.DataFrame({
-            "代码": df['代码'],
-            "名称": df['名称'],
-            "所属板块": df['代码'].apply(get_stock_section),
-            "流通市值": df['流通市值']
-        })
-        
-        # 确保流通市值列是数值类型
-        basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
-        
-        # 保留无市值股票，但标记它们
-        invalid_mask = (basic_info_df["流通市值"] <= 0) | basic_info_df["流通市值"].isna()
-        invalid_count = invalid_mask.sum()
-        
-        if invalid_count > 0:
-            basic_info_df["数据状态"] = '正常'
-            basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
-            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
-        
-        # 【关键修改】调用 tickten.py 中的筛选函数
+    # 【关键修改】添加重试机制
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            from stock.tickten import filter_valid_stocks
-            filtered_df = filter_valid_stocks(basic_info_df)
-            logger.info(f"调用 tickten.py 筛选函数后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
+            logger.info(f"尝试第 {attempt + 1} 次获取股票列表...")
+            
+            # 正确调用 stock_zh_a_spot_em 获取所有必要数据
+            df = ak.stock_zh_a_spot_em()
+            
+            # 检查返回结果
+            if df.empty:
+                logger.error("获取股票列表失败：返回为空")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(5.0, 10.0))  # 失败后等待更长时间
+                    continue
+                return False
+            
+            # 打印API返回的列名，用于调试
+            logger.info(f"API返回的列名: {df.columns.tolist()}")
+            
+            # 确保必要列存在
+            required_columns = ['代码', '名称', '流通市值']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.error(f"获取股票列表失败: 缺少必要列 {col}")
+                    if attempt < max_retries - 1:
+                        time.sleep(random.uniform(5.0, 10.0))
+                        continue
+                    return False
+            
+            # 准备基础信息DataFrame - 严格使用API返回的原始列名
+            basic_info_df = pd.DataFrame({
+                "代码": df['代码'],
+                "名称": df['名称'],
+                "所属板块": df['代码'].apply(get_stock_section),
+                "流通市值": df['流通市值']
+            })
+            
+            # 确保流通市值列是数值类型
+            basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
+            
+            # 保留无市值股票，但标记它们
+            invalid_mask = (basic_info_df["流通市值"] <= 0) | basic_info_df["流通市值"].isna()
+            invalid_count = invalid_mask.sum()
+            
+            if invalid_count > 0:
+                basic_info_df["数据状态"] = '正常'
+                basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
+                logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
+            
+            # 【关键修改】确保调用 tickten.py 中的筛选函数
+            logger.info("准备调用 tickten.py 中的筛选函数...")
+            try:
+                from stock.tickten import filter_valid_stocks
+                logger.info("成功导入 tickten.py 的 filter_valid_stocks 函数")
+                filtered_df = filter_valid_stocks(basic_info_df)
+                logger.info(f"调用 tickten.py 筛选函数后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
+            except ImportError as e:
+                logger.error(f"无法导入 tickten.py 的筛选函数: {str(e)}")
+                logger.warning("使用原始数据作为后备方案")
+                filtered_df = basic_info_df.copy()
+            except Exception as e:
+                logger.error(f"调用 tickten.py 筛选函数时发生异常: {str(e)}", exc_info=True)
+                logger.warning("使用原始数据作为后备方案")
+                filtered_df = basic_info_df.copy()
+            
+            # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
+            filtered_df["next_crawl_index"] = 0
+            
+            # 保存基础信息
+            filtered_df.to_csv(BASIC_INFO_FILE, index=False)
+            logger.info(f"已创建/更新股票基础信息文件，共 {len(filtered_df)} 条记录")
+            
+            # 确认文件已保存
+            if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
+                logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
+                
+                # 详细记录前5只股票（用于验证索引）
+                first_5 = filtered_df.head(5)
+                for idx, row in first_5.iterrows():
+                    logger.info(f"基础信息文件前5只股票[{idx}]: {row['代码']} - {row['名称']}")
+                
+                # 【关键修改】提交基础信息文件到仓库
+                commit_files_in_batches(BASIC_INFO_FILE)
+                logger.info(f"已提交基础信息文件到仓库: {BASIC_INFO_FILE}")
+                
+                return True
+            else:
+                logger.error(f"基础信息文件保存失败: {BASIC_INFO_FILE} 不存在或为空")
+                return False
+                
         except Exception as e:
-            logger.error(f"调用 tickten.py 筛选函数失败: {str(e)}", exc_info=True)
-            return False
-        
-        # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
-        # 所有行的 next_crawl_index 值都相同，表示下一个要爬取的起始索引
-        filtered_df["next_crawl_index"] = 0
-        
-        # 保存基础信息
-        filtered_df.to_csv(BASIC_INFO_FILE, index=False)
-        logger.info(f"已创建/更新股票基础信息文件，共 {len(filtered_df)} 条记录")
-        
-        # 确认文件已保存
-        if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
-            logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
-            
-            # 详细记录前5只股票（用于验证索引）
-            first_5 = filtered_df.head(5)
-            for idx, row in first_5.iterrows():
-                logger.info(f"基础信息文件前5只股票[{idx}]: {row['代码']} - {row['名称']}")
-            
-            # 【关键修改】提交基础信息文件到仓库
-            commit_files_in_batches(BASIC_INFO_FILE)
-            logger.info(f"已提交基础信息文件到仓库: {BASIC_INFO_FILE}")
-            
-            return True
-        else:
-            logger.error(f"基础信息文件保存失败: {BASIC_INFO_FILE} 不存在或为空")
-            return False
-            
-    except Exception as e:
-        logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
-        return False
-
+            logger.error(f"第 {attempt + 1} 次尝试创建基础信息文件失败: {str(e)}", exc_info=True)
+            if attempt < max_retries - 1:
+                wait_time = random.uniform(10.0, 20.0)  # 增加等待时间
+                logger.info(f"等待 {wait_time:.1f} 秒后进行第 {attempt + 2} 次重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error("所有重试都失败，无法创建基础信息文件")
+                return False
+    
+    return False
 def test_akshare_api():
     """测试 akshare API 是否正常工作"""
     logger.info("===== 开始 akshare API 测试 =====")

@@ -110,43 +110,32 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         
         # 【关键修复】添加类型检查，确保 df 是 DataFrame
         if df is None:
-            logger.warning(f"ETF {etf_code} 返回空数据")
+            logger.warning(f"ETF {etf_code} API返回None，跳过")
             return pd.DataFrame()
         
         # 【关键修复】检查 df 是否为 DataFrame 类型
         if not isinstance(df, pd.DataFrame):
-            logger.error(f"ETF {etf_code} 返回的数据类型错误: {type(df)}")
+            logger.error(f"ETF {etf_code} 返回的数据类型错误: {type(df)}，跳过")
             return pd.DataFrame()
         
         # 【关键修复】检查 DataFrame 是否为空
         if df.empty:
-            # 【关键修复】如果首次爬取且数据为空，尝试获取最近30天的数据
-            if is_first_crawl:
-                logger.warning(f"ETF {etf_code} 返回空的DataFrame，尝试获取最近30天的数据")
-                # 使用最近30天的日期范围
-                new_start_date = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
-                new_end_date = datetime.now().strftime("%Y%m%d")
-                
-                # 重新尝试获取数据
-                df = ak.fund_etf_hist_em(
-                    symbol=etf_code,
-                    period="daily",
-                    start_date=new_start_date,
-                    end_date=new_end_date,
-                    adjust="qfq"
-                )
-                
-                # 再次检查数据
-                if df is None or df.empty:
-                    logger.warning(f"ETF {etf_code} 即使获取最近30天的数据也为空")
-                    return pd.DataFrame()
-            
-            # 如果不是首次爬取，或者尝试后仍然为空
-            logger.warning(f"ETF {etf_code} 返回空的DataFrame")
+            logger.warning(f"ETF {etf_code} 无有效数据（API返回空DataFrame）")
             return pd.DataFrame()
         
-        # 记录成功获取的数据条数
-        logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
+        # 【关键修复】记录实际获取的数据条数
+        data_count = len(df)
+        logger.info(f"ETF {etf_code} 获取到 {data_count} 条有效数据")
+        
+        # 【关键修复】检查数据量是否足够
+        if data_count < 5 and is_first_crawl:
+            logger.warning(f"ETF {etf_code} 数据量较少 ({data_count}条)，可能是新上市ETF")
+        
+        # 【关键修复】检查日期范围是否合理
+        if not df.empty and "日期" in df.columns:
+            first_date = df["日期"].min()
+            last_date = df["日期"].max()
+            logger.debug(f"ETF {etf_code} 数据日期范围: {first_date} 至 {last_date}")
         
         # 【关键修复】使用正确的数据清洗函数
         df = clean_and_format_data(df)

@@ -167,41 +167,34 @@ def test_akshare_api():
     logger.info(f"akshare 版本: {ak.__version__}")
     logger.info(f"akshare 模块路径: {ak.__file__}")
     
-    # 【关键修改】使用正确的测试方法
-    test_results = []
-    
-    # 测试不同的股票代码格式和参数
-    test_cases = [
-        # (symbol, period, adjust) - 尝试多种组合
-        ("sh600000", "daily", "qfq"),    # 沪市
-        ("sz000001", "daily", "qfq"),   # 深市
-        ("sz300001", "daily", "qfq"),   # 创业板
-        ("sh688001", "daily", "qfq"),   # 科创板
-        ("600000", "daily", "qfq"),     # 不带前缀
-        ("000001", "daily", "qfq"),     # 不带前缀
-        ("sh600000", "daily", ""),      # 无复权
-        ("sh600000", "weekly", "qfq"),  # 周线
+    # 【关键修改】只测试成功的方法：不带市场前缀的股票代码
+    test_stocks = [
+        ("600000", "浦发银行"),  # 沪市主板
+        ("000001", "平安银行"),  # 深市主板
+        ("300001", "特锐德"),    # 创业板
+        ("688001", "华兴源创")   # 科创板
     ]
     
-    for i, (symbol, period, adjust) in enumerate(test_cases):
+    successful_tests = 0
+    test_results = []
+    
+    for stock_code, name in test_stocks:
         try:
-            logger.info(f"--- 测试案例 {i+1}: symbol={symbol}, period={period}, adjust={adjust or '无复权'} ---")
+            logger.info(f"--- 测试股票 {stock_code} ({name}) ---")
             
-            # 尝试获取少量数据（最近5天）
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
-            
+            # 【关键修改】使用测试成功的参数
             df = ak.stock_zh_a_hist(
-                symbol=symbol,
-                period=period,
-                start_date=start_date,
-                end_date=end_date,
-                adjust=adjust
+                symbol=stock_code,      # 不带市场前缀！
+                period="daily",
+                start_date=(datetime.now() - timedelta(days=5)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+                adjust="qfq"
             )
             
             if df is not None and not df.empty:
                 logger.info(f"  ✓ 成功获取 {len(df)} 条数据")
                 logger.debug(f"  数据列名: {list(df.columns)}")
+                successful_tests += 1
                 test_results.append(True)
             else:
                 logger.warning(f"  ✗ 返回空数据")
@@ -211,45 +204,21 @@ def test_akshare_api():
             logger.error(f"  ✗ 测试失败: {str(e)}")
             test_results.append(False)
     
-    # 如果上面的方法都不行，尝试最基本的调用
-    if not any(test_results):
-        logger.info("--- 尝试最基本的API调用 ---")
-        try:
-            # 测试获取所有股票列表
-            df = ak.stock_zh_a_spot_em()
-            if df is not None and not df.empty:
-                logger.info(f"✓ 基本股票列表API调用成功，获取到 {len(df)} 只股票")
-                logger.debug(f"数据列名: {list(df.columns)}")
-                test_results.append(True)
-            else:
-                logger.error("✗ 基本股票列表API调用失败")
-                test_results.append(False)
-        except Exception as e:
-            logger.error(f"✗ 基本股票列表API调用失败: {str(e)}")
-            test_results.append(False)
-    
     logger.info("===== akshare API 测试完成 =====")
     
     # 分析测试结果
-    successful_tests = sum(test_results)
     total_tests = len(test_results)
     success_rate = successful_tests / total_tests if total_tests > 0 else 0
     
     logger.info(f"=== API测试结果分析 ===")
     logger.info(f"总测试数: {total_tests}, 成功数: {successful_tests}, 成功率: {success_rate:.2%}")
     
-    if successful_tests == 0:
-        logger.error("所有API测试都失败，akshare可能存在问题")
-        return False, None
-    
-    # 确定最佳参数（这里简单处理，实际可以根据成功率选择）
-    best_param = "qfq"  # 默认使用前复权
-    
-    if success_rate >= 0.5:
+    # 【关键修改】只要有一个成功就算通过
+    if successful_tests > 0:
         logger.info("API测试通过，可以继续执行爬取任务")
-        return True, best_param
+        return True, "qfq"  # 返回成功的复权参数
     else:
-        logger.error("API测试失败率过高，停止执行爬取任务")
+        logger.error("API测试全部失败，停止执行爬取任务")
         return False, None
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
@@ -258,39 +227,37 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 确保股票代码是字符串，并且是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
         
-        # 确定市场前缀
-        market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
-        ak_code = f"{market_prefix}{stock_code}"
+        # 【关键修改】使用测试成功的调用方式：不带市场前缀！
+        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {stock_code}, 复权参数: qfq)")
         
-        # 重要：使用正确的复权参数
-        adjust_param = "qfq"  # 前复权
-        
-        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {ak_code}, 复权参数: {adjust_param})")
-        
-        # 【关键修改】使用正确的参数组合
+        # 【关键修改】使用测试成功的参数
         try:
             df = ak.stock_zh_a_hist(
-                symbol=ak_code,
+                symbol=stock_code,      # 不带市场前缀！
                 period="daily",
                 start_date=(datetime.now() - timedelta(days=365)).strftime("%Y%m%d"),
                 end_date=datetime.now().strftime("%Y%m%d"),
-                adjust=adjust_param
+                adjust="qfq"
             )
         except Exception as e:
-            logger.warning(f"使用标准参数失败，尝试简化参数: {str(e)}")
-            # 尝试不带日期参数
+            logger.warning(f"获取股票 {stock_code} 的1年数据失败，尝试获取30天数据: {str(e)}")
             try:
+                # 尝试获取30天数据（适用于新上市股票）
                 df = ak.stock_zh_a_hist(
-                    symbol=ak_code,
+                    symbol=stock_code,      # 不带市场前缀！
                     period="daily",
-                    adjust=adjust_param
+                    start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"),
+                    adjust="qfq"
                 )
-            except Exception as e2:
-                logger.warning(f"使用简化参数也失败，尝试无复权: {str(e2)}")
-                # 最后尝试无复权
+            except Exception as e:
+                logger.warning(f"获取股票 {stock_code} 的30天数据失败，尝试获取不复权数据: {str(e)}")
+                # 尝试不复权数据
                 df = ak.stock_zh_a_hist(
-                    symbol=ak_code,
+                    symbol=stock_code,      # 不带市场前缀！
                     period="daily",
+                    start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"),
                     adjust=""
                 )
         

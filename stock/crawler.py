@@ -169,9 +169,9 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         df = ak.stock_zh_a_hist(
             symbol=ak_code,
             period="daily",
-            start_date=(datetime.now() - timedelta(days=730)).strftime("%Y%m%d"),
+            start_date=(datetime.now() - timedelta(days=365)).strftime("%Y%m%d"),
             end_date=datetime.now().strftime("%Y%m%d"),
-            adjust=""
+            adjust="qfq"  # 修复：使用"qfq"表示前复权
         )
         
         if df.empty:

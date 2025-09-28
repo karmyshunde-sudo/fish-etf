@@ -1,12 +1,12 @@
 name: 定时-个股日线爬取
 on:
   schedule:
-    - cron: '*/50 12-22 * * *'    # UTC 11:00 = 北京时间 20:00-06:00 (股票日线爬取)
+    - cron: '*/10 12-22 * * *'    # UTC 11:00 = 北京时间 20:00-06:00 (股票日线爬取)
 jobs:
   stock-crawler-schedule:
     name: 股票日线数据爬取（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '*/50 12-22 * * *'
+    if: github.event_name == 'schedule' && github.event.schedule == '*/10 12-22 * * *'
     permissions:
       contents: write
     steps:

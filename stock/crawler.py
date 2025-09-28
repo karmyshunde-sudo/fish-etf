@@ -132,9 +132,8 @@ def create_or_update_basic_info():
             basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
             logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
         
-        # 添加 next_crawl_index 列（如果不存在）
-        if "next_crawl_index" not in basic_info_df.columns:
-            basic_info_df["next_crawl_index"] = True
+        # 添加 next_crawl_index 列 - 作为数值索引
+        basic_info_df["next_crawl_index"] = 0
         
         # 保存基础信息
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
@@ -144,7 +143,12 @@ def create_or_update_basic_info():
         if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
             logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
             
-            # 【关键修改】只需调用，无需处理返回值
+            # 详细记录前5只股票（用于验证索引）
+            first_5 = basic_info_df.head(5)
+            for idx, row in first_5.iterrows():
+                logger.info(f"基础信息文件前5只股票[{idx}]: {row['代码']} - {row['名称']}")
+            
+            # 只需调用，无需处理返回值
             commit_files_in_batches(BASIC_INFO_FILE)
             return True
         else:
@@ -154,6 +158,52 @@ def create_or_update_basic_info():
     except Exception as e:
         logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
         return False
+
+def test_akshare_api():
+    """测试 akshare API 是否正常工作"""
+    logger.info("===== 开始 akshare API 测试 =====")
+    logger.info(f"akshare 版本: {ak.__version__}")
+    logger.info(f"akshare 模块路径: {ak.__file__}")
+    
+    test_stocks = [
+        ("600000", "浦发银行"),  # 沪市主板
+        ("000001", "平安银行"),  # 深市主板
+        ("300001", "特锐德"),    # 创业板
+        ("688001", "华兴源创")   # 科创板
+    ]
+    
+    for stock_code, name in test_stocks:
+        logger.info(f"--- 测试股票 {stock_code} ({name}) ---")
+        
+        # 测试不同复权参数
+        for adjust_param in ["qfq", "hfq", "bfq"]:
+            try:
+                logger.info(f"  测试复权参数: {adjust_param}")
+                
+                # 确定市场前缀
+                market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
+                ak_code = f"{market_prefix}{stock_code}"
+                
+                # 获取日线数据（只获取最近30天）
+                df = ak.stock_zh_a_hist(
+                    symbol=ak_code,
+                    period="daily",
+                    start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"),
+                    adjust=adjust_param
+                )
+                
+                if df.empty:
+                    logger.warning(f"  股票 {stock_code} 使用 {adjust_param} 参数返回空数据")
+                else:
+                    logger.info(f"  股票 {stock_code} 使用 {adjust_param} 参数成功获取 {len(df)} 条数据")
+                    logger.debug(f"  数据列名: {df.columns.tolist()}")
+                    if not df.empty:
+                        logger.debug(f"  首条数据: {df.iloc[0].to_dict()}")
+            except Exception as e:
+                logger.error(f"  测试 {stock_code} 使用 {adjust_param} 参数时出错: {str(e)}", exc_info=True)
+    
+    logger.info("===== akshare API 测试完成 =====")
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
@@ -165,25 +215,49 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
         ak_code = f"{market_prefix}{stock_code}"
         
-        # 获取日线数据 - 修复adjust参数并调整为1年数据
+        # 重要：使用正确的复权参数
+        adjust_param = "qfq"  # 前复权
+        
+        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {ak_code}, 复权参数: {adjust_param})")
+        
+        # 获取日线数据 - 使用正确的参数
         df = ak.stock_zh_a_hist(
             symbol=ak_code,
             period="daily",
             start_date=(datetime.now() - timedelta(days=365)).strftime("%Y%m%d"),
             end_date=datetime.now().strftime("%Y%m%d"),
-            adjust="qfq"  # 关键修复：使用有效的复权参数
+            adjust=adjust_param  # 确保使用有效的复权参数
         )
         
+        # 添加详细的API响应检查
         if df.empty:
-            logger.warning(f"股票 {stock_code} 的日线数据为空")
+            logger.warning(f"股票 {stock_code} 的日线数据为空 - 可能原因: 1) 无效的复权参数 2) API限制 3) 股票代码格式问题")
+            # 尝试用其他复权参数再试一次（用于诊断）
+            for test_adjust in ["hfq", "bfq"]:
+                try:
+                    test_df = ak.stock_zh_a_hist(
+                        symbol=ak_code,
+                        period="daily",
+                        start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+                        end_date=datetime.now().strftime("%Y%m%d"),
+                        adjust=test_adjust
+                    )
+                    if not test_df.empty:
+                        logger.error(f"!!! 诊断发现: 股票 {stock_code} 使用 {test_adjust} 复权参数可以获取数据，但 {adjust_param} 不行 !!!")
+                        return test_df
+                except Exception as e:
+                    logger.debug(f"测试复权参数 {test_adjust} 失败: {str(e)}")
             return pd.DataFrame()
+        
+        # 添加列名检查日志
+        logger.debug(f"股票 {stock_code} 获取到的列名: {df.columns.tolist()}")
         
         # 确保必要列存在
         required_columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
-                return pd.DataFrame()
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"股票 {stock_code} 数据缺少必要列: {missing_columns}")
+            return pd.DataFrame()
         
         # 确保日期格式正确
         if '日期' in df.columns:
@@ -203,7 +277,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        # 添加详细的异常日志
+        logger.error(f"获取股票 {stock_code} 日线数据时发生未捕获的异常:", exc_info=True)
+        logger.error(f"akshare 版本: {ak.__version__}")
+        logger.error(f"akshare 模块路径: {ak.__file__}")
         return pd.DataFrame()
 
 def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
@@ -216,7 +293,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         df.to_csv(file_path, index=False)
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【关键修改】只需简单调用，无需任何额外逻辑
+        # 只需简单调用，无需任何额外逻辑
         commit_files_in_batches(file_path)
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -242,46 +319,64 @@ def update_all_stocks_daily_data():
         logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
         return False
     
-    # 获取需要更新的股票列表（next_crawl_index 为 True 的股票）
-    stock_codes = basic_info_df[basic_info_df["next_crawl_index"]]["代码"].tolist()
-    if not stock_codes:
-        logger.info("没有需要爬取的股票，next_crawl_index 均为 False")
-        
-        # 重置 next_crawl_index，标记所有股票为需要爬取
-        basic_info_df["next_crawl_index"] = True
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        
-        # 【关键修改】只需调用，无需处理返回值
-        commit_files_in_batches(BASIC_INFO_FILE)
-        
-        # 尝试获取新的股票列表
-        stock_codes = basic_info_df["代码"].tolist()
-        logger.info(f"重置 next_crawl_index，将爬取所有 {len(stock_codes)} 只股票")
+    # 获取 next_crawl_index 值
+    next_index = int(basic_info_df["next_crawl_index"].iloc[0])
+    total_stocks = len(basic_info_df)
     
-    logger.info(f"开始更新 {len(stock_codes)} 只股票的日线数据（基于 next_crawl_index 标记）")
+    logger.info(f"当前爬取状态: next_crawl_index = {next_index} (共 {total_stocks} 只股票)")
     
-    # 每100只股票处理一次
-    batch_size = 100
-    for i in range(0, len(stock_codes), batch_size):
-        batch = stock_codes[i:i+batch_size]
-        logger.info(f"正在处理第 {i//batch_size + 1} 批，共 {len(batch)} 只股票")
-        
-        for stock_code in batch:
-            # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(0.5, 1.5))
-            df = fetch_stock_daily_data(stock_code)
-            if not df.empty:
-                save_stock_daily_data(stock_code, df)
-        
-        # 更新 next_crawl_index
-        basic_info_df.loc[basic_info_df["代码"].isin(batch), "next_crawl_index"] = False
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        logger.info(f"已更新基础信息文件的 next_crawl_index 列")
-        
-        # 【关键修改】只需调用，无需处理返回值
-        commit_files_in_batches(BASIC_INFO_FILE)
+    # 确定要爬取的股票范围
+    start_idx = next_index
+    end_idx = min(next_index + 100, total_stocks)
     
-    logger.info("所有股票日线数据更新完成")
+    # 如果已经爬取完所有股票，重置索引
+    if start_idx >= total_stocks:
+        logger.info("已爬取完所有股票，重置爬取状态")
+        start_idx = 0
+        end_idx = min(100, total_stocks)
+    
+    # 获取要爬取的股票
+    batch_df = basic_info_df.iloc[start_idx:end_idx]
+    batch_codes = batch_df["代码"].tolist()
+    
+    if not batch_codes:
+        logger.warning("没有可爬取的股票")
+        return False
+    
+    # 【关键添加】记录第一批和最后一批股票
+    first_stock = batch_df.iloc[0]
+    last_stock = batch_df.iloc[-1]
+    logger.info(f"正在处理第 {start_idx//100 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
+    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {start_idx})")
+    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {end_idx-1})")
+    
+    # 处理这批股票
+    for stock_code in batch_codes:
+        # 添加随机延时，避免请求过于频繁
+        time.sleep(random.uniform(1.5, 2.5))  # 增加延时，避免被限流
+        df = fetch_stock_daily_data(stock_code)
+        if not df.empty:
+            save_stock_daily_data(stock_code, df)
+    
+    # 更新 next_crawl_index
+    new_index = end_idx
+    if new_index >= total_stocks:
+        new_index = 0  # 重置，下次从头开始
+    
+    logger.info(f"更新 next_crawl_index = {new_index}")
+    basic_info_df["next_crawl_index"] = new_index
+    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+    
+    # 提交更新后的基础信息文件
+    commit_files_in_batches(BASIC_INFO_FILE)
+    
+    # 检查是否还有未完成的股票
+    remaining_stocks = total_stocks - new_index
+    if remaining_stocks < 0:
+        remaining_stocks = total_stocks  # 重置后
+    
+    logger.info(f"已完成 {len(batch_codes)} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
+    
     return True
 
 def main():
@@ -291,18 +386,21 @@ def main():
     # 添加初始延时，避免立即请求
     time.sleep(random.uniform(1.0, 2.0))
     
-    # 1. 确保基础信息文件存在
+    # 1. 运行 akshare API 测试（关键诊断工具）
+    test_akshare_api()
+    
+    # 2. 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
         logger.info("基础信息文件不存在或为空，正在创建...")
         if not create_or_update_basic_info():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 2. 更新所有股票日线数据
+    # 3. 只更新一批股票（最多100只）
     if update_all_stocks_daily_data():
-        logger.info("日线数据更新成功")
+        logger.info("已成功处理一批股票数据")
     else:
-        logger.error("日线数据更新失败")
+        logger.error("处理股票数据失败")
     
     logger.info("===== 股票数据更新完成 =====")
 

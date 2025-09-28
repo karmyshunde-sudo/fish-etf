@@ -345,7 +345,7 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         original_count = len(df)
         logger.debug(f"清洗前数据量: {original_count} 条")
         
-        # 【关键修复】添加详细的日期处理检查
+        # 处理日期列
         if "日期" in df.columns:
             # 确保日期列是字符串类型
             df["日期"] = df["日期"].astype(str)
@@ -361,14 +361,27 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
             logger.error("数据缺少'日期'列，无法正确处理")
             return pd.DataFrame()
         
-        # 【关键修复】检查数据量变化
+        # 检查数据量变化
         if len(df) == 0:
             logger.warning("清洗后数据为空，请检查原始数据")
             return pd.DataFrame()
         elif len(df) < original_count * 0.5:
             logger.warning(f"清洗后数据量显著减少 ({original_count} -> {len(df)})，可能存在数据问题")
         
-        # 其他清洗逻辑...
+        # 确保其他列存在
+        required_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+        for col in required_columns:
+            if col in df.columns:
+                # 转换为数值类型
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # 处理NaN值
+                if col in ["开盘", "最高", "最低", "收盘"]:
+                    df[col] = df[col].ffill()
+            else:
+                logger.warning(f"数据缺少关键列: {col}")
+        
+        # 移除NaN值
+        df = df.dropna(subset=["收盘", "成交量"])
         
         logger.debug(f"清洗后数据量: {len(df)} 条")
         return df

@@ -128,81 +128,16 @@ def should_execute_calculate_position() -> bool:
     
     return True
 
-def should_execute_update_etf_list() -> bool:
-    """
-    判断是否应该执行ETF列表更新任务
-    
-    Returns:
-        bool: 如果应该执行返回True，否则返回False
-    """
-    # 手动触发的任务总是执行
-    if is_manual_trigger():
-        logger.info("手动触发的任务，总是执行ETF列表更新")
-        return True
-    
-    # 定时触发的任务：检查是否需要更新
-    if not is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-        logger.info("ETF列表未到更新周期，跳过更新（定时任务）")
-        return False
-    
-    return True
-
-def setup_environment() -> bool:
-    """
-    设置运行环境，检查必要的目录和文件
-    
-    Returns:
-        bool: 环境设置是否成功
-    """
-    try:
-        # 获取当前双时区时间
-        utc_now, beijing_now = get_current_times()
-        
-        logger.info(f"开始设置运行环境 (UTC: {utc_now}, CST: {beijing_now})")
-        
-        # 确保必要的目录存在
-        os.makedirs(Config.DATA_DIR, exist_ok=True)
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
-        os.makedirs(os.path.dirname(Config.get_arbitrage_flag_file()), exist_ok=True)
-        os.makedirs(os.path.dirname(Config.get_position_flag_file()), exist_ok=True)
-        
-        # 检查ETF列表是否过期
-        if os.path.exists(Config.ALL_ETFS_PATH):
-            if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
-                logger.warning("ETF列表已过期，建议更新")
-            else:
-                logger.info("ETF列表有效")
-        else:
-            logger.warning("ETF列表文件不存在")
-        
-        # 检查企业微信配置
-        if not Config.WECOM_WEBHOOK:
-            logger.warning("企业微信Webhook未配置，消息推送将不可用")
-        
-        # 记录环境信息
-        logger.info(f"当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        logger.info("环境设置完成")
-        return True
-    except Exception as e:
-        error_msg = f"环境设置失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return False
-
 def handle_update_etf_list() -> Dict[str, Any]:
     """
-    处理ETF列表更新任务
+    处理ETF列表更新任务 - 直接执行，不进行任何条件判断
+    因为定时器已经确保只在周日触发此任务
     
     Returns:
         Dict[str, Any]: 任务执行结果
     """
     try:
-        # 检查是否应该执行任务（仅对定时任务有效）
-        if not is_manual_trigger() and not should_execute_update_etf_list():
-            logger.info("根据定时任务规则，跳过ETF列表更新任务")
-            return {"status": "skipped", "message": "ETF列表未到更新周期"}
-        
-        logger.info("开始更新全市场ETF列表")
+        logger.info("开始更新全市场ETF列表（周日强制更新）")
         etf_list = update_all_etf_list()
         
         if etf_list.empty:
@@ -630,6 +565,48 @@ def main() -> Dict[str, Any]:
         
         print(json.dumps(response, indent=2, ensure_ascii=False))
         return response
+
+def setup_environment() -> bool:
+    """
+    设置运行环境，检查必要的目录和文件
+    
+    Returns:
+        bool: 环境设置是否成功
+    """
+    try:
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()
+        
+        logger.info(f"开始设置运行环境 (UTC: {utc_now}, CST: {beijing_now})")
+        
+        # 确保必要的目录存在
+        os.makedirs(Config.DATA_DIR, exist_ok=True)
+        os.makedirs(Config.LOG_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(Config.get_arbitrage_flag_file()), exist_ok=True)
+        os.makedirs(os.path.dirname(Config.get_position_flag_file()), exist_ok=True)
+        
+        # 检查ETF列表是否过期
+        if os.path.exists(Config.ALL_ETFS_PATH):
+            if is_file_outdated(Config.ALL_ETFS_PATH, Config.ETF_LIST_UPDATE_INTERVAL):
+                logger.warning("ETF列表已过期，建议更新")
+            else:
+                logger.info("ETF列表有效")
+        else:
+            logger.warning("ETF列表文件不存在")
+        
+        # 检查企业微信配置
+        if not Config.WECOM_WEBHOOK:
+            logger.warning("企业微信Webhook未配置，消息推送将不可用")
+        
+        # 记录环境信息
+        logger.info(f"当前北京时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        logger.info("环境设置完成")
+        return True
+    except Exception as e:
+        error_msg = f"环境设置失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return False
 
 def run_scheduled_tasks():
     """

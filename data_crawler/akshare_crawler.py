@@ -337,21 +337,42 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     try:
         if df.empty:
+            logger.debug("数据为空，跳过清洗")
             return df
             
         # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
         df = df.copy(deep=True)
+        original_count = len(df)
+        logger.debug(f"清洗前数据量: {original_count} 条")
         
-        # 处理日期列
-        if "日期" in df.columns and not df.empty:
-            # 确保日期列是datetime类型
+        # 【关键修复】添加详细的日期处理检查
+        if "日期" in df.columns:
+            # 确保日期列是字符串类型
+            df["日期"] = df["日期"].astype(str)
+            # 尝试转换为日期格式
             df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
             # 删除无效日期
-            df = df.dropna(subset=["日期"])
+            invalid_dates = df["日期"].isna().sum()
+            if invalid_dates > 0:
+                logger.warning(f"发现 {invalid_dates} 条无效日期，将被删除")
+                df = df.dropna(subset=["日期"])
+            logger.debug(f"日期处理后数据量: {len(df)} 条")
+        else:
+            logger.error("数据缺少'日期'列，无法正确处理")
+            return pd.DataFrame()
         
-        # 【关键修复】正确返回DataFrame，而不是date对象
+        # 【关键修复】检查数据量变化
+        if len(df) == 0:
+            logger.warning("清洗后数据为空，请检查原始数据")
+            return pd.DataFrame()
+        elif len(df) < original_count * 0.5:
+            logger.warning(f"清洗后数据量显著减少 ({original_count} -> {len(df)})，可能存在数据问题")
+        
+        # 其他清洗逻辑...
+        
+        logger.debug(f"清洗后数据量: {len(df)} 条")
         return df
         
     except Exception as e:
         logger.error(f"清洗数据失败: {str(e)}", exc_info=True)
-        return df  # 即使出错也返回DataFrame
+        return df

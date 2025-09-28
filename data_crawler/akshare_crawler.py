@@ -105,7 +105,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             period="daily",
             start_date=start_date,
             end_date=end_date,
-            adjust=""
+            adjust="qfq" if is_first_crawl else ""
         )
         
         # 【关键修复】添加类型检查，确保 df 是 DataFrame
@@ -120,6 +120,28 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         
         # 【关键修复】检查 DataFrame 是否为空
         if df.empty:
+            # 【关键修复】如果首次爬取且数据为空，尝试获取最近30天的数据
+            if is_first_crawl:
+                logger.warning(f"ETF {etf_code} 返回空的DataFrame，尝试获取最近30天的数据")
+                # 使用最近30天的日期范围
+                new_start_date = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
+                new_end_date = datetime.now().strftime("%Y%m%d")
+                
+                # 重新尝试获取数据
+                df = ak.fund_etf_hist_em(
+                    symbol=etf_code,
+                    period="daily",
+                    start_date=new_start_date,
+                    end_date=new_end_date,
+                    adjust="qfq"
+                )
+                
+                # 再次检查数据
+                if df is None or df.empty:
+                    logger.warning(f"ETF {etf_code} 即使获取最近30天的数据也为空")
+                    return pd.DataFrame()
+            
+            # 如果不是首次爬取，或者尝试后仍然为空
             logger.warning(f"ETF {etf_code} 返回空的DataFrame")
             return pd.DataFrame()
         

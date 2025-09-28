@@ -13,6 +13,8 @@ import time
 import random
 from datetime import datetime, timedelta
 from config import Config
+# 只需导入Git工具模块
+from utils.git_utils import commit_files_in_batches
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -141,6 +143,9 @@ def create_or_update_basic_info():
         # 确认文件已保存
         if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
             logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
+            
+            # 【关键修改】只需调用，无需处理返回值
+            commit_files_in_batches(BASIC_INFO_FILE)
             return True
         else:
             logger.error(f"基础信息文件保存失败: {BASIC_INFO_FILE} 不存在或为空")
@@ -210,6 +215,9 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         df.to_csv(file_path, index=False)
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
+        
+        # 【关键修改】只需简单调用，无需任何额外逻辑
+        commit_files_in_batches(file_path)
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 
@@ -243,6 +251,9 @@ def update_all_stocks_daily_data():
         basic_info_df["next_crawl_index"] = True
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         
+        # 【关键修改】只需调用，无需处理返回值
+        commit_files_in_batches(BASIC_INFO_FILE)
+        
         # 尝试获取新的股票列表
         stock_codes = basic_info_df["代码"].tolist()
         logger.info(f"重置 next_crawl_index，将爬取所有 {len(stock_codes)} 只股票")
@@ -266,6 +277,9 @@ def update_all_stocks_daily_data():
         basic_info_df.loc[basic_info_df["代码"].isin(batch), "next_crawl_index"] = False
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         logger.info(f"已更新基础信息文件的 next_crawl_index 列")
+        
+        # 【关键修改】只需调用，无需处理返回值
+        commit_files_in_batches(BASIC_INFO_FILE)
     
     logger.info("所有股票日线数据更新完成")
     return True

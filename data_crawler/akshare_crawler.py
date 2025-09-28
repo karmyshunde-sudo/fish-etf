@@ -76,6 +76,64 @@ def retry_if_akshare_error(exception: Exception) -> bool:
     # 扩展异常类型，包括requests库的网络错误
     from requests.exceptions import ConnectionError, Timeout
     return isinstance(exception, (ValueError, ConnectionError, Timeout, OSError))
+        
+@retry(
+    stop_max_attempt_number=MAX_RETRY_ATTEMPTS,
+    wait_fixed=RETRY_WAIT_FIXED,
+    retry_on_result=empty_result_check,
+    retry_on_exception=retry_if_akshare_error
+)
+def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
+    """
+    使用AkShare爬取ETF日线数据
+    
+    Args:
+        etf_code: ETF代码
+        start_date: 开始日期 (YYYYMMDD)
+        end_date: 结束日期 (YYYYMMDD)
+        is_first_crawl: 是否首次爬取
+    
+    Returns:
+        pd.DataFrame: ETF日线数据
+    """
+    try:
+        logger.debug(f"开始爬取ETF {etf_code} 日线数据: {start_date} ~ {end_date}")
+        
+        # 爬取ETF日线数据
+        df = ak.fund_etf_hist_em(
+            symbol=etf_code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust="qfq" if is_first_crawl else ""
+        )
+        
+        # 【关键修复】添加类型检查，确保 df 是 DataFrame
+        if df is None:
+            logger.warning(f"ETF {etf_code} 返回空数据")
+            return pd.DataFrame()
+        
+        # 【关键修复】检查 df 是否为 DataFrame 类型
+        if not isinstance(df, pd.DataFrame):
+            logger.error(f"ETF {etf_code} 返回的数据类型错误: {type(df)}")
+            return pd.DataFrame()
+        
+        # 【关键修复】检查 DataFrame 是否为空
+        if df.empty:
+            logger.warning(f"ETF {etf_code} 返回空的DataFrame")
+            return pd.DataFrame()
+        
+        # 记录成功获取的数据条数
+        logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
+        
+        # 【关键修复】使用正确的数据清洗函数
+        df = clean_and_format_data(df)
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
 
 def test_etf_api_call():
     """测试ETF API调用方式，找出正确的参数组合"""
@@ -145,64 +203,6 @@ def test_etf_api_call():
     else:
         logger.error("===== API测试失败，所有测试案例都失败 =====")
         return None
-        
-@retry(
-    stop_max_attempt_number=MAX_RETRY_ATTEMPTS,
-    wait_fixed=RETRY_WAIT_FIXED,
-    retry_on_result=empty_result_check,
-    retry_on_exception=retry_if_akshare_error
-)
-def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
-    """
-    使用AkShare爬取ETF日线数据
-    
-    Args:
-        etf_code: ETF代码
-        start_date: 开始日期 (YYYYMMDD)
-        end_date: 结束日期 (YYYYMMDD)
-        is_first_crawl: 是否首次爬取
-    
-    Returns:
-        pd.DataFrame: ETF日线数据
-    """
-    try:
-        logger.debug(f"开始爬取ETF {etf_code} 日线数据: {start_date} ~ {end_date}")
-        
-        # 爬取ETF日线数据
-        df = ak.fund_etf_hist_em(
-            symbol=etf_code,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq" if is_first_crawl else ""
-        )
-        
-        # 【关键修复】添加类型检查，确保 df 是 DataFrame
-        if df is None:
-            logger.warning(f"ETF {etf_code} 返回空数据")
-            return pd.DataFrame()
-        
-        # 【关键修复】检查 df 是否为 DataFrame 类型
-        if not isinstance(df, pd.DataFrame):
-            logger.error(f"ETF {etf_code} 返回的数据类型错误: {type(df)}")
-            return pd.DataFrame()
-        
-        # 【关键修复】检查 DataFrame 是否为空
-        if df.empty:
-            logger.warning(f"ETF {etf_code} 返回空的DataFrame")
-            return pd.DataFrame()
-        
-        # 记录成功获取的数据条数
-        logger.info(f"成功获取ETF {etf_code} 数据，共{len(df)}条记录")
-        
-        # 【关键修复】使用正确的数据清洗函数
-        df = clean_and_format_data(df)
-        
-        return df
-        
-    except Exception as e:
-        logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
 
 def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """使用fund_etf_spot_em接口获取ETF实时数据（优先使用）"""

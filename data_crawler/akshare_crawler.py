@@ -105,7 +105,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             period="daily",
             start_date=start_date,
             end_date=end_date,
-            adjust="qfq" if is_first_crawl else ""
+            adjust=""
         )
         
         # 【关键修复】添加类型检查，确保 df 是 DataFrame
@@ -134,7 +134,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
     except Exception as e:
         logger.error(f"爬取ETF {etf_code} 失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
+"""
 def test_etf_api_call():
     """测试ETF API调用方式，找出正确的参数组合"""
     logger.info("===== 开始测试ETF API调用方式 =====")
@@ -203,6 +203,7 @@ def test_etf_api_call():
     else:
         logger.error("===== API测试失败，所有测试案例都失败 =====")
         return None
+"""
 
 def try_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """使用fund_etf_spot_em接口获取ETF实时数据（优先使用）"""

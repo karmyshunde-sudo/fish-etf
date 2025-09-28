@@ -446,6 +446,9 @@ def update_all_stocks_daily_data():
     
     # 处理这批股票
     for stock_code in batch_codes:
+        # 【关键修复】确保股票代码是6位
+        stock_code = str(stock_code).zfill(6)
+        
         # 添加随机延时，避免请求过于频繁
         time.sleep(random.uniform(1.5, 2.5))  # 增加延时，避免被限流
         df = fetch_stock_daily_data(stock_code)

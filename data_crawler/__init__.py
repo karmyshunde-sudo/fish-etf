@@ -75,6 +75,13 @@ def crawl_etf_daily_incremental() -> None:
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
+        # 【关键修复】首先运行API测试
+        logger.info("运行ETF API调用测试...")
+        test_result = test_etf_api_call()
+        if test_result is None:
+            logger.error("ETF API测试失败，停止执行爬取任务")
+            return
+            
         # 初始化目录
         Config.init_dirs()
         etf_daily_dir = Config.ETFS_DAILY_DIR

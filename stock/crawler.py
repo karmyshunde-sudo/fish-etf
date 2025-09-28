@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 严格使用API返回的原始列名
-不修改API返回的列名，直接使用原始列名
+股票数据爬取模块 - 使用正确的API获取股票列表
+严格使用API返回的原始列名，不修改任何列名
 """
 
 import os
@@ -120,25 +120,31 @@ def create_or_update_basic_info():
     time.sleep(random.uniform(1.0, 2.0))
     
     try:
-        # 获取股票列表 - API返回的是中文列名
-        stock_list = ak.stock_info_a_code_name()
+        # 正确获取股票列表 - 使用 stock_zh_a_spot_em 接口
+        df = ak.stock_zh_a_spot_em()
         
         # 打印API返回的列名，用于调试
-        logger.info(f"API返回的列名: {stock_list.columns.tolist()}")
+        logger.info(f"API返回的列名: {df.columns.tolist()}")
         
-        if stock_list.empty:
+        if df.empty:
             logger.error("获取股票列表失败：返回为空")
             return False
         
         # 确保列名存在
         required_columns = ['代码', '名称']
         for col in required_columns:
-            if col not in stock_list.columns:
+            if col not in df.columns:
                 logger.error(f"股票列表缺少必要列: {col}")
                 return False
         
         # 过滤ST股票和非主板/科创板/创业板股票
+        # 从 stock_zh_a_spot_em 的数据中过滤
+        stock_list = df.copy()
+        
+        # 过滤ST股票
         stock_list = stock_list[~stock_list['名称'].str.contains('ST', na=False)]
+        
+        # 过滤非主板/科创板/创业板股票
         stock_list = stock_list[stock_list['代码'].str.startswith(('0', '3', '6'))]
         
         logger.info(f"成功获取股票列表，共 {len(stock_list)} 只股票")
@@ -147,7 +153,6 @@ def create_or_update_basic_info():
         market_cap_dict = fetch_market_cap_data()
         
         # 准备基础信息DataFrame - 严格使用API返回的原始列名
-        # 不修改API返回的列名，直接使用
         basic_info_df = pd.DataFrame({
             "代码": stock_list['代码'],
             "名称": stock_list['名称'],

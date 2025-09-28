@@ -408,10 +408,10 @@ def main():
     time.sleep(random.uniform(1.0, 2.0))
     
     # 1. 运行 akshare API 测试（关键诊断工具）
-    api_ok, best_param = test_akshare_api()
-    if not api_ok:
-        logger.error("akshare API 测试失败，停止执行爬取任务")
-        return
+    # api_ok, best_param = test_akshare_api()
+    # if not api_ok:
+    #    logger.error("akshare API 测试失败，停止执行爬取任务")
+    #    return
     
     # 2. 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:

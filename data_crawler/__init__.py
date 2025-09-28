@@ -41,7 +41,7 @@ from utils.data_processor import (
     clean_and_format_data,
     limit_to_one_year_data
 )
-from data_crawler.akshare_crawler import (crawl_etf_daily_akshare,test_etf_api_call)
+from data_crawler.akshare_crawler import crawl_etf_daily_akshare
 # 从akshare_crawler.py移除了sina_crawler的导入
 from data_crawler.etf_list_manager import (
     get_filtered_etf_codes,
@@ -76,11 +76,11 @@ def crawl_etf_daily_incremental() -> None:
         logger.info(f"当前北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
         # 【关键修复】首先运行API测试
-        logger.info("运行ETF API调用测试...")
-        test_result = test_etf_api_call()
-        if test_result is None:
-            logger.error("ETF API测试失败，停止执行爬取任务")
-            return
+        #logger.info("运行ETF API调用测试...")
+        #test_result = test_etf_api_call()
+        #if test_result is None:
+        #    logger.error("ETF API测试失败，停止执行爬取任务")
+        #    return
             
         # 初始化目录
         Config.init_dirs()

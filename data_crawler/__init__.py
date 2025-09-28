@@ -163,6 +163,13 @@ def crawl_etf_daily_incremental() -> None:
                         with open(completed_file, "a", encoding="utf-8") as f:
                             f.write(f"{etf_code}\n")
                         continue
+                    # 【关键修复】如果开始日期等于结束日期，说明数据已最新，无需爬取
+                    elif start_date_obj == end_date_obj:
+                        logger.info(f"📅 数据已更新至最新（{start_date}），无需爬取")
+                        # 标记为已完成（仅用于进度显示）
+                        with open(completed_file, "a", encoding="utf-8") as f:
+                            f.write(f"{etf_code}\n")
+                        continue
                     logger.info(f"📅 增量爬取，获取新数据：{start_date} 至 {end_date}")
                 
                 # 只尝试AkShare爬取（已修改为只使用两个API）

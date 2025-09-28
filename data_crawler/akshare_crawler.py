@@ -127,15 +127,15 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         data_count = len(df)
         logger.info(f"ETF {etf_code} 获取到 {data_count} 条有效数据")
         
-        # 【关键修复】检查数据量是否足够
-        if data_count < 5 and is_first_crawl:
-            logger.warning(f"ETF {etf_code} 数据量较少 ({data_count}条)，可能是新上市ETF")
-        
-        # 【关键修复】检查日期范围是否合理
+        # 【关键修复】记录数据日期范围
         if not df.empty and "日期" in df.columns:
             first_date = df["日期"].min()
             last_date = df["日期"].max()
             logger.debug(f"ETF {etf_code} 数据日期范围: {first_date} 至 {last_date}")
+        
+        # 【关键修复】新上市ETF数据也应保存
+        if data_count == 1 and is_first_crawl:
+            logger.info(f"ETF {etf_code} 是新上市ETF，仅获取到1天数据，仍会保存")
         
         # 【关键修复】使用正确的数据清洗函数
         df = clean_and_format_data(df)

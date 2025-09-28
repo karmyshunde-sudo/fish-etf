@@ -248,10 +248,10 @@ def test_akshare_api():
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
     try:
-        # 确保股票代码是字符串，并且是6位（前面补零）
+        # 【关键修复】确保股票代码是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
         
-        # 【关键修改】检查本地是否已有该股票的日线数据文件
+        # 【关键修复】检查本地是否已有该股票的日线数据文件
         local_file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         existing_data = None
         last_date = None
@@ -272,7 +272,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 existing_data = None
                 last_date = None
         
-        # 【关键修改】确定爬取的起始日期
+        # 【关键修复】确定爬取的起始日期
         if last_date is not None:
             # 从最后日期的第二天开始爬取
             start_date = (last_date + timedelta(days=1)).strftime("%Y%m%d")
@@ -282,12 +282,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
             logger.info(f"股票 {stock_code} 首次爬取，获取最近一年数据")
         
-        # 【关键修改】使用测试成功的调用方式：不带市场前缀！
-        market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
-        ak_code = f"{market_prefix}{stock_code}"
-        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {ak_code}, 复权参数: qfq)")
+        # 【关键修复】使用测试成功的调用方式：不带市场前缀！
+        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {stock_code}, 复权参数: qfq)")
         
-        # 【关键修改】使用正确的参数进行增量爬取
+        # 【关键修复】使用测试成功的参数进行增量爬取
         try:
             df = ak.stock_zh_a_hist(
                 symbol=stock_code,      # 不带市场前缀！
@@ -318,7 +316,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     adjust=""
                 )
         
-        # 【关键修改】添加详细的API响应检查
+        # 【关键修复】添加详细的API响应检查
         if df is None or df.empty:
             logger.warning(f"股票 {stock_code} 的日线数据为空")
             return pd.DataFrame()
@@ -347,7 +345,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 移除NaN值
         df = df.dropna(subset=['收盘', '成交量'])
         
-        # 【关键修改】合并新数据与已有数据
+        # 【关键修复】合并新数据与已有数据
         if existing_data is not None and not existing_data.empty:
             # 合并数据并去重
             combined_df = pd.concat([existing_data, df], ignore_index=True)
@@ -356,7 +354,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             # 按日期排序
             combined_df = combined_df.sort_values('日期').reset_index(drop=True)
             
-            # 【关键修改】只保留最近一年的数据（约250个交易日）
+            # 【关键修复】只保留最近一年的数据（约250个交易日）
             if len(combined_df) > 250:
                 combined_df = combined_df.tail(250)
             

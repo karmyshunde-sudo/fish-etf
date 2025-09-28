@@ -165,13 +165,13 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         market_prefix = 'sh' if stock_code.startswith('6') else 'sz'
         ak_code = f"{market_prefix}{stock_code}"
         
-        # 获取日线数据
+        # 获取日线数据 - 修复adjust参数并调整为1年数据
         df = ak.stock_zh_a_hist(
             symbol=ak_code,
             period="daily",
             start_date=(datetime.now() - timedelta(days=365)).strftime("%Y%m%d"),
             end_date=datetime.now().strftime("%Y%m%d"),
-            adjust="qfq"  # 修复：使用"qfq"表示前复权
+            adjust="qfq"  # 关键修复：使用有效的复权参数
         )
         
         if df.empty:
@@ -179,7 +179,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             return pd.DataFrame()
         
         # 确保必要列存在
-        required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+        required_columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")

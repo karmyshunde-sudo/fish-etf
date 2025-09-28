@@ -979,19 +979,18 @@ def generate_strategy_report():
             logger.warning("没有找到符合条件的股票")
             return
         
-        # 生成报告
-        report = []
-        report.append(f"===== 个股趋势策略报告 =====")
-        report.append(f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        report.append(f"数据来源：本地缓存（已确保数据完整性）")
-        report.append(f"策略依据：20日均线+成交量变化+形态识别")
-        report.append(f"筛选条件：数据完整、市值有效、趋势明确")
-        report.append(" ")
+        # 【关键修改】按板块分组生成多个消息
+        section_messages = []
         
-        # 按板块输出股票
+        # 生成每个板块的消息
         for section, stocks in top_stocks.items():
             if stocks:
+                report = []
+                report.append(f"===== 个股趋势策略报告 - {section} =====")
+                report.append(f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                report.append(f"策略依据：20日均线+成交量变化+形态识别")
                 report.append(f"【{section}】")
+                
                 for i, stock in enumerate(stocks):
                     # 生成股票信号
                     current = stock["df"]["收盘"].iloc[-1]
@@ -1002,15 +1001,27 @@ def generate_strategy_report():
                     report.append(f"{'='*40}")
                     report.append(f"{i+1}. {stock['name']}({stock['code']})")
                     report.append(f"评分: {stock['score']:.2f}")
-                    report.append(f"当前价: {current:.2f} | 20日均线: {critical:.2f} | 偏离率: {deviation:.2f}%")
-                    report.append(" ")
-                    report.append(signal_msg)
-                    report.append(" ")
+                    report.append(f"当前价: {current:.2f}")
+                    report.append(f"20日均线: {critical:.2f}")
+                    report.append(f"偏离率: {deviation:.2f}%")
+                    report.append(signal_msg)                
+                section_messages.append("\n".join(report))
         
-        # 发送报告
-        report_message = "\n".join(report)
-        logger.info("推送个股趋势策略报告")
-        send_wechat_message(report_message)
+        # 【关键修改】分别发送每个板块的消息
+        if section_messages:
+            for i, message in enumerate(section_messages):
+                logger.info(f"推送个股趋势策略报告 - 板块 {i+1}/{len(section_messages)}")
+                send_wechat_message(message)
+                # 添加延时避免消息发送过快
+                time.sleep(1)
+        else:
+            # 如果没有板块消息，发送默认消息
+            default_message = (
+                f"===== 个股趋势策略报告 =====\n"
+                f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"今日无符合条件的股票"
+            )
+            send_wechat_message(default_message)
         
         logger.info("个股趋势策略执行完成")
     

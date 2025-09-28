@@ -378,13 +378,14 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         return
     
     try:
-        # 【关键修复】确保股票代码是6位
+        # 【关键修复】确保股票代码是6位（前面补零）
         stock_code = str(stock_code).zfill(6)
+        
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         df.to_csv(file_path, index=False)
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【关键修改】只需简单调用，无需任何额外逻辑
+        # 【关键修复】只需简单调用，无需任何额外逻辑
         commit_files_in_batches(file_path)
         logger.debug(f"已提交股票 {stock_code} 的日线数据到仓库")
     except Exception as e:

@@ -41,7 +41,7 @@ from utils.data_processor import (
     clean_and_format_data,
     limit_to_one_year_data
 )
-from data_crawler.akshare_crawler import crawl_etf_daily_akshare
+from data_crawler.akshare_crawler import (crawl_etf_daily_akshare,test_etf_api_call)
 # 从akshare_crawler.py移除了sina_crawler的导入
 from data_crawler.etf_list_manager import (
     get_filtered_etf_codes,

@@ -31,6 +31,7 @@ logger.addHandler(handler)
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
+VALID_STOCKS_FILE = os.path.join(DATA_DIR, "valid_stocks.csv")  # 新增有效股票列表文件
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 策略参数
@@ -461,8 +462,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
         message = (
             f"【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
             f"✅ 操作建议：\n"
-            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%（如{index_info['etf_code']}）\n"
-            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%（如{index_info['etf_code']}）\n"
+            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%\n"
+            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%\n"
             f"  • 总仓位严格控制在≤50%\n"
             f"⚠️ 避免频繁交易，等待趋势明朗\n"
         )
@@ -475,18 +476,16 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             message = (
                 f"【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）立即建仓30%\n"
-                f"  • 卫星行业ETF立即建仓20%\n"
+                f"  • 立即建仓30%\n"
                 f"  • 回调至5日均线（约{current * 0.99:.2f}）可加仓20%\n"
-                f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）\n"
+                f"⚠️ 止损：买入价下方5%\n"
             )
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
         elif 2 <= consecutive_above <= 3 and volume_change > 0.2:
             message = (
                 f"【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）可加仓至50%\n"
-                f"  • 卫星行业ETF可加仓至35%\n"
+                f"  • 可加仓至50%\n"
                 f"  • 严格跟踪5日均线作为止损位（约{current * 0.99:.2f}）\n"
                 f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
             )
@@ -528,7 +527,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 观望，不新增仓位\n"
-                    f"  • 逢高减仓10%-15%（{index_info['etf_code']}）\n"
+                    f"  • 逢高减仓10%-15%\n"
                     f"  • 若收盘跌破10日均线，减仓30%\n"
                     f"{pattern_msg}\n"
                 )
@@ -547,7 +546,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【超买风险】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 逢高减仓20%-30%（仅卫星ETF）\n"
+                    f"  • 逢高减仓20%-30%\n"
                     f"  • 当前价格已处高位，避免新增仓位\n"
                     f"  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回\n"
                     f"{pattern_msg}\n"
@@ -564,8 +563,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）立即减仓50%\n"
-                    f"  • 卫星行业ETF立即减仓70%-80%\n"
+                    f"  • 立即减仓50%\n"
                     f"  • 止损位：20日均线上方5%（约{critical * 1.05:.2f}）\n"
                     f"⚠️ 若收盘未收回均线，明日继续减仓至20%\n"
                 )
@@ -573,8 +571,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%，亏损{loss_percentage:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）立即清仓\n"
-                    f"  • 卫星行业ETF保留20%-30%底仓观察\n"
+                    f"  • 立即清仓\n"
+                    f"  • 保留20%-30%底仓观察\n"
                     f"  • 严格止损：收盘价站上20日均线才考虑回补\n"
                     f"⚠️ 重大亏损信号，避免盲目抄底\n"
                 )
@@ -583,8 +581,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             message = (
                 f"【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）严格止损清仓\n"
-                f"  • 卫星行业ETF仅保留20%-30%底仓\n"
+                f"  • 严格止损清仓\n"
+                f"  • 仅保留20%-30%底仓\n"
                 f"  • 严格止损：20日均线下方5%（约{critical * 0.95:.2f}）\n"
                 f"⚠️ 信号确认，避免侥幸心理\n"
             )
@@ -606,7 +604,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"【下跌中期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 空仓为主，避免抄底\n"
-                    f"  • 仅核心宽基ETF（{index_info['etf_code']}）可试仓5%-10%\n"
+                    f"  • 可试仓5%-10%\n"
                     f"  • 严格止损：收盘跌破前低即离场\n"
                     f"⚠️ 重点观察：行业基本面是否有利空，有利空则清仓\n"
                 )
@@ -615,7 +613,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【超卖机会】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）小幅加仓10%-15%\n"
+                    f"  • 小幅加仓10%-15%\n"
                     f"  • 目标价：偏离率≥-5%（约{critical * 0.95:.2f}）\n"
                     f"  • 达到目标即卖出加仓部分\n"
                     f"⚠️ 重点观察：若跌破前低，立即止损\n"
@@ -638,14 +636,14 @@ def load_stock_basic_info() -> pd.DataFrame:
         df = pd.read_csv(BASIC_INFO_FILE)
         
         # 严格检查中文列名
-        required_columns = ["股票代码", "股票名称", "所属板块", "流通市值"]
+        required_columns = ["代码", "名称", "所属板块", "流通市值"]
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"基础信息文件缺少必要列: {col}")
                 return pd.DataFrame()
         
         # 确保股票代码是6位字符串
-        df["股票代码"] = df["股票代码"].astype(str).str.zfill(6)
+        df["代码"] = df["代码"].astype(str).str.zfill(6)
         
         # 确保流通市值列是数值类型
         df["流通市值"] = pd.to_numeric(df["流通市值"], errors='coerce')
@@ -826,6 +824,68 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
 
+def get_valid_stock_codes() -> list:
+    """
+    获取所有符合策略要求的有效股票代码列表
+    这是tickten.py的核心功能：定义哪些股票应该被爬取
+    
+    Returns:
+        list: 有效股票代码列表
+    """
+    logger.info("===== 正在筛选符合策略要求的有效股票 =====")
+    
+    # 1. 获取基础信息
+    basic_info_df = load_stock_basic_info()
+    if basic_info_df.empty:
+        logger.error("无法获取股票基础信息，无法筛选有效股票")
+        return []
+    
+    # 2. 筛选有效股票
+    valid_stocks = []
+    
+    for idx, row in basic_info_df.iterrows():
+        stock_code = str(row["代码"]).zfill(6)
+        stock_name = row["名称"]
+        
+        # 【关键筛选】排除新上市股票（名称以"N"开头）
+        if stock_name.startswith("N"):
+            logger.debug(f"排除新上市股票: {stock_code} - {stock_name}")
+            continue
+        
+        # 【关键筛选】排除ST股票
+        if "ST" in stock_name:
+            logger.debug(f"排除ST股票: {stock_code} - {stock_name}")
+            continue
+        
+        # 【关键筛选】排除市值过小的股票
+        market_cap = row["流通市值"]
+        if pd.isna(market_cap) or market_cap <= 0:
+            logger.debug(f"排除无市值数据股票: {stock_code} - {stock_name}")
+            continue
+        if market_cap < 5e8:  # 5亿流通市值
+            logger.debug(f"排除小市值股票({market_cap:.2f}): {stock_code} - {stock_name}")
+            continue
+        
+        # 【关键筛选】排除非主板/科创板/创业板股票
+        if not stock_code.startswith(("00", "30", "60", "688")):
+            logger.debug(f"排除非目标板块股票: {stock_code} - {stock_name}")
+            continue
+        
+        # 通过所有筛选条件，加入有效股票列表
+        valid_stocks.append(stock_code)
+    
+    # 3. 保存有效股票列表（供crawler.py使用）
+    if valid_stocks:
+        valid_df = pd.DataFrame({
+            "代码": valid_stocks
+        })
+        valid_df.to_csv(VALID_STOCKS_FILE, index=False)
+        logger.info(f"筛选完成，共 {len(valid_stocks)} 只有效股票，已保存到 {VALID_STOCKS_FILE}")
+    else:
+        logger.warning("没有筛选出有效股票")
+    
+    return valid_stocks
+
 def get_top_stocks_for_strategy() -> dict:
     """获取各板块中适合策略的股票（使用本地已保存数据）"""
     try:
@@ -837,9 +897,15 @@ def get_top_stocks_for_strategy() -> dict:
             logger.error("获取股票基础信息失败，无法继续")
             return {}
         
-        logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
+        # 2. 获取有效股票列表
+        valid_stock_codes = get_valid_stock_codes()
+        if not valid_stock_codes:
+            logger.error("没有有效股票，无法继续")
+            return {}
         
-        # 2. 按板块分组处理
+        logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录，其中 {len(valid_stock_codes)} 条为有效股票")
+        
+        # 3. 按板块分组处理
         section_stocks = {
             "沪市主板": [],
             "深市主板": [],
@@ -848,19 +914,20 @@ def get_top_stocks_for_strategy() -> dict:
             "其他板块": []
         }
         
-        # 3. 处理每只股票
-        stock_list = basic_info_df.to_dict('records')
-        logger.info(f"开始处理 {len(stock_list)} 只股票...")
+        # 4. 处理每只股票
+        # 只处理有效股票
+        stock_list = [row for _, row in basic_info_df.iterrows() if str(row["代码"]).zfill(6) in valid_stock_codes]
+        logger.info(f"开始处理 {len(stock_list)} 只有效股票...")
         
         # 确保所有股票代码是字符串格式（6位，前面补零）
         for stock in stock_list:
-            stock["股票代码"] = str(stock["股票代码"]).zfill(6)
+            stock["代码"] = str(stock["代码"]).zfill(6)
         
-        logger.info(f"今天实际处理 {len(stock_list)} 只股票（完整处理）")
+        logger.info(f"今天实际处理 {len(stock_list)} 只有效股票（完整处理）")
         
         def process_stock(stock):
-            stock_code = stock["股票代码"]
-            stock_name = stock["股票名称"]
+            stock_code = stock["代码"]
+            stock_name = stock["名称"]
             section = stock["所属板块"]
             
             # 检查板块是否有效

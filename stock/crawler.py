@@ -122,19 +122,14 @@ def create_or_update_basic_info():
             basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
             logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
         
-        # 【关键修改】从 tickten.py 导入并应用筛选逻辑
+        # 【关键修改】直接调用 tickten.py 中已有的筛选函数
         try:
             from stock.tickten import filter_valid_stocks
             filtered_df = filter_valid_stocks(basic_info_df)
             logger.info(f"筛选后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
         except Exception as e:
-            logger.error(f"应用筛选逻辑失败: {str(e)}", exc_info=True)
-            # 如果导入失败，使用默认筛选
-            filtered_df = basic_info_df.copy()
-            # 应用基本筛选（至少排除新上市股票和ST股票）
-            filtered_df = filtered_df[~filtered_df["名称"].str.startswith("N")]
-            filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST", na=False)]
-            logger.warning("使用基本筛选作为后备")
+            logger.error(f"无法调用 tickten.py 中的筛选函数: {str(e)}", exc_info=True)
+            return False
         
         # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
         # 所有行的 next_crawl_index 值都相同，表示下一个要爬取的起始索引

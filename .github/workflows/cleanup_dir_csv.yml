@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       target_path:
-        description: '要清理的路径（例如：data/daily）\n\n常用路径说明：\ndata/daily → 删除所有股票日线CSV文件\ndata/etf_daily → 删除所有ETF日线CSV文件\ndata/arbitrage → 删除所有套利数据CSV文件'
+        description: '要清理的路径（例如：data/daily）常用路径说明：data/daily → 删除所有股票日线CSV文件；data/etf_daily → 删除所有ETF日线CSV文件；data/arbitrage → 删除所有套利数据CSV文件'
         required: true
         type: string
         default: 'data/arbitrage'

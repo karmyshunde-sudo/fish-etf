@@ -452,7 +452,7 @@ def handle_index_yesno() -> Dict[str, Any]:
         logger.info(f"开始执行ETF Yes/No策略 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 导入index_YesNo模块
-        from index_Yesno import generate_report
+        from index_yesno import generate_report
         
         # 执行策略
         generate_report()

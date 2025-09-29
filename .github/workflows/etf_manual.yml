@@ -712,8 +712,8 @@ jobs:
           import logging
           from utils.git_utils import commit_files_in_batches
           
-          # 设置日志
-          logging.basicConfig(level=logging.INFO)
+          # 配置日志
+          logging.basicConfig(level=logging.INFO, format='%(message)s')
           logger = logging.getLogger(__name__)
           
           def clean_numeric_csv(max_length=None):
@@ -725,7 +725,7 @@ jobs:
               """
               # 获取data目录
               data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
-              logger.info(f"开始清理纯数字CSV文件，data目录: {data_dir}")
+              print(f"删除 data/ 目录下文件名为数字且文件名长度等于 {max_length if max_length is not None else '所有'} 的CSV文件")
               
               # 查找所有CSV文件
               for root, _, files in os.walk(data_dir):
@@ -734,35 +734,27 @@ jobs:
                           # 检查文件名长度
                           if max_length is None or len(filename[:-4]) == max_length:
                               file_path = os.path.join(root, filename)
-                              logger.info(f"✅ 找到目标文件: {file_path}")
+                              # 删除文件
                               try:
-                                  # 删除文件
                                   os.remove(file_path)
-                                  logger.info(f"✅ 已删除: {file_path}")
-                                  # 使用git_utils提交删除操作
-                                  if commit_files_in_batches(file_path, f"feat: 手动清理纯数字CSV文件 - {os.path.basename(file_path)}"):
-                                      logger.info(f"✅ Git提交成功: {file_path}")
-                                  else:
-                                      logger.error(f"❌ Git提交失败: {file_path}")
+                                  print(f"删除: {file_path}")
+                                  # 提交到Git
+                                  commit_files_in_batches(file_path, f"feat: 手动清理纯数字CSV文件 - {os.path.basename(file_path)}")
                               except Exception as e:
-                                  logger.error(f"❌ 删除失败: {file_path} - {str(e)}")
+                                  print(f"❌ 删除失败: {file_path} - {str(e)}")
           
           if __name__ == "__main__":
               try:
-                  # 获取参数
                   max_length = None
                   if len(sys.argv) > 1:
                       try:
                           max_length = int(sys.argv[1])
-                          logger.info(f"只删除文件名长度为 {max_length} 的纯数字CSV文件")
                       except ValueError:
-                          logger.warning(f"无效的max_length值: {sys.argv[1]}，将删除所有纯数字CSV文件")
-                  
-                  # 执行清理
+                          pass
                   clean_numeric_csv(max_length)
                   sys.exit(0)
               except Exception as e:
-                  logger.exception("清理过程中发生错误")
+                  print(f"❌ 清理失败: {str(e)}")
                   sys.exit(1)
           EOF
           

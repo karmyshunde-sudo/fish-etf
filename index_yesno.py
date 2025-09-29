@@ -185,7 +185,7 @@ def check_network_connection():
 def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     专门处理恒生指数数据获取
-    添加了数据保存功能，用于调试数据获取问题
+    添加了数据保存功能，并确保文件被提交到仓库
     
     Args:
         index_code: 指数代码（如"HSNDXIT.HI"）
@@ -206,12 +206,18 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     debug_file = os.path.join(debug_dir, f"{index_code}_{timestamp}.csv")
     
+    # 创建用于保存调试文件的标记文件
+    commit_marker = os.path.join(debug_dir, "COMMIT_ME.txt")
+    
     # 网络连接检查
     if not check_network_connection():
         logger.error("网络连接不可用，无法获取数据")
         # 保存空数据的调试信息
         with open(debug_file, 'w') as f:
             f.write("Error: 网络连接不可用\n")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
         return pd.DataFrame()
     
     # 1. 尝试使用akshare获取恒生科技指数 (800373)
@@ -239,6 +245,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             with open(debug_file, 'w') as f:
                 f.write("Error: akshare返回空数据\n")
             logger.warning(f"⚠️ akshare返回空数据，已保存调试信息到: {debug_file}")
+        
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
         
         if not df.empty:
             # 标准化列名
@@ -292,6 +302,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write(f"Error: {str(e)}\n")
         logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
 
     # 2. 尝试使用yfinance获取恒生科技指数
     try:
@@ -311,6 +324,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             with open(debug_file, 'w') as f:
                 f.write("Error: yfinance返回空数据或非DataFrame\n")
             logger.warning(f"⚠️ yfinance返回空数据，已保存调试信息到: {debug_file}")
+        
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
         
         if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
@@ -347,6 +364,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write(f"Error: {str(e)}\n")
         logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
 
     # 3. 尝试使用akshare获取恒生科技指数 (使用正确符号)
     try:
@@ -362,6 +382,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             with open(debug_file, 'w') as f:
                 f.write("Error: ak.index_hk_hist返回空数据或非DataFrame\n")
             logger.warning(f"⚠️ ak.index_hk_hist返回空数据，已保存调试信息到: {debug_file}")
+        
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
         
         if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
@@ -403,6 +427,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write(f"Error: {str(e)}\n")
         logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
 
     # 4. 尝试使用akshare获取恒生科技指数 (使用800373代码)
     try:
@@ -420,6 +447,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 f.write("Error: ak.index_hk_hist(800373)返回空数据或非DataFrame\n")
             logger.warning(f"⚠️ ak.index_hk_hist(800373)返回空数据，已保存调试信息到: {debug_file}")
         
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
+        
         if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
             df = df.rename(columns={
@@ -460,6 +491,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write(f"Error: {str(e)}\n")
         logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
 
     # 5. 尝试使用akshare获取恒生指数作为替代
     try:
@@ -476,6 +510,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             with open(debug_file, 'w') as f:
                 f.write("Error: ak.index_hk_hist(800001)返回空数据或非DataFrame\n")
             logger.warning(f"⚠️ ak.index_hk_hist(800001)返回空数据，已保存调试信息到: {debug_file}")
+        
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
         
         if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
@@ -517,6 +555,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write(f"Error: {str(e)}\n")
         logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
 
     # 没有获取到任何有效数据
     logger.error(f"❌ 无法获取恒生科技指数历史数据: {index_code}")
@@ -535,6 +576,9 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         with open(debug_file, 'w') as f:
             f.write("Error: 所有数据源均返回空数据\n")
         logger.warning(f"⚠️ 已创建调试文件: {debug_file}")
+        # 创建标记文件，通知工作流需要提交
+        with open(commit_marker, 'w') as f:
+            f.write(f"需要提交的调试文件: {debug_file}\n")
     
     return pd.DataFrame()
 

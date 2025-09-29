@@ -2,25 +2,16 @@ name: Get-akshare接口信息
 on:
   workflow_dispatch:
     inputs:
-      task:
-        description: '任务类型'
-        required: true
-        type: choice
-        options:
-          - 'show_akshare_info'
       interface_name:
         description: '填充具体AkShare接口名称（可选）'
         required: false
         type: string
         default: ''
+
 jobs:
-  # ========================
-  # 显示AkShare信息
-  # ========================
   show-akshare-info:
     name: 显示AkShare信息
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'show_akshare_info'
     permissions:
       contents: write
     env:

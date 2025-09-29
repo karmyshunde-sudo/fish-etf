@@ -696,35 +696,43 @@ jobs:
           MAX_LENGTH=${{ inputs.max_filename_length }}
           DELETED_COUNT=0
           
-          # 处理输入值
           if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
             echo "删除 data/ 目录下的所有纯数字CSV文件"
-            # 删除所有纯数字CSV文件
-            find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
-              echo "删除: $file_path"
-              rm -f "$file_path"
-              ((DELETED_COUNT++))
-            done
+            
+            # 使用find -exec 避免管道问题
+            find data/ -type f -name '[0-9]*.csv' -exec sh -c '
+              echo "删除: $1"
+              rm -f "$1"
+              echo "DELETED_COUNT=1" >> $GITHUB_ENV
+            ' _ {} \;
           else
             echo "删除 data/ 目录下文件名为数字且文件名长度等于 $MAX_LENGTH 的CSV文件"
-            # 查找并处理文件
-            find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
+            
+            # 使用find -exec 避免管道问题
+            find data/ -type f -name '[0-9]*.csv' -exec bash -c '
               # 提取基础文件名（不含路径）
-              filename=$(basename "$file_path")
+              filename=$(basename "$1")
               # 移除扩展名
               filename_no_ext="${filename%.csv}"
               
               # 检查是否为纯数字且长度等于MAX_LENGTH
-              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -eq $MAX_LENGTH ]; then
-                echo "删除: $file_path"
-                rm -f "$file_path"
-                ((DELETED_COUNT++))
+              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -eq $2 ]; then
+                echo "删除: $1"
+                rm -f "$1"
+                echo "DELETED_COUNT=1" >> $GITHUB_ENV
               fi
-            done
+            ' _ {} $MAX_LENGTH \;
           fi
           
-          # 保存删除计数
-          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
+          # 统计实际删除的文件数量
+          if [ -n "$(git diff --cached --name-only data/)" ]; then
+            git add -A data/
+            DELETED_COUNT=$(git diff --cached --name-only data/ | wc -l)
+            git reset
+            echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
+          else
+            echo "DELETED_COUNT=0" >> $GITHUB_ENV
+          fi
       - name: 提交清理变更
         if: env.DELETED_COUNT > 0
         run: |

@@ -2,12 +2,6 @@ name: Hand-清理仓库纯数字CSV文件
 on:
   workflow_dispatch:
     inputs:
-      task:
-        description: '任务类型'
-        required: true
-        type: choice
-        options:
-          - 'clean_numeric_csv'
       max_filename_length:
         description: '最大文件名长度（留空或0表示删除所有纯数字CSV文件）'
         required: false

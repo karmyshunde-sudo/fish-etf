@@ -690,75 +690,87 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: 配置Git
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          pip install -r requirements.txt
       - name: 清理纯数字CSV
-        shell: bash
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
           DELETED_COUNT=0
           
-          # 初始化Git跟踪
-          git add -A data/
+          # 创建临时Python脚本
+          cat << 'EOF' > clean_numeric_csv.py
+          #!/usr/bin/env python3
+          # -*- coding: utf-8 -*-
+          import os
+          import sys
+          import logging
+          from utils.git_utils import commit_files_in_batches
           
-          # 处理输入值
-          if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
-            echo "删除 data/ 目录下的所有纯数字CSV文件"
-          else
-            echo "删除 data/ 目录下文件名为数字且文件名长度等于 $MAX_LENGTH 的CSV文件"
-          fi
+          # 设置日志
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
           
-          # 查找并处理文件
-          find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
-            # 提取基础文件名（不含路径）
-            filename=$(basename "$file_path")
-            # 移除扩展名
-            filename_no_ext="${filename%.csv}"
-            
-            # 检查是否为纯数字且长度符合要求
-            if [[ "$filename_no_ext" =~ ^[0-9]+$ ]]; then
-              length=${#filename_no_ext}
+          def clean_numeric_csv(max_length=None):
+              """
+              清理纯数字CSV文件
               
-              # 根据输入值判断是否要删除
-              if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ] || [ $length -eq $MAX_LENGTH ]; then
-                # 检查文件是否存在
-                if [ -f "$file_path" ]; then
-                  # 执行删除
-                  rm -f "$file_path"
+              Args:
+                  max_length: 要清理的文件名长度，None表示清理所有纯数字CSV文件
+              """
+              # 获取data目录
+              data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+              logger.info(f"开始清理纯数字CSV文件，data目录: {data_dir}")
+              
+              # 查找所有CSV文件
+              for root, _, files in os.walk(data_dir):
+                  for filename in files:
+                      if filename.endswith(".csv") and filename[:-4].isdigit():
+                          # 检查文件名长度
+                          if max_length is None or len(filename[:-4]) == max_length:
+                              file_path = os.path.join(root, filename)
+                              logger.info(f"✅ 找到目标文件: {file_path}")
+                              try:
+                                  # 删除文件
+                                  os.remove(file_path)
+                                  logger.info(f"✅ 已删除: {file_path}")
+                                  # 使用git_utils提交删除操作
+                                  if commit_files_in_batches(file_path, f"feat: 手动清理纯数字CSV文件 - {os.path.basename(file_path)}"):
+                                      logger.info(f"✅ Git提交成功: {file_path}")
+                                  else:
+                                      logger.error(f"❌ Git提交失败: {file_path}")
+                              except Exception as e:
+                                  logger.error(f"❌ 删除失败: {file_path} - {str(e)}")
+          
+          if __name__ == "__main__":
+              try:
+                  # 获取参数
+                  max_length = None
+                  if len(sys.argv) > 1:
+                      try:
+                          max_length = int(sys.argv[1])
+                          logger.info(f"只删除文件名长度为 {max_length} 的纯数字CSV文件")
+                      except ValueError:
+                          logger.warning(f"无效的max_length值: {sys.argv[1]}，将删除所有纯数字CSV文件")
                   
-                  # 验证是否删除成功
-                  if [ ! -f "$file_path" ]; then
-                    echo "✅ 成功删除: $file_path (长度: $length)"
-                    ((DELETED_COUNT++))
-                  else
-                    echo "❌ 失败删除: $file_path (长度: $length)"
-                  fi
-                else
-                  echo "⚠️ 跳过: $file_path 已不存在 (长度: $length)"
-                fi
-              fi
-            fi
-          done
+                  # 执行清理
+                  clean_numeric_csv(max_length)
+                  sys.exit(0)
+              except Exception as e:
+                  logger.exception("清理过程中发生错误")
+                  sys.exit(1)
+          EOF
           
-          # 提交删除操作到Git
-          if [ $DELETED_COUNT -gt 0 ]; then
-            git add -A data/  # 添加所有变更
-            echo "提交删除操作到Git"
-            git commit -m "【手动清理】删除 $DELETED_COUNT 个纯数字CSV文件" || echo "没有变更需要提交"
-          fi
-          
-          # 保存删除计数
-          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
-      - name: 推送变更
-        if: env.DELETED_COUNT > 0
-        run: |
-          git push origin main
+          # 执行Python脚本
+          python clean_numeric_csv.py $MAX_LENGTH
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          DELETED_COUNT=${{ env.DELETED_COUNT }}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\删除了 ${DELETED_COUNT} 个文件\北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件清理任务已完成\北京时间: ${BEIJING_TIME}\"}}"

@@ -196,7 +196,7 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         pd.DataFrame: 指数日线数据
     """
     index_name = index_code.replace('.HI', '')
-    logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
+    logger.info(f"这是新的代码？获取恒生指数数据: {index_code} ({index_name})")
     
     # 创建数据保存目录
     debug_dir = "data/debug"

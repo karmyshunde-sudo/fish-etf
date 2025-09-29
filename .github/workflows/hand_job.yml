@@ -78,7 +78,7 @@ jobs:
           LOG_FILE="data/logs/index_yesno_${BEIJING_TIME}.log"
           echo "正在执行: 指数YesNo 策略（手动）"
           echo "日志文件: $LOG_FILE"
-          python index_yesno.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
+          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT

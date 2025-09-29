@@ -694,27 +694,39 @@ jobs:
         shell: bash
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
+          DELETED_COUNT=0
           
-          # 如果输入为空或为0，则按原逻辑删除所有纯数字CSV文件
+          # 处理输入值
           if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
             echo "删除 data/ 目录下的所有纯数字CSV文件"
-            find data/ -type f -name '[0-9]*.csv' -delete
+            # 删除所有纯数字CSV文件
+            find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
+              echo "删除: $file_path"
+              rm -f "$file_path"
+              ((DELETED_COUNT++))
+            done
           else
-            echo "删除 data/ 目录下文件名为数字且文件名长度小于 $MAX_LENGTH 的CSV文件"
-            # 关键修正：使用更可靠的处理方式
-            find data/ -type f -name '[0-9]*.csv' | while IFS= read -r file; do
+            echo "删除 data/ 目录下文件名为数字且文件名长度等于 $MAX_LENGTH 的CSV文件"
+            # 查找并处理文件
+            find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
               # 提取基础文件名（不含路径）
-              filename=$(basename "$file")
+              filename=$(basename "$file_path")
               # 移除扩展名
               filename_no_ext="${filename%.csv}"
-              # 检查是否为纯数字且长度小于MAX_LENGTH
-              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $MAX_LENGTH ]; then
-                echo "删除: $file (原始文件名: $filename, 数字部分: $filename_no_ext, 长度: ${#filename_no_ext})"
-                rm -f "$file"
+              
+              # 检查是否为纯数字且长度等于MAX_LENGTH
+              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -eq $MAX_LENGTH ]; then
+                echo "删除: $file_path"
+                rm -f "$file_path"
+                ((DELETED_COUNT++))
               fi
             done
           fi
+          
+          # 保存删除计数
+          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
       - name: 提交清理变更
+        if: env.DELETED_COUNT > 0
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add -u data/ && git commit -m "【手动清理】清除纯数字CSV文件" && git push origin main
@@ -722,5 +734,6 @@ jobs:
         if: env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          DELETED_COUNT=${{ env.DELETED_COUNT }}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\删除了 ${DELETED_COUNT} 个文件\北京时间: ${BEIJING_TIME}\"}}"

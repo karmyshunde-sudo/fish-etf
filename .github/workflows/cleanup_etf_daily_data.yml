@@ -1,4 +1,4 @@
-name: Hand-任务及数据清理
+name: Cleanup-删除ETF日线数据CSV文件
 on:
   workflow_dispatch:
     inputs:

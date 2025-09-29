@@ -1,0 +1,37 @@
+name: Cleanup-删除ETF交易记录CSV文件
+on:
+  workflow_dispatch:
+
+jobs:
+  # 手动清理ETF交易记录
+  manual-clean-trade-records:
+    name: 手动清理ETF交易记录
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_trade_records'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理ETF交易记录
+        run: |
+          echo "删除 data/trade_records.csv"
+          rm -f data/trade_records.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/trade_records.csv && git commit -m "【手动清理】清除ETF交易记录文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF交易记录文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"

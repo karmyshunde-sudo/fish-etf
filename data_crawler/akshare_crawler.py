@@ -72,7 +72,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             period="daily",
             start_date=start_date,
             end_date=end_date,
-            adjust=""
+            adjust="qfq"
         )
         
         # 【关键修复】添加详细的空数据诊断

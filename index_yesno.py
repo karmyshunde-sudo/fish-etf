@@ -196,7 +196,7 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         pd.DataFrame: 指数日线数据
     """
     index_name = index_code.replace('.HI', '')
-    logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
+    logger.info(f"代码9291818获取恒生指数数据: {index_code} ({index_name})")
     
     # 1. 尝试使用AKShare的stock_hk_index_daily_em获取恒生科技指数历史数据
     try:

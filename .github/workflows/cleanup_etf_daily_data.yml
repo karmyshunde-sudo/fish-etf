@@ -1,0 +1,75 @@
+name: Hand-任务及数据清理
+on:
+  workflow_dispatch:
+    inputs:
+        options:
+          - 'clean_ETF_daily_data'
+
+jobs:
+
+  # ========================
+  # 清理任务 - 每个任务都有独立Job
+  # ========================
+  # 手动清理ETF日线数据
+  manual-clean-ETF_daily-data:
+    name: 手动清理ETF日线数据
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理ETF日线数据
+        run: |
+          echo "删除 data/etf_daily/*.csv"
+          rm -rf data/etf_daily/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/etf_daily/ && git commit -m "【手动清理】清除ETF日线数据文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF日线数据文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
+  # 手动清理ETF套利数据
+  manual-clean-arbitrage-data:
+    name: 手动清理ETF套利数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_arbitrage_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理ETF套利数据
+        run: |
+          echo "删除 data/arbitrage/*.csv"
+          rm -rf data/arbitrage/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          git add data/arbitrage/ && git commit -m "【手动清理】清除ETF套利数据文件" && git push origin main
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF套利数据文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"

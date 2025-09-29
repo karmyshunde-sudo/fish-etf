@@ -1,4 +1,4 @@
-name: Hand-清理仓库中的纯数字名称CSV文件
+name: Hand-清理全仓库纯数字名称CSV文件
 on:
   workflow_dispatch:
     inputs:

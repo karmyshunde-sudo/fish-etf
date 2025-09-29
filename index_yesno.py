@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-指数 Yes/No 策略执行器
-仅用于测试恒生互联网科技业指数代码
+恒生互联网科技业指数代码测试工具
+专注于测试 yfinance + ^HSIII 组合
 """
 
 import os
 import logging
 import pandas as pd
-import akshare as ak
-import time
-import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
-from config import Config
-from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -25,10 +20,9 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 恒生互联网科技业指数测试函数
 def test_hang_seng_tech_index_code(start_date: str = "20240101", end_date: str = "20250929") -> str:
     """
-    测试恒生互联网科技业指数的可能代码
+    专门测试 yfinance + ^HSIII 组合
     
     Args:
         start_date: 开始日期（YYYYMMDD）
@@ -37,198 +31,54 @@ def test_hang_seng_tech_index_code(start_date: str = "20240101", end_date: str =
     Returns:
         str: 成功获取数据的代码或错误信息
     """
-    # 恒生互联网科技业指数的可能代码
-    test_codes = [
-        "HSIII",       # 恒生互联网科技业指数代码
-        "800806",      # 部分行情网站使用的代码
-        "HSNDXIT",     # AKShare可能使用的代码（无.HI后缀）
-        "HSNDXIT.HI",  # 原始代码
-        "HSTECH.HK",   # yfinance中的代码
-        "HSTECH"       # 简化代码
-    ]
+    # 专门测试 ^HSIII (恒生互联网科技业指数)
+    code = "^HSIII"
     
-    # 测试结果存储
-    success_results = []
-    error_results = []
-    
-    # 1. 测试AKShare的stock_hk_index_daily_em
     logger.info("=" * 50)
-    logger.info("测试恒生互联网科技业指数的可能代码 (AKShare)")
+    logger.info(f"测试恒生互联网科技业指数代码: {code}")
     logger.info("=" * 50)
     
-    for code in test_codes:
-        try:
-            logger.info(f"尝试使用 ak.stock_hk_index_daily_em 获取代码 {code}")
+    try:
+        # 转换日期格式
+        start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
+        
+        logger.info(f"尝试使用 yfinance.download 获取代码 {code}")
+        
+        # 获取数据
+        df = yf.download(code, start=start_dt, end=end_dt)
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            logger.info(f"✅ 成功获取到 {len(df)} 条数据")
+            logger.info(f"数据列名: {', '.join(df.columns)}")
             
-            # 获取数据
-            df = ak.stock_hk_index_daily_em(
-                symbol=code,
-                period="daily",
-                start_date=start_date,
-                end_date=end_date
-            )
+            # 检查日期范围
+            if 'Date' in df.columns:
+                first_date = df['Date'].min().strftime("%Y-%m-%d")
+                last_date = df['Date'].max().strftime("%Y-%m-%d")
+                logger.info(f"数据日期范围: {first_date} 至 {last_date}")
             
-            if not df.empty:
-                logger.info(f"✅ 成功获取到 {len(df)} 条数据")
-                logger.info(f"数据列名: {', '.join(df.columns)}")
-                
-                # 检查日期范围
-                if '日期' in df.columns:
-                    first_date = df['日期'].min()
-                    last_date = df['日期'].max()
-                    logger.info(f"数据日期范围: {first_date} 至 {last_date}")
-                
-                success_results.append(f"✅ {code} - 获取到 {len(df)} 条数据")
-            else:
-                error_results.append(f"❌ {code} - 返回空数据")
-        except Exception as e:
-            error_msg = str(e)
-            # 提取主要错误信息
-            if "No data" in error_msg:
-                error_type = "No data"
-            elif "Invalid symbol" in error_msg:
-                error_type = "Invalid symbol"
-            elif "404" in error_msg:
-                error_type = "404 error"
-            else:
-                error_type = "Unknown error"
-            
-            error_results.append(f"❌ {code} - {error_type}")
-            logger.error(f"测试 {code} 失败: {error_type}")
-    
-    # 2. 测试yfinance
-    logger.info("\n" + "=" * 50)
-    logger.info("测试恒生互联网科技业指数的可能代码 (yfinance)")
-    logger.info("=" * 50)
-    
-    yf_codes = [
-        "02828.HK",    # 恒生互联网科技业指数的ETF代码
-        "HSTECH.HK",   # 恒生科技指数代码
-        "HSTECH",      # 简化代码
-        "^HSI"         # 恒生指数
-    ]
-    
-    for code in yf_codes:
-        try:
-            logger.info(f"尝试使用 yfinance.download 获取代码 {code}")
-            
-            # 转换日期格式
-            start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
-            
-            # 获取数据
-            df = yf.download(code, start=start_dt, end=end_dt)
-            
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                logger.info(f"✅ 成功获取到 {len(df)} 条数据")
-                logger.info(f"数据列名: {', '.join(df.columns)}")
-                
-                # 检查日期范围
-                if 'Date' in df.columns:
-                    first_date = df['Date'].min().strftime("%Y-%m-%d")
-                    last_date = df['Date'].max().strftime("%Y-%m-%d")
-                    logger.info(f"数据日期范围: {first_date} 至 {last_date}")
-                
-                success_results.append(f"✅ yfinance {code} - 获取到 {len(df)} 条数据")
-            else:
-                error_results.append(f"❌ yfinance {code} - 返回空数据")
-        except Exception as e:
-            error_msg = str(e)
-            # 提取主要错误信息
-            if "404" in error_msg:
-                error_type = "404 error"
-            elif "No data" in error_msg:
-                error_type = "No data"
-            elif "Symbol not found" in error_msg:
-                error_type = "Symbol not found"
-            else:
-                error_type = "Unknown error"
-            
-            error_results.append(f"❌ yfinance {code} - {error_type}")
-            logger.error(f"测试 {code} 失败: {error_type}")
-    
-    # 输出结果
-    logger.info("\n" + "=" * 50)
-    logger.info("测试结果总结")
-    logger.info("=" * 50)
-    
-    if success_results:
-        logger.info("✅ 成功获取数据的代码:")
-        for result in success_results:
-            logger.info(result)
-    else:
-        logger.info("❌ 没有成功获取到数据的代码")
-    
-    if error_results:
-        logger.info("\n❌ 失败的代码:")
-        for result in error_results:
-            logger.info(result)
-    
-    # 返回第一个成功代码
-    if success_results:
-        first_success = success_results[0]
-        return first_success.split()[1]  # 返回代码部分
-    else:
+            return code
+        else:
+            logger.error(f"❌ {code} - 返回空数据")
+            return "所有测试代码均失败"
+    except Exception as e:
+        error_msg = str(e)
+        # 提取主要错误信息
+        if "404" in error_msg:
+            error_type = "404 error"
+        elif "No data" in error_msg:
+            error_type = "No data"
+        elif "Symbol not found" in error_msg:
+            error_type = "Symbol not found"
+        else:
+            error_type = "Unknown error"
+        
+        logger.error(f"❌ {code} - {error_type}")
+        logger.error(f"详细错误信息: {error_msg}")
         return "所有测试代码均失败"
 
-# ================ 以下代码被跳过 ================
-# 以下函数定义保留，但不会执行
-# 这是按照要求保留的代码，只是不会在主流程中执行
-
-# 原有指数列表（保留但不执行）
-INDICES = [
-    # 原有内容保持不变...
-]
-
-# 原有策略参数（保留但不执行）
-CRITICAL_VALUE_DAYS = 20
-DEVIATION_THRESHOLD = 0.02
-PATTERN_CONFIDENCE_THRESHOLD = 0.7
-
-# 原有函数定义（保留但不执行）
-def check_network_connection():
-    pass
-
-def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    pass
-
-def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
-    pass
-
-def fetch_us_index_from_yfinance(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    pass
-
-def calculate_critical_value(df: pd.DataFrame) -> float:
-    pass
-
-def calculate_deviation(current: float, critical: float) -> float:
-    pass
-
-def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) -> int:
-    pass
-
-def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) -> int:
-    pass
-
-def calculate_volume_change(df: pd.DataFrame) -> float:
-    pass
-
-def calculate_loss_percentage(df: pd.DataFrame) -> float:
-    pass
-
-def is_in_volatile_market(df: pd.DataFrame) -> tuple:
-    pass
-
-def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
-    pass
-
-def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, critical: float, deviation: float) -> str:
-    pass
-
-def generate_report():
-    pass
-
-# ================ 主流程修改 ================
+# ================ 主流程 ================
 if __name__ == "__main__":
     logger.info("===== 开始执行 恒生互联网科技业指数代码测试 =====")
     

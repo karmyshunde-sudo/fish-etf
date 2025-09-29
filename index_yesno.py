@@ -215,9 +215,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             df = ak.stock_hk_index_hist(symbol="800373", period="daily", 
                                        start_date=start_date, end_date=end_date)
         else:
-            logger.info(f"akshare版本不支持恒生指数专用方法")
-            # 不再尝试使用通用的港股历史数据获取方法，因为那通常是股票数据
-            df = pd.DataFrame()
+            logger.info(f"akshare版本不支持恒生指数专用方法，尝试使用 ak.stock_hk_hist")
+            # 尝试使用通用的港股历史数据获取方法
+            df = ak.stock_hk_hist(symbol="800373", period="daily", 
+                                 start_date=start_date, end_date=end_date)
         
         if not df.empty:
             # 标准化列名
@@ -269,15 +270,15 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
     
     # 2. 尝试使用yfinance获取恒生科技指数
-    # 恒生科技指数在yfinance中代码是^HSTECH
+    # 恒生科技指数在yfinance中代码应该是"HSTECH.HK"，而不是"^HSTECH"
     try:
         # 转换日期格式
         start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
         
         # 获取数据
-        logger.info(f"尝试使用 yfinance.download 获取恒生科技指数历史数据 (^HSTECH)")
-        df = yf.download('^HSTECH', start=start_dt, end=end_dt)
+        logger.info(f"尝试使用 yfinance.download 获取恒生科技指数历史数据 (HSTECH.HK)")
+        df = yf.download('HSTECH.HK', start=start_dt, end=end_dt)
         
         if not df.empty:
             # 标准化列名
@@ -311,43 +312,94 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     except Exception as e:
         logger.warning(f"❌ yfinance.download 方法获取恒生科技指数历史数据失败: {str(e)}")
     
-    # 3. 尝试使用stock_zh_a_spot_em获取指数数据 - 仅用于获取实时数据
+    # 3. 尝试使用akshare获取恒生科技指数 (使用正确符号)
     try:
-        logger.info("尝试使用 ak.stock_zh_a_spot_em 获取恒生科技指数实时数据")
-        df = ak.stock_zh_a_spot_em()
+        logger.info(f"尝试使用 ak.index_hk_hist 获取恒生科技指数历史数据 (HSNDXIT.HI)")
+        df = ak.index_hk_hist(symbol=index_code, period="daily", 
+                             start_date=start_date, end_date=end_date)
+        
         if not df.empty:
-            # 恒生科技指数在stock_zh_a_spot_em中的标识
-            df = df[df["代码"].str.contains("HSTECH") | df["名称"].str.contains("恒生科技")]
-            if not df.empty:
-                # 标准化列名
-                df = df.rename(columns={
-                    '最新价': '收盘',
-                    '开盘价': '开盘',
-                    '最高价': '最高',
-                    '最低价': '最低',
-                    '成交量': '成交量',
-                    '代码': 'symbol',
-                    '名称': 'name'
-                })
-                
-                # 添加日期列
-                df["日期"] = datetime.now().strftime("%Y-%m-%d")
-                
-                # 只保留我们需要的列
-                df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
-                
-                # 检查数据量
-                if len(df) <= 1:
-                    logger.warning("⚠️ 只获取到实时数据，无法用于历史分析")
-                    return pd.DataFrame()
-                
-                # 注意：这里获取的是实时数据，不是历史数据
-                logger.warning(f"⚠️ 通过 ak.stock_zh_a_spot_em 获取的是实时数据，不是历史数据，共{len(df)}条记录")
+            # 标准化列名
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume'
+            })
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条恒生科技指数历史数据，可能是当天数据，无法用于历史分析")
                 return pd.DataFrame()
+            
+            # 检查日期范围
+            first_date = df['日期'].min()
+            last_date = df['日期'].max()
+            logger.info(f"✅ 获取到恒生科技指数历史数据，日期范围: {first_date} 至 {last_date}，共{len(df)}条记录")
+            return df
     except Exception as e:
-        logger.warning(f"❌ ak.stock_zh_a_spot_em 方法获取数据失败: {str(e)}")
+        logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
     
-    # 4. 尝试使用通用方法获取恒生指数作为替代
+    # 4. 尝试使用akshare获取恒生科技指数 (使用800373代码)
+    try:
+        logger.info("尝试使用 ak.index_hk_hist 获取恒生科技指数历史数据 (800373)")
+        # 恒生科技指数代码为800373
+        df = ak.index_hk_hist(symbol="800373", period="daily", 
+                             start_date=start_date, end_date=end_date)
+        
+        if not df.empty:
+            # 标准化列名
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume'
+            })
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量'
+            })
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条恒生科技指数历史数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            # 检查日期范围
+            first_date = df['日期'].min()
+            last_date = df['日期'].max()
+            logger.info(f"✅ 获取到恒生科技指数历史数据，日期范围: {first_date} 至 {last_date}，共{len(df)}条记录")
+            return df
+    except Exception as e:
+        logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
+    
+    # 5. 尝试使用akshare获取恒生指数作为替代
     try:
         logger.info("尝试使用 ak.index_hk_hist 获取恒生指数历史数据 (800001)")
         # 恒生指数代码为800001
@@ -400,6 +452,7 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     logger.error("  4. 数据源服务暂时不可用")
     logger.error("❌ 重要提示：")
     logger.error("  - ETF数据不能替代指数数据，因为ETF存在折溢价，无法准确反映指数表现")
+    logger.error("  - 恒生科技指数在yfinance中的正确代码应为'HSTECH.HK'，而非'^HSTECH'")
     logger.error("  - 请确认您使用的指数代码正确，并检查AkShare文档中是否有相关数据接口")
     
     return pd.DataFrame()

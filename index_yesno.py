@@ -206,15 +206,15 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     try:
         # 检查akshare版本是否支持所需方法
         if hasattr(ak, 'index_hk_hist'):
-            logger.info("使用ak.index_hk_hist方法获取恒生科技指数数据")
+            logger.info(f"尝试使用 ak.index_hk_hist 获取恒生科技指数数据")
             df = ak.index_hk_hist(symbol="800373", period="daily", 
                                  start_date=start_date, end_date=end_date)
         elif hasattr(ak, 'stock_hk_index_hist'):
-            logger.info("使用ak.stock_hk_index_hist方法获取恒生科技指数数据")
+            logger.info(f"尝试使用 ak.stock_hk_index_hist 获取恒生科技指数数据")
             df = ak.stock_hk_index_hist(symbol="800373", period="daily", 
                                        start_date=start_date, end_date=end_date)
         else:
-            logger.info("akshare版本不支持恒生指数专用方法，尝试其他方法")
+            logger.info(f"akshare版本不支持恒生指数专用方法，尝试使用 ak.stock_hk_hist")
             # 尝试使用通用的港股历史数据获取方法
             df = ak.stock_hk_hist(symbol="800373", period="daily", 
                                  start_date=start_date, end_date=end_date)
@@ -253,12 +253,12 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 # 排序
                 df = df.sort_values('日期').reset_index(drop=True)
                 
-                logger.info(f"✅ 通过akshare方法成功获取恒生科技指数数据，共{len(df)}条记录")
+                logger.info(f"✅ 通过 ak.index_hk_hist 获取恒生科技指数数据，共{len(df)}条记录")
                 return df
             else:
                 logger.warning("获取的恒生指数数据缺少必要列")
     except Exception as e:
-        logger.warning(f"akshare方法获取恒生科技指数数据失败: {str(e)}")
+        logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数数据失败: {str(e)}")
     
     # 2. 尝试使用yfinance获取恒生科技指数
     # 恒生科技指数在yfinance中代码是^HSTECH
@@ -268,6 +268,7 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
         
         # 获取数据
+        logger.info(f"尝试使用 yfinance.download 获取恒生科技指数数据 (^HSTECH)")
         df = yf.download('^HSTECH', start=start_dt, end=end_dt)
         
         if not df.empty:
@@ -289,13 +290,14 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
             
-            logger.info(f"✅ 通过yfinance获取恒生科技指数数据，共{len(df)}条记录")
+            logger.info(f"✅ 通过 yfinance.download 获取恒生科技指数数据，共{len(df)}条记录")
             return df
     except Exception as e:
-        logger.warning(f"yfinance方法获取恒生科技指数数据失败: {str(e)}")
+        logger.warning(f"❌ yfinance.download 方法获取恒生科技指数数据失败: {str(e)}")
     
     # 3. 尝试使用fund_etf_spot_em获取ETF数据
     try:
+        logger.info("尝试使用 ak.fund_etf_spot_em 获取华夏恒生互联网ETF数据 (513400)")
         # 获取所有ETF数据
         df = ak.fund_etf_spot_em()
         
@@ -319,13 +321,14 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 # 只保留我们需要的列
                 df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
                 
-                logger.info(f"✅ 通过fund_etf_spot_em获取华夏恒生互联网ETF数据，共{len(df)}条记录")
+                logger.info(f"✅ 通过 ak.fund_etf_spot_em 获取华夏恒生互联网ETF数据，共{len(df)}条记录")
                 return df
     except Exception as e:
-        logger.warning(f"fund_etf_spot_em方法获取数据失败: {str(e)}")
+        logger.warning(f"❌ ak.fund_etf_spot_em 方法获取数据失败: {str(e)}")
     
     # 4. 尝试使用stock_zh_a_spot_em获取指数数据
     try:
+        logger.info("尝试使用 ak.stock_zh_a_spot_em 获取恒生科技指数数据")
         df = ak.stock_zh_a_spot_em()
         if not df.empty:
             # 恒生科技指数在stock_zh_a_spot_em中的标识
@@ -348,13 +351,14 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 # 只保留我们需要的列
                 df = df[["日期", "开盘", "最高", "最低", "收盘", "成交量"]]
                 
-                logger.info(f"✅ 通过stock_zh_a_spot_em获取恒生科技指数数据，共{len(df)}条记录")
+                logger.info(f"✅ 通过 ak.stock_zh_a_spot_em 获取恒生科技指数数据，共{len(df)}条记录")
                 return df
     except Exception as e:
-        logger.warning(f"stock_zh_a_spot_em方法获取数据失败: {str(e)}")
+        logger.warning(f"❌ ak.stock_zh_a_spot_em 方法获取数据失败: {str(e)}")
     
     # 5. 尝试使用通用方法获取恒生指数作为替代
     try:
+        logger.info("尝试使用 ak.index_hk_hist 获取恒生指数数据 (800001)")
         # 恒生指数代码为800001
         df = ak.index_hk_hist(symbol="800001", period="daily", 
                              start_date=start_date, end_date=end_date)
@@ -383,10 +387,10 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
             
-            logger.info(f"✅ 通过akshare获取恒生指数数据（作为替代），共{len(df)}条记录")
+            logger.info(f"✅ 通过 ak.index_hk_hist 获取恒生指数数据（作为替代），共{len(df)}条记录")
             return df
     except Exception as e:
-        logger.warning(f"获取恒生指数数据失败: {str(e)}")
+        logger.warning(f"❌ ak.index_hk_hist 方法获取恒生指数数据失败: {str(e)}")
     
     logger.error(f"❌ 无法获取恒生指数数据: {index_code}")
     return pd.DataFrame()

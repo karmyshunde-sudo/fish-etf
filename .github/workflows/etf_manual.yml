@@ -692,6 +692,7 @@ jobs:
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: 清理纯数字CSV
+        shell: bash  # 关键修改：指定使用bash执行
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
           
@@ -701,19 +702,19 @@ jobs:
             find data/ -type f -name '[0-9]*.csv' -delete
           else
             echo "删除 data/ 目录下文件名为数字且文件名长度小于 $MAX_LENGTH 的CSV文件"
-            find data/ -type f -name '[0-9]*.csv' -exec sh -c '
+            find data/ -type f -name '[0-9]*.csv' -exec bash -c '
               for file; do
                 # 提取基础文件名（不含路径）
                 filename=$(basename "$file")
                 # 移除扩展名
                 filename_no_ext="${filename%.csv}"
                 # 检查是否为纯数字且长度小于MAX_LENGTH
-                if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $MAX_LENGTH ]; then
+                if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $1 ]; then
                   echo "删除: $file"
                   rm -f "$file"
                 fi
               done
-            ' _ {} \;
+            ' _ "$MAX_LENGTH" {} \;
           fi
       - name: 提交清理变更
         run: |

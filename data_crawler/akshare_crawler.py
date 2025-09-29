@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 使用AkShare接口获取ETF日线数据
-确保与仓库中的数据结构完全匹配
+特别处理API返回空DataFrame但请求成功的情况
 """
 
 import akshare as ak
@@ -11,12 +11,9 @@ import pandas as pd
 import logging
 import time
 import os
-from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, date
 from config import Config
 from retrying import retry
-
-# 修复：正确导入函数
 from utils.date_utils import (
     get_current_times,
     get_beijing_time,
@@ -24,56 +21,37 @@ from utils.date_utils import (
     get_last_trading_day,
     is_trading_day
 )
-# 从正确的模块导入数据处理函数
 from utils.file_utils import (
-    ensure_chinese_columns, internal_ensure_chinese_columns
+    ensure_chinese_columns, 
+    internal_ensure_chinese_columns
 )
 from utils.data_processor import (
     ensure_required_columns,
     clean_and_format_data,
     limit_to_one_year_data
 )
-# 仅添加必要的git工具导入（不添加任何新函数）
 from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 
 # 重试配置
-MAX_RETRY_ATTEMPTS = 5  # 增加重试次数
-RETRY_WAIT_FIXED = 3000  # 增加等待时间
-RETRY_WAIT_EXPONENTIAL_MAX = 15000  # 增加最大等待时间
+MAX_RETRY_ATTEMPTS = 3
+RETRY_WAIT_FIXED = 2000
+RETRY_WAIT_EXPONENTIAL_MAX = 10000
 
 # 打印AkShare版本
 logger.info(f"AkShare版本: {ak.__version__}")
 
 def empty_result_check(result: pd.DataFrame) -> bool:
-    """
-    检查AkShare返回结果是否为空
-    
-    Args:
-        result: AkShare返回的DataFrame
-        
-    Returns:
-        bool: 如果结果为空返回True，否则返回False
-    """
     if result is None or result.empty:
         return False
     return False
 
 def retry_if_akshare_error(exception: Exception) -> bool:
-    """
-    重试条件：AkShare相关错误
-    
-    Args:
-        exception: 异常对象
-        
-    Returns:
-        bool: 如果是AkShare错误返回True，否则返回False
-    """
     from requests.exceptions import ConnectionError, Timeout
     return isinstance(exception, (ValueError, ConnectionError, Timeout, OSError))
-        
+
 @retry(
     stop_max_attempt_number=MAX_RETRY_ATTEMPTS,
     wait_fixed=RETRY_WAIT_FIXED,
@@ -83,7 +61,7 @@ def retry_if_akshare_error(exception: Exception) -> bool:
 def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_first_crawl: bool = False) -> pd.DataFrame:
     """
     使用AkShare爬取ETF日线数据
-    确保与仓库中的数据结构完全匹配
+    特别处理API返回空DataFrame的情况
     """
     try:
         logger.debug(f"开始爬取ETF {etf_code} 日线数据: {start_date} ~ {end_date}")
@@ -97,19 +75,7 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             adjust=""
         )
         
-        # 【关键添加】记录API返回的实际列名
-        if isinstance(df, pd.DataFrame):
-            logger.info(f"ETF {etf_code} API返回的列名: {list(df.columns)}")
-            logger.info(f"ETF {etf_code} API返回的数据示例:")
-            if not df.empty:
-                logger.info(f"第一条数据: {df.iloc[0].to_dict()}")
-                if len(df) > 1:
-                    logger.info(f"第二条数据: {df.iloc[1].to_dict()}")
-        else:
-            logger.warning(f"ETF {etf_code} API返回的数据类型不是DataFrame，类型: {type(df)}")
-            return pd.DataFrame()
-        
-        # 检查结果是否为空
+        # 【关键修复】添加详细的空数据诊断
         if df is None:
             logger.warning(f"ETF {etf_code} API返回None，跳过")
             return pd.DataFrame()
@@ -119,17 +85,44 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
             return pd.DataFrame()
         
         if df.empty:
-            logger.warning(f"ETF {etf_code} 无有效数据（API返回空DataFrame）")
+            # 【关键修复】添加详细的空数据诊断
+            logger.warning(f"ETF {etf_code} API返回空DataFrame")
+            
+            # 检查日期范围是否合理
+            logger.warning("可能原因：")
+            logger.warning(f"  - 日期范围: {start_date} 至 {end_date}")
+            logger.warning("  - 数据源可能尚未更新该日期的数据")
+            logger.warning("  - 该ETF可能在该日期无交易数据")
+            logger.warning("  - ETF可能已暂停交易或清盘")
+            
+            # 检查日期是否为交易日
+            if not is_trading_day(end_date):
+                logger.warning(f"  - 结束日期 {end_date} 不是交易日")
+            if not is_trading_day(start_date):
+                logger.warning(f"  - 开始日期 {start_date} 不是交易日")
+            
+            # 尝试获取最近的有效数据
+            recent_date = get_last_trading_day(end_date)
+            if recent_date != end_date:
+                logger.info(f"尝试获取最近交易日 {recent_date} 的数据")
+                return crawl_etf_daily_akshare(etf_code, start_date, recent_date, is_first_crawl)
+            
             return pd.DataFrame()
         
-        # 记录实际获取的数据条数
+        # 正常数据处理逻辑
         data_count = len(df)
-        logger.info(f"ETF {etf_code} 获取到 {data_count} 条原始数据")
+        logger.info(f"ETF {etf_code} 获取到 {data_count} 条有效数据")
+        
+        # 检查日期范围
+        if "date" in df.columns:
+            first_date = df["date"].min()
+            last_date = df["date"].max()
+            logger.debug(f"ETF {etf_code} 数据日期范围: {first_date} 至 {last_date}")
         
         # 确保所有必需列都存在
         required_columns = [
-            '日期', '开盘', '最高', '最低', '收盘', '成交量', 
-            '成交额', '振幅', '涨跌幅', '涨跌额', '换手率', 
+            '日期', '开盘', '最高', '最低', '收盘', '成交量',
+            '成交额', '振幅', '涨跌幅', '涨跌额', '换手率',
             'ETF代码', 'ETF名称', '爬取时间', '折溢价率'
         ]
         
@@ -142,19 +135,10 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
                     df[col] = get_etf_name(etf_code)
                 elif col == '爬取时间':
                     df[col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    # 对于其他列，用NaN填充
-                    df[col] = pd.NA
         
         # 确保日期格式正确
         if '日期' in df.columns:
-            # 如果日期列是字符串类型
-            if df['日期'].dtype == object:
-                try:
-                    # 尝试将日期转换为标准格式
-                    df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime("%Y-%m-%d")
-                except Exception as e:
-                    logger.error(f"日期格式转换失败: {str(e)}")
+            df['日期'] = pd.to_datetime(df['日期']).dt.strftime("%Y-%m-%d")
         
         # 确保数值列是数值类型
         numeric_columns = [
@@ -163,20 +147,13 @@ def crawl_etf_daily_akshare(etf_code: str, start_date: str, end_date: str, is_fi
         ]
         for col in numeric_columns:
             if col in df.columns:
-                try:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                except Exception as e:
-                    logger.error(f"{col} 列转换为数值类型失败: {str(e)}")
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 添加数据有效性检查
-        if '收盘' in df.columns:
-            valid_data = df[df['收盘'].notna()]
-            if len(valid_data) == 0:
-                logger.warning(f"ETF {etf_code} 没有有效价格数据")
-                return df
-        else:
-            valid_data = df
-            logger.warning(f"ETF {etf_code} 数据中没有'收盘'列，无法过滤无效数据")
+        valid_data = df[df['收盘'].notna()]
+        if len(valid_data) == 0:
+            logger.warning(f"ETF {etf_code} 没有有效价格数据")
+            return pd.DataFrame()
         
         logger.info(f"ETF {etf_code} 有效数据: {len(valid_data)} 条")
         return valid_data

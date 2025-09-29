@@ -71,9 +71,9 @@ def crawl_etf_daily_incremental() -> None:
     """增量爬取ETF日线数据（单只保存+断点续爬逻辑）
     注意：此函数不再包含是否执行的判断逻辑，由调用方决定是否执行"""
     try:
-        logger.info("===== 开始执行任务：crawl_etf_daily =====")
+        logger.info("=== 开始执行任务：crawl_etf_daily ===")
         beijing_time = get_beijing_time()
-        logger.info(f"当前北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
+        logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
         # 【关键修复】首先运行API测试
         #logger.info("运行ETF API调用测试...")

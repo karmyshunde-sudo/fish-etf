@@ -49,10 +49,10 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_ETFYESNO }}
           TZ: Asia/Shanghai
-          TASK: 'etf_yesno'
+          TASK: 'index_yesno'
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
-          LOG_FILE="data/logs/etf_yesno_${BEIJING_TIME}.log"
+          LOG_FILE="data/logs/index_yesno_${BEIJING_TIME}.log"
           echo "正在执行: 指数Yes/No 策略（定时）"
           echo "日志文件: $LOG_FILE"
           python main.py 2>&1 | tee "$LOG_FILE"

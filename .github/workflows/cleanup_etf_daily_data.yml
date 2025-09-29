@@ -1,15 +1,8 @@
 name: Cleanup-删除ETF日线数据CSV文件
 on:
   workflow_dispatch:
-    inputs:
-        options:
-          - 'clean_ETF_daily_data'
-jobs:
 
-  # ========================
-  # 清理任务 - 每个任务都有独立Job
-  # ========================
-  # 手动清理ETF日线数据
+jobs:
   manual-clean-ETF_daily-data:
     name: 手动清理ETF日线数据
     runs-on: ubuntu-latest

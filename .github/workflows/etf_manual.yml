@@ -690,54 +690,71 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
       - name: 清理纯数字CSV
         shell: bash
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
           DELETED_COUNT=0
           
+          # 初始化Git跟踪
+          git add -A data/
+          
+          # 处理输入值
           if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
             echo "删除 data/ 目录下的所有纯数字CSV文件"
-            
-            # 使用find -exec 避免管道问题
-            find data/ -type f -name '[0-9]*.csv' -exec sh -c '
-              echo "删除: $1"
-              rm -f "$1"
-              echo "DELETED_COUNT=1" >> $GITHUB_ENV
-            ' _ {} \;
           else
             echo "删除 data/ 目录下文件名为数字且文件名长度等于 $MAX_LENGTH 的CSV文件"
-            
-            # 使用find -exec 避免管道问题
-            find data/ -type f -name '[0-9]*.csv' -exec bash -c '
-              # 提取基础文件名（不含路径）
-              filename=$(basename "$1")
-              # 移除扩展名
-              filename_no_ext="${filename%.csv}"
-              
-              # 检查是否为纯数字且长度等于MAX_LENGTH
-              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -eq $2 ]; then
-                echo "删除: $1"
-                rm -f "$1"
-                echo "DELETED_COUNT=1" >> $GITHUB_ENV
-              fi
-            ' _ {} $MAX_LENGTH \;
           fi
           
-          # 统计实际删除的文件数量
-          if [ -n "$(git diff --cached --name-only data/)" ]; then
-            git add -A data/
-            DELETED_COUNT=$(git diff --cached --name-only data/ | wc -l)
-            git reset
-            echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
-          else
-            echo "DELETED_COUNT=0" >> $GITHUB_ENV
+          # 查找并处理文件
+          find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
+            # 提取基础文件名（不含路径）
+            filename=$(basename "$file_path")
+            # 移除扩展名
+            filename_no_ext="${filename%.csv}"
+            
+            # 检查是否为纯数字且长度符合要求
+            if [[ "$filename_no_ext" =~ ^[0-9]+$ ]]; then
+              length=${#filename_no_ext}
+              
+              # 根据输入值判断是否要删除
+              if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ] || [ $length -eq $MAX_LENGTH ]; then
+                # 检查文件是否存在
+                if [ -f "$file_path" ]; then
+                  # 执行删除
+                  rm -f "$file_path"
+                  
+                  # 验证是否删除成功
+                  if [ ! -f "$file_path" ]; then
+                    echo "✅ 成功删除: $file_path (长度: $length)"
+                    ((DELETED_COUNT++))
+                  else
+                    echo "❌ 失败删除: $file_path (长度: $length)"
+                  fi
+                else
+                  echo "⚠️ 跳过: $file_path 已不存在 (长度: $length)"
+                fi
+              fi
+            fi
+          done
+          
+          # 提交删除操作到Git
+          if [ $DELETED_COUNT -gt 0 ]; then
+            git add -A data/  # 添加所有变更
+            echo "提交删除操作到Git"
+            git commit -m "【手动清理】删除 $DELETED_COUNT 个纯数字CSV文件" || echo "没有变更需要提交"
           fi
-      - name: 提交清理变更
+          
+          # 保存删除计数
+          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
+      - name: 推送变更
         if: env.DELETED_COUNT > 0
         run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add -u data/ && git commit -m "【手动清理】清除纯数字CSV文件" && git push origin main
+          git push origin main
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |

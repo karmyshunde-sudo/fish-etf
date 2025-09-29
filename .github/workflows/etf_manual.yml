@@ -673,7 +673,6 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】ETF交易记录文件已清理完成\北京时间: ${BEIJING_TIME}\"}}"
-  # 手动清理纯数字CSV
   manual-clean-numeric-csv:
     name: 手动清理纯数字CSV
     runs-on: ubuntu-latest
@@ -692,7 +691,7 @@ jobs:
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: 清理纯数字CSV
-        shell: bash  # 关键修改：指定使用bash执行
+        shell: bash
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
           
@@ -702,19 +701,18 @@ jobs:
             find data/ -type f -name '[0-9]*.csv' -delete
           else
             echo "删除 data/ 目录下文件名为数字且文件名长度小于 $MAX_LENGTH 的CSV文件"
-            find data/ -type f -name '[0-9]*.csv' -exec bash -c '
-              for file; do
-                # 提取基础文件名（不含路径）
-                filename=$(basename "$file")
-                # 移除扩展名
-                filename_no_ext="${filename%.csv}"
-                # 检查是否为纯数字且长度小于MAX_LENGTH
-                if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $1 ]; then
-                  echo "删除: $file"
-                  rm -f "$file"
-                fi
-              done
-            ' _ "$MAX_LENGTH" {} \;
+            # 关键修正：使用更可靠的处理方式
+            find data/ -type f -name '[0-9]*.csv' | while IFS= read -r file; do
+              # 提取基础文件名（不含路径）
+              filename=$(basename "$file")
+              # 移除扩展名
+              filename_no_ext="${filename%.csv}"
+              # 检查是否为纯数字且长度小于MAX_LENGTH
+              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $MAX_LENGTH ]; then
+                echo "删除: $file (原始文件名: $filename, 数字部分: $filename_no_ext, 长度: ${#filename_no_ext})"
+                rm -f "$file"
+              fi
+            done
           fi
       - name: 提交清理变更
         run: |

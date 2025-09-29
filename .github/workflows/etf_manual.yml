@@ -734,23 +734,40 @@ jobs:
                       if filename.endswith(".csv") and filename[:-4].isdigit():
                           if max_length is None or len(filename[:-4]) == max_length:
                               file_path = os.path.join(root, filename)
-                              files_to_delete.append(file_path)
+                              if os.path.exists(file_path):
+                                  files_to_delete.append(file_path)
               
               # 删除文件
+              deleted_files = []
               for i, file_path in enumerate(files_to_delete):
                   try:
+                      # 检查文件是否存在
+                      if not os.path.exists(file_path):
+                          print(f"⚠️ 跳过: {file_path} 已不存在")
+                          continue
+                      
+                      # 删除文件
                       os.remove(file_path)
-                      print(f"删除: {file_path}")
-                      # 提交到Git
-                      if i == len(files_to_delete) - 1:
-                          # 最后一个文件，使用LAST_FILE触发提交
-                          commit_files_in_batches(file_path, "LAST_FILE")
+                      
+                      # 验证是否成功删除
+                      if os.path.exists(file_path):
+                          print(f"❌ 删除失败: {file_path}")
                       else:
-                          commit_files_in_batches(file_path)
+                          print(f"删除: {file_path}")
+                          deleted_files.append(file_path)
+                          # 立即提交
+                          try:
+                              commit_files_in_batches(file_path, f"feat: 手动清理纯数字CSV文件 - {os.path.basename(file_path)}")
+                          except Exception as e:
+                              print(f"⚠️ Git提交失败: {file_path} - {str(e)}")
                   except Exception as e:
                       print(f"❌ 删除失败: {file_path} - {str(e)}")
               
-              print(f"✅ 成功删除 {len(files_to_delete)} 个文件")
+              print(f"✅ 成功删除 {len(deleted_files)} 个文件")
+              if deleted_files:
+                  print("详细删除列表:")
+                  for file_path in deleted_files:
+                      print(f"- {file_path}")
           
           if __name__ == "__main__":
               try:

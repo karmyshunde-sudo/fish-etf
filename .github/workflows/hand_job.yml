@@ -20,83 +20,8 @@ jobs
   # ========================
   # 手动任务 - 每个任务都有独立Job
   # ========================
-  # ETF列表更新（手动）
-  update-etf-list-manual
-    name ETF列表更新（手动）
-    runs-on ubuntu-latest
-    if github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'update_etf_list'
-    permissions
-      contents write
-    steps
-      - name 验证时区设置
-        run 
-          echo 时区验证 $(date -u '+%Y-%m-%d %H%M%S' UTC)  $(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S' CST)
-      - name 拉取仓库代码
-        uses actionscheckout@v4
-        with
-          ref main
-          fetch-depth 0
-          clean true
-          token ${{ secrets.GITHUB_TOKEN }}
-      - name 配置Python环境
-        uses actionssetup-python@v4
-        with
-          python-version '3.10'
-          cache 'pip'
-      - name 安装依赖包
-        run 
-          # 首先确认当前目录
-          echo 当前工作目录 $(pwd)
-          # 检查文件是否存在
-          if [ -f requirements.txt ]; then
-            echo ✅ requirements.txt 文件存在，开始安装依赖...
-            pip install -r requirements.txt
-          else
-            echo ❌ 错误 requirements.txt 文件不存在
-            ls -la  # 列出当前目录内容以帮助诊断
-            exit 1
-          fi
-      - name 创建数据目录
-        run 
-          mkdir -p data{flags,logs} && chmod -R 777 data
-      - name 执行ETF列表更新（手动）
-        env
-          WECOM_WEBHOOK ${{ secrets.WECOM_WEBHOOK }}
-          TZ AsiaShanghai
-          TASK 'update_etf_list'  # 修复：通过环境变量传递任务类型
-        run 
-          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
-          LOG_FILE=datalogsupdate_etf_list_${BEIJING_TIME}.log
-          echo 正在执行 ETF列表更新（手动）
-          echo 日志文件 $LOG_FILE
-          python main.py 2&1  tee $LOG_FILE  # 移除了命令行参数
-          # 记录任务状态
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo task_status=success  $GITHUB_OUTPUT
-          else
-            echo task_status=failed  $GITHUB_OUTPUT
-          fi
-          [ ${PIPESTATUS[0]} -eq 0 ]  exit 1
-      - name 提交数据变更
-        if steps.execute_task.outputs.task_status == 'success'
-        run 
-          git config user.name GitHub Actions && git config user.email actions@github.com
-          git add dataall_etfs.csv && [ -n $(git diff --cached --name-only dataall_etfs.csv) ] && 
-          git commit -m 手动更新ETF列表 && git push origin main
-      - name 发送完成通知
-        if steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
-        run 
-          BEIJING_TIME=$(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S')
-          curl -s -X POST $WECOM_WEBHOOK -H Content-Type applicationjson 
-            -d {msgtype text, text {content ✅ 【ETF列表更新（手动）】执行成功北京时间 ${BEIJING_TIME}}}
-      - name 发送失败通知
-        if failure() && env.WECOM_WEBHOOK
-        run 
-          BEIJING_TIME=$(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S')
-          curl -s -X POST $WECOM_WEBHOOK -H Content-Type applicationjson 
-            -d {msgtype text, text {content ⚠️ 【ETF列表更新（手动）】执行失败北京时间 ${BEIJING_TIME}}}
   # 指数YesNo 策略（手动）
-  etf-yesno-manual
+  index-yesno-manual
     name 指数YesNo策略（手动）
     runs-on ubuntu-latest
     if github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'index_yesno'
@@ -329,6 +254,83 @@ jobs
           EMOJI=${STATUS == 'success' && '✅'  '❌'}
           curl -s -X POST $WECOM_WEBHOOK -H Content-Type applicationjson 
             -d {msgtype text, text {content $EMOJI 【股票日线数据爬取（手动）】执行${STATUS}北京时间 ${BEIJING_TIME}}}
+  # ETF列表更新（手动）
+  update-etf-list-manual
+    name ETF列表更新（手动）
+    runs-on ubuntu-latest
+    if github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'update_etf_list'
+    permissions
+      contents write
+    steps
+      - name 验证时区设置
+        run 
+          echo 时区验证 $(date -u '+%Y-%m-%d %H%M%S' UTC)  $(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S' CST)
+      - name 拉取仓库代码
+        uses actionscheckout@v4
+        with
+          ref main
+          fetch-depth 0
+          clean true
+          token ${{ secrets.GITHUB_TOKEN }}
+      - name 配置Python环境
+        uses actionssetup-python@v4
+        with
+          python-version '3.10'
+          cache 'pip'
+      - name 安装依赖包
+        run 
+          # 首先确认当前目录
+          echo 当前工作目录 $(pwd)
+          # 检查文件是否存在
+          if [ -f requirements.txt ]; then
+            echo ✅ requirements.txt 文件存在，开始安装依赖...
+            pip install -r requirements.txt
+          else
+            echo ❌ 错误 requirements.txt 文件不存在
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      - name 创建数据目录
+        run 
+          mkdir -p data{flags,logs} && chmod -R 777 data
+      - name 执行ETF列表更新（手动）
+        env
+          WECOM_WEBHOOK ${{ secrets.WECOM_WEBHOOK }}
+          TZ AsiaShanghai
+          TASK 'update_etf_list'  # 修复：通过环境变量传递任务类型
+        run 
+          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
+          LOG_FILE=datalogsupdate_etf_list_${BEIJING_TIME}.log
+          echo 正在执行 ETF列表更新（手动）
+          echo 日志文件 $LOG_FILE
+          python main.py 2&1  tee $LOG_FILE  # 移除了命令行参数
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo task_status=success  $GITHUB_OUTPUT
+          else
+            echo task_status=failed  $GITHUB_OUTPUT
+          fi
+          [ ${PIPESTATUS[0]} -eq 0 ]  exit 1
+      - name 提交数据变更
+        if steps.execute_task.outputs.task_status == 'success'
+        run 
+          git config user.name GitHub Actions && git config user.email actions@github.com
+          git add dataall_etfs.csv && [ -n $(git diff --cached --name-only dataall_etfs.csv) ] && 
+          git commit -m 手动更新ETF列表 && git push origin main
+      - name 发送完成通知
+        if steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        run 
+          BEIJING_TIME=$(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S')
+          curl -s -X POST $WECOM_WEBHOOK -H Content-Type applicationjson 
+            -d {msgtype text, text {content ✅ 【ETF列表更新（手动）】执行成功北京时间 ${BEIJING_TIME}}}
+      - name 发送失败通知
+        if failure() && env.WECOM_WEBHOOK
+        run 
+          BEIJING_TIME=$(TZ=AsiaShanghai date '+%Y-%m-%d %H%M%S')
+          curl -s -X POST $WECOM_WEBHOOK -H Content-Type applicationjson 
+            -d {msgtype text, text {content ⚠️ 【ETF列表更新（手动）】执行失败北京时间 ${BEIJING_TIME}}}
+
+
   # ETF日线数据爬取（手动）
   crawl-etf-daily-manual
     name ETF日线数据爬取（手动）

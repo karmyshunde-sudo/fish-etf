@@ -37,6 +37,16 @@ jobs:
           fetch-depth: 0
           clean: true
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 验证代码版本
+        run: |
+          echo "当前工作目录: $(pwd)"
+          echo "当前分支: $(git branch --show-current)"
+          echo "当前commit: $(git rev-parse HEAD)"
+          echo "最新远程commit: $(git ls-remote origin main | awk '{print $1}')"
+          echo "当前main分支的提交历史:"
+          git log --oneline -n 5
+          echo "本地仓库状态:"
+          git status
       - name: 配置Python环境
         uses: actions/setup-python@v4
         with:

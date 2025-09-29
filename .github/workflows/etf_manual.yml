@@ -727,21 +727,30 @@ jobs:
               data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
               print(f"删除 data/ 目录下文件名为数字且文件名长度等于 {max_length if max_length is not None else '所有'} 的CSV文件")
               
-              # 查找所有CSV文件
+              # 收集所有要删除的文件
+              files_to_delete = []
               for root, _, files in os.walk(data_dir):
                   for filename in files:
                       if filename.endswith(".csv") and filename[:-4].isdigit():
-                          # 检查文件名长度
                           if max_length is None or len(filename[:-4]) == max_length:
                               file_path = os.path.join(root, filename)
-                              # 删除文件
-                              try:
-                                  os.remove(file_path)
-                                  print(f"删除: {file_path}")
-                                  # 提交到Git
-                                  commit_files_in_batches(file_path, f"feat: 手动清理纯数字CSV文件 - {os.path.basename(file_path)}")
-                              except Exception as e:
-                                  print(f"❌ 删除失败: {file_path} - {str(e)}")
+                              files_to_delete.append(file_path)
+              
+              # 删除文件
+              for i, file_path in enumerate(files_to_delete):
+                  try:
+                      os.remove(file_path)
+                      print(f"删除: {file_path}")
+                      # 提交到Git
+                      if i == len(files_to_delete) - 1:
+                          # 最后一个文件，使用LAST_FILE触发提交
+                          commit_files_in_batches(file_path, "LAST_FILE")
+                      else:
+                          commit_files_in_batches(file_path)
+                  except Exception as e:
+                      print(f"❌ 删除失败: {file_path} - {str(e)}")
+              
+              print(f"✅ 成功删除 {len(files_to_delete)} 个文件")
           
           if __name__ == "__main__":
               try:

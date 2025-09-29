@@ -159,7 +159,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         pd.DataFrame: 包含ETF代码、名称、市场价格、IOPV等信息的DataFrame
     """
     try:
-        logger.info("===== 开始执行套利数据爬取 =====")
+        logger.info("=== 开始执行套利数据爬取 ===")
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -271,7 +271,7 @@ def crawl_arbitrage_data() -> str:
         str: 保存的文件路径
     """
     try:
-        logger.info("===== 开始执行套利数据爬取 =====")
+        logger.info("=== 开始执行套利数据爬取 ===")
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         

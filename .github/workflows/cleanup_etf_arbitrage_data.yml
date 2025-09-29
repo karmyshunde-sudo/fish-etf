@@ -1,0 +1,30 @@
+name: Cleanup-删除ETF套利数据CSV文件
+on:
+  workflow_dispatch:
+
+jobs:
+  # 手动清理ETF套利数据
+  manual-clean-arbitrage-data:
+    name: 手动清理ETF套利数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_arbitrage_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 清理ETF套利数据
+        run: |
+          echo "删除 data/arbitrage/*.csv"
+          rm -rf data/arbitrage/*.csv
+      - name: 提交清理变更
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"

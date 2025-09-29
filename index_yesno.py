@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF Yes/No 策略执行器
+指数 Yes/No 策略执行器
 每天计算指定指数的策略信号并推送微信通知
 """
 

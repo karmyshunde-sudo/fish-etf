@@ -1,0 +1,101 @@
+name: Hand-清理仓库纯数字CSV文件
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '任务类型'
+        required: true
+        type: choice
+        options:
+          - 'clean_numeric_csv'
+      max_filename_length:
+        description: '最大文件名长度（留空或0表示删除所有纯数字CSV文件）'
+        required: false
+        type: string
+
+jobs:
+  manual-clean-numeric-csv:
+    name: 手动清理纯数字CSV
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'clean_numeric_csv'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+      - name: 清理纯数字CSV
+        shell: bash
+        run: |
+          MAX_LENGTH=${{ inputs.max_filename_length }}
+          DELETED_COUNT=0
+          TEMP_FILE=$(mktemp)
+          
+          # 使用find -exec避免管道问题
+          find data/ -type f -name '[0-9]*.csv' -exec bash -c '
+            for file; do
+              # 提取基础文件名（不含路径）
+              filename=$(basename "$file")
+              # 移除扩展名
+              filename_no_ext="${filename%.csv}"
+              
+              # 检查是否为纯数字
+              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]]; then
+                length=${#filename_no_ext}
+                
+                # 根据输入值判断是否要删除
+                if [ -z "$1" ] || [ "$1" -eq 0 ] || [ $length -eq $1 ]; then
+                  # 检查文件是否存在
+                  if [ -f "$file" ]; then
+                    # 执行删除
+                    rm -f "$file"
+                    
+                    # 验证是否删除成功
+                    if [ ! -f "$file" ]; then
+                      echo "删除: $file"
+                      echo "1" >> "$2"
+                    fi
+                  fi
+                fi
+              fi
+            done
+          ' _ "$MAX_LENGTH" "$TEMP_FILE" {} \;
+          
+          # 统计删除数量
+          if [ -s "$TEMP_FILE" ]; then
+            DELETED_COUNT=$(wc -l < "$TEMP_FILE")
+          fi
+          
+          # 清理临时文件
+          rm -f "$TEMP_FILE"
+          
+          # 提交删除操作
+          if [ $DELETED_COUNT -gt 0 ]; then
+            echo "提交 $DELETED_COUNT 个文件的删除操作到Git"
+            git add -A data/
+            git commit -m "【手动清理】删除 $DELETED_COUNT 个纯数字CSV文件" || echo "没有变更需要提交"
+            git push origin main
+          else
+            echo "没有文件需要删除"
+          fi
+          
+          # 保存删除计数
+          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          DELETED_COUNT=${{ env.DELETED_COUNT }}
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】纯数字CSV文件已清理完成\删除了 ${DELETED_COUNT} 个文件\北京时间: ${BEIJING_TIME}\"}}"

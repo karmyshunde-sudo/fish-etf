@@ -1,9 +1,4 @@
 name: Cleanup-删除ETF日线数据CSV文件
-on:
-  workflow_dispatch:
-    inputs:
-        options:
-          - 'clean_ETF_daily_data'
 
 jobs:
 

@@ -185,7 +185,7 @@ def check_network_connection():
 def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     专门处理恒生指数数据获取
-    重要说明：只使用能获取指数历史数据的API，不再使用ETF或股票接口获取数据
+    添加了数据保存功能，用于调试数据获取问题
     
     Args:
         index_code: 指数代码（如"HSNDXIT.HI"）
@@ -198,9 +198,20 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     index_name = index_code.replace('.HI', '')
     logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
     
+    # 创建数据保存目录
+    debug_dir = "data/debug"
+    os.makedirs(debug_dir, exist_ok=True)
+    
+    # 生成唯一文件名，包含时间戳
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    debug_file = os.path.join(debug_dir, f"{index_code}_{timestamp}.csv")
+    
     # 网络连接检查
     if not check_network_connection():
         logger.error("网络连接不可用，无法获取数据")
+        # 保存空数据的调试信息
+        with open(debug_file, 'w') as f:
+            f.write("Error: 网络连接不可用\n")
         return pd.DataFrame()
     
     # 1. 尝试使用akshare获取恒生科技指数 (800373)
@@ -219,6 +230,15 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             # 尝试使用通用的港股历史数据获取方法
             df = ak.stock_hk_hist(symbol="800373", period="daily", 
                                  start_date=start_date, end_date=end_date)
+        
+        # 保存获取到的数据到CSV文件
+        if not df.empty:
+            df.to_csv(debug_file, index=False)
+            logger.info(f"✅ 已保存数据到调试文件: {debug_file}")
+        else:
+            with open(debug_file, 'w') as f:
+                f.write("Error: akshare返回空数据\n")
+            logger.warning(f"⚠️ akshare返回空数据，已保存调试信息到: {debug_file}")
         
         if not df.empty:
             # 标准化列名
@@ -268,9 +288,12 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
                 logger.warning("获取的恒生科技指数数据缺少必要列")
     except Exception as e:
         logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
-    
+        # 保存错误信息
+        with open(debug_file, 'w') as f:
+            f.write(f"Error: {str(e)}\n")
+        logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+
     # 2. 尝试使用yfinance获取恒生科技指数
-    # 恒生科技指数在yfinance中代码应该是"HSTECH.HK"，而不是"^HSTECH"
     try:
         # 转换日期格式
         start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
@@ -280,7 +303,16 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         logger.info(f"尝试使用 yfinance.download 获取恒生科技指数历史数据 (HSTECH.HK)")
         df = yf.download('HSTECH.HK', start=start_dt, end=end_dt)
         
-        if not df.empty:
+        # 保存获取到的数据到CSV文件
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df.to_csv(debug_file, index=True)
+            logger.info(f"✅ 已保存数据到调试文件: {debug_file}")
+        else:
+            with open(debug_file, 'w') as f:
+                f.write("Error: yfinance返回空数据或非DataFrame\n")
+            logger.warning(f"⚠️ yfinance返回空数据，已保存调试信息到: {debug_file}")
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
             df = df.reset_index()
             df = df.rename(columns={
@@ -311,14 +343,27 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             return df
     except Exception as e:
         logger.warning(f"❌ yfinance.download 方法获取恒生科技指数历史数据失败: {str(e)}")
-    
+        # 保存错误信息
+        with open(debug_file, 'w') as f:
+            f.write(f"Error: {str(e)}\n")
+        logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+
     # 3. 尝试使用akshare获取恒生科技指数 (使用正确符号)
     try:
         logger.info(f"尝试使用 ak.index_hk_hist 获取恒生科技指数历史数据 (HSNDXIT.HI)")
         df = ak.index_hk_hist(symbol=index_code, period="daily", 
                              start_date=start_date, end_date=end_date)
         
-        if not df.empty:
+        # 保存获取到的数据到CSV文件
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df.to_csv(debug_file, index=False)
+            logger.info(f"✅ 已保存数据到调试文件: {debug_file}")
+        else:
+            with open(debug_file, 'w') as f:
+                f.write("Error: ak.index_hk_hist返回空数据或非DataFrame\n")
+            logger.warning(f"⚠️ ak.index_hk_hist返回空数据，已保存调试信息到: {debug_file}")
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
             df = df.rename(columns={
                 '日期': 'date',
@@ -354,7 +399,11 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             return df
     except Exception as e:
         logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
-    
+        # 保存错误信息
+        with open(debug_file, 'w') as f:
+            f.write(f"Error: {str(e)}\n")
+        logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+
     # 4. 尝试使用akshare获取恒生科技指数 (使用800373代码)
     try:
         logger.info("尝试使用 ak.index_hk_hist 获取恒生科技指数历史数据 (800373)")
@@ -362,7 +411,16 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         df = ak.index_hk_hist(symbol="800373", period="daily", 
                              start_date=start_date, end_date=end_date)
         
-        if not df.empty:
+        # 保存获取到的数据到CSV文件
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df.to_csv(debug_file, index=False)
+            logger.info(f"✅ 已保存数据到调试文件: {debug_file}")
+        else:
+            with open(debug_file, 'w') as f:
+                f.write("Error: ak.index_hk_hist(800373)返回空数据或非DataFrame\n")
+            logger.warning(f"⚠️ ak.index_hk_hist(800373)返回空数据，已保存调试信息到: {debug_file}")
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
             df = df.rename(columns={
                 '日期': 'date',
@@ -398,7 +456,11 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             return df
     except Exception as e:
         logger.warning(f"❌ ak.index_hk_hist 方法获取恒生科技指数历史数据失败: {str(e)}")
-    
+        # 保存错误信息
+        with open(debug_file, 'w') as f:
+            f.write(f"Error: {str(e)}\n")
+        logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+
     # 5. 尝试使用akshare获取恒生指数作为替代
     try:
         logger.info("尝试使用 ak.index_hk_hist 获取恒生指数历史数据 (800001)")
@@ -406,7 +468,16 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         df = ak.index_hk_hist(symbol="800001", period="daily", 
                              start_date=start_date, end_date=end_date)
         
-        if not df.empty:
+        # 保存获取到的数据到CSV文件
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df.to_csv(debug_file, index=False)
+            logger.info(f"✅ 已保存数据到调试文件: {debug_file}")
+        else:
+            with open(debug_file, 'w') as f:
+                f.write("Error: ak.index_hk_hist(800001)返回空数据或非DataFrame\n")
+            logger.warning(f"⚠️ ak.index_hk_hist(800001)返回空数据，已保存调试信息到: {debug_file}")
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
             # 标准化列名
             df = df.rename(columns={
                 '日期': 'date',
@@ -442,7 +513,11 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
             return df
     except Exception as e:
         logger.warning(f"❌ ak.index_hk_hist 方法获取恒生指数历史数据失败: {str(e)}")
-    
+        # 保存错误信息
+        with open(debug_file, 'w') as f:
+            f.write(f"Error: {str(e)}\n")
+        logger.warning(f"⚠️ 已保存错误信息到调试文件: {debug_file}")
+
     # 没有获取到任何有效数据
     logger.error(f"❌ 无法获取恒生科技指数历史数据: {index_code}")
     logger.error("❌ 可能原因：")
@@ -454,6 +529,12 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
     logger.error("  - ETF数据不能替代指数数据，因为ETF存在折溢价，无法准确反映指数表现")
     logger.error("  - 恒生科技指数在yfinance中的正确代码应为'HSTECH.HK'，而非'^HSTECH'")
     logger.error("  - 请确认您使用的指数代码正确，并检查AkShare文档中是否有相关数据接口")
+    
+    # 确保有一个调试文件
+    if not os.path.exists(debug_file):
+        with open(debug_file, 'w') as f:
+            f.write("Error: 所有数据源均返回空数据\n")
+        logger.warning(f"⚠️ 已创建调试文件: {debug_file}")
     
     return pd.DataFrame()
 

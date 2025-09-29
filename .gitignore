@@ -26,3 +26,5 @@ temp/
 !data/arbitrage/*.csv
 !data/flags/
 !data/flags/*.txt
+!data/debug/
+!data/debug/.csv

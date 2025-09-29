@@ -394,9 +394,7 @@ class Config:
     WECOM_WEBHOOK: str = os.getenv("WECOM_WEBHOOK", "")
 
     WECOM_MESFOOTER: str = (
-        "\n\n"
         "【GIT-fish-etf】\n"
-        "📊 数据来源：AkShare | 环境：生产\n"
         "🕒 消息生成时间：{current_time}"
     )
     

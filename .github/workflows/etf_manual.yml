@@ -18,6 +18,10 @@ on:
           - 'clean_arbitrage_data'
           - 'clean_trade_records'
           - 'clean_numeric_csv'
+      max_filename_length:
+        description: '最大文件名长度（留空或0表示删除所有纯数字CSV文件）'
+        required: false
+        type: string
 
 jobs:
   # ========================
@@ -689,8 +693,28 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: 清理纯数字CSV
         run: |
-          echo "删除纯数字CSV文件"
-          find data/ -type f -name '[0-9]*.csv' -delete
+          MAX_LENGTH=${{ inputs.max_filename_length }}
+          
+          # 如果输入为空或为0，则按原逻辑删除所有纯数字CSV文件
+          if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
+            echo "删除 data/ 目录下的所有纯数字CSV文件"
+            find data/ -type f -name '[0-9]*.csv' -delete
+          else
+            echo "删除 data/ 目录下文件名为数字且文件名长度小于 $MAX_LENGTH 的CSV文件"
+            find data/ -type f -name '[0-9]*.csv' -exec sh -c '
+              for file; do
+                # 提取基础文件名（不含路径）
+                filename=$(basename "$file")
+                # 移除扩展名
+                filename_no_ext="${filename%.csv}"
+                # 检查是否为纯数字且长度小于MAX_LENGTH
+                if [[ "$filename_no_ext" =~ ^[0-9]+$ ]] && [ ${#filename_no_ext} -lt $MAX_LENGTH ]; then
+                  echo "删除: $file"
+                  rm -f "$file"
+                fi
+              done
+            ' _ {} \;
+          fi
       - name: 提交清理变更
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"

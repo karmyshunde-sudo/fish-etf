@@ -1234,10 +1234,10 @@ def generate_report():
         send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}", message_type="error")
 
 if __name__ == "__main__":
-    logger.info("===== 开始执行ETF Yes/No策略 =====")
+    logger.info("===== 开始执行 指数Yes/No策略 =====")
     
     # 添加延时，避免在每天23:00整点时AkShare接口可能还未更新当日数据
     time.sleep(30)
     
     generate_report()
-    logger.info("===== ETF Yes/No策略执行完成 =====")
+    logger.info("=== 指数Yes/No策略执行完成 ===")

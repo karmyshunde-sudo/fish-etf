@@ -185,7 +185,7 @@ def check_network_connection():
 def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     专门处理恒生指数数据获取
-    重要说明：此函数无法直接提交到Git，因为GitHub Actions工作流的安全限制
+    仅提供详细的日志输出，不保存任何文件
     
     Args:
         index_code: 指数代码（如"HSNDXIT.HI"）
@@ -196,134 +196,139 @@ def fetch_hang_seng_index_data(index_code: str, start_date: str, end_date: str) 
         pd.DataFrame: 指数日线数据
     """
     index_name = index_code.replace('.HI', '')
-    logger.info(f"这是新的代码？获取恒生指数数据: {index_code} ({index_name})")
+    logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
     
-    # 创建数据保存目录
-    debug_dir = "data/debug"
-    os.makedirs(debug_dir, exist_ok=True)
-    
-    # 生成唯一文件名，包含时间戳
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    debug_file = os.path.join(debug_dir, f"{index_code}_{timestamp}.csv")
-    
-    # 创建用于保存调试文件的标记文件
-    commit_marker = os.path.join(debug_dir, "COMMIT_ME.txt")
-    
-    # ============== 重要说明 ==============
-    # 以下代码无法真正提交到Git仓库
-    # GitHub Actions工作流的安全限制禁止在Python代码中直接提交
-    # 任何git命令都会失败，因为：
-    # 1. 没有正确的Git凭证
-    # 2. 工作流环境不允许直接修改仓库
-    # 3. 这违反了GitHub Actions的安全策略
-    
-    # 尝试直接提交（会失败，仅用于演示）
+    # 1. 尝试使用AKShare的stock_hk_index_daily_em获取恒生科技指数历史数据
     try:
-        # 创建标记文件
-        with open(commit_marker, 'w') as f:
-            f.write(f"需要提交的调试文件: {debug_file}\n")
+        logger.info("尝试使用 ak.stock_hk_index_daily_em 获取恒生科技指数历史数据")
         
-        # 以下命令会失败，但会生成日志供分析
-        # 这是不推荐的，仅用于演示
-        import subprocess
-        try:
-            # 设置Git用户
-            subprocess.run(['git', 'config', 'user.name', 'GitHub Actions'], check=True)
-            subprocess.run(['git', 'config', 'user.email', 'actions@github.com'], check=True)
+        # 恒生科技指数的正确代码是 "HSNDXIT" 而不是 "HSNDXIT.HI"
+        symbol = index_code.replace('.HI', '')
+        logger.info(f"使用指数代码: {symbol} (已移除'.HI'后缀)")
+        
+        # 获取数据
+        df = ak.stock_hk_index_daily_em(symbol=symbol, period="daily", 
+                                      start_date=start_date, end_date=end_date)
+        
+        if not df.empty:
+            logger.info(f"✅ 成功获取到 {len(df)} 条数据")
             
-            # 添加文件
-            subprocess.run(['git', 'add', debug_file], check=True)
+            # 检查数据列
+            logger.info(f"数据列名: {', '.join(df.columns)}")
             
-            # 检查是否真的有变更
-            status = subprocess.run(['git', 'status', '--porcelain', debug_file], 
-                                  capture_output=True, text=True)
+            # 检查日期范围
+            if '日期' in df.columns:
+                first_date = df['日期'].min()
+                last_date = df['日期'].max()
+                logger.info(f"数据日期范围: {first_date} 至 {last_date}")
             
-            if status.stdout:
-                # 创建提交
-                subprocess.run(['git', 'commit', '-m', f'Debug: {os.path.basename(debug_file)}'], check=True)
-                
-                # 尝试推送 - 这会失败
-                subprocess.run(['git', 'push', 'origin', 'main'], check=True)
-                logger.info(f"✅ 已尝试提交调试文件: {debug_file}")
-            else:
-                logger.warning(f"⚠️ 调试文件未变更，无需提交")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"❌ Git操作失败: {str(e)}")
-            logger.error("⚠️ 重要: 这是预期行为！")
-            logger.error("⚠️ GitHub Actions工作流中运行的Python代码无法直接提交到Git仓库")
-            logger.error("⚠️ 请在工作流中添加一个步骤来检查 data/debug/COMMIT_ME.txt 文件")
-            logger.error("⚠️ 正确做法：在工作流中添加一个步骤来检查标记文件并提交")
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            return df
+        else:
+            logger.warning("⚠️ ak.stock_hk_index_daily_em 返回空数据")
+            logger.warning("可能原因:")
+            logger.warning("  - 指数代码不正确（应为 'HSNDXIT' 而不是 'HSNDXIT.HI'）")
+            logger.warning("  - 数据源无历史数据")
+            logger.warning("  - 网络连接问题")
+            logger.warning("  - 日期范围不正确")
+            return pd.DataFrame()
     except Exception as e:
-        logger.error(f"❌ Git操作失败: {str(e)}")
-        logger.error("⚠️ 重要: Python代码无法直接提交到Git仓库")
-        logger.error("⚠️ 请在工作流中添加一个步骤来检查 data/debug/COMMIT_ME.txt 文件")
-    
-    # ============== 正确的做法 ==============
-    # 1. 在函数中创建标记文件（已实现）
-    # 2. 在工作流中添加以下步骤：
-    #    - name: 检查并提交调试文件
-    #      if: success()
-    #      run: |
-    #        if [ -f "data/debug/COMMIT_ME.txt" ]; then
-    #          echo "发现需要提交的调试文件..."
-    #          DEBUG_FILE=$(cat data/debug/COMMIT_ME.txt | grep "需要提交的调试文件" | cut -d ':' -f 2-)
-    #          git config user.name "GitHub Actions"
-    #          git config user.email "actions@github.com"
-    #          git add "$DEBUG_FILE"
-    #          if [ -n "$(git status --porcelain "$DEBUG_FILE")" ]; then
-    #            git commit -m "调试文件: $DEBUG_FILE"
-    #            git push origin main
-    #            echo "✅ 已提交调试文件: $DEBUG_FILE"
-    #          fi
-    #        fi
-    
-    # 创建标记文件（供工作流使用）
-    with open(commit_marker, 'w') as f:
-        f.write(f"需要提交的调试文件: {debug_file}\n")
-    
-    # 保存调试信息
-    with open(debug_file, 'w') as f:
-        f.write("Error: 无法在Python代码中直接提交到Git仓库\n")
-        f.write("========================================\n")
-        f.write("重要说明:\n")
-        f.write("1. GitHub Actions工作流中运行的Python代码无法直接提交到Git\n")
-        f.write("2. 请在工作流中添加一个步骤来检查 data/debug/COMMIT_ME.txt\n")
-        f.write("3. 添加以下步骤到您的工作流:\n")
-        f.write("   - name: 检查并提交调试文件\n")
-        f.write("     if: success()\n")
-        f.write("     run: |\n")
-        f.write("       if [ -f \"data/debug/COMMIT_ME.txt\" ]; then\n")
-        f.write("         DEBUG_FILE=$(cat data/debug/COMMIT_ME.txt | grep \"需要提交的调试文件\" | cut -d ':' -f 2-)\n")
-        f.write("         git config user.name \"GitHub Actions\"\n")
-        f.write("         git config user.email \"actions@github.com\"\n")
-        f.write("         git add \"$DEBUG_FILE\"\n")
-        f.write("         if [ -n \"$(git status --porcelain \"$DEBUG_FILE\")\" ]; then\n")
-        f.write("           git commit -m \"调试文件: $DEBUG_FILE\"\n")
-        f.write("           git push origin main\n")
-        f.write("           echo \"✅ 已提交调试文件: $DEBUG_FILE\"\n")
-        f.write("         fi\n")
-        f.write("       fi\n")
-        f.write("========================================\n")
-    
-    # 网络连接检查
-    if not check_network_connection():
-        logger.error("网络连接不可用，无法获取数据")
-        with open(debug_file, 'a') as f:
-            f.write("Error: 网络连接不可用\n")
+        logger.error(f"❌ ak.stock_hk_index_daily_em 方法获取恒生科技指数历史数据失败: {str(e)}")
+        logger.error("详细错误信息:")
+        logger.error(str(e))
+        
+        # 检查akshare版本
+        import akshare as ak
+        logger.error(f"当前akshare版本: {ak.__version__}")
+        logger.error("可能解决方案:")
+        logger.error("  - 确认指数代码为 'HSNDXIT'（无.HI后缀）")
+        logger.error("  - 更新akshare: pip install --upgrade akshare")
+        logger.error("  - 检查akshare文档: https://www.akshare.xyz/")
+        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues")
+        
         return pd.DataFrame()
     
-    # 实际数据获取逻辑（简化版）
-    # 这里省略了实际的数据获取代码，因为重点是调试机制
-    # 实际使用时，这里应该是完整的数据获取逻辑
-    with open(debug_file, 'a') as f:
-        f.write("Debug: 以下是实际获取的数据内容\n")
-        f.write("========================================\n")
-        f.write("这里将保存实际获取的数据\n")
-        f.write("========================================\n")
+    # 2. 如果第一步失败，尝试使用AKShare的stock_hk_index_spot_em获取实时数据
+    try:
+        logger.info("尝试使用 ak.stock_hk_index_spot_em 获取恒生科技指数实时数据")
+        
+        # 获取数据
+        df = ak.stock_hk_index_spot_em()
+        
+        if not df.empty:
+            # 过滤指定的指数
+            filtered = df[df["代码"] == index_code.replace('.HI', '')]
+            
+            if not filtered.empty:
+                logger.info(f"✅ 成功获取到 {len(filtered)} 条实时数据")
+                logger.info(f"数据列名: {', '.join(filtered.columns)}")
+                
+                # 仅用于诊断，不返回实时数据
+                logger.info("⚠️ 注意: 实时数据无法用于历史分析")
+                logger.info(f"实时数据: {filtered.iloc[0].to_dict()}")
+                return pd.DataFrame()
+            else:
+                logger.warning("⚠️ 未找到指定指数的实时数据")
+        else:
+            logger.warning("⚠️ ak.stock_hk_index_spot_em 返回空数据")
+    except Exception as e:
+        logger.error(f"❌ ak.stock_hk_index_spot_em 方法获取数据失败: {str(e)}")
     
-    logger.info(f"已保存调试信息到: {debug_file}")
-    logger.info("⚠️ 重要: Python代码无法直接提交到Git仓库")
-    logger.info("⚠️ 请在工作流中添加步骤来提交 data/debug/ 目录下的文件")
+    # 3. 尝试使用yfinance获取恒生科技指数
+    try:
+        import yfinance as yf
+        # 转换日期格式
+        start_dt = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
+        
+        logger.info(f"尝试使用 yfinance.download 获取恒生科技指数历史数据 (HSTECH.HK)")
+        df = yf.download('HSTECH.HK', start=start_dt, end=end_dt)
+        
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            logger.info(f"✅ 成功获取到 {len(df)} 条数据")
+            logger.info(f"数据列名: {', '.join(df.columns)}")
+            
+            # 检查日期范围
+            if 'Date' in df.columns:
+                first_date = df['Date'].min().strftime("%Y-%m-%d")
+                last_date = df['Date'].max().strftime("%Y-%m-%d")
+                logger.info(f"数据日期范围: {first_date} 至 {last_date}")
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            return df
+        else:
+            logger.warning("⚠️ yfinance 返回空数据或非DataFrame")
+            logger.warning("可能原因:")
+            logger.warning("  - 指数代码不正确（应为 'HSTECH.HK'）")
+            logger.warning("  - 数据源无历史数据")
+            logger.warning("  - 网络连接问题")
+            logger.warning("  - 日期范围不正确")
+    except Exception as e:
+        logger.error(f"❌ yfinance.download 方法获取恒生科技指数历史数据失败: {str(e)}")
+        logger.error("详细错误信息:")
+        logger.error(str(e))
+    
+    # 没有获取到任何有效数据
+    logger.error(f"❌ 无法获取恒生科技指数历史数据: {index_code}")
+    logger.error("❌ 可能原因：")
+    logger.error("  1. 指数代码不正确：")
+    logger.error("     - 应使用 'HSNDXIT' 而不是 'HSNDXIT.HI'")
+    logger.error("     - 恒生科技指数代码应为 'HSNDXIT'")
+    logger.error("  2. 日期范围问题：")
+    logger.error("     - 开始日期: " + start_date)
+    logger.error("     - 结束日期: " + end_date)
+    logger.error("  3. AKShare接口问题：")
+    logger.error("     - 确认akshare版本: " + ak.__version__)
+    logger.error("     - 查看文档: https://www.akshare.xyz/")
+    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues")
     
     return pd.DataFrame()
 

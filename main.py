@@ -439,7 +439,7 @@ def handle_check_arbitrage_exit() -> Dict[str, Any]:
         )
         return {"status": "error", "message": error_msg}
 
-def handle_etf_yesno() -> Dict[str, Any]:
+def handle_index_yesno() -> Dict[str, Any]:
     """
     处理ETF Yes/No策略任务
     
@@ -451,8 +451,8 @@ def handle_etf_yesno() -> Dict[str, Any]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始执行ETF Yes/No策略 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 导入ETF_YesNo模块
-        from ETF_YesNo import generate_report
+        # 导入index_YesNo模块
+        from index_Yesno import generate_report
         
         # 执行策略
         generate_report()
@@ -469,14 +469,14 @@ def handle_etf_yesno() -> Dict[str, Any]:
         }
         
         # 发送任务完成通知
-        send_task_completion_notification("etf_yesno", result)
+        send_task_completion_notification("index_yesno", result)
         
         return result
     except Exception as e:
         error_msg = f"ETF Yes/No策略执行失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         result = {"status": "error", "message": error_msg}
-        send_task_completion_notification("etf_yesno", result, message_type="error")
+        send_task_completion_notification("index_yesno", result, message_type="error")
         return result
 
 def main() -> Dict[str, Any]:
@@ -511,7 +511,7 @@ def main() -> Dict[str, Any]:
             "update_etf_list": handle_update_etf_list,
             "send_daily_report": handle_send_daily_report,
             "check_arbitrage_exit": handle_check_arbitrage_exit,
-            "etf_yesno": handle_etf_yesno  # 新增：ETF Yes/No策略任务
+            "index_yesno": handle_index_yesno  # 新增：指数 Yes/No策略任务
         }
         
         if task in task_handlers:
@@ -649,10 +649,10 @@ def run_scheduled_tasks():
             logger.info("执行ETF日线数据增量爬取任务")
             handle_crawl_etf_daily()
         
-        # ETF Yes/No策略（每天晚上11点）
+        # 指数 Yes/No策略（每天晚上11点）
         if beijing_now.hour == 23 and beijing_now.minute == 0:
             logger.info("执行ETF Yes/No策略任务")
-            handle_etf_yesno()
+            handle_index_yesno()
         
         logger.info("定时任务执行完成")
         
@@ -686,9 +686,9 @@ def test_all_modules():
         logger.info("测试仓位策略...")
         handle_calculate_position()
         
-        # 测试ETF Yes/No策略
+        # 测试指数 Yes/No策略
         logger.info("测试ETF Yes/No策略...")
-        handle_etf_yesno()
+        handle_index_yesno()
         
         # 测试每日报告
         logger.info("测试每日报告...")

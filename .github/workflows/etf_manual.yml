@@ -699,45 +699,45 @@ jobs:
         run: |
           MAX_LENGTH=${{ inputs.max_filename_length }}
           DELETED_COUNT=0
+          TEMP_FILE=$(mktemp)
           
-          # 处理输入值
-          if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ]; then
-            echo "删除 data/ 目录下的所有纯数字CSV文件"
-          else
-            echo "删除 data/ 目录下文件名为数字且文件名长度等于 $MAX_LENGTH 的CSV文件"
-          fi
-          
-          # 查找并处理文件
-          find data/ -type f -name '[0-9]*.csv' -print0 | while IFS= read -r -d $'\0' file_path; do
-            # 提取基础文件名（不含路径）
-            filename=$(basename "$file_path")
-            # 移除扩展名
-            filename_no_ext="${filename%.csv}"
-            
-            # 检查是否为纯数字且长度符合要求
-            if [[ "$filename_no_ext" =~ ^[0-9]+$ ]]; then
-              length=${#filename_no_ext}
+          # 使用find -exec避免管道问题
+          find data/ -type f -name '[0-9]*.csv' -exec bash -c '
+            for file; do
+              # 提取基础文件名（不含路径）
+              filename=$(basename "$file")
+              # 移除扩展名
+              filename_no_ext="${filename%.csv}"
               
-              # 根据输入值判断是否要删除
-              if [ -z "$MAX_LENGTH" ] || [ "$MAX_LENGTH" -eq 0 ] || [ $length -eq $MAX_LENGTH ]; then
-                # 检查文件是否存在
-                if [ -f "$file_path" ]; then
-                  # 执行删除
-                  rm -f "$file_path"
-                  
-                  # 验证是否删除成功
-                  if [ ! -f "$file_path" ]; then
-                    echo "删除: $file_path"
-                    ((DELETED_COUNT++))
-                  else
-                    echo "❌ 失败删除: $file_path"
+              # 检查是否为纯数字
+              if [[ "$filename_no_ext" =~ ^[0-9]+$ ]]; then
+                length=${#filename_no_ext}
+                
+                # 根据输入值判断是否要删除
+                if [ -z "$1" ] || [ "$1" -eq 0 ] || [ $length -eq $1 ]; then
+                  # 检查文件是否存在
+                  if [ -f "$file" ]; then
+                    # 执行删除
+                    rm -f "$file"
+                    
+                    # 验证是否删除成功
+                    if [ ! -f "$file" ]; then
+                      echo "删除: $file"
+                      echo "1" >> "$2"
+                    fi
                   fi
-                else
-                  echo "⚠️ 跳过: $file_path 已不存在"
                 fi
               fi
-            fi
-          done
+            done
+          ' _ "$MAX_LENGTH" "$TEMP_FILE" {} \;
+          
+          # 统计删除数量
+          if [ -s "$TEMP_FILE" ]; then
+            DELETED_COUNT=$(wc -l < "$TEMP_FILE")
+          fi
+          
+          # 清理临时文件
+          rm -f "$TEMP_FILE"
           
           # 提交删除操作
           if [ $DELETED_COUNT -gt 0 ]; then

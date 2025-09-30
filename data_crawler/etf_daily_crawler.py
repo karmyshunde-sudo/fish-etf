@@ -14,10 +14,11 @@ import tempfile
 import shutil
 from datetime import datetime, timedelta
 from config import Config
-from utils.date_utils import get_beijing_time, get_last_trading_day
+from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
+from utils.git_utils import commit_files_in_batches  # 添加git工具模块导入
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -74,6 +75,56 @@ def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.Da
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def get_incremental_date_range(etf_code: str) -> (str, str):
+    """
+    获取增量爬取的日期范围
+    返回：(start_date, end_date)
+    """
+    try:
+        # 获取最近交易日作为结束日期
+        last_trading_day = get_last_trading_day()
+        end_date = last_trading_day.strftime("%Y%m%d")
+        
+        # 获取ETF的最后爬取日期
+        save_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
+        if os.path.exists(save_path):
+            last_date = get_last_crawl_date(etf_code, Config.ETFS_DAILY_DIR)
+            last_date_obj = datetime.strptime(last_date, "%Y%m%d").date()
+            
+            # 从最后日期的下一个交易日开始
+            next_trading_day = last_date_obj + timedelta(days=1)
+            
+            # 确保是交易日
+            while not is_trading_day(next_trading_day):
+                next_trading_day += timedelta(days=1)
+            
+            start_date = next_trading_day.strftime("%Y%m%d")
+            
+            # 如果起始日期晚于结束日期，说明数据已经是最新
+            if start_date > end_date:
+                logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
+                return None, None
+            
+            # 确保不超过一年
+            one_year_ago = last_trading_day - timedelta(days=365)
+            if datetime.strptime(start_date, "%Y%m%d").date() < one_year_ago:
+                logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago.strftime('%Y%m%d')}开始")
+                start_date = one_year_ago.strftime("%Y%m%d")
+        else:
+            # 首次爬取，获取一年数据
+            start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+        
+        logger.info(f"ETF {etf_code} 增量爬取日期范围：{start_date} 至 {end_date}")
+        return start_date, end_date
+    
+    except Exception as e:
+        logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
+        # 出错时使用全量爬取一年数据
+        last_trading_day = get_last_trading_day()
+        end_date = last_trading_day.strftime("%Y%m%d")
+        start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+        return start_date, end_date
+
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     """
     保存ETF日线数据
@@ -94,6 +145,9 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         df.to_csv(temp_file.name, index=False)
         # 原子替换
         shutil.move(temp_file.name, save_path)
+        
+        # 【关键修改】使用git工具模块提交变更
+        commit_files_in_batches(save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -154,12 +208,15 @@ def crawl_all_etfs_daily_data() -> None:
             for etf_code in batch_codes:
                 etf_name = get_etf_name(etf_code)
                 
-                # 确定爬取时间范围（一年）
-                start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+                # 获取增量日期范围
+                start_date, end_date = get_incremental_date_range(etf_code)
+                if start_date is None or end_date is None:
+                    logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
+                    continue
                 
                 # 爬取数据
                 logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
-                logger.info(f"📅 爬取一年历史数据：{start_date} 至 {end_date}")
+                logger.info(f"📅 增量爬取日期范围：{start_date} 至 {end_date}")
                 
                 df = crawl_etf_daily_data(etf_code, start_date, end_date)
                 

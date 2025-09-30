@@ -22,7 +22,7 @@ from utils.date_utils import (
     is_file_outdated
 )
 from utils.file_utils import load_etf_daily_data, load_etf_metadata, ensure_chinese_columns
-from data_crawler.etf_list_manager import load_all_etf_list, get_etf_name
+from data_crawler.all_etfs import load_all_etf_list, get_etf_name
 from wechat_push.push import send_wechat_message
 
 # 初始化日志

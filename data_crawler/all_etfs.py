@@ -7,6 +7,7 @@ ETF列表管理模块
 - 手动触发更新
 - 不考虑7天文件有效期
 - 仅根据config.py中定义的过滤条件进行ETF初步过滤
+- 确保更新后的文件提交到Git仓库
 """
 
 import akshare as ak
@@ -15,6 +16,8 @@ import logging
 import os
 from datetime import datetime
 from config import Config
+# 添加git工具模块导入
+from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -108,6 +111,9 @@ def update_all_etf_list() -> pd.DataFrame:
         os.makedirs(Config.DATA_DIR, exist_ok=True)
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
+        
+        # 【关键修改】使用git工具模块提交变更
+        commit_files_in_batches(etf_list_file)
         
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF，已保存至 {etf_list_file}")
         return etf_list

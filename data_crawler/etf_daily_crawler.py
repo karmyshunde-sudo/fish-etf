@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
-from all_etfs import get_etf_name
+from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
 
 # 初始化日志

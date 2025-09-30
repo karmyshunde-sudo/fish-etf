@@ -304,4 +304,16 @@ def get_all_etf_codes() -> list:
     """
     获取所有ETF代码
     """
-    return get_all_etf_codes()
+    try:
+        etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
+        if not os.path.exists(etf_list_file):
+            logger.info("ETF列表文件不存在，正在创建...")
+            from data_crawler.all_etfs import update_all_etf_list
+            update_all_etf_list()
+        
+        etf_list = pd.read_csv(etf_list_file)
+        return etf_list["ETF代码"].tolist()
+    
+    except Exception as e:
+        logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
+        return []

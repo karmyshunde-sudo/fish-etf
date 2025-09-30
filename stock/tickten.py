@@ -834,7 +834,7 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: 过滤后的有效股票DataFrame
     """
-    logger.info("===== 正在筛选符合策略要求的有效股票 =====")
+    logger.info("=== 正在筛选符合策略要求的有效股票 ===")
     
     # 创建副本，避免修改原始数据
     filtered_df = basic_info_df.copy()
@@ -874,7 +874,7 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
 def get_top_stocks_for_strategy() -> dict:
     """获取各板块中适合策略的股票（使用本地已保存数据）"""
     try:
-        logger.info("===== 开始执行个股趋势策略(TickTen) =====")
+        logger.info("=== 开始执行个股趋势策略(TickTen) ===")
         
         # 1. 获取股票基础信息（自动处理文件缺失或过期）
         basic_info_df = load_stock_basic_info()
@@ -986,7 +986,7 @@ def generate_strategy_report():
         for section, stocks in top_stocks.items():
             if stocks:
                 report = []
-                report.append(f"===== 个股趋势策略报告 - {section} =====")
+                report.append(f"=== 个股趋势策略报告 - {section} ===")
                 report.append(f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 report.append(f"策略依据：20日均线+成交量变化+形态识别")
                 report.append(f"【{section}】")
@@ -998,7 +998,7 @@ def generate_strategy_report():
                     deviation = calculate_deviation(current, critical)
                     signal_msg = generate_signal_message(stock, stock["df"], current, critical, deviation)
                     
-                    report.append(f"{'='*40}")
+                    report.append(f"{'='*20}")
                     report.append(f"{i+1}. {stock['name']}({stock['code']})")
                     report.append(f"评分: {stock['score']:.2f}")
                     report.append(f"当前价: {current:.2f}")
@@ -1017,7 +1017,7 @@ def generate_strategy_report():
         else:
             # 如果没有板块消息，发送默认消息
             default_message = (
-                f"===== 个股趋势策略报告 =====\n"
+                f"=== 个股趋势策略报告 ===\n"
                 f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"今日无符合条件的股票"
             )
@@ -1031,7 +1031,7 @@ def generate_strategy_report():
 
 def main():
     """主函数：执行个股趋势策略"""
-    logger.info("===== 开始执行个股趋势策略(TickTen) =====")
+    logger.info("=== 开始执行个股趋势策略(TickTen) ===")
     
     # 确保目录存在
     ensure_directory_exists()
@@ -1045,7 +1045,7 @@ def main():
     # 生成并发送策略报告
     generate_strategy_report()
     
-    logger.info("===== 个股趋势策略执行完成 =====")
+    logger.info("=== 个股趋势策略执行完成 ===")
 
 if __name__ == "__main__":
     main()

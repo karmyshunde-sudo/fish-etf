@@ -69,7 +69,8 @@ jobs:
         if: env.DELETED_COUNT > 0
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add ${{ env.TARGET_PATH }} && git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件" && git push origin main
+          # 【关键修改】使用git add -A确保删除操作也被添加到索引
+          git add -A ${{ env.TARGET_PATH }} && git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件" && git push origin main
 
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
@@ -77,4 +78,4 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           DELETED_COUNT=${{ env.DELETED_COUNT }}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】路径 ${{ env.TARGET_PATH }} 已清理完成\删除了 ${DELETED_COUNT} 个CSV文件\北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】路径 ${{ env.TARGET_PATH }} 已清理完成\n删除了 ${DELETED_COUNT} 个CSV文件\n北京时间: ${BEIJING_TIME}\"}}"

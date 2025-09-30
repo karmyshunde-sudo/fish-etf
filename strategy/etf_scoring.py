@@ -22,7 +22,7 @@ from utils.date_utils import (
     is_file_outdated
 )
 from utils.file_utils import load_etf_daily_data, load_etf_metadata, ensure_chinese_columns
-from data_crawler.all_etfs import load_all_etf_list, get_etf_name
+from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -521,7 +521,11 @@ def get_etf_basic_info(etf_code: str) -> float:
         etf_code = str(etf_code).strip().zfill(6)
         
         # 检查ETF列表是否有效
-        etf_list = load_all_etf_list()
+        etf_codes = get_all_etf_codes()
+        
+        # 创建DataFrame
+        etf_list = pd.DataFrame(etf_codes, columns=['ETF代码'])
+        
         if etf_list is None or etf_list.empty:
             logger.warning("ETF列表为空或无效，使用默认值")
             return 0.0

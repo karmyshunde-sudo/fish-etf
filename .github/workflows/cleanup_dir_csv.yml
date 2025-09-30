@@ -55,14 +55,15 @@ jobs:
         run: |
           echo "删除 ${{ env.TARGET_PATH }}/*.csv"
           
-          # 查找并删除CSV文件
+          # 查找CSV文件并使用git rm删除
           find ${{ env.TARGET_PATH }} -maxdepth 1 -name "*.csv" -type f | while IFS= read -r file; do
             echo "删除: $file"
-            rm -f "$file"
+            # 【关键修改】使用git rm而不是rm
+            git rm -f "$file"
           done
           
           # 保存删除计数
-          DELETED_COUNT=$(find ${{ env.TARGET_PATH }} -maxdepth 1 -name "*.csv" -type f | wc -l)
+          DELETED_COUNT=$(git status --porcelain ${{ env.TARGET_PATH }} | grep '^D' | wc -l)
           echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
 
       - name: 提交清理变更
@@ -70,22 +71,28 @@ jobs:
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           
-          # 【关键修复】
-          # 1. 确保工作目录是干净的
-          git reset --hard
+          # 提交删除操作
+          git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件"
           
-          # 2. 强制添加所有变更，包括删除操作
-          git add -A ${{ env.TARGET_PATH }} || true
+          # 推送变更
+          git push origin main
+
+      - name: 验证文件是否真正删除
+        run: |
+          # 检查远程仓库中是否还有这些文件
+          git fetch origin main
+          git checkout origin/main -- ${{ env.TARGET_PATH }} || true
           
-          # 3. 检查是否有实际变更
-          if ! git diff --staged --quiet; then
-            # 4. 提交变更
-            git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件"
-            
-            # 5. 推送变更
-            git push origin main
-          else
-            echo "没有实际变更需要提交"
+          REMAINING_COUNT=$(find ${{ env.TARGET_PATH }} -name "*.csv" -type f | wc -l)
+          echo "REMAINING_COUNT=$REMAINING_COUNT" >> $GITHUB_ENV
+          echo "✅ 已从远程仓库删除 $((DELETED_COUNT - REMAINING_COUNT)) 个CSV文件"
+          
+          # 验证剩余文件
+          if [ "$REMAINING_COUNT" -gt 0 ]; then
+            echo "⚠️ 注意: 还有 $REMAINING_COUNT 个CSV文件未删除"
+            find ${{ env.TARGET_PATH }} -name "*.csv" -type f | while IFS= read -r file; do
+              echo "未删除: $file"
+            done
           fi
 
       - name: 发送清理通知
@@ -93,5 +100,6 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           DELETED_COUNT=${{ env.DELETED_COUNT }}
+          REMAINING_COUNT=${{ env.REMAINING_COUNT }}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】路径 ${{ env.TARGET_PATH }} 已清理完成\n删除了 ${DELETED_COUNT} 个CSV文件\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】路径 ${{ env.TARGET_PATH }} 已清理完成\n删除了 ${DELETED_COUNT} 个CSV文件\n剩余 ${REMAINING_COUNT} 个CSV文件\n北京时间: ${BEIJING_TIME}\"}}"

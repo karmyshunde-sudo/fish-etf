@@ -14,11 +14,10 @@ import akshare as ak
 import pandas as pd
 import logging
 import os
-import subprocess
 from datetime import datetime
 from config import Config
-# 添加git工具模块导入
-from utils.git_utils import commit_files_in_batches
+# 修改：导入_immediate_commit函数代替commit_files_in_batches
+from utils.git_utils import _immediate_commit
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -113,34 +112,10 @@ def update_all_etf_list() -> pd.DataFrame:
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
         
-        # 【关键修改】添加详细日志
-        logger.info(f"文件已保存至: {etf_list_file}")
-        file_size = os.path.getsize(etf_list_file)
-        logger.info(f"文件大小: {file_size} 字节")
-        
-        # 确保文件存在
-        if os.path.exists(etf_list_file):
-            logger.info("确认文件存在")
-        else:
-            logger.error("文件不存在，无法提交")
-        
-        # 【关键修改】使用git工具模块提交变更
-        logger.info("触发Git提交操作...")
-        commit_files_in_batches(etf_list_file)
-        logger.info("Git提交操作已触发")
-        
-        # 额外检查
-        logger.info("正在检查提交状态...")
-        try:
-            # 获取文件的Git状态
-            git_status = subprocess.run(['git', 'status', '--porcelain', etf_list_file], 
-                                     capture_output=True, text=True)
-            if git_status.stdout.strip():
-                logger.info(f"Git状态: {git_status.stdout.strip()}")
-            else:
-                logger.info("文件已提交或已在最新状态")
-        except Exception as e:
-            logger.error(f"检查Git状态失败: {str(e)}")
+        # 【关键修改】使用立即提交函数
+        logger.info("触发Git立即提交操作...")
+        _immediate_commit(etf_list_file, "ETF列表更新")
+        logger.info("Git提交操作已完成")
         
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF，已保存至 {etf_list_file}")
         return etf_list

@@ -304,6 +304,4 @@ def get_all_etf_codes() -> list:
     """
     获取所有ETF代码
     """
-    # 从all_etfs模块获取
-    from all_etfs import get_all_etf_codes
     return get_all_etf_codes()

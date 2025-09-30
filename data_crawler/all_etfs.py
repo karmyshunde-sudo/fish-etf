@@ -6,7 +6,7 @@ ETF列表管理模块
 - 每周日强制更新
 - 手动触发更新
 - 不考虑7天文件有效期
-- 根据config.py定义进行ETF初步过滤
+- 仅根据config.py中定义的过滤条件进行ETF初步过滤
 """
 
 import akshare as ak
@@ -15,8 +15,6 @@ import logging
 import os
 from datetime import datetime
 from config import Config
-# 添加git工具模块导入
-from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -67,25 +65,34 @@ def update_all_etf_list() -> pd.DataFrame:
             etf_list["基金规模"] = etf_list["基金规模"].replace(0, pd.NA)
         
         # 初步过滤 - 根据config.py定义
-        if Config.ETF_MIN_FUND_SIZE > 0 and "基金规模" in etf_list.columns:
-            original_count = len(etf_list)
-            etf_list = etf_list[etf_list["基金规模"] >= Config.ETF_MIN_FUND_SIZE].copy()
-            filtered_count = len(etf_list)
-            logger.info(f"根据最小基金规模过滤: {original_count} → {filtered_count} (阈值: {Config.ETF_MIN_FUND_SIZE}亿元)")
+        # 注意：这里只用于过滤，不进行列名映射
+        try:
+            # 尝试获取配置项，如果不存在则使用默认值
+            min_fund_size = getattr(Config, 'ETF_MIN_FUND_SIZE', 0.0)
+            exclude_money_etfs = getattr(Config, 'EXCLUDE_MONEY_ETFS', True)
+            
+            # 应用过滤条件
+            if min_fund_size > 0 and "基金规模" in etf_list.columns:
+                original_count = len(etf_list)
+                etf_list = etf_list[etf_list["基金规模"] >= min_fund_size].copy()
+                filtered_count = len(etf_list)
+                logger.info(f"根据最小基金规模过滤: {original_count} → {filtered_count} (阈值: {min_fund_size}亿元)")
+            
+            # 排除货币ETF（如果配置中设置）
+            if exclude_money_etfs and "ETF代码" in etf_list.columns:
+                original_count = len(etf_list)
+                money_etf_mask = etf_list["ETF代码"].str.startswith("511") | etf_list["ETF代码"].str.startswith("510")
+                etf_list = etf_list[~money_etf_mask].copy()
+                filtered_count = len(etf_list)
+                logger.info(f"排除货币ETF: {original_count} → {filtered_count} (511/510开头)")
+        except Exception as e:
+            logger.warning(f"ETF过滤配置加载失败，跳过过滤: {str(e)}")
         
         # 确保ETF代码格式
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.zfill(6)
             # 过滤无效的ETF代码（非6位数字）
             etf_list = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')].copy()
-        
-        # 排除货币ETF（如果配置中设置）
-        if Config.EXCLUDE_MONEY_ETFS and "ETF代码" in etf_list.columns:
-            original_count = len(etf_list)
-            money_etf_mask = etf_list["ETF代码"].str.startswith("511") | etf_list["ETF代码"].str.startswith("510")
-            etf_list = etf_list[~money_etf_mask].copy()
-            filtered_count = len(etf_list)
-            logger.info(f"排除货币ETF: {original_count} → {filtered_count} (511/510开头)")
         
         # 确保列顺序
         final_columns = ['ETF代码', 'ETF名称', '基金规模']
@@ -102,8 +109,6 @@ def update_all_etf_list() -> pd.DataFrame:
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
         
-        # 【关键修复】使用git工具模块提交变更
-        commit_files_in_batches(etf_list_file)
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF，已保存至 {etf_list_file}")
         return etf_list
     

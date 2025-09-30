@@ -74,7 +74,7 @@ jobs:
           TZ: Asia/Shanghai
           TASK: 'index_yesno'  # 修复：通过环境变量传递任务类型
         run: |
-          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/index_yesno_${BEIJING_TIME}.log"
           echo "正在执行: 指数YesNo 策略（手动）"
           echo "日志文件: $LOG_FILE"
@@ -309,13 +309,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
-          TASK: 'update_etf_list'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/update_etf_list_${BEIJING_TIME}.log"
           echo "正在执行: ETF列表更新（手动）"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
+          # 直接调用all_etfs模块
+          python -c "from data_crawler.all_etfs import update_all_etf_list; update_all_etf_list()" 2>&1 | tee "$LOG_FILE"
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -385,13 +385,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
-          TASK: 'crawl_etf_daily'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/crawl_etf_daily_${BEIJING_TIME}.log"
           echo "正在执行: ETF日线数据爬取（手动）"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
+          # 直接调用etf_daily_crawler模块
+          python -c "from data_crawler.etf_daily_crawler import crawl_all_etfs_daily_data; crawl_all_etfs_daily_data()" 2>&1 | tee "$LOG_FILE"
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -461,13 +461,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
-          TASK: 'calculate_arbitrage'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_arbitrage_${BEIJING_TIME}.log"
           echo "正在执行: ETF套利计算（手动）"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
+          # 直接调用strategy_arbitrage_source模块
+          python -c "from data_crawler.strategy_arbitrage_source import crawl_arbitrage_data; crawl_arbitrage_data()" 2>&1 | tee "$LOG_FILE"
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT
@@ -479,8 +479,7 @@ jobs:
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/arbitrage/ data/flags/{discount,premium}_status.json && 
-          [ -n "$(git diff --cached --name-only data/arbitrage/ data/flags/)" ] && 
+          git add data/arbitrage/ && [ -n "$(git diff --cached --name-only data/arbitrage/)" ] && 
           git commit -m "手动更新ETF套利数据" && git push origin main
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
@@ -548,13 +547,13 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TZ: Asia/Shanghai
-          TASK: 'calculate_position'  # 修复：通过环境变量传递任务类型
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/calculate_position_${BEIJING_TIME}.log"
           echo "正在执行: ETF仓位策略计算（手动）"
           echo "日志文件: $LOG_FILE"
-          python main.py 2>&1 | tee "$LOG_FILE"  # 移除了命令行参数
+          # 直接调用strategy_arbitrage_source模块
+          python -c "from data_crawler.strategy_arbitrage_source import calculate_position; calculate_position()" 2>&1 | tee "$LOG_FILE"
           # 记录任务状态
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
             echo "task_status=success" >> $GITHUB_OUTPUT

@@ -52,14 +52,14 @@ def test_etf_apis():
     # 7. 测试fund_etf_hist_em接口
     test_fund_etf_hist_em(etf_code, start_date, end_date)
     
-    logger.info("=" * 30)
+    # logger.info("=" * 30)
     logger.info("ETF API测试完成")
     logger.info("请提供以上日志，将基于实际返回的列名编写匹配代码")
     logger.info("=" * 30)
 
 def test_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str):
     """测试fund_etf_hist_sina接口"""
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_hist_sina (无市场前缀)")
     logger.info(f"ak.fund_etf_hist_sina(symbol='{etf_code}')")
     logger.info("=" * 30)
@@ -80,7 +80,7 @@ def test_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str):
     except Exception as e:
         logger.info(f"❌ 接口调用失败: {str(e)}")
     
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_hist_sina (带市场前缀)")
     logger.info(f"ak.fund_etf_hist_sina(symbol='sz{etf_code}')")
     logger.info("=" * 30)
@@ -92,7 +92,7 @@ def test_fund_etf_hist_sina(etf_code: str, start_date: str, end_date: str):
 
 def test_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str):
     """测试fund_etf_spot_em接口"""
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_spot_em")
     logger.info(f"ak.fund_etf_spot_em()")
     logger.info("=" * 30)
@@ -104,7 +104,7 @@ def test_fund_etf_spot_em(etf_code: str, start_date: str, end_date: str):
 
 def test_fund_etf_fund_daily_em(etf_code: str, start_date: str, end_date: str):
     """测试fund_etf_fund_daily_em接口"""
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_fund_daily_em")
     logger.info(f"ak.fund_etf_fund_daily_em()")
     logger.info("=" * 30)
@@ -117,7 +117,7 @@ def test_fund_etf_fund_daily_em(etf_code: str, start_date: str, end_date: str):
 def test_stock_zh_a_hist(etf_code: str, start_date: str, end_date: str):
     """测试stock_zh_a_hist接口"""
     # 测试上交所ETF
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.stock_zh_a_hist (上交所)")
     logger.info(f"ak.stock_zh_a_hist(symbol='sh{etf_code}', period='daily', start_date='{start_date}', end_date='{end_date}')")
     logger.info("=" * 30)
@@ -133,7 +133,7 @@ def test_stock_zh_a_hist(etf_code: str, start_date: str, end_date: str):
         logger.info(f"❌ 接口调用失败: {str(e)}")
     
     # 测试深交所ETF
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.stock_zh_a_hist (深交所)")
     logger.info(f"ak.stock_zh_a_hist(symbol='sz{etf_code}', period='daily', start_date='{start_date}', end_date='{end_date}')")
     logger.info("=" * 30)
@@ -151,7 +151,7 @@ def test_stock_zh_a_hist(etf_code: str, start_date: str, end_date: str):
 def test_stock_zh_a_hist_min(etf_code: str, start_date: str, end_date: str):
     """测试stock_zh_a_hist_min接口"""
     # 测试上交所ETF
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.stock_zh_a_hist_min (上交所)")
     logger.info(f"ak.stock_zh_a_hist_min(symbol='sh{etf_code}', period='5', start_date='{start_date} 09:30:00', end_date='{end_date} 15:00:00')")
     logger.info("=" * 30)
@@ -167,7 +167,7 @@ def test_stock_zh_a_hist_min(etf_code: str, start_date: str, end_date: str):
         logger.info(f"❌ 接口调用失败: {str(e)}")
     
     # 测试深交所ETF
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.stock_zh_a_hist_min (深交所)")
     logger.info(f"ak.stock_zh_a_hist_min(symbol='sz{etf_code}', period='5', start_date='{start_date} 09:30:00', end_date='{end_date} 15:00:00')")
     logger.info("=" * 30)
@@ -184,7 +184,7 @@ def test_stock_zh_a_hist_min(etf_code: str, start_date: str, end_date: str):
 
 def test_fund_etf_daily_em(etf_code: str, start_date: str, end_date: str):
     """测试fund_etf_daily_em接口"""
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_daily_em")
     logger.info(f"ak.fund_etf_daily_em(symbol='{etf_code}', period='daily', start_date='{start_date}', end_date='{end_date}')")
     logger.info("=" * 30)
@@ -201,7 +201,7 @@ def test_fund_etf_daily_em(etf_code: str, start_date: str, end_date: str):
 
 def test_fund_etf_hist_em(etf_code: str, start_date: str, end_date: str):
     """测试fund_etf_hist_em接口"""
-    logger.info("\n" + "=" * 30)
+    # logger.info("\n" + "=" * 30)
     logger.info(f"测试 ak.fund_etf_hist_em")
     logger.info(f"ak.fund_etf_hist_em(symbol='{etf_code}', period='daily', start_date='{start_date}', end_date='{end_date}')")
     logger.info("=" * 30)

@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from config import Config
 from utils.date_utils import get_beijing_time, is_trading_day, is_trading_time
 from utils.file_utils import ensure_dir_exists
-from data_crawler.etf_list_manager import get_filtered_etf_codes, get_etf_name, load_all_etf_list  # 修改：添加load_all_etf_list导入
+from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -176,7 +176,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})")
         
         # 获取需要监控的ETF列表
-        etf_codes = get_filtered_etf_codes()
+        etf_codes = get_all_etf_codes()
         logger.info(f"获取到 {len(etf_codes)} 只符合条件的ETF进行套利监控")
         
         if not etf_codes:

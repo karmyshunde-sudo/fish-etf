@@ -19,8 +19,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from data_crawler import crawl_etf_daily_incremental
-from data_crawler.etf_list_manager import update_all_etf_list
+# 修改1：从新文件导入函数
+from data_crawler.etf_daily_crawler import crawl_all_etfs_daily_data
+from data_crawler.all_etfs import update_all_etf_list
 from strategy import (
     calculate_arbitrage_opportunity,
     calculate_position_strategy,
@@ -138,6 +139,7 @@ def handle_update_etf_list() -> Dict[str, Any]:
     """
     try:
         logger.info("开始更新全市场ETF列表（周日强制更新）")
+        # 修改2：直接调用新函数
         etf_list = update_all_etf_list()
         
         if etf_list.empty:
@@ -190,7 +192,7 @@ def handle_update_etf_list() -> Dict[str, Any]:
 
 def handle_crawl_etf_daily() -> Dict[str, Any]:
     """
-    处理ETF日线数据增量爬取任务
+    处理ETF日线数据爬取任务
     
     Returns:
         Dict[str, Any]: 任务执行结果
@@ -203,12 +205,12 @@ def handle_crawl_etf_daily() -> Dict[str, Any]:
         
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
-        logger.info(f"开始执行ETF日线数据增量爬取 (UTC: {utc_now}, CST: {beijing_now})")
+        logger.info(f"开始执行ETF日线数据爬取 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 执行爬取
-        crawl_etf_daily_incremental()
+        # 修改3：执行新的爬取函数
+        crawl_all_etfs_daily_data()
         
-        success_msg = "ETF日线数据增量爬取完成"
+        success_msg = "ETF日线数据爬取完成"
         logger.info(success_msg)
         
         # 构建结果字典
@@ -225,7 +227,7 @@ def handle_crawl_etf_daily() -> Dict[str, Any]:
         return result
     
     except Exception as e:
-        error_msg = f"ETF日线数据增量爬取失败: {str(e)}"
+        error_msg = f"ETF日线数据爬取失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         result = {"status": "error", "message": error_msg}
         send_task_completion_notification("crawl_etf_daily", result)
@@ -646,7 +648,7 @@ def run_scheduled_tasks():
         
         # 爬取日线数据
         if beijing_now.hour == 18 and beijing_now.minute == 0:
-            logger.info("执行ETF日线数据增量爬取任务")
+            logger.info("执行ETF日线数据爬取任务")
             handle_crawl_etf_daily()
         
         # 指数 Yes/No策略（每天晚上11点）

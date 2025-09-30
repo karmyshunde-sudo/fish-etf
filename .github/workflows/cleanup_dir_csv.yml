@@ -70,18 +70,22 @@ jobs:
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           
-          # 确保工作目录是干净的
+          # 【关键修复】
+          # 1. 确保工作目录是干净的
           git reset --hard
           
-          # 添加所有变更，包括删除操作
+          # 2. 强制添加所有变更，包括删除操作
           git add -A ${{ env.TARGET_PATH }} || true
           
-          # 只有当有变更时才提交
-          if git diff --staged --quiet; then
-            echo "没有变更需要提交"
-          else
+          # 3. 检查是否有实际变更
+          if ! git diff --staged --quiet; then
+            # 4. 提交变更
             git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件"
+            
+            # 5. 推送变更
             git push origin main
+          else
+            echo "没有实际变更需要提交"
           fi
 
       - name: 发送清理通知

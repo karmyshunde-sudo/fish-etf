@@ -6,6 +6,7 @@ ETF列表管理模块
 - 每周日强制更新
 - 手动触发更新
 - 不考虑7天文件有效期
+- 根据config.py定义进行ETF初步过滤
 """
 
 import akshare as ak
@@ -14,7 +15,8 @@ import logging
 import os
 from datetime import datetime
 from config import Config
-from utils.date_utils import get_beijing_time
+# 添加git工具模块导入
+from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -32,57 +34,76 @@ def update_all_etf_list() -> pd.DataFrame:
     
     try:
         # 获取ETF列表
-        logger.info("尝试从AkShare获取ETF列表...")
         etf_info = ak.fund_etf_spot_em()
         
         if etf_info.empty:
             logger.warning("ETF列表更新后为空")
             return pd.DataFrame()
         
-        # 记录返回的列名，用于调试
-        logger.debug(f"AkShare返回列名: {list(etf_info.columns)}")
-        
         # 提取需要的列
-        required_columns = ["代码", "名称", "流通市值"]
-        missing_columns = [col for col in required_columns if col not in etf_info.columns]
+        required_columns = ['代码', '名称', '流通市值']
+        available_columns = [col for col in required_columns if col in etf_info.columns]
         
-        if missing_columns:
-            logger.error(f"ETF列表数据缺少必要列: {', '.join(missing_columns)}")
-            # 尝试修复列名
-            for col in missing_columns:
-                if col == "代码" and "code" in etf_info.columns:
-                    etf_info = etf_info.rename(columns={"code": "代码"})
-                elif col == "名称" and "name" in etf_info.columns:
-                    etf_info = etf_info.rename(columns={"name": "名称"})
-                elif col == "流通市值" and "成交额" in etf_info.columns:
-                    etf_info = etf_info.rename(columns={"成交额": "流通市值"})
+        if not available_columns:
+            logger.error("ETF数据缺少必要列: 代码、名称、流通市值")
+            return pd.DataFrame()
         
-        # 确保包含所有需要的列
-        for col in required_columns:
-            if col not in etf_info.columns:
-                etf_info[col] = "" if col != "流通市值" else 0.0
-        
-        # 提取需要的列
-        etf_list = etf_info[required_columns]
+        etf_list = etf_info[available_columns].copy()
         
         # 重命名列
-        etf_list = etf_list.rename(columns={
+        column_mapping = {
             "代码": "ETF代码",
             "名称": "ETF名称",
             "流通市值": "基金规模"
-        })
+        }
+        etf_list = etf_list.rename(columns=column_mapping)
         
         # 基金规模转换为亿元
-        etf_list["基金规模"] = etf_list["基金规模"].astype(float) / 100000000
+        if "基金规模" in etf_list.columns:
+            # 处理非数值数据
+            etf_list["基金规模"] = pd.to_numeric(etf_list["基金规模"], errors="coerce")
+            etf_list["基金规模"] = etf_list["基金规模"].fillna(0) / 100000000
+            # 填充缺失的基金规模数据
+            etf_list["基金规模"] = etf_list["基金规模"].replace(0, pd.NA)
+        
+        # 初步过滤 - 根据config.py定义
+        if Config.ETF_MIN_FUND_SIZE > 0 and "基金规模" in etf_list.columns:
+            original_count = len(etf_list)
+            etf_list = etf_list[etf_list["基金规模"] >= Config.ETF_MIN_FUND_SIZE].copy()
+            filtered_count = len(etf_list)
+            logger.info(f"根据最小基金规模过滤: {original_count} → {filtered_count} (阈值: {Config.ETF_MIN_FUND_SIZE}亿元)")
         
         # 确保ETF代码格式
-        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.zfill(6)
+        if "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str).str.zfill(6)
+            # 过滤无效的ETF代码（非6位数字）
+            etf_list = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')].copy()
+        
+        # 排除货币ETF（如果配置中设置）
+        if Config.EXCLUDE_MONEY_ETFS and "ETF代码" in etf_list.columns:
+            original_count = len(etf_list)
+            money_etf_mask = etf_list["ETF代码"].str.startswith("511") | etf_list["ETF代码"].str.startswith("510")
+            etf_list = etf_list[~money_etf_mask].copy()
+            filtered_count = len(etf_list)
+            logger.info(f"排除货币ETF: {original_count} → {filtered_count} (511/510开头)")
+        
+        # 确保列顺序
+        final_columns = ['ETF代码', 'ETF名称', '基金规模']
+        final_columns = [col for col in final_columns if col in etf_list.columns]
+        
+        if not final_columns:
+            logger.error("ETF列表缺少必要列")
+            return pd.DataFrame()
+        
+        etf_list = etf_list[final_columns]
         
         # 保存到CSV
         os.makedirs(Config.DATA_DIR, exist_ok=True)
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
         
+        # 【关键修复】使用git工具模块提交变更
+        commit_files_in_batches(etf_list_file)
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF，已保存至 {etf_list_file}")
         return etf_list
     
@@ -97,7 +118,6 @@ def get_all_etf_codes() -> list:
     try:
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         if not os.path.exists(etf_list_file):
-            logger.info("ETF列表文件不存在，开始更新...")
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
@@ -114,11 +134,10 @@ def get_etf_name(etf_code: str) -> str:
     try:
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         if not os.path.exists(etf_list_file):
-            logger.info("ETF列表文件不存在，开始更新...")
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
-        etf_row = etf_list[etf_list["ETF代码"].astype(str).str.zfill(6) == etf_code]
+        etf_row = etf_list[etf_list["ETF代码"] == etf_code]
         if not etf_row.empty:
             return etf_row["ETF名称"].values[0]
         

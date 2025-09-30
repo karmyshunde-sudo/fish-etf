@@ -69,8 +69,20 @@ jobs:
         if: env.DELETED_COUNT > 0
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          # 【关键修改】使用git add -A确保删除操作也被添加到索引
-          git add -A ${{ env.TARGET_PATH }} && git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件" && git push origin main
+          
+          # 确保工作目录是干净的
+          git reset --hard
+          
+          # 添加所有变更，包括删除操作
+          git add -A ${{ env.TARGET_PATH }} || true
+          
+          # 只有当有变更时才提交
+          if git diff --staged --quiet; then
+            echo "没有变更需要提交"
+          else
+            git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件"
+            git push origin main
+          fi
 
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK

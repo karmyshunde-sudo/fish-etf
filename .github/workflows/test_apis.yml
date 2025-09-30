@@ -1,0 +1,92 @@
+name: Test-ETF所有接口测试
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '任务类型'
+        required: true
+        type: choice
+        options:
+          - 'test_etf_apis'
+
+jobs:
+  # ========================
+  # 手动任务 - 用159915，2025年7月2日去测试所有数据源，所有ETF接口
+  # ========================
+  test-etf-apis:
+    name: 测试ETF API
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'test_etf_apis'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          echo "当前工作目录: $(pwd)"
+          # 检查 requirements.txt 是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # 验证 akshare 是否安装成功
+            if ! python -c "import akshare; print('akshare 版本:', akshare.__version__)"; then
+              echo "❌ akshare 未正确安装，尝试单独安装..."
+              pip install akshare
+            fi
+            # 再次验证
+            if ! python -c "import akshare"; then
+              echo "❌ akshare 安装失败"
+              exit 1
+            fi
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la
+            exit 1
+          fi
+      
+      - name: 运行ETF API测试
+        run: |
+          echo "运行ETF API测试..."
+          python test_apis.py
+
+      - name: 发送完成通知
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【ETF API测试】已完成"
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【ETF API测试】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi

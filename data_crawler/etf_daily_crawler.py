@@ -18,7 +18,7 @@ from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
-from utils.git_utils import commit_files_in_batches
+from utils.git_utils import commit_files_in_batches, commit_final
 
 # 初始化日志
 logger = logging.getLogger(__name__)

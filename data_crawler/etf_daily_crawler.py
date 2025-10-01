@@ -18,7 +18,7 @@ from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
-from utils.git_utils import commit_files_in_batches, commit_final
+from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -294,11 +294,16 @@ def crawl_all_etfs_daily_data() -> None:
                 # 更新处理计数器
                 processed_count += 1
                 
-                # 每10个ETF提交一次（确保提交机制工作）
+                # 每10个ETF提交一次
                 if processed_count % 10 == 0:
                     logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
-                    commit_final()
-                    logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
+                    # 尝试提交，但不阻断主流程
+                    try:
+                        from utils.git_utils import commit_final
+                        commit_final()
+                        logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
+                    except Exception as e:
+                        logger.error(f"提交文件时出错，继续执行: {str(e)}")
                 
                 # 记录进度
                 logger.info(f"进度: {processed_count}/{total_count} ({processed_count/total_count*100:.1f}%)")
@@ -335,7 +340,10 @@ if __name__ == "__main__":
     try:
         crawl_all_etfs_daily_data()
     finally:
-        # 【关键修改】确保所有文件都被提交
-        from utils.git_utils import commit_final
-        commit_final()
-        logger.info("所有ETF日线数据文件已提交到Git仓库")
+        # 尝试提交剩余文件，但不阻断主流程
+        try:
+            from utils.git_utils import commit_final
+            commit_final()
+            logger.info("所有ETF日线数据文件已提交到Git仓库")
+        except Exception as e:
+            logger.error(f"提交文件时出错: {str(e)}")

@@ -217,8 +217,9 @@ def crawl_all_etfs_daily_data() -> None:
         batch_size = Config.CRAWL_BATCH_SIZE
         num_batches = (len(etf_codes) + batch_size - 1) // batch_size
         
-        # 初始化一个列表来跟踪需要提交的文件
-        files_to_commit = []
+        # 初始化一个计数器来跟踪已处理的ETF数量
+        processed_count = 0
+        total_count = len(etf_codes)
         
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
@@ -289,6 +290,18 @@ def crawl_all_etfs_daily_data() -> None:
                 
                 # 限制请求频率
                 time.sleep(1)
+                
+                # 更新处理计数器
+                processed_count += 1
+                
+                # 每10个ETF提交一次（确保提交机制工作）
+                if processed_count % 10 == 0:
+                    logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
+                    commit_final()
+                    logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
+                
+                # 记录进度
+                logger.info(f"进度: {processed_count}/{total_count} ({processed_count/total_count*100:.1f}%)")
             
             # 批次间暂停
             if batch_idx < num_batches - 1:

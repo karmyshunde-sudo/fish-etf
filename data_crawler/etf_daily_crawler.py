@@ -317,3 +317,12 @@ def get_all_etf_codes() -> list:
     except Exception as e:
         logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
         return []
+
+if __name__ == "__main__":
+    try:
+        crawl_all_etfs_daily_data()
+    finally:
+        # 【关键修改】确保所有文件都被提交
+        from utils.git_utils import commit_final
+        commit_final()
+        logger.info("所有ETF日线数据文件已提交到Git仓库")

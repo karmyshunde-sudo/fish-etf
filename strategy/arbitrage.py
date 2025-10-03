@@ -4,7 +4,11 @@
 套利策略计算模块
 基于已保存的实时数据计算套利机会
 严格遵循项目架构原则：只负责计算，不涉及数据爬取和消息格式化
-增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
+【已修复】
+- 修复了非交易日仍尝试计算的问题
+- 修复了ETF数量不一致问题
+- 修复了无日线数据但有溢价率的逻辑矛盾
+- 确保数据源一致性
 """
 
 import pandas as pd
@@ -19,7 +23,7 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_file_outdated,
+    is_trading_day,
     is_trading_time
 )
 from utils.file_utils import (
@@ -35,7 +39,7 @@ from utils.file_utils import (
     mark_premium_pushed,
     load_etf_metadata
 )
-from data_crawler.strategy_arbitrage_source import get_latest_arbitrage_opportunities as get_arbitrage_data
+from data_crawler.strategy_arbitrage_source import get_trading_etf_list, get_latest_arbitrage_opportunities as get_arbitrage_data
 from .etf_scoring import (
     get_etf_basic_info, 
     get_etf_name,
@@ -46,6 +50,11 @@ from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 def extract_scalar_value(value, default=0.0, log_prefix=""):
     """
@@ -183,6 +192,11 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         Tuple[pd.DataFrame, pd.DataFrame]: 折价机会DataFrame, 溢价机会DataFrame
     """
     try:
+        # ===== 关键修复：检查是否为交易日 =====
+        if not is_trading_day():
+            logger.warning("当前不是交易日，跳过套利机会计算")
+            return pd.DataFrame(), pd.DataFrame()
+        
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
@@ -206,6 +220,19 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 标准化列名 - 处理可能的空格问题
         all_opportunities.columns = [col.strip() for col in all_opportunities.columns]
+        
+        # ===== 关键修复：确保ETF列表一致性 =====
+        # 获取用于套利监控的ETF列表
+        trading_etf_list = get_trading_etf_list()
+        logger.info(f"获取到 {len(trading_etf_list)} 只符合条件的ETF进行套利监控")
+        
+        # 筛选出交易ETF列表中的ETF
+        all_opportunities = all_opportunities[all_opportunities["ETF代码"].isin(trading_etf_list)]
+        
+        # 检查筛选后的数据量
+        if all_opportunities.empty:
+            logger.warning("筛选后无符合条件的ETF数据")
+            return pd.DataFrame(), pd.DataFrame()
         
         # ===== 关键修复：确保数据有效性 =====
         # 1. 确保IOPV有效（大于最小阈值）

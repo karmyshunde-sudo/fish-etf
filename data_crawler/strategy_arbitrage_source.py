@@ -5,6 +5,11 @@
 负责爬取ETF实时市场价格和IOPV(基金份额参考净值)
 数据保存格式: data/arbitrage/YYYYMMDD.csv
 增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
+【已修复】
+- 修复了非交易日仍尝试爬取数据的问题
+- 修复了ETF数量不一致问题
+- 修复了无日线数据但有溢价率的逻辑矛盾
+- 确保数据源一致性
 """
 
 import pandas as pd
@@ -23,6 +28,11 @@ from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     """
@@ -151,6 +161,44 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
         logger.error(f"增量保存套利数据失败: {str(e)}", exc_info=True)
         return ""
 
+def get_trading_etf_list() -> List[str]:
+    """
+    获取用于套利监控的ETF列表（统一数据源）
+    
+    Returns:
+        List[str]: ETF代码列表
+    """
+    try:
+        # 获取基础ETF列表
+        etf_codes = get_all_etf_codes()
+        if not etf_codes:
+            logger.error("无法获取ETF代码列表")
+            return []
+        
+        # 创建ETF列表DataFrame
+        etf_list = pd.DataFrame({
+            "ETF代码": etf_codes,
+            "ETF名称": [get_etf_name(code) for code in etf_codes]
+        })
+        
+        # 确保ETF代码是字符串类型
+        etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
+        
+        # 筛选基础条件：规模、非货币ETF
+        etf_list = etf_list[
+            (~etf_list["ETF代码"].str.startswith("511")) &  # 排除货币ETF
+            (etf_list["ETF代码"].str.len() == 6)  # 确保代码长度为6位
+        ].copy()
+        
+        # 确保唯一性
+        etf_list = etf_list.drop_duplicates(subset=["ETF代码"])
+        
+        logger.info(f"筛选后用于套利监控的ETF数量: {len(etf_list)}")
+        return etf_list["ETF代码"].tolist()
+    except Exception as e:
+        logger.error(f"获取交易ETF列表失败: {str(e)}", exc_info=True)
+        return []
+
 def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     """
     爬取所有ETF的实时市场价格和IOPV数据
@@ -165,7 +213,8 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         
         # 检查是否为交易日
         if not is_trading_day():
-            logger.warning("当前不是交易日")
+            logger.warning("当前不是交易日，跳过套利数据爬取")
+            return pd.DataFrame()
         
         # 检查是否为交易时间
         current_time = beijing_time.time()
@@ -173,15 +222,16 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
         
         if not (trading_start <= current_time <= trading_end):
-            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})")
-        
-        # 获取需要监控的ETF列表
-        etf_codes = get_all_etf_codes()
-        logger.info(f"获取到 {len(etf_codes)} 只符合条件的ETF进行套利监控")
-        
-        if not etf_codes:
-            logger.warning("无符合条件的ETF，跳过套利数据爬取")
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
             return pd.DataFrame()
+        
+        # 获取需要监控的ETF列表（统一数据源）
+        etf_codes = get_trading_etf_list()
+        if not etf_codes:
+            logger.error("无法获取有效的ETF代码列表")
+            return pd.DataFrame()
+        
+        logger.info(f"获取到 {len(etf_codes)} 只符合条件的ETF进行套利监控")
         
         # 爬取数据 - 使用单个API调用获取所有数据
         df = ak.fund_etf_spot_em()
@@ -217,11 +267,11 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         available_columns = [col for col in column_mapping.keys() if col in df.columns]
         df = df[available_columns].rename(columns=column_mapping).copy(deep=True)
         
+        # 确保ETF代码是字符串类型
+        df["ETF代码"] = df["ETF代码"].astype(str)
+        
         # 添加计算时间
         df.loc[:, '计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 修复：移除所有计算逻辑，只返回原始数据
-        # 不再计算折溢价率，这部分逻辑应该在策略层处理
         
         logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
         return df
@@ -256,6 +306,11 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
         
         # 读取数据并创建副本
         df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
+        
+        # 确保ETF代码是字符串类型
+        if "ETF代码" in df.columns:
+            df["ETF代码"] = df["ETF代码"].astype(str)
+        
         logger.debug(f"成功加载套利数据: {file_path} (共{len(df)}条记录)")
         return df
     
@@ -275,12 +330,26 @@ def crawl_arbitrage_data() -> str:
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
+        # 检查是否为交易日和交易时间
+        if not is_trading_day():
+            logger.warning("当前不是交易日，跳过套利数据爬取")
+            return ""
+        
+        # 检查是否为交易时间
+        current_time = beijing_time.time()
+        trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
+        trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
+        
+        if not (trading_start <= current_time <= trading_end):
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
+            return ""
+        
         # 爬取数据
         df = fetch_arbitrage_realtime_data()
         
         # 详细检查爬取结果
         if df.empty:
-            logger.error("未获取到有效的套利数据，爬取结果为空")
+            logger.warning("未获取到有效的套利数据，爬取结果为空")
             return ""
         else:
             logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
@@ -300,6 +369,11 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         pd.DataFrame: 原始套利数据，不做任何筛选和排序
     """
     try:
+        # 检查是否为交易日
+        if not is_trading_day():
+            logger.warning("当前不是交易日，跳过获取套利机会")
+            return pd.DataFrame()
+        
         # 尝试加载今天的套利数据
         today = get_beijing_time().strftime("%Y%m%d")
         df = load_arbitrage_data(today)
@@ -329,8 +403,11 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 修复：不再检查"折溢价率"列，因为数据源可能不提供该列
-        # 只检查必要列是否存在
+        # 确保ETF代码是字符串类型
+        if "ETF代码" in df.columns:
+            df["ETF代码"] = df["ETF代码"].astype(str)
+        
+        # 检查必要列
         required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
@@ -340,7 +417,10 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.debug(f"实际列名: {list(df.columns)}")
             return pd.DataFrame()
         
-        # 修复：不再进行筛选和排序，只返回原始数据
+        # 确保数据质量
+        df = df.dropna(subset=["ETF代码", "ETF名称", "市场价格", "IOPV"])
+        
+        # 记录最终数据量
         logger.info(f"成功加载 {len(df)} 条原始套利数据")
         return df
     
@@ -405,7 +485,6 @@ except Exception as e:
     
     try:
         # 退回到基础日志配置
-        import logging
         logging.basicConfig(
             level="INFO",
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

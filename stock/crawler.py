@@ -14,6 +14,7 @@ import random
 import json
 from datetime import datetime, timedelta
 from config import Config
+from utils.date_utils import is_trading_day  # 添加交易日检查
 # 只需导入Git工具模块
 from utils.git_utils import commit_files_in_batches
 
@@ -272,11 +273,30 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 existing_data = None
                 last_date = None
         
-        # 【关键修复】确定爬取的起始日期
+        # ===== 关键修复：交易日检查 =====
+        # 1. 确保只在交易日进行爬取
+        if not is_trading_day():
+            logger.warning("当前不是交易日，跳过股票数据爬取")
+            return pd.DataFrame()
+        
+        # 2. 确定正确的起始日期（跳过非交易日）
         if last_date is not None:
-            # 从最后日期的第二天开始爬取
-            start_date = (last_date + timedelta(days=1)).strftime("%Y%m%d")
-            logger.info(f"股票 {stock_code} 增量爬取，从 {last_date.strftime('%Y-%m-%d')} 后开始")
+            # 查找下一个交易日
+            current_date = last_date + timedelta(days=1)
+            start_date = None
+            
+            # 最多查找30天，避免无限循环
+            for i in range(30):
+                if is_trading_day(current_date):
+                    start_date = current_date.strftime("%Y%m%d")
+                    break
+                current_date += timedelta(days=1)
+            
+            if not start_date:
+                logger.warning(f"无法找到股票 {stock_code} 的下一个交易日，跳过爬取")
+                return pd.DataFrame()
+                
+            logger.info(f"股票 {stock_code} 增量爬取，从 {current_date.strftime('%Y-%m-%d')} 开始")
         else:
             # 没有本地数据，爬取最近一年的数据
             start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")

@@ -441,13 +441,13 @@ def update_all_stocks_daily_data():
     
     # 【关键修复】确定要爬取的股票范围
     start_idx = next_index
-    end_idx = min(next_index + 150, total_stocks)
+    end_idx = min(next_index + 100, total_stocks)
     
     # 如果已经爬取完所有股票，重置索引
     if start_idx >= total_stocks:
         logger.info("已爬取完所有股票，重置爬取状态")
         start_idx = 0
-        end_idx = min(150, total_stocks)
+        end_idx = min(100, total_stocks)
     
     # 获取要爬取的股票
     batch_df = basic_info_df.iloc[start_idx:end_idx]
@@ -457,7 +457,7 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
-    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
+    logger.info(f"正在处理第 {start_idx//100 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
     
     # 记录第一批和最后一批股票
     first_stock = batch_df.iloc[0]
@@ -518,7 +518,7 @@ def main():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 3. 只更新一批股票（最多150只）
+    # 3. 只更新一批股票（最多100只）
     if update_all_stocks_daily_data():
         logger.info("已成功处理一批股票数据")
     else:

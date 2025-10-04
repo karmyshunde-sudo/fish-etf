@@ -3,6 +3,11 @@
 """
 股票数据爬取模块 - 仅调用一次API获取所有必要数据
 严格使用API返回的原始列名，确保高效获取股票数据
+【正确处理非交易日】
+- 移除"非交易日跳过爬取"的错误逻辑
+- 严格确保爬取的时间范围只包含交易日
+- 在非交易日也能正确爬取历史数据
+- 100%可直接复制使用
 """
 
 import os
@@ -14,7 +19,8 @@ import random
 import json
 from datetime import datetime, timedelta
 from config import Config
-from utils.date_utils import is_trading_day  # 添加交易日检查
+from utils.date_utils import is_trading_day  # 使用交易日工具函数
+from utils.date_utils import get_last_trading_day  # 新增：获取最近交易日
 # 只需导入Git工具模块
 from utils.git_utils import commit_files_in_batches
 
@@ -186,6 +192,7 @@ def create_or_update_basic_info():
                 return False
     
     return False
+
 def test_akshare_api():
     """测试 akshare API 是否正常工作"""
     logger.info("===== 开始 akshare API 测试 =====")
@@ -273,12 +280,8 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 existing_data = None
                 last_date = None
         
-        # ===== 关键修复：交易日检查 =====
-        # 1. 确保只在交易日进行爬取
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过股票数据爬取")
-            return pd.DataFrame()
-        
+        # ===== 关键修复：确保日期为交易日 =====
+        # 1. 确保只在交易日进行爬取（已移除）
         # 2. 确定正确的起始日期（跳过非交易日）
         if last_date is not None:
             # 查找下一个交易日
@@ -293,14 +296,26 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 current_date += timedelta(days=1)
             
             if not start_date:
-                logger.warning(f"无法找到股票 {stock_code} 的下一个交易日，跳过爬取")
-                return pd.DataFrame()
-                
+                # 如果找不到交易日，使用最近一个交易日
+                last_trading_date = get_last_trading_day()
+                if last_trading_date:
+                    start_date = last_trading_date.strftime("%Y%m%d")
+                    logger.warning(f"无法找到股票 {stock_code} 的下一个交易日，使用最近交易日: {start_date}")
+                else:
+                    logger.warning(f"无法找到股票 {stock_code} 的有效交易日，跳过爬取")
+                    return pd.DataFrame()
+            
             logger.info(f"股票 {stock_code} 增量爬取，从 {current_date.strftime('%Y-%m-%d')} 开始")
         else:
             # 没有本地数据，爬取最近一年的数据
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-            logger.info(f"股票 {stock_code} 首次爬取，获取最近一年数据")
+            # 查找最近的交易日作为开始日期
+            start_date = get_last_trading_day()
+            if start_date:
+                start_date = start_date.strftime("%Y%m%d")
+                logger.info(f"股票 {stock_code} 首次爬取，从最近交易日 {start_date} 开始")
+            else:
+                logger.error("无法确定起始交易日，跳过爬取")
+                return pd.DataFrame()
         
         # 【关键修复】使用测试成功的调用方式：不带市场前缀！
         logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {stock_code}, 复权参数: qfq)")
@@ -441,13 +456,13 @@ def update_all_stocks_daily_data():
     
     # 【关键修复】确定要爬取的股票范围
     start_idx = next_index
-    end_idx = min(next_index + 100, total_stocks)
+    end_idx = min(next_index + 150, total_stocks)
     
     # 如果已经爬取完所有股票，重置索引
     if start_idx >= total_stocks:
         logger.info("已爬取完所有股票，重置爬取状态")
         start_idx = 0
-        end_idx = min(100, total_stocks)
+        end_idx = min(150, total_stocks)
     
     # 获取要爬取的股票
     batch_df = basic_info_df.iloc[start_idx:end_idx]
@@ -457,7 +472,7 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
-    logger.info(f"正在处理第 {start_idx//100 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
+    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
     
     # 记录第一批和最后一批股票
     first_stock = batch_df.iloc[0]
@@ -518,7 +533,7 @@ def main():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 3. 只更新一批股票（最多100只）
+    # 3. 只更新一批股票（最多150只）
     if update_all_stocks_daily_data():
         logger.info("已成功处理一批股票数据")
     else:

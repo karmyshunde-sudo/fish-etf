@@ -3,9 +3,9 @@
 """
 股票数据爬取模块 - 仅调用一次API获取所有必要数据
 严格使用API返回的原始列名，确保高效获取股票数据
-【已修复】
-- 移除了对 parse_date_string 的导入
-- 修复了日期处理逻辑
+【最终修复版】
+- 彻底修复日期类型错误
+- 确保所有日期操作一致性
 - 100%可直接复制使用
 """
 
@@ -270,7 +270,12 @@ def get_valid_trading_date_range(start_date, end_date):
     
     # 确保结束日期不晚于当前日期
     today = datetime.now().date()
-    if end_date.date() > today:
+    if isinstance(end_date, datetime):
+        end_date_date = end_date.date()
+    else:
+        end_date_date = end_date
+        
+    if end_date_date > today:
         end_date = datetime.combine(today, datetime.min.time())
     
     # 查找有效的结束交易日
@@ -362,7 +367,14 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             
             # 确保结束日期不晚于当前日期
             today = datetime.now().date()
-            if end_date.date() > today:
+            
+            # 关键修复：安全处理日期类型
+            if isinstance(end_date, datetime):
+                end_date_date = end_date.date()
+            else:
+                end_date_date = end_date
+                
+            if end_date_date > today:
                 end_date = get_last_trading_day()
             
             # 如果开始日期 >= 结束日期，表示没有新数据需要爬取

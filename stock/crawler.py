@@ -4,8 +4,9 @@
 股票数据爬取模块 - 仅调用一次API获取所有必要数据
 严格使用API返回的原始列名，确保高效获取股票数据
 【最终修复版】
-- 严格确保只处理历史交易日，永不查找未来日期
-- 正确处理国庆假期等特殊假期场景
+- 严格确保只处理历史交易日
+- 修复增量爬取逻辑，正确判断是否有新数据
+- 当没有新数据时不再尝试爬取
 - 100%可直接复制使用
 """
 
@@ -273,7 +274,7 @@ def get_valid_trading_date_range(start_date, end_date):
     if end_date.date() > today:
         end_date = datetime.combine(today, datetime.min.time())
     
-    # 查找有效的结束交易日（向后查找）
+    # 查找有效的结束交易日
     valid_end_date = end_date
     days_back = 0
     while days_back < 30:  # 最多查找30天
@@ -337,35 +338,58 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 1. 确定爬取的日期范围
         if last_date is not None:
             # 查找下一个交易日作为起始点
-            start_date = last_date + timedelta(days=1)
-            end_date = datetime.now()
+            current_date = last_date + timedelta(days=1)
+            start_date = None
             
-            # 获取有效的交易日范围
-            valid_start_date, valid_end_date = get_valid_trading_date_range(start_date, end_date)
+            # 最多查找30天，避免无限循环
+            for i in range(30):
+                if is_trading_day(current_date):
+                    start_date = current_date
+                    break
+                current_date += timedelta(days=1)
             
-            if valid_start_date is None or valid_end_date is None:
-                logger.warning(f"股票 {stock_code} 无法确定有效的交易日范围")
+            if not start_date:
+                logger.warning(f"无法找到股票 {stock_code} 的下一个交易日")
                 return pd.DataFrame()
-                
-            start_date_str = valid_start_date.strftime("%Y%m%d")
-            end_date_str = valid_end_date.strftime("%Y%m%d")
             
+            # 获取当前日期前的最近一个交易日作为结束日期
+            end_date = get_last_trading_day()
+            
+            # 确保结束日期不晚于当前日期
+            if end_date.date() > datetime.now().date():
+                end_date = get_last_trading_day()
+            
+            # 如果开始日期 >= 结束日期，表示没有新数据需要爬取
+            if start_date >= end_date:
+                logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
+                return pd.DataFrame()
+            
+            start_date_str = start_date.strftime("%Y%m%d")
+            end_date_str = end_date.strftime("%Y%m%d")
             logger.info(f"股票 {stock_code} 增量爬取，从 {start_date_str} 到 {end_date_str}")
         else:
             # 没有本地数据，爬取最近一年的数据
             start_date = datetime.now() - timedelta(days=365)
-            end_date = datetime.now()
+            end_date = get_last_trading_day()
             
-            # 获取有效的交易日范围
-            valid_start_date, valid_end_date = get_valid_trading_date_range(start_date, end_date)
+            # 确保开始日期是交易日
+            current_date = start_date
+            start_date = None
+            for i in range(30):
+                if is_trading_day(current_date):
+                    start_date = current_date
+                    break
+                current_date += timedelta(days=1)
             
-            if valid_start_date is None or valid_end_date is None:
-                logger.warning(f"股票 {stock_code} 无法确定有效的交易日范围")
-                return pd.DataFrame()
-                
-            start_date_str = valid_start_date.strftime("%Y%m%d")
-            end_date_str = valid_end_date.strftime("%Y%m%d")
+            if not start_date:
+                start_date = end_date
             
+            # 确保起始日期不晚于结束日期
+            if start_date > end_date:
+                start_date = end_date
+            
+            start_date_str = start_date.strftime("%Y%m%d")
+            end_date_str = end_date.strftime("%Y%m%d")
             logger.info(f"股票 {stock_code} 首次爬取，获取从 {start_date_str} 到 {end_date_str} 的数据")
         
         # 【关键修复】使用测试成功的调用方式：不带市场前缀！

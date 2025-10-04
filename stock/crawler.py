@@ -4,8 +4,8 @@
 股票数据爬取模块 - 仅调用一次API获取所有必要数据
 严格使用API返回的原始列名，确保高效获取股票数据
 【最终修复版】
-- 彻底修复日期类型错误
-- 确保所有日期操作一致性
+- 彻底修复日期类型不一致问题
+- 确保所有日期比较都使用相同类型
 - 100%可直接复制使用
 """
 
@@ -16,7 +16,7 @@ import akshare as ak
 import time
 import random
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day
 # 只需导入Git工具模块
@@ -377,8 +377,23 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             if end_date_date > today:
                 end_date = get_last_trading_day()
             
+            # ===== 关键修复：日期类型安全比较 =====
+            # 将两个日期都转换为datetime.date类型进行比较
+            def to_date(d):
+                if hasattr(d, 'date'):
+                    return d.date()
+                elif isinstance(d, str):
+                    return datetime.strptime(d, "%Y%m%d").date()
+                elif isinstance(d, datetime):
+                    return d.date()
+                else:
+                    return d
+            
+            start_date_date = to_date(start_date)
+            end_date_date = to_date(end_date)
+            
             # 如果开始日期 >= 结束日期，表示没有新数据需要爬取
-            if start_date >= end_date:
+            if start_date_date >= end_date_date:
                 logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
             

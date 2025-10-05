@@ -298,7 +298,7 @@ jobs:
       - name: 提交ETF列表数据变更
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
-          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          # git config user.name "GitHub Actions" && git config user.email "actions@github.com"
           git add data/all_etfs.csv && [ -n "$(git diff --cached --name-only data/all_etfs.csv)" ] && 
           git commit -m "自动更新ETF列表 [定时]" && git push origin main
       

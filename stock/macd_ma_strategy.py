@@ -128,11 +128,11 @@ def main():
             code = file.replace(".csv", "")
             try:
                 df = pd.read_csv(os.path.join(DATA_DIR, file))
-                if not {"日期", "股票代码", "收盘", "换手率"}.issubset(df.columns):
+                if not {"日期", "代码", "收盘", "换手率"}.issubset(df.columns):
                     continue
 
                 df = df.sort_values("日期").reset_index(drop=True)
-                name = df.iloc[-1]["股票代码"] if "股票代码" in df.columns else code
+                name = df.iloc[-1]["代码"] if "代码" in df.columns else code
                 signals = check_signals(df, code, name)
                 all_signals.extend(signals)
 

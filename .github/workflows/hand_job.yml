@@ -14,6 +14,7 @@ on:
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
           - 'calculate_position'
+          - 'stock_backtest'      #股票均线缠绕
 
 jobs:
   # ========================

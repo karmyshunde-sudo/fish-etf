@@ -583,3 +583,95 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+
+  # 股票回测任务（手动）
+  stock-backtest-manual:
+    name: 股票回测任务（手动）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_backtest'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H%M%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H%M%S' CST)"
+      
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{stock_backtest,logs,daily} && chmod -R 777 data
+      
+      - name: 执行股票回测任务（手动）
+        id: execute_task  # 添加ID以便后续步骤引用
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 使用STOCK_WEBHOOK
+          TZ: Asia/Shanghai
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/stock_backtest_${BEIJING_TIME}.log"
+          echo "正在执行: 股票回测任务（手动）"
+          echo "日志文件: $LOG_FILE"
+          
+          # 检查回测文件是否存在
+          if [ -f "stock/backtest.py" ]; then
+            echo "找到回测文件: stock/backtest.py"
+            python stock/backtest.py 2>&1 | tee "$LOG_FILE"
+            # 记录任务状态
+            if [ ${PIPESTATUS[0]} -eq 0 ]; then
+              echo "task_status=success" >> $GITHUB_OUTPUT
+            else
+              echo "task_status=failed" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "错误: 未找到股票回测文件 stock/backtest.py"
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: 提交回测结果
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/stock_backtest/
+          if [ -n "$(git diff --cached --name-only data/stock_backtest/)" ]; then
+            git commit -m "手动提交股票回测结果" && git push origin main
+          else
+            echo "股票回测结果没有变化，无需提交"
+          fi
+      
+      - name: 发送回测通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
+          EMOJI=${STATUS == 'success' && '✅' || '❌'}
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票回测任务（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 仅调用一次API获取所有必要数据
-严格使用API返回的原始列名，确保高效获取股票数据
+股票数据爬取模块 - 严格确保股票代码为6位格式
 【最终修复版】
-- 彻底修复日期类型不一致问题
+- 彻底修复股票代码格式问题，确保所有地方都保存为6位代码
 - 确保所有日期比较都使用相同类型
 - 100%可直接复制使用
 """
@@ -49,25 +48,49 @@ def ensure_directory_exists():
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)
 
+def format_stock_code(code):
+    """
+    规范化股票代码为6位字符串格式
+    Args:
+        code: 股票代码（可能包含前缀或非6位）
+    Returns:
+        str: 规范化的6位股票代码
+    """
+    # 转换为字符串
+    code_str = str(code).strip().lower()
+    
+    # 移除可能的市场前缀
+    if code_str.startswith(('sh', 'sz')):
+        code_str = code_str[2:]
+    
+    # 移除可能的数字前缀（如"0."）
+    if '.' in code_str:
+        code_str = code_str.split('.')[1]
+    
+    # 确保是6位数字
+    code_str = code_str.zfill(6)
+    
+    # 验证格式
+    if not code_str.isdigit() or len(code_str) != 6:
+        logger.warning(f"股票代码格式化失败: {code_str}")
+        return None
+    
+    return code_str
+
 def get_stock_section(stock_code: str) -> str:
     """
     获取股票所属板块
     
     Args:
-        stock_code: 股票代码（不带市场前缀）
+        stock_code: 股票代码（已格式化为6位）
     
     Returns:
         str: 板块名称
     """
-    # 确保股票代码是字符串
-    stock_code = str(stock_code).zfill(6)
-    
-    # 移除可能的市场前缀
-    if stock_code.lower().startswith(('sh', 'sz')):
-        stock_code = stock_code[2:]
-    
-    # 确保股票代码是6位数字
-    stock_code = stock_code.zfill(6)
+    # 确保股票代码是6位
+    stock_code = format_stock_code(stock_code)
+    if not stock_code:
+        return "格式错误"
     
     # 根据股票代码前缀判断板块
     if stock_code.startswith('60'):
@@ -118,13 +141,17 @@ def create_or_update_basic_info():
                         continue
                     return False
             
-            # 准备基础信息DataFrame - 严格使用API返回的原始列名
+            # 【关键修复】确保股票代码是6位
+            # 创建基础信息DataFrame - 严格使用API返回的原始列名
             basic_info_df = pd.DataFrame({
-                "代码": df['代码'],
+                "代码": df['代码'].apply(format_stock_code),  # 关键修复：格式化股票代码
                 "名称": df['名称'],
                 "所属板块": df['代码'].apply(get_stock_section),
                 "流通市值": df['流通市值']
             })
+            
+            # 移除无效代码
+            basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
             
             # 确保流通市值列是数值类型
             basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
@@ -138,35 +165,22 @@ def create_or_update_basic_info():
                 basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
                 logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
             
-            # 【关键修改】确保调用 tickten.py 中的筛选函数
-            logger.info("准备调用 tickten.py 中的筛选函数...")
-            try:
-                from stock.tickten import filter_valid_stocks
-                logger.info("成功导入 tickten.py 的 filter_valid_stocks 函数")
-                filtered_df = filter_valid_stocks(basic_info_df)
-                logger.info(f"调用 tickten.py 筛选函数后，剩余 {len(filtered_df)} 只有效股票（原 {len(basic_info_df)} 只）")
-            except ImportError as e:
-                logger.error(f"无法导入 tickten.py 的筛选函数: {str(e)}")
-                logger.warning("使用原始数据作为后备方案")
-                filtered_df = basic_info_df.copy()
-            except Exception as e:
-                logger.error(f"调用 tickten.py 筛选函数时发生异常: {str(e)}", exc_info=True)
-                logger.warning("使用原始数据作为后备方案")
-                filtered_df = basic_info_df.copy()
+            # 【关键修改】确保只保留有效股票
+            basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
             
             # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
-            filtered_df["next_crawl_index"] = 0
+            basic_info_df["next_crawl_index"] = 0
             
             # 保存基础信息
-            filtered_df.to_csv(BASIC_INFO_FILE, index=False)
-            logger.info(f"已创建/更新股票基础信息文件，共 {len(filtered_df)} 条记录")
+            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+            logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录")
             
             # 确认文件已保存
             if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
                 logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
                 
                 # 详细记录前5只股票（用于验证索引）
-                first_5 = filtered_df.head(5)
+                first_5 = basic_info_df.head(5)
                 for idx, row in first_5.iterrows():
                     logger.info(f"基础信息文件前5只股票[{idx}]: {row['代码']} - {row['名称']}")
                 
@@ -315,7 +329,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
     try:
         # 【关键修复】确保股票代码是6位（前面补零）
-        stock_code = str(stock_code).zfill(6)
+        stock_code = format_stock_code(stock_code)
+        if not stock_code:
+            logger.error(f"股票代码格式化失败: {stock_code}")
+            return pd.DataFrame()
         
         # 【关键修复】检查本地是否已有该股票的日线数据文件
         local_file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
@@ -518,7 +535,10 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
     
     try:
         # 【关键修复】确保股票代码是6位（前面补零）
-        stock_code = str(stock_code).zfill(6)
+        stock_code = format_stock_code(stock_code)
+        if not stock_code:
+            logger.error(f"无法保存：股票代码格式化失败")
+            return
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         df.to_csv(file_path, index=False)
@@ -547,6 +567,19 @@ def update_all_stocks_daily_data():
         if basic_info_df.empty:
             logger.error("基础信息文件为空，无法更新日线数据")
             return False
+        
+        # 【关键修复】确保"代码"列是6位格式
+        basic_info_df["代码"] = basic_info_df["代码"].apply(format_stock_code)
+        # 移除无效股票
+        basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
+        basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
+        basic_info_df = basic_info_df.reset_index(drop=True)
+        
+        # 保存更新后的基础信息文件
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        commit_files_in_batches(BASIC_INFO_FILE)
+        logger.info(f"已更新基础信息文件，确保所有股票代码为6位格式，共 {len(basic_info_df)} 条记录")
+        
     except Exception as e:
         logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
         return False
@@ -587,8 +620,10 @@ def update_all_stocks_daily_data():
     # 处理这批股票
     for stock_code in batch_codes:
         # 【关键修复】确保股票代码是6位
-        stock_code = str(stock_code).zfill(6)
-        
+        stock_code = format_stock_code(stock_code)
+        if not stock_code:
+            continue
+            
         # 添加随机延时，避免请求过于频繁
         time.sleep(random.uniform(1.5, 2.5))  # 增加延时，避免被限流
         df = fetch_stock_daily_data(stock_code)

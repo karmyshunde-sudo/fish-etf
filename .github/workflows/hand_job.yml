@@ -643,7 +643,8 @@ jobs:
           # 检查回测文件是否存在
           if [ -f "stock/backtest.py" ]; then
             echo "找到回测代码文件: stock/backtest.py"
-            python stock/backtest.py 2>&1 | tee "$LOG_FILE"
+            # ✅ 修复：使用 -m 模块导入方式
+            python -m stock.backtest 2>&1 | tee "$LOG_FILE"
             # 记录任务状态
             if [ ${PIPESTATUS[0]} -eq 0 ]; then
               echo "task_status=success" >> $GITHUB_OUTPUT

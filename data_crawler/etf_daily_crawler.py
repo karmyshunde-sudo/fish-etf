@@ -3,10 +3,10 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【修复版】
-- 彻底解决日期比较问题
-- 添加akshare库硬编码字典错误处理
-- 改进错误恢复机制
+【最终修复版】
+- 彻底解决服务器连接被断开问题
+- 添加智能请求频率控制
+- 实现防封策略
 """
 
 import akshare as ak
@@ -14,6 +14,7 @@ import pandas as pd
 import logging
 import os
 import time
+import random
 import tempfile
 import shutil
 from datetime import datetime, timedelta
@@ -36,33 +37,48 @@ def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.Da
     """
     使用AkShare爬取ETF日线数据
     """
+    # 关键修复：添加智能重试机制和请求频率控制
+    df = None
+    
     try:
-        # 1. 获取基础价格数据
-        # 关键修复：添加重试机制处理akshare的硬编码字典问题
-        max_retries = 3
+        # 智能重试机制
+        max_retries = 5  # 增加重试次数
         for retry in range(max_retries):
             try:
+                # 关键修复：添加随机延时，避免固定请求间隔
+                delay = 2.5 + random.uniform(0.5, 1.5)
+                logger.debug(f"ETF {etf_code} 等待 {delay:.2f} 秒后重试 ({retry+1}/{max_retries})")
+                time.sleep(delay)
+                
+                # 1. 获取基础价格数据
                 df = ak.fund_etf_hist_em(
                     symbol=etf_code,
                     period="daily",
                     start_date=start_date,
                     end_date=end_date
                 )
-                break
-            except KeyError as e:
-                # 关键修复：akshare内部硬编码字典问题处理
-                logger.warning(f"ETF {etf_code} 在akshare的硬编码字典中未找到，重试 {retry+1}/{max_retries}")
-                if retry == max_retries - 1:
-                    logger.error(f"ETF {etf_code} 在akshare的硬编码字典中未找到，跳过爬取")
-                    return pd.DataFrame()
-                time.sleep(2)
+                break  # 成功获取数据后跳出重试循环
             except Exception as e:
-                # 其他异常处理
-                if "Remote end closed connection" in str(e):
+                # 关键修复：处理各种服务器错误
+                if "Remote end closed connection" in str(e) or "Connection aborted" in str(e):
                     logger.warning(f"ETF {etf_code} 连接被服务器断开，重试 {retry+1}/{max_retries}")
+                    # 服务器拒绝连接，需要更长的延时
+                    time.sleep(3 * (retry + 1))
+                elif "KeyError" in str(e) or "not in dictionary" in str(e):
+                    logger.warning(f"ETF {etf_code} 在akshare的硬编码字典中未找到，重试 {retry+1}/{max_retries}")
                     time.sleep(2 * (retry + 1))
+                elif "429" in str(e):
+                    logger.warning(f"ETF {etf_code} 请求被限流，重试 {retry+1}/{max_retries}")
+                    time.sleep(5 * (retry + 1))
                 else:
-                    raise e
+                    logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
+                    # 直接返回空DataFrame，避免后续代码执行
+                    return pd.DataFrame()
+        
+        # 关键修复：确保df已定义
+        if df is None or df.empty:
+            logger.warning(f"ETF {etf_code} 基础数据为空")
+            return pd.DataFrame()
         
         # 2. 检查基础数据
         if df.empty:
@@ -145,7 +161,6 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
                 start_date = next_trading_day.strftime("%Y%m%d")
                 
                 # 关键修复：确保日期比较基于相同类型
-                # 将字符串转换为日期对象进行比较
                 start_date_obj = datetime.strptime(start_date, "%Y%m%d").date()
                 end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
                 
@@ -252,6 +267,10 @@ def crawl_all_etfs_daily_data() -> None:
         processed_count = 0
         total_count = len(etf_codes)
         
+        # 关键修复：添加全局请求频率控制
+        last_request_time = datetime.now()
+        min_interval = 3.0  # 最小请求间隔(秒)
+        
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, len(etf_codes))
@@ -267,6 +286,14 @@ def crawl_all_etfs_daily_data() -> None:
                 if start_date is None or end_date is None:
                     logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
                     continue
+                
+                # 关键修复：请求频率控制
+                current_time = datetime.now()
+                elapsed = (current_time - last_request_time).total_seconds()
+                if elapsed < min_interval:
+                    wait_time = min_interval - elapsed + random.uniform(0.5, 1.0)
+                    logger.debug(f"请求频率控制：等待 {wait_time:.2f} 秒")
+                    time.sleep(wait_time)
                 
                 # 爬取数据
                 logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
@@ -319,8 +346,8 @@ def crawl_all_etfs_daily_data() -> None:
                 with open(completed_file, "a", encoding="utf-8") as f:
                     f.write(f"{etf_code}\n")
                 
-                # 限制请求频率
-                time.sleep(1)
+                # 更新最后请求时间
+                last_request_time = datetime.now()
                 
                 # 更新处理计数器
                 processed_count += 1
@@ -341,8 +368,8 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 批次间暂停
             if batch_idx < num_batches - 1:
-                batch_pause_seconds = 2
-                logger.info(f"批次处理完成，暂停 {batch_pause_seconds} 秒...")
+                batch_pause_seconds = 5 + random.uniform(2, 3)
+                logger.info(f"批次处理完成，暂停 {batch_pause_seconds:.1f} 秒...")
                 time.sleep(batch_pause_seconds)
     
     except Exception as e:

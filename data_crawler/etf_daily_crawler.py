@@ -3,6 +3,10 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
+【修复版】
+- 彻底解决日期比较问题
+- 添加akshare库硬编码字典错误处理
+- 改进错误恢复机制
 """
 
 import akshare as ak
@@ -34,12 +38,31 @@ def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.Da
     """
     try:
         # 1. 获取基础价格数据
-        df = ak.fund_etf_hist_em(
-            symbol=etf_code,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date
-        )
+        # 关键修复：添加重试机制处理akshare的硬编码字典问题
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                df = ak.fund_etf_hist_em(
+                    symbol=etf_code,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                break
+            except KeyError as e:
+                # 关键修复：akshare内部硬编码字典问题处理
+                logger.warning(f"ETF {etf_code} 在akshare的硬编码字典中未找到，重试 {retry+1}/{max_retries}")
+                if retry == max_retries - 1:
+                    logger.error(f"ETF {etf_code} 在akshare的硬编码字典中未找到，跳过爬取")
+                    return pd.DataFrame()
+                time.sleep(2)
+            except Exception as e:
+                # 其他异常处理
+                if "Remote end closed connection" in str(e):
+                    logger.warning(f"ETF {etf_code} 连接被服务器断开，重试 {retry+1}/{max_retries}")
+                    time.sleep(2 * (retry + 1))
+                else:
+                    raise e
         
         # 2. 检查基础数据
         if df.empty:
@@ -47,12 +70,15 @@ def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.Da
             return pd.DataFrame()
         
         # 3. 获取折价率
-        fund_df = ak.fund_etf_fund_daily_em()
-        if not fund_df.empty and "基金代码" in fund_df.columns and "折价率" in fund_df.columns:
-            etf_fund_data = fund_df[fund_df["基金代码"] == etf_code]
-            if not etf_fund_data.empty:
-                # 从fund_df提取折价率
-                df["折价率"] = etf_fund_data["折价率"].values[0]
+        try:
+            fund_df = ak.fund_etf_fund_daily_em()
+            if not fund_df.empty and "基金代码" in fund_df.columns and "折价率" in fund_df.columns:
+                etf_fund_data = fund_df[fund_df["基金代码"] == etf_code]
+                if not etf_fund_data.empty:
+                    # 从fund_df提取折价率
+                    df["折价率"] = etf_fund_data["折价率"].values[0]
+        except Exception as e:
+            logger.warning(f"获取ETF {etf_code} 折价率数据失败: {str(e)}")
         
         # 4. 补充ETF基本信息
         df["ETF代码"] = etf_code
@@ -118,14 +144,19 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
                 
                 start_date = next_trading_day.strftime("%Y%m%d")
                 
+                # 关键修复：确保日期比较基于相同类型
+                # 将字符串转换为日期对象进行比较
+                start_date_obj = datetime.strptime(start_date, "%Y%m%d").date()
+                end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
+                
                 # 如果起始日期晚于结束日期，说明数据已经是最新
-                if start_date > end_date:
+                if start_date_obj > end_date_obj:
                     logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
                     return None, None
                 
                 # 确保不超过一年
                 one_year_ago = last_trading_day - timedelta(days=365)
-                if datetime.strptime(start_date, "%Y%m%d").date() < one_year_ago:
+                if start_date_obj < one_year_ago:
                     logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago.strftime('%Y%m%d')}开始")
                     start_date = one_year_ago.strftime("%Y%m%d")
             except Exception as e:
@@ -231,7 +262,7 @@ def crawl_all_etfs_daily_data() -> None:
             for etf_code in batch_codes:
                 etf_name = get_etf_name(etf_code)
                 
-                # 获取增量日期范围（关键修改：从数据文件"日期"列获取最新日期）
+                # 获取增量日期范围
                 start_date, end_date = get_incremental_date_range(etf_code)
                 if start_date is None or end_date is None:
                     logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")

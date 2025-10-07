@@ -144,7 +144,7 @@ def run_backtest():
                 df = pd.read_csv(file_path)
                 
                 # 检查必要列（修复列名不一致问题）
-                if not {"日期", "代码", "收盘", "换手率"}.issubset(df.columns):
+                if not {"日期", "股票代码", "收盘", "换手率"}.issubset(df.columns):
                     logger.warning(f"文件 {file} 缺少必要列，跳过回测")
                     invalid_count += 1
                     continue

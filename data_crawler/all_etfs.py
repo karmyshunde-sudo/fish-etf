@@ -84,10 +84,10 @@ def update_all_etf_list() -> pd.DataFrame:
             # 排除货币ETF（如果配置中设置）
             if exclude_money_etfs and "ETF代码" in etf_list.columns:
                 original_count = len(etf_list)
-                money_etf_mask = etf_list["ETF代码"].str.startswith("511") | etf_list["ETF代码"].str.startswith("510")
+                money_etf_mask = etf_list["ETF代码"].str.startswith("511")
                 etf_list = etf_list[~money_etf_mask].copy()
                 filtered_count = len(etf_list)
-                logger.info(f"排除货币ETF: {original_count} → {filtered_count} (511/510开头)")
+                logger.info(f"排除货币ETF: {original_count} → {filtered_count} (511开头)")
         except Exception as e:
             logger.warning(f"ETF过滤配置加载失败，跳过过滤: {str(e)}")
         

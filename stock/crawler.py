@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 严格确保股票代码为6位格式
+股票数据爬取模块 - 严格确保股票代码为6位格式，日期处理逻辑完善
 【最终修复版】
 - 彻底修复股票代码格式问题，确保所有地方都保存为6位代码
-- 确保所有日期比较都使用相同类型
+- 彻底修复日期类型问题，确保所有日期比较都使用相同类型
+- 严格确保结束日期不晚于当前时间，不处理未来日期
 - 100%可直接复制使用
 """
 
@@ -104,166 +105,28 @@ def get_stock_section(stock_code: str) -> str:
     else:
         return "其他板块"
 
-def create_or_update_basic_info():
-    """创建或更新股票基础信息文件，仅调用一次API"""
-    ensure_directory_exists()
-    
-    # 添加随机延时，避免请求过于频繁
-    time.sleep(random.uniform(2.0, 3.0))  # 增加延时
-    
-    # 【关键修改】添加重试机制
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"尝试第 {attempt + 1} 次获取股票列表...")
-            
-            # 正确调用 stock_zh_a_spot_em 获取所有必要数据
-            df = ak.stock_zh_a_spot_em()
-            
-            # 检查返回结果
-            if df.empty:
-                logger.error("获取股票列表失败：返回为空")
-                if attempt < max_retries - 1:
-                    time.sleep(random.uniform(5.0, 10.0))  # 失败后等待更长时间
-                    continue
-                return False
-            
-            # 打印API返回的列名，用于调试
-            logger.info(f"API返回的列名: {df.columns.tolist()}")
-            
-            # 确保必要列存在
-            required_columns = ['代码', '名称', '流通市值']
-            for col in required_columns:
-                if col not in df.columns:
-                    logger.error(f"获取股票列表失败: 缺少必要列 {col}")
-                    if attempt < max_retries - 1:
-                        time.sleep(random.uniform(5.0, 10.0))
-                        continue
-                    return False
-            
-            # 【关键修复】确保股票代码是6位
-            # 创建基础信息DataFrame - 严格使用API返回的原始列名
-            basic_info_df = pd.DataFrame({
-                "代码": df['代码'].apply(format_stock_code),  # 关键修复：格式化股票代码
-                "名称": df['名称'],
-                "所属板块": df['代码'].apply(get_stock_section),
-                "流通市值": df['流通市值']
-            })
-            
-            # 移除无效代码
-            basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
-            
-            # 确保流通市值列是数值类型
-            basic_info_df["流通市值"] = pd.to_numeric(basic_info_df["流通市值"], errors='coerce').fillna(0)
-            
-            # 保留无市值股票，但标记它们
-            invalid_mask = (basic_info_df["流通市值"] <= 0) | basic_info_df["流通市值"].isna()
-            invalid_count = invalid_mask.sum()
-            
-            if invalid_count > 0:
-                basic_info_df["数据状态"] = '正常'
-                basic_info_df.loc[invalid_mask, "数据状态"] = '流通市值缺失'
-                logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
-            
-            # 【关键修改】确保只保留有效股票
-            basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
-            
-            # 【关键修改】添加 next_crawl_index 列 - 作为数值索引
-            basic_info_df["next_crawl_index"] = 0
-            
-            # 保存基础信息
-            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            logger.info(f"已创建/更新股票基础信息文件，共 {len(basic_info_df)} 条记录")
-            
-            # 确认文件已保存
-            if os.path.exists(BASIC_INFO_FILE) and os.path.getsize(BASIC_INFO_FILE) > 0:
-                logger.info(f"基础信息文件已成功保存到: {BASIC_INFO_FILE}")
-                
-                # 详细记录前5只股票（用于验证索引）
-                first_5 = basic_info_df.head(5)
-                for idx, row in first_5.iterrows():
-                    logger.info(f"基础信息文件前5只股票[{idx}]: {row['代码']} - {row['名称']}")
-                
-                # 【关键修改】提交基础信息文件到仓库
-                commit_files_in_batches(BASIC_INFO_FILE)
-                logger.info(f"已提交基础信息文件到仓库: {BASIC_INFO_FILE}")
-                
-                return True
-            else:
-                logger.error(f"基础信息文件保存失败: {BASIC_INFO_FILE} 不存在或为空")
-                return False
-                
-        except Exception as e:
-            logger.error(f"第 {attempt + 1} 次尝试创建基础信息文件失败: {str(e)}", exc_info=True)
-            if attempt < max_retries - 1:
-                wait_time = random.uniform(10.0, 20.0)  # 增加等待时间
-                logger.info(f"等待 {wait_time:.1f} 秒后进行第 {attempt + 2} 次重试...")
-                time.sleep(wait_time)
-            else:
-                logger.error("所有重试都失败，无法创建基础信息文件")
-                return False
-    
-    return False
-
-def test_akshare_api():
-    """测试 akshare API 是否正常工作"""
-    logger.info("===== 开始 akshare API 测试 =====")
-    logger.info(f"akshare 版本: {ak.__version__}")
-    logger.info(f"akshare 模块路径: {ak.__file__}")
-    
-    # 【关键修改】只测试成功的方法：不带市场前缀的股票代码
-    test_stocks = [
-        ("600000", "浦发银行"),  # 沪市主板
-        ("000001", "平安银行"),  # 深市主板
-        ("300001", "特锐德"),    # 创业板
-        ("688001", "华兴源创")   # 科创板
-    ]
-    
-    successful_tests = 0
-    test_results = []
-    
-    for stock_code, name in test_stocks:
-        try:
-            logger.info(f"--- 测试股票 {stock_code} ({name}) ---")
-            
-            # 【关键修改】使用测试成功的参数
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,      # 不带市场前缀！
-                period="daily",
-                start_date=(datetime.now() - timedelta(days=5)).strftime("%Y%m%d"),
-                end_date=datetime.now().strftime("%Y%m%d"),
-                adjust="qfq"
-            )
-            
-            if df is not None and not df.empty:
-                logger.info(f"  ✓ 成功获取 {len(df)} 条数据")
-                logger.debug(f"  数据列名: {list(df.columns)}")
-                successful_tests += 1
-                test_results.append(True)
-            else:
-                logger.warning(f"  ✗ 返回空数据")
-                test_results.append(False)
-                
-        except Exception as e:
-            logger.error(f"  ✗ 测试失败: {str(e)}")
-            test_results.append(False)
-    
-    logger.info("===== akshare API 测试完成 =====")
-    
-    # 分析测试结果
-    total_tests = len(test_results)
-    success_rate = successful_tests / total_tests if total_tests > 0 else 0
-    
-    logger.info(f"=== API测试结果分析 ===")
-    logger.info(f"总测试数: {total_tests}, 成功数: {successful_tests}, 成功率: {success_rate:.2%}")
-    
-    # 【关键修改】只要有一个成功就算通过
-    if successful_tests > 0:
-        logger.info("API测试通过，可以继续执行爬取任务")
-        return True, "qfq"  # 返回成功的复权参数
-    else:
-        logger.error("API测试全部失败，停止执行爬取任务")
-        return False, None
+def to_datetime(date_input):
+    """
+    统一转换为datetime.datetime类型
+    Args:
+        date_input: 日期输入，可以是str、date、datetime等类型
+    Returns:
+        datetime.datetime: 统一的datetime类型
+    """
+    if isinstance(date_input, datetime):
+        return date_input
+    elif isinstance(date_input, date):
+        return datetime.combine(date_input, datetime.min.time())
+    elif isinstance(date_input, str):
+        # 尝试多种日期格式
+        for fmt in ["%Y-%m-%d", "%Y%m%d"]:
+            try:
+                return datetime.strptime(date_input, fmt)
+            except:
+                continue
+        logger.warning(f"无法解析日期格式: {date_input}")
+        return None
+    return None
 
 def get_valid_trading_date_range(start_date, end_date):
     """
@@ -276,21 +139,19 @@ def get_valid_trading_date_range(start_date, end_date):
     Returns:
         tuple: (valid_start_date, valid_end_date) - 有效的交易日范围
     """
-    # 转换为datetime对象
-    if isinstance(start_date, str):
-        start_date = datetime.strptime(start_date, "%Y%m%d")
-    if isinstance(end_date, str):
-        end_date = datetime.strptime(end_date, "%Y%m%d")
+    # 统一转换为datetime.datetime类型
+    start_date = to_datetime(start_date)
+    end_date = to_datetime(end_date)
     
-    # 确保结束日期不晚于当前日期
-    today = datetime.now().date()
-    if isinstance(end_date, datetime):
-        end_date_date = end_date.date()
-    else:
-        end_date_date = end_date
-        
-    if end_date_date > today:
-        end_date = datetime.combine(today, datetime.min.time())
+    if start_date is None or end_date is None:
+        logger.error("日期格式转换失败")
+        return None, None
+    
+    # 确保结束日期不晚于当前时间
+    now = datetime.now()
+    if end_date > now:
+        end_date = now
+        logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
     
     # 查找有效的结束交易日
     valid_end_date = end_date
@@ -347,6 +208,9 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     # 获取最后一条数据的日期
                     last_date = pd.to_datetime(existing_data['日期'].max(), errors='coerce')
                     if pd.notna(last_date):
+                        # 确保是datetime类型
+                        if not isinstance(last_date, datetime):
+                            last_date = to_datetime(last_date)
                         logger.info(f"股票 {stock_code} 本地已有数据，最后日期: {last_date.strftime('%Y-%m-%d')}")
                     else:
                         last_date = None
@@ -382,35 +246,14 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             # 获取当前日期前的最近一个交易日作为结束日期
             end_date = get_last_trading_day()
             
-            # 确保结束日期不晚于当前日期
-            today = datetime.now().date()
+            # 确保结束日期不晚于当前时间
+            now = datetime.now()
+            if end_date > now:
+                end_date = now
+                logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
             
-            # 关键修复：安全处理日期类型
-            if isinstance(end_date, datetime):
-                end_date_date = end_date.date()
-            else:
-                end_date_date = end_date
-                
-            if end_date_date > today:
-                end_date = get_last_trading_day()
-            
-            # ===== 关键修复：日期类型安全比较 =====
-            # 将两个日期都转换为datetime.date类型进行比较
-            def to_date(d):
-                if hasattr(d, 'date'):
-                    return d.date()
-                elif isinstance(d, str):
-                    return datetime.strptime(d, "%Y%m%d").date()
-                elif isinstance(d, datetime):
-                    return d.date()
-                else:
-                    return d
-            
-            start_date_date = to_date(start_date)
-            end_date_date = to_date(end_date)
-            
-            # 如果开始日期 >= 结束日期，表示没有新数据需要爬取
-            if start_date_date >= end_date_date:
+            # 确保开始日期不晚于结束日期
+            if start_date > end_date:
                 logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
             
@@ -438,6 +281,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             
             logger.info(f"股票 {stock_code} 首次爬取，获取从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')} 的数据")
         
+        # 【关键修复】统一日期格式
+        start_date_str = start_date.strftime("%Y%m%d")
+        end_date_str = end_date.strftime("%Y%m%d")
+        
         # 【关键修复】使用测试成功的调用方式：不带市场前缀！
         logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {stock_code}, 复权参数: qfq)")
         
@@ -446,8 +293,8 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             df = ak.stock_zh_a_hist(
                 symbol=stock_code,      # 不带市场前缀！
                 period="daily",
-                start_date=start_date.strftime("%Y%m%d"),
-                end_date=end_date.strftime("%Y%m%d"),
+                start_date=start_date_str,
+                end_date=end_date_str,
                 adjust="qfq"
             )
         except Exception as e:
@@ -489,6 +336,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         
         # 确保日期格式正确
         if '日期' in df.columns:
+            # 先统一转换为字符串格式
             df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
             df = df.sort_values('日期').reset_index(drop=True)
         
@@ -659,20 +507,14 @@ def main():
     # 添加初始延时，避免立即请求
     time.sleep(random.uniform(1.0, 2.0))
     
-    # 1. 运行 akshare API 测试（关键诊断工具）
-    # api_ok, best_param = test_akshare_api()
-    # if not api_ok:
-    #    logger.error("akshare API 测试失败，停止执行爬取任务")
-    #    return
-    
-    # 2. 确保基础信息文件存在
+    # 1. 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
         logger.info("基础信息文件不存在或为空，正在创建...")
         if not create_or_update_basic_info():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 3. 只更新一批股票（最多150只）
+    # 2. 只更新一批股票（最多150只）
     if update_all_stocks_daily_data():
         logger.info("已成功处理一批股票数据")
     else:

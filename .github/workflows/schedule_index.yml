@@ -1,7 +1,7 @@
 name: 定时-指数Yes/No计算
 on:
   schedule:
-    - cron: '0 8 * * *'       # UTC 08:00 = 北京时间 16:00 (指数Yes/No)
+    - cron: '0 8 * * *'       # UTC 08:00 = 北京时间 16:00 (指数Yes/No计算)
 jobs:
   etf-yesno-schedule:
     name: 指数Yes/No 策略（定时）

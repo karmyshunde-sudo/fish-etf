@@ -7,6 +7,7 @@
 - 替换了已删除的模块引用
 - 确保数据结构正确
 - 保证与现有代码结构兼容
+- 添加了数据缺失时自动爬取功能
 """
 import pandas as pd
 import os
@@ -24,7 +25,6 @@ from utils.date_utils import (
 )
 from wechat_push.push import send_wechat_message
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name  # 直接导入必要函数
-
 # 初始化日志
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,13 +32,40 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-
 # 仓位持仓记录路径
 POSITION_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "position_record.csv")
 # 交易记录路径
 TRADE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "trade_record.csv")
 # 策略表现记录路径
 PERFORMANCE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "performance_record.csv")
+
+def recover_etf_data(etf_code: str) -> bool:
+    """
+    尝试恢复缺失的ETF数据
+    Args:
+        etf_code: ETF代码
+    Returns:
+        bool: 恢复是否成功
+    """
+    try:
+        # 动态导入爬虫模块（避免循环导入）
+        from data_crawler.etf_crawler import crawl_single_etf
+        logger.info(f"正在尝试恢复ETF {etf_code} 数据...")
+        
+        # 调用爬虫获取数据
+        success = crawl_single_etf(etf_code)
+        
+        # 验证恢复结果
+        etf_file = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
+        if success and os.path.exists(etf_file) and os.path.getsize(etf_file) > 100:
+            logger.info(f"ETF {etf_code} 数据恢复成功")
+            return True
+        else:
+            logger.warning(f"ETF {etf_code} 爬取成功但数据仍无效")
+            return False
+    except Exception as e:
+        logger.error(f"ETF {etf_code} 数据恢复失败: {str(e)}")
+        return False
 
 def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
     """
@@ -54,7 +81,17 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         # 检查文件是否存在
         if not os.path.exists(file_path):
             logger.warning(f"ETF {etf_code} 日线数据文件不存在: {file_path}")
-            return pd.DataFrame()
+            # 【关键修复】尝试恢复缺失数据
+            if recover_etf_data(etf_code):
+                # 恢复成功后重新检查文件
+                if os.path.exists(file_path):
+                    logger.info(f"ETF {etf_code} 数据恢复成功，重新加载")
+                else:
+                    logger.error(f"ETF {etf_code} 数据恢复后文件仍不存在")
+                    return pd.DataFrame()
+            else:
+                return pd.DataFrame()
+        
         # 读取CSV文件，明确指定数据类型
         df = pd.read_csv(
             file_path, 
@@ -128,35 +165,29 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
     try:
         # 直接使用已导入的函数
         logger.info("正在获取ETF列表...")
-        
         # 获取所有ETF代码
         etf_codes = get_all_etf_codes()
         if not etf_codes:
             logger.error("获取ETF代码列表失败，无法继续计算仓位策略")
             return pd.DataFrame()
-        
         # 创建ETF列表DataFrame
         etf_list = pd.DataFrame({
             "ETF代码": etf_codes,
             "ETF名称": [get_etf_name(code) for code in etf_codes]
         })
-        
         # 确保ETF代码是字符串类型
         if not etf_list.empty and "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
-        
         # 检查ETF列表是否有效
         if etf_list.empty:
             logger.error("ETF列表为空，无法获取评分前N的ETF")
             return pd.DataFrame()
-        
         # 确保包含必要列
         required_columns = ["ETF代码", "ETF名称"]
         for col in required_columns:
             if col not in etf_list.columns:
                 logger.error(f"ETF列表缺少必要列: {col}，无法进行有效评分")
                 return pd.DataFrame()
-        
         # 添加基金规模信息 - 从all_etfs.csv文件加载
         all_etfs_path = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         if os.path.exists(all_etfs_path):
@@ -170,25 +201,33 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         else:
             logger.warning("all_etfs.csv文件不存在，无法获取基金规模信息")
             etf_list["基金规模"] = 0
-        
         # 筛选基础条件：规模、非货币ETF
         etf_list = etf_list[
             (etf_list["基金规模"] >= 10.0) & 
             (~etf_list["ETF代码"].astype(str).str.startswith("511"))
         ].copy()
-        
         if etf_list.empty:
             logger.warning("筛选后无符合条件的ETF")
             return pd.DataFrame()
-        
         scored_etfs = []
         for _, row in etf_list.iterrows():
             etf_code = str(row["ETF代码"])
             df = internal_load_etf_daily_data(etf_code)
-            # 统一使用20天标准（永久记录在记忆库中）
+            
+            # 【关键修复】确保数据有效性
             if not internal_validate_etf_data(df, etf_code):
-                logger.debug(f"ETF {etf_code} 数据验证失败，跳过评分")
-                continue
+                # 尝试恢复数据
+                if recover_etf_data(etf_code):
+                    # 恢复成功后重新加载数据
+                    df = internal_load_etf_daily_data(etf_code)
+                    # 再次验证
+                    if not internal_validate_etf_data(df, etf_code):
+                        logger.warning(f"ETF {etf_code} 数据恢复后仍无效，跳过评分")
+                        continue
+                else:
+                    logger.warning(f"ETF {etf_code} 数据恢复失败，跳过评分")
+                    continue
+            
             # 统一使用20天标准（永久记录在记忆库中）
             if len(df) < 20:
                 logger.debug(f"ETF {etf_code} 数据量不足({len(df)}天)，跳过评分")
@@ -232,7 +271,6 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         if not scored_etfs:
             logger.warning("无任何ETF通过评分筛选")
             return pd.DataFrame()
-        
         # 按评分排序
         scored_df = pd.DataFrame(scored_etfs).sort_values("评分", ascending=False)
         logger.info(f"成功计算所有ETF评分，共 {len(scored_df)} 条记录，筛选出评分前{top_n}的ETF")
@@ -1823,6 +1861,7 @@ def calculate_position_strategy() -> str:
             message_type="error"
         )
         return "【ETF仓位操作提示】\n计算仓位策略时发生错误，请检查日志"
+
 # 模块初始化
 try:
     # 确保必要的目录存在

@@ -4,7 +4,7 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 与股票日线爬取完全一致的逻辑
+- 严格确保进度文件被正确保存
 - 每次只爬取100只ETF
 - 每10只ETF提交到Git仓库
 - 从进度文件读取继续爬取的位置
@@ -47,6 +47,9 @@ def save_progress(etf_code: str, processed_count: int, total_count: int, next_in
         next_index: 下次应处理的索引位置
     """
     try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
+        
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             f.write(f"last_etf={etf_code}\n")
             f.write(f"processed={processed_count}\n")
@@ -204,7 +207,7 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
                 end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
                 
                 # 如果起始日期晚于结束日期，说明数据已经是最新
-                if start_date_obj > end_date_obj:
+                if start_date_obj >= end_date_obj:
                     logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
                     return None, None
                 
@@ -290,6 +293,14 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
+        # 关键修复：即使没有ETF需要处理，也要保存进度
+        if start_idx >= len(etf_codes):
+            logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
+            # 保存进度为end_idx（即len(etf_codes)）
+            save_progress(None, start_idx, total_count, len(etf_codes))
+            logger.info(f"进度已更新为 {len(etf_codes)}/{total_count}")
+            return
+        
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
         
         # 已完成列表路径
@@ -308,6 +319,7 @@ def crawl_all_etfs_daily_data() -> None:
         
         # 处理当前批次
         processed_count = 0
+        last_processed_code = None
         for i in range(start_idx, end_idx):
             etf_code = etf_codes[i]
             etf_name = get_etf_name(etf_code)
@@ -381,10 +393,18 @@ def crawl_all_etfs_daily_data() -> None:
                     logger.error(f"提交文件时出错，继续执行: {str(e)}")
             
             # 更新进度
+            last_processed_code = etf_code
             save_progress(etf_code, start_idx + processed_count, total_count, i + 1)
             
             # 记录进度
             logger.info(f"进度: {start_idx + processed_count}/{total_count} ({(start_idx + processed_count)/total_count*100:.1f}%)")
+        
+        # 关键修复：确保进度文件被正确保存
+        # 即使没有ETF需要处理，也要更新进度
+        if processed_count == 0:
+            logger.info("本批次无新数据需要爬取")
+            # 保存进度为end_idx
+            save_progress(last_processed_code, start_idx + processed_count, total_count, end_idx)
         
         # 爬取完本批次后，直接退出，等待下一次调用
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")

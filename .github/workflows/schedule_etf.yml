@@ -2,7 +2,7 @@ name: 定时-ETF交易策略及数据爬取任务
 on:
   schedule:
     - cron: '*/60 2-7 * * 1-5' # UTC 02:00-07:00 = 北京时间 10:00-15:00 (ETF套利计算推送)
-    - cron: '0 10 * * 1-5'   # UTC 10:00 = 北京时间 18:00 (ETF日线爬取)
+    - cron: '*/10 9-12 * * 1-5'   # UTC 09:00 = 北京时间 17:00 (ETF日线爬取)
     - cron: '0 1 * * 0'       # UTC 01:00 = 北京时间 09:00 (ETF列表更新)
     - cron: '30 5 * * 1-5'    # UTC 05:30 = 北京时间 13:30 (ETF仓位策略)
 
@@ -136,12 +136,12 @@ jobs:
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【ETF套利计算（定时）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ========================
-  # ETF日线数据爬取（定时）
+  # ETF日线数据爬取（定时）'0 10 * * 1-5'
   # ========================
   crawl-etf-daily-schedule:
     name: ETF日线爬取（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && (github.event.schedule == '0 10 * * 1-5')
+    if: github.event_name == 'schedule' && (github.event.schedule == '*/10 9-12 * * 1-5')
     permissions:
       contents: write
     steps:

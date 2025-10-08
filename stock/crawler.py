@@ -252,8 +252,15 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 end_date = now
                 logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
             
-            # 确保开始日期不晚于结束日期
-            if start_date > end_date:
+            # 关键修复：确保日期类型一致
+            if not isinstance(start_date, datetime):
+                start_date = to_datetime(start_date)
+            if not isinstance(end_date, datetime):
+                end_date = to_datetime(end_date)
+            
+            # 关键修复：严格检查日期
+            # 开始日期 >= 结束日期，代表数据已最新
+            if start_date >= end_date:
                 logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
             

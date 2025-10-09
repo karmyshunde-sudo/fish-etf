@@ -134,6 +134,9 @@ def get_all_etf_codes() -> list:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
+        if "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         return etf_list["ETF代码"].tolist()
     
     except Exception as e:
@@ -150,6 +153,10 @@ def get_etf_name(etf_code: str) -> str:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
+        if "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
+        
         etf_row = etf_list[etf_list["ETF代码"] == etf_code]
         if not etf_row.empty:
             return etf_row["ETF名称"].values[0]

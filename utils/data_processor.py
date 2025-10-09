@@ -1,4 +1,3 @@
-# 新文件: utils/data_processor.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -10,6 +9,7 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import List
+from datetime import datetime, timedelta
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -36,10 +36,16 @@ def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
                 logger.warning(f"数据中缺少必要列: {col}")
                 df.loc[:, col] = np.nan
         
-        # 确保日期列格式正确
+        # 【日期datetime类型规则】确保日期列是datetime类型
         if '日期' in df.columns:
-            # 使用loc避免SettingWithCopyWarning
-            df.loc[:, '日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+            # 确保日期列是datetime类型，但保留原数据格式
+            if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+                try:
+                    df.loc[:, '日期'] = pd.to_datetime(df['日期'], errors='coerce')
+                except Exception as e:
+                    logger.error(f"日期列转换失败: {str(e)}")
+                    # 如果转换失败，保留原始数据
+            # 保持日期列为datetime类型，不转换为字符串
         
         return df
     
@@ -63,23 +69,20 @@ def clean_and_format_data(df: pd.DataFrame) -> pd.DataFrame:
         
         # 处理日期列
         if "日期" in df.columns:
-            # 确保日期列是字符串类型
-            df["日期"] = df["日期"].astype(str)
-            
-            # 尝试转换为日期格式
-            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
-            
-            # 删除无效日期
-            invalid_dates = df["日期"].isna().sum()
-            if invalid_dates > 0:
-                logger.warning(f"发现 {invalid_dates} 条无效日期，将被删除")
-                df = df.dropna(subset=["日期"])
-                
-                # 检查删除后是否为空
-                if df.empty:
-                    logger.warning("所有日期均无效，无法继续处理")
+            # 【日期datetime类型规则】确保日期列是datetime类型
+            if not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+                try:
+                    # 尝试转换为日期格式
+                    df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+                    # 确保没有NaT值
+                    df = df.dropna(subset=["日期"])
+                except Exception as e:
+                    logger.error(f"日期列转换失败: {str(e)}")
                     return pd.DataFrame()
-                    
+            else:
+                # 已经是datetime类型，移除NaT值
+                df = df.dropna(subset=["日期"])
+            
             logger.debug(f"日期处理后数据量: {len(df)} 条")
         else:
             logger.error("数据缺少'日期'列，无法正确处理")
@@ -146,25 +149,37 @@ def limit_to_one_year_data(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
         return df
     
     try:
-        # 计算1年前的日期
-        one_year_ago = (pd.to_datetime(end_date) - timedelta(days=365)).strftime("%Y-%m-%d")
-        
-        # 确保日期列存在
+        # 【日期datetime类型规则】确保日期列是datetime类型
         if "日期" not in df.columns:
             logger.warning("数据中缺少日期列，无法限制为1年数据")
             return df
         
+        # 确保end_date是datetime类型
+        if isinstance(end_date, str):
+            end_date_dt = pd.to_datetime(end_date)
+        else:
+            end_date_dt = end_date
+        
+        # 计算1年前的日期
+        one_year_ago = end_date_dt - timedelta(days=365)
+        
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 转换日期列
-        df.loc[:, "日期"] = pd.to_datetime(df["日期"], errors='coerce')
+        # 确保日期列是datetime类型
+        if not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+            try:
+                df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+                df = df.dropna(subset=["日期"])
+            except Exception as e:
+                logger.error(f"日期列转换失败: {str(e)}")
+                return df
         
         # 过滤数据
-        mask = df["日期"] >= pd.to_datetime(one_year_ago)
+        mask = df["日期"] >= one_year_ago
         df = df.loc[mask]
         
-        logger.info(f"数据已限制为最近1年（从 {one_year_ago} 至 {end_date}），剩余 {len(df)} 条数据")
+        logger.info(f"数据已限制为最近1年（从 {one_year_ago.strftime('%Y-%m-%d')} 至 {end_date_dt.strftime('%Y-%m-%d')}），剩余 {len(df)} 条数据")
         return df
     except Exception as e:
         logger.error(f"限制数据为1年时发生错误: {str(e)}", exc_info=True)

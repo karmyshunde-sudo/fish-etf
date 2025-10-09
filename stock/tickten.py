@@ -140,11 +140,10 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
                         logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
                         return pd.DataFrame()
                 
-                # 确保日期列是字符串类型
+                # 【日期datetime类型规则】确保日期列是datetime类型
                 if "日期" in df.columns:
-                    df["日期"] = df["日期"].astype(str)
+                    df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
                     # 移除可能存在的空格
-                    df["日期"] = df["日期"].str.strip()
                     df = df.sort_values("日期", ascending=True)
                 
                 # 确保数值列是数值类型

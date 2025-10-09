@@ -9,7 +9,7 @@
 import os
 import logging
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from datetime import datetime, timezone, timedelta  # 确保timedelta已正确导入
 
@@ -99,7 +99,7 @@ class Config:
     ETF_STANDARD_COLUMNS: list = ["ETF代码", "ETF名称", "完整代码", "基金规模"]
     
     # 新浪数据源备用接口
-    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/    {etf_code}/hisdata/klc_kl.js"
+    SINA_ETF_HIST_URL: str = "https://finance.sina.com.cn/realstock/company/        {etf_code}/hisdata/klc_kl.js"
     
     # 批量爬取批次大小
     CRAWL_BATCH_SIZE: int = 50  # 每批50只ETF
@@ -227,16 +227,27 @@ class Config:
     
     # 套利结果标记文件（保留用于兼容性）
     @staticmethod
-    def get_arbitrage_flag_file(date_str: Optional[str] = None) -> str:
+    def get_arbitrage_flag_file(date_str: Optional[Union[str, datetime]] = None) -> str:
         """获取套利标记文件路径"""
         try:
-            # 尝试使用北京时间
-            from utils.date_utils import get_beijing_time
-            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期在内存中是datetime类型
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                # 尝试使用北京时间
+                from utils.date_utils import get_beijing_time
+                date = get_beijing_time().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
         except ImportError:
             # 回退到简单实现（仅用于初始化阶段）
-            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                date = datetime.now().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
         except Exception as e:
             logging.error(f"获取套利标记文件路径失败: {str(e)}", exc_info=True)
@@ -244,16 +255,27 @@ class Config:
     
     # 折价标记文件
     @staticmethod
-    def get_discount_flag_file(date_str: Optional[str] = None) -> str:
+    def get_discount_flag_file(date_str: Optional[Union[str, datetime]] = None) -> str:
         """获取折价标记文件路径"""
         try:
-            # 尝试使用北京时间
-            from utils.date_utils import get_beijing_time
-            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期在内存中是datetime类型
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                # 尝试使用北京时间
+                from utils.date_utils import get_beijing_time
+                date = get_beijing_time().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"discount_pushed_{date}.txt")
         except ImportError:
             # 回退到简单实现（仅用于初始化阶段）
-            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                date = datetime.now().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"discount_pushed_{date}.txt")
         except Exception as e:
             logging.error(f"获取折价标记文件路径失败: {str(e)}", exc_info=True)
@@ -261,16 +283,27 @@ class Config:
     
     # 溢价标记文件
     @staticmethod
-    def get_premium_flag_file(date_str: Optional[str] = None) -> str:
+    def get_premium_flag_file(date_str: Optional[Union[str, datetime]] = None) -> str:
         """获取溢价标记文件路径"""
         try:
-            # 尝试使用北京时间
-            from utils.date_utils import get_beijing_time
-            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期在内存中是datetime类型
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                # 尝试使用北京时间
+                from utils.date_utils import get_beijing_time
+                date = get_beijing_time().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"premium_pushed_{date}.txt")
         except ImportError:
             # 回退到简单实现（仅用于初始化阶段）
-            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                date = datetime.now().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"premium_pushed_{date}.txt")
         except Exception as e:
             logging.error(f"获取溢价标记文件路径失败: {str(e)}", exc_info=True)
@@ -278,16 +311,27 @@ class Config:
     
     # 仓位策略结果标记文件
     @staticmethod
-    def get_position_flag_file(date_str: Optional[str] = None) -> str:
+    def get_position_flag_file(date_str: Optional[Union[str, datetime]] = None) -> str:
         """获取仓位标记文件路径"""
         try:
-            # 尝试使用北京时间
-            from utils.date_utils import get_beijing_time
-            date = date_str or get_beijing_time().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期在内存中是datetime类型
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                # 尝试使用北京时间
+                from utils.date_utils import get_beijing_time
+                date = get_beijing_time().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
         except ImportError:
             # 回退到简单实现（仅用于初始化阶段）
-            date = date_str or datetime.now().strftime("%Y-%m-%d")
+            if isinstance(date_str, datetime):
+                date = date_str.strftime("%Y-%m-%d")
+            elif isinstance(date_str, str):
+                date = date_str
+            else:
+                date = datetime.now().strftime("%Y-%m-%d")
             return os.path.join(Config.FLAG_DIR, f"position_pushed_{date}.txt")
         except Exception as e:
             logging.error(f"获取仓位标记文件路径失败: {str(e)}", exc_info=True)

@@ -673,7 +673,8 @@ def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
         beijing_now = get_beijing_time()
         
         for i in range(days):
-            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期是datetime类型
+            date = (beijing_now - timedelta(days=i)).strftime("%Y-%m-%d")
             flag_file = os.path.join(Config.FLAG_DIR, f"arbitrage_pushed_{date}.txt")
             
             if os.path.exists(flag_file):

@@ -18,7 +18,7 @@ import random
 import json
 from datetime import datetime, timedelta, date
 from config import Config
-from utils.date_utils import is_trading_day, get_last_trading_day
+from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
 # 只需导入Git工具模块
 from utils.git_utils import commit_files_in_batches
 
@@ -61,12 +61,12 @@ def format_stock_code(code):
     code_str = str(code).strip().lower()
     
     # 移除可能的市场前缀
-    if code_str.startswith(('sh', 'sz')):
+    if code_str.startswith(('sh', 'sz', 'hk', 'bj')):
         code_str = code_str[2:]
     
-    # 移除可能的数字前缀（如"0."）
+    # 移除可能的点号（如"0.600022"）
     if '.' in code_str:
-        code_str = code_str.split('.')[1]
+        code_str = code_str.split('.')[1] if code_str.startswith('0.') else code_str
     
     # 确保是6位数字
     code_str = code_str.zfill(6)
@@ -102,31 +102,40 @@ def get_stock_section(stock_code: str) -> str:
         return "创业板"
     elif stock_code.startswith('688'):
         return "科创板"
+    elif stock_code.startswith('8'):
+        return "北交所"
+    elif stock_code.startswith('4') or stock_code.startswith('8'):
+        return "三板市场"
     else:
         return "其他板块"
 
-def to_datetime(date_input):
+def to_naive_datetime(dt):
     """
-    统一转换为datetime.datetime类型
+    将日期转换为naive datetime（无时区）
     Args:
-        date_input: 日期输入，可以是str、date、datetime等类型
+        dt: 可能是naive或aware datetime
     Returns:
-        datetime.datetime: 统一的datetime类型
+        datetime: naive datetime
     """
-    if isinstance(date_input, datetime):
-        return date_input
-    elif isinstance(date_input, date):
-        return datetime.combine(date_input, datetime.min.time())
-    elif isinstance(date_input, str):
-        # 尝试多种日期格式
-        for fmt in ["%Y-%m-%d", "%Y%m%d"]:
-            try:
-                return datetime.strptime(date_input, fmt)
-            except:
-                continue
-        logger.warning(f"无法解析日期格式: {date_input}")
+    if dt is None:
         return None
-    return None
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+def to_aware_datetime(dt):
+    """
+    将日期转换为aware datetime（有时区）
+    Args:
+        dt: 可能是naive或aware datetime
+    Returns:
+        datetime: aware datetime（北京时区）
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=Config.BEIJING_TIMEZONE)
+    return dt
 
 def get_valid_trading_date_range(start_date, end_date):
     """
@@ -148,7 +157,11 @@ def get_valid_trading_date_range(start_date, end_date):
         return None, None
     
     # 确保结束日期不晚于当前时间
-    now = datetime.now()
+    now = get_beijing_time()
+    # 确保两个日期对象类型一致
+    end_date = to_aware_datetime(end_date)
+    now = to_aware_datetime(now)
+    
     if end_date > now:
         end_date = now
         logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
@@ -157,7 +170,7 @@ def get_valid_trading_date_range(start_date, end_date):
     valid_end_date = end_date
     days_back = 0
     while days_back < 30:  # 最多查找30天
-        if is_trading_day(valid_end_date):
+        if is_trading_day(valid_end_date.date()):
             break
         valid_end_date -= timedelta(days=1)
         days_back += 1
@@ -171,7 +184,7 @@ def get_valid_trading_date_range(start_date, end_date):
     valid_start_date = start_date
     days_forward = 0
     while days_forward < 30:  # 最多查找30天
-        if is_trading_day(valid_start_date):
+        if is_trading_day(valid_start_date.date()):
             break
         valid_start_date += timedelta(days=1)
         days_forward += 1
@@ -181,10 +194,37 @@ def get_valid_trading_date_range(start_date, end_date):
         valid_start_date = valid_end_date
     
     # 确保起始日期不晚于结束日期
-    if valid_start_date > valid_end_date:
+    # 【关键修复】确保比较前类型一致
+    start_naive = to_naive_datetime(valid_start_date)
+    end_naive = to_naive_datetime(valid_end_date)
+    
+    if start_naive > end_naive:
         valid_start_date = valid_end_date
     
     return valid_start_date, valid_end_date
+
+def to_datetime(date_input):
+    """
+    统一转换为datetime.datetime类型
+    Args:
+        date_input: 日期输入，可以是str、date、datetime等类型
+    Returns:
+        datetime.datetime: 统一的datetime类型
+    """
+    if isinstance(date_input, datetime):
+        return date_input
+    elif isinstance(date_input, date):
+        return datetime.combine(date_input, datetime.min.time())
+    elif isinstance(date_input, str):
+        # 尝试多种日期格式
+        for fmt in ["%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"]:
+            try:
+                return datetime.strptime(date_input, fmt)
+            except:
+                continue
+        logger.warning(f"无法解析日期格式: {date_input}")
+        return None
+    return None
 
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
@@ -227,7 +267,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             
             # 最多查找30天，避免无限循环
             for i in range(30):
-                if is_trading_day(current_date):
+                if is_trading_day(current_date.date()):
                     start_date = current_date
                     break
                 current_date += timedelta(days=1)
@@ -253,8 +293,12 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 end_date = datetime.combine(end_date, datetime.min.time())
             
             # 确保结束日期不晚于当前时间
-            now = datetime.now()
-            if end_date > now:
+            now = get_beijing_time()
+            # 【关键修复】确保比较前日期类型一致
+            now_naive = to_naive_datetime(now)
+            end_date_naive = to_naive_datetime(end_date)
+            
+            if end_date_naive > now_naive:
                 end_date = now
                 logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
             
@@ -264,16 +308,22 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             if not isinstance(end_date, datetime):
                 end_date = to_datetime(end_date)
             
-            # 关键修复：严格检查日期
+            # 【关键修复】确保比较前日期类型一致
+            # 转换为naive datetime进行比较
+            start_date_naive = to_naive_datetime(start_date)
+            end_date_naive = to_naive_datetime(end_date)
+            
+            # 严格检查日期
             # 开始日期 >= 结束日期，代表数据已最新
-            if start_date >= end_date:
+            if start_date_naive >= end_date_naive:
                 logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
             
             logger.info(f"股票 {stock_code} 增量爬取，从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
         else:
             # 没有本地数据，爬取最近一年的数据
-            start_date = datetime.now() - timedelta(days=365)
+            now = get_beijing_time()
+            start_date = now - timedelta(days=365)
             end_date = get_last_trading_day()
             
             # 【日期datetime类型规则】确保end_date是datetime类型
@@ -284,7 +334,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             current_date = start_date
             start_date = None
             for i in range(30):
-                if is_trading_day(current_date):
+                if is_trading_day(current_date.date()):
                     start_date = current_date
                     break
                 current_date += timedelta(days=1)
@@ -292,8 +342,13 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             if not start_date:
                 start_date = end_date
             
+            # 【关键修复】确保比较前日期类型一致
+            # 转换为naive datetime进行比较
+            start_date_naive = to_naive_datetime(start_date)
+            end_date_naive = to_naive_datetime(end_date)
+            
             # 确保起始日期不晚于结束日期
-            if start_date > end_date:
+            if start_date_naive > end_date_naive:
                 start_date = end_date
             
             logger.info(f"股票 {stock_code} 首次爬取，获取从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')} 的数据")
@@ -369,7 +424,6 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         if existing_data is not None and not existing_data.empty:
             # 合并数据并去重
             combined_df = pd.concat([existing_data, df], ignore_index=True)
-            # 按日期去重，保留最新的数据
             combined_df = combined_df.drop_duplicates(subset=['日期'], keep='last')
             # 按日期排序
             combined_df = combined_df.sort_values('日期').reset_index(drop=True)
@@ -409,9 +463,11 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         if '日期' in df.columns:
             df_save = df.copy()
             df_save['日期'] = df_save['日期'].dt.strftime('%Y-%m-%d')
-            df_save.to_csv(file_path, index=False)
         else:
-            df.to_csv(file_path, index=False)
+            df_save = df
+        
+        # 保存数据
+        df_save.to_csv(file_path, index=False)
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
@@ -466,13 +522,21 @@ def update_all_stocks_daily_data():
     start_idx = next_index
     end_idx = min(next_index + 150, total_stocks)
     
-    # 如果已经爬取完所有股票，重置索引
+    # 如果已爬取完所有股票，重置索引
     if start_idx >= total_stocks:
         logger.info("已爬取完所有股票，重置爬取状态")
         start_idx = 0
         end_idx = min(150, total_stocks)
     
-    # 获取要爬取的股票
+    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {end_idx - start_idx} 只股票 (索引 {start_idx} - {end_idx-1})")
+    
+    # 记录第一批和最后一批股票
+    first_stock = basic_info_df.iloc[start_idx]
+    last_stock = basic_info_df.iloc[min(end_idx-1, total_stocks-1)]
+    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {start_idx})")
+    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {end_idx-1})")
+    
+    # 处理这批股票
     batch_df = basic_info_df.iloc[start_idx:end_idx]
     batch_codes = batch_df["代码"].tolist()
     
@@ -480,15 +544,6 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
-    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {len(batch_codes)} 只股票 (索引 {start_idx} - {end_idx-1})")
-    
-    # 记录第一批和最后一批股票
-    first_stock = batch_df.iloc[0]
-    last_stock = batch_df.iloc[-1]
-    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {start_idx})")
-    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {end_idx-1})")
-    
-    # 处理这批股票
     for stock_code in batch_codes:
         # 【关键修复】确保股票代码是6位
         stock_code = format_stock_code(stock_code)
@@ -519,9 +574,40 @@ def update_all_stocks_daily_data():
     if remaining_stocks < 0:
         remaining_stocks = total_stocks  # 重置后
     
-    logger.info(f"已完成 {len(batch_codes)} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
+    logger.info(f"已完成 {end_idx - start_idx} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
     
     return True
+
+def create_or_update_basic_info():
+    """创建或更新股票基础信息"""
+    try:
+        # 获取股票基础信息
+        logger.info("正在获取股票基础信息...")
+        stock_info = ak.stock_info_a_code_name()
+        
+        if stock_info.empty:
+            logger.error("获取股票基础信息失败：返回空数据")
+            return False
+        
+        # 确保代码列是6位格式
+        stock_info["代码"] = stock_info["代码"].apply(format_stock_code)
+        # 移除无效股票
+        stock_info = stock_info[stock_info["代码"].notna()]
+        stock_info = stock_info[stock_info["代码"].str.len() == 6]
+        stock_info = stock_info.reset_index(drop=True)
+        
+        # 添加 next_crawl_index 列
+        stock_info["next_crawl_index"] = 0
+        
+        # 保存基础信息
+        stock_info.to_csv(BASIC_INFO_FILE, index=False)
+        commit_files_in_batches(BASIC_INFO_FILE)
+        logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
+        
+        return True
+    except Exception as e:
+        logger.error(f"获取股票基础信息失败: {str(e)}", exc_info=True)
+        return False
 
 def main():
     """主函数：更新所有股票数据"""
@@ -543,7 +629,7 @@ def main():
     else:
         logger.error("处理股票数据失败")
     
-    logger.info("===== 股票数据更新完成 =====")
+    logger.info("===== 肋票数据更新完成 =====")
 
 if __name__ == "__main__":
     main()

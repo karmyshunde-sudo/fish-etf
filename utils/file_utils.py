@@ -14,7 +14,7 @@ import tempfile
 import pandas as pd
 import numpy as np
 from typing import Any, Dict, List, Optional, Union, TextIO, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone  # 确保timedelta已正确导入
 # 添加缺失的导入
 from utils.date_utils import get_beijing_time, get_utc_time
 from pathlib import Path
@@ -237,8 +237,7 @@ def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     final_mapping = {}
     for col in df.columns:
         # 标准化列名（小写、移除空格）
-        normalized_col = str(col).strip().lower().replace(' ', '').replace('
-', '')
+        normalized_col = str(col).strip().lower().replace(' ', '').replace('\n', '')
         # 尝试匹配映射字典
         for src, target in column_mapping.items():
             normalized_src = src.strip().lower().replace(' ', '')
@@ -310,7 +309,7 @@ def get_last_crawl_date(etf_code: str, etf_daily_dir: str) -> str:
         # 创建DataFrame的深拷贝，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         # 确保日期列是datetime类型
-        if not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+        if "日期" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["日期"]):
             df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
         # 删除无效日期
         df = df.dropna(subset=["日期"])
@@ -487,7 +486,7 @@ def should_push_arbitrage(etf_code: str) -> bool:
         # 加载套利状态
         status = load_arbitrage_status()
         # 如果ETF从未推送过，或者上次推送不是今天，则应该推送
-        return etf_code not in status or status[etf_code].get("last_pushed") != today
+        return etf_code not in status or status.get(etf_code, {}).get("last_pushed") != today
     except Exception as e:
         logger.error(f"检查是否应该推送套利机会失败: {str(e)}", exc_info=True)
         # 出错时保守策略：允许推送
@@ -576,7 +575,7 @@ def should_push_discount(etf_code: str) -> bool:
         # 加载折价状态
         status = load_discount_status()
         # 如果ETF从未推送过，或者上次推送不是今天，则应该推送
-        return etf_code not in status or status[etf_code].get("last_pushed") != today
+        return etf_code not in status or status.get(etf_code, {}).get("last_pushed") != today
     except Exception as e:
         logger.error(f"检查是否应该推送折价机会失败: {str(e)}", exc_info=True)
         # 出错时保守策略：允许推送
@@ -665,7 +664,7 @@ def should_push_premium(etf_code: str) -> bool:
         # 加载溢价状态
         status = load_premium_status()
         # 如果ETF从未推送过，或者上次推送不是今天，则应该推送
-        return etf_code not in status or status[etf_code].get("last_pushed") != today
+        return etf_code not in status or status.get(etf_code, {}).get("last_pushed") != today
     except Exception as e:
         logger.error(f"检查是否应该推送溢价机会失败: {str(e)}", exc_info=True)
         # 出错时保守策略：允许推送
@@ -994,7 +993,6 @@ def is_file_outdated(file_path: str, days: int) -> bool:
             return True
         # 获取文件最后修改时间
         file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
-        # 【日期datetime类型规则】确保使用datetime类型进行比较
         # 将文件修改时间转换为时区感知对象（使用北京时间时区）
         file_mtime = file_mtime.replace(tzinfo=Config.BEIJING_TIMEZONE)
         # 获取当前时间
@@ -1060,7 +1058,7 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
                 file_path = os.path.join(arbitrage_dir, filename)
                 # 获取文件最后修改时间
                 file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
-                # 【日期datetime类型规则】确保使用datetime类型进行比较
+                # 确保时区信息
                 file_mtime = file_mtime.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 # 检查是否过期
                 if (current_time - file_mtime).days > days_to_keep:
@@ -1083,7 +1081,7 @@ def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
         from utils.date_utils import get_beijing_time
         beijing_now = get_beijing_time()
         for i in range(days):
-            # 【日期datetime类型规则】确保日期在内存中保持为datetime类型
+            # 确保日期是datetime类型
             date_obj = beijing_now - timedelta(days=i)
             date_str = date_obj.strftime("%Y-%m-%d")
             score_file = os.path.join(Config.SCORE_HISTORY_DIR, f"{etf_code}_{date_str}.json")

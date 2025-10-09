@@ -72,7 +72,7 @@ def should_execute_crawl_etf_daily() -> bool:
         return True
     
     # 定时触发的任务：检查是否是交易日或是否已过18点
-    beijing_time: datetime = get_beijing_time()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+    beijing_time = get_beijing_time()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
     beijing_date = beijing_time.date()
     
     # 检查是否为交易日
@@ -99,7 +99,7 @@ def should_execute_calculate_arbitrage() -> bool:
         return True
     
     # 交易时间检查：9:30-15:00之间才执行
-    beijing_time: datetime = get_beijing_time()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+    beijing_time = get_beijing_time()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
     current_time_str = beijing_time.strftime("%H:%M")
     
     # 检查是否在交易时间内
@@ -160,13 +160,11 @@ def handle_update_etf_list() -> Dict[str, Any]:
         logger.info(success_msg)
         
         # 获取文件修改时间（UTC与北京时间）
-        utc_mtime: datetime  # 【日期datetime类型规则】明确类型为datetime
-        beijing_mtime: datetime  # 【日期datetime类型规则】明确类型为datetime
         utc_mtime, beijing_mtime = get_file_mtime(Config.ALL_ETFS_PATH)
         
         # 计算过期时间
-        expiration_utc: datetime = utc_mtime + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)
-        expiration_beijing: datetime = beijing_mtime + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)
+        expiration_utc = utc_mtime + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)
+        expiration_beijing = beijing_mtime + timedelta(days=Config.ETF_LIST_UPDATE_INTERVAL)
         
         # 构建结果字典（包含双时区信息）
         result = {
@@ -206,7 +204,7 @@ def handle_crawl_etf_daily() -> Dict[str, Any]:
             return {"status": "skipped", "message": "非交易日且未到补爬时间"}
         
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         logger.info(f"开始执行ETF日线数据爬取 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 修改3：执行新的爬取函数
@@ -249,7 +247,7 @@ def handle_calculate_arbitrage() -> Dict[str, Any]:
             return {"status": "skipped", "message": "Not in trading hours"}
         
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         
         # 计算套利机会
         logger.info("开始计算套利机会")
@@ -329,7 +327,7 @@ def handle_calculate_position() -> Dict[str, Any]:
             return {"status": "skipped", "message": "Position strategy already pushed today"}
         
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         
         # 计算仓位策略
         logger.info("开始计算仓位策略")
@@ -378,7 +376,7 @@ def handle_send_daily_report() -> Dict[str, Any]:
     """
     try:
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         logger.info(f"开始生成并发送每日报告 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 生成并发送报告
@@ -414,7 +412,7 @@ def handle_check_arbitrage_exit() -> Dict[str, Any]:
     """
     try:
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         logger.info(f"开始检查套利退出信号 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 检查退出信号
@@ -452,7 +450,7 @@ def handle_index_yesno() -> Dict[str, Any]:
     """
     try:
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         logger.info(f"开始执行ETF Yes/No策略 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 导入index_YesNo模块
@@ -492,7 +490,7 @@ def main() -> Dict[str, Any]:
     """
     try:
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         
         # 从环境变量获取任务类型（由GitHub Actions传递）
         task = os.getenv("TASK", "unknown")
@@ -579,7 +577,7 @@ def setup_environment() -> bool:
     """
     try:
         # 获取当前双时区时间
-        utc_now: datetime, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         
         logger.info(f"开始设置运行环境 (UTC: {utc_now}, CST: {beijing_now})")
         
@@ -620,7 +618,7 @@ def run_scheduled_tasks():
         logger.info("开始运行定时任务")
         
         # 获取当前双时区时间
-        _, beijing_now: datetime = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        _, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
         
         # 每5分钟检查一次套利机会（交易时间内）
         if beijing_now.minute % 5 == 0 and Config.TRADING_START_TIME <= beijing_now.strftime("%H:%M") <= Config.TRADING_END_TIME:

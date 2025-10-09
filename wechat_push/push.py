@@ -728,13 +728,15 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
         for msg in messages:
             # 仅对position类型应用底部格式
             if message_type == "position":
+                # 【日期datetime类型规则】确保日期在内存中是datetime类型
+                beijing_time = get_beijing_time()
+                utc_time = get_utc_time()
                 # 添加底部格式
-                beijing_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
                 footer = f"\n\n==================\n"
-                footer += f"📅 UTC时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                footer += f"📅 北京时间: {beijing_time}\n"
+                footer += f"📅 UTC时间: {utc_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                footer += f"📅 北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 footer += "📊 环境：生产\n"
-                footer += f"📅 北京时间: {beijing_time}\n"
+                footer += f"📅 北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 footer += "📊 环境：Git-fish-etf"
                 
                 full_message = msg + footer

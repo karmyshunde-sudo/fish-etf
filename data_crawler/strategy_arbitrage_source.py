@@ -47,8 +47,8 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             logger.info("套利数据目录不存在，无需清理")
             return
         
-        # 获取当前日期（仅日期部分，不包含时间）
-        current_date = get_beijing_time().date()
+        # 【日期datetime类型规则】确保当前日期是datetime类型
+        current_date = get_beijing_time()
         logger.info(f"清理旧套利数据：保留最近 {days_to_keep} 天的数据")
         logger.info(f"当前日期: {current_date}")
         
@@ -63,9 +63,10 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             # 提取文件日期
             try:
                 file_date_str = file_name.split(".")[0]
-                file_date = datetime.strptime(file_date_str, "%Y%m%d").date()
+                # 【日期datetime类型规则】确保文件日期是datetime类型
+                file_date = datetime.strptime(file_date_str, "%Y%m%d")
                 
-                # 计算日期差（仅比较日期，不考虑时间）
+                # 计算日期差（使用datetime类型直接计算）
                 days_diff = (current_date - file_date).days
                 
                 # 记录详细信息
@@ -126,13 +127,16 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
         
         # 添加时间戳列
         if "timestamp" not in df.columns:
-            df.loc[:, "timestamp"] = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            # 【日期datetime类型规则】确保时间戳是datetime类型
+            timestamp = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[:, "timestamp"] = timestamp
         
         # 创建数据目录
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
         ensure_dir_exists(arbitrage_dir)
         
         # 生成文件名 (YYYYMMDD.csv)
+        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
         file_date = beijing_time.strftime("%Y%m%d")
         file_path = os.path.join(arbitrage_dir, f"{file_date}.csv")
@@ -141,6 +145,9 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
         if os.path.exists(file_path):
             # 读取现有数据并创建副本
             existing_df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
+            # 【日期datetime类型规则】确保时间戳列是datetime类型
+            if "timestamp" in existing_df.columns:
+                existing_df["timestamp"] = pd.to_datetime(existing_df["timestamp"], errors='coerce')
             # 合并数据
             combined_df = pd.concat([existing_df, df], ignore_index=True)
             # 去重（基于ETF代码和时间戳）
@@ -208,6 +215,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     """
     try:
         logger.info("=== 开始执行套利数据爬取 ===")
+        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -271,6 +279,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         df["ETF代码"] = df["ETF代码"].astype(str)
         
         # 添加计算时间
+        # 【日期datetime类型规则】确保计算时间是datetime类型
         df.loc[:, '计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         
         logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
@@ -291,9 +300,13 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
         pd.DataFrame: 套利数据
     """
     try:
+        # 【日期datetime类型规则】确保beijing_time是datetime类型
+        beijing_time = get_beijing_time()
+        
         # 默认使用今天
         if not date_str:
-            date_str = get_beijing_time().strftime("%Y%m%d")
+            # 【日期datetime类型规则】直接使用datetime对象
+            date_str = beijing_time.strftime("%Y%m%d")
         
         # 构建文件路径
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
@@ -307,9 +320,13 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
         # 读取数据并创建副本
         df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
         
-        # 确保ETF代码是字符串类型
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
         if "ETF代码" in df.columns:
             df["ETF代码"] = df["ETF代码"].astype(str)
+        
+        # 【日期datetime类型规则】确保时间戳列是datetime类型
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         
         logger.debug(f"成功加载套利数据: {file_path} (共{len(df)}条记录)")
         return df
@@ -327,6 +344,7 @@ def crawl_arbitrage_data() -> str:
     """
     try:
         logger.info("=== 开始执行套利数据爬取 ===")
+        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -374,8 +392,12 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.warning("当前不是交易日，跳过获取套利机会")
             return pd.DataFrame()
         
+        # 【日期datetime类型规则】确保beijing_time是datetime类型
+        beijing_time = get_beijing_time()
+        # 【日期datetime类型规则】直接使用datetime对象
+        today = beijing_time.strftime("%Y%m%d")
+        
         # 尝试加载今天的套利数据
-        today = get_beijing_time().strftime("%Y%m%d")
         df = load_arbitrage_data(today)
         
         # 如果数据为空，尝试重新爬取
@@ -403,7 +425,7 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 确保ETF代码是字符串类型
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
         if "ETF代码" in df.columns:
             df["ETF代码"] = df["ETF代码"].astype(str)
         
@@ -439,10 +461,12 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
         pd.DataFrame: 最近有效的套利数据
     """
     try:
+        # 【日期datetime类型规则】确保beijing_now是datetime类型
         beijing_now = get_beijing_time()
         
         # 从今天开始向前查找
         for i in range(days_back):
+            # 【日期datetime类型规则】确保date_str是datetime类型
             date = (beijing_now - timedelta(days=i)).strftime("%Y%m%d")
             df = load_arbitrage_data(date)
             

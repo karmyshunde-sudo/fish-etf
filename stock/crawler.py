@@ -205,12 +205,11 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 # 读取已有的数据
                 existing_data = pd.read_csv(local_file_path)
                 if not existing_data.empty and '日期' in existing_data.columns:
+                    # 【日期datetime类型规则】确保日期列是datetime类型
+                    existing_data['日期'] = pd.to_datetime(existing_data['日期'], errors='coerce')
                     # 获取最后一条数据的日期
-                    last_date = pd.to_datetime(existing_data['日期'].max(), errors='coerce')
+                    last_date = existing_data['日期'].max()
                     if pd.notna(last_date):
-                        # 确保是datetime类型
-                        if not isinstance(last_date, datetime):
-                            last_date = to_datetime(last_date)
                         logger.info(f"股票 {stock_code} 本地已有数据，最后日期: {last_date.strftime('%Y-%m-%d')}")
                     else:
                         last_date = None
@@ -341,10 +340,9 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             logger.error(f"股票 {stock_code} 数据缺少必要列: {missing_columns}")
             return pd.DataFrame()
         
-        # 确保日期格式正确
+        # 【日期datetime类型规则】确保日期列是datetime类型
         if '日期' in df.columns:
-            # 先统一转换为字符串格式
-            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
             df = df.sort_values('日期').reset_index(drop=True)
         
         # 确保数值列是数值类型
@@ -396,7 +394,14 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
             return
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
-        df.to_csv(file_path, index=False)
+        # 【日期datetime类型规则】保存前将日期列转换为字符串
+        if '日期' in df.columns:
+            df_save = df.copy()
+            df_save['日期'] = df_save['日期'].dt.strftime('%Y-%m-%d')
+            df_save.to_csv(file_path, index=False)
+        else:
+            df.to_csv(file_path, index=False)
+        
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
         # 【关键修复】只需简单调用，无需任何额外逻辑

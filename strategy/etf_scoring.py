@@ -594,12 +594,19 @@ def calculate_etf_score(etf_code: str, df: pd.DataFrame) -> float:
         # 创建安全副本
         df = df.copy(deep=True)
         
+        # 【日期datetime类型规则】确保日期列是datetime类型
+        if DATE_COL in df.columns:
+            try:
+                # 仅在日期列存在时转换为datetime类型
+                df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors='coerce')
+                # 按日期排序
+                df = df.sort_values(DATE_COL)
+            except Exception as e:
+                logger.error(f"日期列转换失败: {str(e)}")
+                df = df.sort_values(DATE_COL)
+        
         # 确保使用中文列名
         df = ensure_chinese_columns(df)
-        
-        # 确保数据按日期排序
-        if DATE_COL in df.columns:
-            df = df.sort_values(DATE_COL)
         
         # 检查数据量
         min_required_data = 30  # 默认需要30天数据
@@ -699,7 +706,8 @@ def get_etf_score_history(etf_code: str, days: int = 30) -> pd.DataFrame:
         beijing_now = get_beijing_time()
         
         for i in range(days):
-            date = (beijing_now - timedelta(days=i)).date().strftime("%Y-%m-%d")
+            # 【日期datetime类型规则】确保日期是datetime类型
+            date = (beijing_now - timedelta(days=i)).strftime("%Y-%m-%d")
             score_file = os.path.join(Config.SCORE_HISTORY_DIR, f"{etf_code}_{date}.json")
             
             if os.path.exists(score_file):
@@ -944,6 +952,15 @@ def get_top_rated_etfs(top_n=None,
                 if df.empty:
                     logger.debug(f"ETF {etf_code} 无日线数据，跳过评分")
                     continue
+                
+                # 【日期datetime类型规则】确保日期列是datetime类型
+                if not df.empty and DATE_COL in df.columns:
+                    try:
+                        df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors='coerce')
+                        df = df.sort_values(DATE_COL)
+                    except Exception as e:
+                        logger.error(f"日期列转换失败: {str(e)}")
+                        df = df.sort_values(DATE_COL)
                 
                 # 确保ETF代码格式一致（6位数字）
                 etf_code = str(etf_code).strip().zfill(6)

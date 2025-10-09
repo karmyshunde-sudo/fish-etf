@@ -72,7 +72,7 @@ def simulate_trading(df, code, name):
                         if stock_status["position"] is None:  # 空仓 -> 买入
                             stock_status["position"] = "LONG"
                             stock_status["entry_price"] = row["收盘"]
-                            stock_status["entry_date"] = row["日期"]
+                            stock_status["entry_date"] = row["日期"]  # 已是datetime类型
                             trades.append({
                                 "date": row["日期"],
                                 "code": code,
@@ -87,6 +87,8 @@ def simulate_trading(df, code, name):
         if stock_status["position"] == "LONG":
             # 卖出条件1：MACD柱衰减 >= 40%
             if prev["MACD"] > 0 and row["MACD"] < prev["MACD"] * (1 - MACD_GROWTH_THRESHOLD):
+                # 【日期datetime类型规则】直接使用datetime对象计算
+                holding_days = (row["日期"] - stock_status["entry_date"]).days
                 trades.append({
                     "date": row["日期"],
                     "code": code,
@@ -96,13 +98,15 @@ def simulate_trading(df, code, name):
                     "reason": "MACD减弱",
                     "entry_price": stock_status["entry_price"],
                     "entry_date": stock_status["entry_date"],
-                    "holding_days": (pd.to_datetime(row["日期"]) - pd.to_datetime(stock_status["entry_date"])).days
+                    "holding_days": holding_days
                 })
                 # 清除持仓状态
                 stock_status = {"position": None, "entry_price": 0.0, "entry_date": None}
                 
             # 卖出条件2：跌破5日线
             elif row["收盘"] < row["MA5"]:
+                # 【日期datetime类型规则】直接使用datetime对象计算
+                holding_days = (row["日期"] - stock_status["entry_date"]).days
                 trades.append({
                     "date": row["日期"],
                     "code": code,
@@ -112,7 +116,7 @@ def simulate_trading(df, code, name):
                     "reason": "跌破MA5",
                     "entry_price": stock_status["entry_price"],
                     "entry_date": stock_status["entry_date"],
-                    "holding_days": (pd.to_datetime(row["日期"]) - pd.to_datetime(stock_status["entry_date"])).days
+                    "holding_days": holding_days
                 })
                 # 清除持仓状态
                 stock_status = {"position": None, "entry_price": 0.0, "entry_date": None}
@@ -149,8 +153,19 @@ def run_backtest():
                     invalid_count += 1
                     continue
                 
-                # 确保日期列为字符串格式
-                df["日期"] = df["日期"].astype(str)
+                # 【日期datetime类型规则】确保日期列是datetime类型
+                if "日期" in df.columns:
+                    # 尝试多种日期格式
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                    # 确保日期列是datetime类型
+                    if df["日期"].isnull().all():
+                        logger.warning(f"股票 {code} 日期格式解析失败，尝试其他格式")
+                        # 尝试其他格式
+                        df["日期"] = pd.to_datetime(df["日期"], format="%Y/%m/%d", errors="coerce")
+                        if df["日期"].isnull().all():
+                            logger.error(f"股票 {code} 无法解析日期格式")
+                            invalid_count += 1
+                            continue
                 
                 # 按日期排序
                 df = df.sort_values("日期").reset_index(drop=True)
@@ -222,7 +237,8 @@ def run_backtest():
         return [], {}
 
 def generate_backtest_message(trades, summary):
-    today = datetime.today().strftime("%Y-%m-%d")
+    # 【日期datetime类型规则】使用datetime对象
+    today = datetime.now().strftime("%Y-%m-%d")
     lines = [f"【策略2 - 一年回测结果】", f"日期：{today}", ""]
     
     # 添加统计信息
@@ -240,13 +256,15 @@ def generate_backtest_message(trades, summary):
         sell_trades = [t for t in trades if t["action"] == "SELL"]
         
         for i, t in enumerate(buy_trades[:10]):  # 只显示前10条买入
-            lines.append(f"买入 {t['code']} {t['name']} @ {t['price']:.2f} (日期: {t['date']})")
+            # 【日期datetime类型规则】直接使用datetime对象
+            lines.append(f"买入 {t['code']} {t['name']} @ {t['price']:.2f} (日期: {t['date'].strftime('%Y-%m-%d')})")
         
         for i, t in enumerate(sell_trades[:10]):  # 只显示前10条卖出
             holding_days = t.get("holding_days", 0)
             entry_price = t.get("entry_price", 0)
             profit = (t["price"] - entry_price) / entry_price * 100 if entry_price > 0 else 0
-            lines.append(f"卖出 {t['code']} {t['name']} @ {t['price']:.2f} (日期: {t['date']}, 持有: {holding_days}天, 收益: {profit:.2f}%)")
+            # 【日期datetime类型规则】直接使用datetime对象
+            lines.append(f"卖出 {t['code']} {t['name']} @ {t['price']:.2f} (日期: {t['date'].strftime('%Y-%m-%d')}, 持有: {holding_days}天, 收益: {profit:.2f}%)")
     else:
         lines.append("无交易记录")
 
@@ -258,21 +276,23 @@ def main():
 
     # 保存 CSV 文件
     os.makedirs(RESULT_DIR, exist_ok=True)
-    filename = f"{RESULT_DIR}/{datetime.today().strftime('%Y%m%d')}_backtest.csv"
+    # 【日期datetime类型规则】使用datetime对象生成文件名
+    filename = f"{RESULT_DIR}/{datetime.now().strftime('%Y%m%d')}_backtest.csv"
 
     # 保存更详细的交易记录
     if trades:
         detailed_trades = []
         for t in trades:
+            # 【日期datetime类型规则】确保日期列是datetime类型
             trade = {
-                "date": t["date"],
+                "date": t["date"].strftime('%Y-%m-%d') if isinstance(t["date"], datetime) else t["date"],
                 "code": t["code"],
                 "name": t["name"],
                 "action": t["action"],
                 "price": t["price"],
                 "reason": t.get("reason", ""),
                 "entry_price": t.get("entry_price", 0),
-                "entry_date": t.get("entry_date", ""),
+                "entry_date": t.get("entry_date").strftime('%Y-%m-%d') if isinstance(t.get("entry_date"), datetime) else t.get("entry_date", ""),
                 "holding_days": t.get("holding_days", 0)
             }
             detailed_trades.append(trade)

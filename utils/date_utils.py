@@ -91,22 +91,27 @@ def get_utc_time() -> datetime:
         from config import Config
         return datetime.utcnow().replace(tzinfo=Config.UTC_TIMEZONE)
 
-def is_trading_day(date_param: Optional[Union[date, str]] = None) -> bool:
+def is_trading_day(date_param: Optional[Union[datetime, str]] = None) -> bool:
     """
     检查是否为交易日
     
     Args:
-        date_param: 日期 (date对象或YYYY-MM-DD字符串)
+        date_param: 日期 (datetime对象或YYYY-MM-DD字符串)
     
     Returns:
         bool: 是否为交易日
     """
     try:
-        # 处理输入参数
+        # 【日期datetime类型规则】确保日期在内存中保持为datetime类型
         if date_param is None:
-            date_obj = get_beijing_time().date()
+            date_obj = get_beijing_time()
         elif isinstance(date_param, str):
-            date_obj = datetime.strptime(date_param, "%Y-%m-%d").date()
+            # 直接解析为datetime对象，而不是date
+            date_obj = datetime.strptime(date_param, "%Y-%m-%d")
+            # 确保日期在内存中是datetime类型
+            if date_obj.tzinfo is None:
+                from config import Config
+                date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
         else:
             date_obj = date_param
         
@@ -168,7 +173,7 @@ def is_trading_day(date_param: Optional[Union[date, str]] = None) -> bool:
         logger.error(f"判断交易日失败: {str(e)}", exc_info=True)
         # 回退：简单判断（仅检查是否为周末）
         if date_param is None:
-            date_param = datetime.now().date()
+            date_param = datetime.now()
         return date_param.weekday() < 5
 
 def is_trading_time() -> bool:
@@ -183,14 +188,14 @@ def is_trading_time() -> bool:
         from config import Config
         
         # 获取当前系统时间（假设系统时区已设置为北京时间）
-        current_time = datetime.now().time()
+        current_time = datetime.now()
         
         # 将配置中的交易时间字符串转换为time对象
         trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
         trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
         
         # 检查是否在交易时间内
-        return trading_start <= current_time <= trading_end
+        return trading_start <= current_time.time() <= trading_end
     
     except Exception as e:
         logger.error(f"判断交易时间失败: {str(e)}", exc_info=True)
@@ -210,29 +215,41 @@ def is_same_day(date1: datetime, date2: datetime) -> bool:
         bool: 如果是同一天返回True，否则返回False
     """
     try:
-        # 直接比较日期部分
+        # 【日期datetime类型规则】确保比较时使用datetime对象
         return date1.date() == date2.date()
     except Exception as e:
         logger.error(f"比较日期失败: {str(e)}", exc_info=True)
         return False
 
-def get_next_trading_day(current_date: date) -> date:
+def get_next_trading_day(current_date: datetime) -> datetime:
     """
     获取下一个交易日
     
     Args:
-        current_date: 当前日期
+        current_date: 当前日期时间
     
     Returns:
-        date: 下一个交易日
+        datetime: 下一个交易日（作为datetime对象）
     """
     try:
-        # 确保输入是date对象
-        if isinstance(current_date, datetime):
-            current_date = current_date.date()
+        # 【日期datetime类型规则】确保输入是datetime类型
+        if not isinstance(current_date, datetime):
+            if isinstance(current_date, date):
+                # 将date转换为datetime
+                current_date = datetime.combine(current_date, datetime.min.time())
+            else:
+                current_date = datetime.now()
         
-        # 获取最近交易日
+        # 统一处理时区
+        if current_date.tzinfo is None:
+            from config import Config
+            current_date = current_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 获取下一个日期（作为datetime对象）
         next_day = current_date + timedelta(days=1)
+        # 确保是00:00:00
+        next_day = next_day.replace(hour=0, minute=0, second=0, microsecond=0)
+        
         while not is_trading_day(next_day):
             next_day += timedelta(days=1)
             # 防止无限循环
@@ -240,13 +257,15 @@ def get_next_trading_day(current_date: date) -> date:
                 logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
                 break
         
+        # 确保返回的日期是datetime类型
         return next_day
+    
     except Exception as e:
         logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
         # 出错时返回明天
         return current_date + timedelta(days=1)
 
-def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None) -> datetime:
+def get_previous_trading_day(date_param: Optional[datetime] = None) -> datetime:
     """
     获取上一个交易日
     
@@ -262,24 +281,36 @@ def get_previous_trading_day(date_param: Optional[Union[datetime, date]] = None)
         if date_param is None:
             date_param = get_beijing_time()
         
-        # 转换为日期对象
-        if isinstance(date_param, datetime):
-            date_param = date_param.date()
+        # 【日期datetime类型规则】确保是datetime对象
+        if not isinstance(date_param, datetime):
+            if isinstance(date_param, date):
+                date_param = datetime.combine(date_param, datetime.min.time())
+            else:
+                date_param = get_beijing_time()
+        
+        # 确保时区信息
+        if date_param.tzinfo is None:
+            date_param = date_param.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
         # 循环查找上一个交易日
         prev_day = date_param - timedelta(days=1)
+        # 确保是00:00:00
+        prev_day = prev_day.replace(hour=0, minute=0, second=0, microsecond=0)
+        
         while not is_trading_day(prev_day):
             prev_day -= timedelta(days=1)
+            # 确保是00:00:00
+            prev_day = prev_day.replace(hour=0, minute=0, second=0, microsecond=0)
         
         logger.debug(f"上一个交易日: {date_param} -> {prev_day}")
-        return datetime.combine(prev_day, datetime.min.time()).replace(tzinfo=Config.BEIJING_TIMEZONE)
+        return prev_day
     
     except Exception as e:
         logger.error(f"获取上一个交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：简单减一天
         return (date_param if date_param else get_beijing_time()) - timedelta(days=1)
 
-def get_last_trading_day(date_param: Optional[Union[datetime, date]] = None) -> date:
+def get_last_trading_day(date_param: Optional[datetime] = None) -> datetime:
     """
     获取最近一个交易日（包括今天，如果今天是交易日）
     
@@ -287,30 +318,41 @@ def get_last_trading_day(date_param: Optional[Union[datetime, date]] = None) -> 
         date_param: 日期，如果为None则使用当前日期
     
     Returns:
-        date: 最近一个交易日
+        datetime: 最近一个交易日
     """
     try:
         from config import Config
         
         if date_param is None:
-            date_param = get_beijing_time().date()
-        elif isinstance(date_param, datetime):
-            date_param = date_param.date()
+            date_param = get_beijing_time()
+        elif not isinstance(date_param, datetime):
+            if isinstance(date_param, date):
+                date_param = datetime.combine(date_param, datetime.min.time())
+            else:
+                date_param = get_beijing_time()
+        
+        # 【日期datetime类型规则】确保是datetime对象
+        if date_param.tzinfo is None:
+            date_param = date_param.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
         # 如果是交易日，返回当天
         if is_trading_day(date_param):
-            return date_param
+            # 确保是00:00:00
+            return date_param.replace(hour=0, minute=0, second=0, microsecond=0)
         
         # 如果不是交易日，向前查找最近的交易日
-        while not is_trading_day(date_param):
-            date_param = date_param - timedelta(days=1)
+        prev_day = date_param.replace(hour=0, minute=0, second=0, microsecond=0)
+        while not is_trading_day(prev_day):
+            prev_day -= timedelta(days=1)
+            # 确保是00:00:00
+            prev_day = prev_day.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        return date_param
+        return prev_day
     
     except Exception as e:
         logger.error(f"获取最近交易日失败 {date_param}: {str(e)}", exc_info=True)
         # 回退：返回昨天
-        return (date_param if date_param else get_beijing_time().date()) - timedelta(days=1)
+        return (date_param if date_param else get_beijing_time()) - timedelta(days=1)
 
 def is_file_outdated(file_path: str, max_age_days: int) -> bool:
     """
@@ -334,6 +376,7 @@ def is_file_outdated(file_path: str, max_age_days: int) -> bool:
         timestamp = os.path.getmtime(file_path)
         
         # 使用config定义的时区
+        # 【日期datetime类型规则】确保时间是datetime类型
         utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
         beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
         
@@ -371,7 +414,7 @@ def get_file_mtime(file_path: str) -> Tuple[datetime, datetime]:
         # 获取文件最后修改时间戳
         timestamp = os.path.getmtime(file_path)
         
-        # 使用config定义的时区
+        # 【日期datetime类型规则】确保时间是datetime类型
         utc_time = datetime.fromtimestamp(timestamp, tz=Config.UTC_TIMEZONE)
         beijing_time = datetime.fromtimestamp(timestamp, tz=Config.BEIJING_TIMEZONE)
         
@@ -412,6 +455,10 @@ def is_market_open(time_to_check: Optional[datetime] = None) -> bool:
         from config import Config
         
         if time_to_check is None:
+            time_to_check = get_beijing_time()
+        
+        # 【日期datetime类型规则】确保是datetime对象
+        if not isinstance(time_to_check, datetime):
             time_to_check = get_beijing_time()
         
         # 将时间转换为北京时间

@@ -152,8 +152,9 @@ def main():
                     invalid_count += 1
                     continue
                 
-                # 确保日期列为字符串格式
-                df["日期"] = df["日期"].astype(str)
+                # 【日期datetime类型规则】确保日期列是datetime类型
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
                 
                 # 按日期排序
                 df = df.sort_values("日期").reset_index(drop=True)

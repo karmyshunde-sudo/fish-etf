@@ -113,6 +113,12 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.error(f"ETF {etf_code} 日期参数类型错误，应为datetime类型")
             return pd.DataFrame()
         
+        # 确保日期对象有正确的时区信息
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         # 直接获取基础价格数据（无重试机制，简化逻辑）
         df = ak.fund_etf_hist_em(
             symbol=etf_code,
@@ -162,6 +168,44 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def get_next_trading_day(date_obj: datetime) -> datetime:
+    """
+    获取下一个交易日
+    
+    Args:
+        date_obj: 日期对象
+    
+    Returns:
+        datetime: 下一个交易日
+    """
+    try:
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        if not isinstance(date_obj, datetime):
+            if isinstance(date_obj, datetime.date):
+                date_obj = datetime.combine(date_obj, datetime.min.time())
+            else:
+                date_obj = datetime.now()
+        
+        # 确保时区信息
+        if date_obj.tzinfo is None:
+            date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 循环查找下一个交易日
+        next_day = date_obj + timedelta(days=1)
+        while not is_trading_day(next_day):
+            next_day += timedelta(days=1)
+            # 防止无限循环
+            if (next_day - date_obj).days > 30:
+                logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
+                break
+        
+        return next_day
+    
+    except Exception as e:
+        logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
+        # 出错时返回明天
+        return date_obj + timedelta(days=1)
+
 def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     """
     获取增量爬取的日期范围
@@ -170,15 +214,28 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     重点：从数据文件的"日期"列获取最新日期，而不是最后爬取日期
     """
     try:
-        # 【日期datetime类型规则】确保日期是datetime类型
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
         # 获取最近交易日作为结束日期
         last_trading_day = get_last_trading_day()
         if not isinstance(last_trading_day, datetime):
-            last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            if isinstance(last_trading_day, datetime.date):
+                last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            else:
+                last_trading_day = datetime.now()
+        
+        # 确保时区信息
+        if last_trading_day.tzinfo is None:
+            last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
         end_date = last_trading_day
         
         # 确保结束日期不晚于当前时间
-        current_time = datetime.now()
+        current_time = get_beijing_time()
+        # 确保两个日期对象都有时区信息
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         if end_date > current_time:
             logger.warning(f"结束日期 {end_date} 晚于当前时间，已调整为当前时间")
             end_date = current_time
@@ -210,12 +267,13 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
                 if not isinstance(latest_date, datetime):
                     latest_date = pd.to_datetime(latest_date)
                 
-                # 从最新日期的下一个交易日开始
-                next_trading_day = latest_date + timedelta(days=1)
+                # 确保时区信息
+                if latest_date.tzinfo is None:
+                    latest_date = latest_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 
-                # 确保是交易日
-                while not is_trading_day(next_trading_day):
-                    next_trading_day += timedelta(days=1)
+                # 从最新日期的下一个交易日开始
+                # 【日期datetime类型规则】确保日期在内存中保持为datetime类型
+                next_trading_day = get_next_trading_day(latest_date)
                 
                 start_date = next_trading_day
                 
@@ -227,6 +285,8 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
                 
                 # 确保不超过一年
                 one_year_ago = last_trading_day - timedelta(days=365)
+                if one_year_ago.tzinfo is None:
+                    one_year_ago = one_year_ago.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 if start_date < one_year_ago:
                     logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago}开始")
                     start_date = one_year_ago
@@ -234,9 +294,19 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
                 logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}", exc_info=True)
                 # 出错时使用全量爬取一年数据
                 start_date = last_trading_day - timedelta(days=365)
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         else:
             # 首次爬取，获取一年数据
             start_date = last_trading_day - timedelta(days=365)
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 确保返回的日期对象都有时区信息
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
         logger.info(f"ETF {etf_code} 增量爬取日期范围：{start_date} 至 {end_date}")
         return start_date, end_date
@@ -246,9 +316,20 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         # 出错时使用全量爬取一年数据
         last_trading_day = get_last_trading_day()
         if not isinstance(last_trading_day, datetime):
-            last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            if isinstance(last_trading_day, datetime.date):
+                last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            else:
+                last_trading_day = datetime.now()
+        
+        # 确保时区信息
+        if last_trading_day.tzinfo is None:
+            last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         end_date = last_trading_day
         start_date = last_trading_day - timedelta(days=365)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         return start_date, end_date
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
@@ -355,7 +436,7 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 爬取数据
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
-            logger.info(f"📅 增量爬取日期范围：{start_date} 至 {end_date}")
+            logger.info(f"📅 增量爬取日期范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
             
             df = crawl_etf_daily_data(etf_code, start_date, end_date)
             
@@ -466,6 +547,44 @@ def get_all_etf_codes() -> list:
     except Exception as e:
         logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
         return []
+
+def get_next_trading_day(date_obj: datetime) -> datetime:
+    """
+    获取下一个交易日
+    
+    Args:
+        date_obj: 日期对象
+    
+    Returns:
+        datetime: 下一个交易日
+    """
+    try:
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        if not isinstance(date_obj, datetime):
+            if isinstance(date_obj, datetime.date):
+                date_obj = datetime.combine(date_obj, datetime.min.time())
+            else:
+                date_obj = datetime.now()
+        
+        # 确保时区信息
+        if date_obj.tzinfo is None:
+            date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 循环查找下一个交易日
+        next_day = date_obj + timedelta(days=1)
+        while not is_trading_day(next_day):
+            next_day += timedelta(days=1)
+            # 防止无限循环
+            if (next_day - date_obj).days > 30:
+                logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
+                break
+        
+        return next_day
+    
+    except Exception as e:
+        logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
+        # 出错时返回明天
+        return date_obj + timedelta(days=1)
 
 if __name__ == "__main__":
     try:

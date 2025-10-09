@@ -101,25 +101,34 @@ def load_progress() -> dict:
         logger.error(f"加载进度失败: {str(e)}", exc_info=True)
         return progress
 
-def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
     使用AkShare爬取ETF日线数据
     """
     df = None
     
     try:
+        # 【日期datetime类型规则】确保日期参数是datetime类型
+        if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
+            logger.error(f"ETF {etf_code} 日期参数类型错误，应为datetime类型")
+            return pd.DataFrame()
+        
         # 直接获取基础价格数据（无重试机制，简化逻辑）
         df = ak.fund_etf_hist_em(
             symbol=etf_code,
             period="daily",
-            start_date=start_date,
-            end_date=end_date
+            start_date=start_date.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d")
         )
         
         # 检查基础数据
         if df is None or df.empty:
             logger.warning(f"ETF {etf_code} 基础数据为空")
             return pd.DataFrame()
+        
+        # 【日期datetime类型规则】确保日期列是datetime类型
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
         
         # 获取折价率
         try:
@@ -153,7 +162,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: str, end_date: str) -> pd.Da
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def get_incremental_date_range(etf_code: str) -> (str, str):
+def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     """
     获取增量爬取的日期范围
     返回：(start_date, end_date)
@@ -161,15 +170,18 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
     重点：从数据文件的"日期"列获取最新日期，而不是最后爬取日期
     """
     try:
+        # 【日期datetime类型规则】确保日期是datetime类型
         # 获取最近交易日作为结束日期
         last_trading_day = get_last_trading_day()
-        end_date = last_trading_day.strftime("%Y%m%d")
+        if not isinstance(last_trading_day, datetime):
+            last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+        end_date = last_trading_day
         
-        # 确保结束日期不晚于当前日期
-        current_date = datetime.now().date()
-        if datetime.strptime(end_date, "%Y%m%d").date() > current_date:
-            logger.warning(f"结束日期 {end_date} 晚于当前日期，已调整为当前日期")
-            end_date = current_date.strftime("%Y%m%d")
+        # 确保结束日期不晚于当前时间
+        current_time = datetime.now()
+        if end_date > current_time:
+            logger.warning(f"结束日期 {end_date} 晚于当前时间，已调整为当前时间")
+            end_date = current_time
         
         save_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
         
@@ -179,50 +191,52 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
                 # 读取数据文件
                 df = pd.read_csv(save_path)
                 
+                # 【日期datetime类型规则】确保日期列是datetime类型
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+                
                 # 确保"日期"列存在
                 if "日期" not in df.columns:
                     logger.warning(f"ETF {etf_code} 数据文件缺少'日期'列")
                     return None, None
                 
-                # 确保日期列是字符串类型
-                df["日期"] = df["日期"].astype(str)
-                
                 # 获取最新日期
                 latest_date = df["日期"].max()
+                if pd.isna(latest_date):
+                    logger.warning(f"ETF {etf_code} 数据文件日期列为空")
+                    return None, None
                 
-                # 转换为日期对象
-                latest_date_obj = datetime.strptime(latest_date, "%Y-%m-%d").date()
+                # 确保是datetime类型
+                if not isinstance(latest_date, datetime):
+                    latest_date = pd.to_datetime(latest_date)
                 
                 # 从最新日期的下一个交易日开始
-                next_trading_day = latest_date_obj + timedelta(days=1)
+                next_trading_day = latest_date + timedelta(days=1)
                 
                 # 确保是交易日
                 while not is_trading_day(next_trading_day):
                     next_trading_day += timedelta(days=1)
                 
-                start_date = next_trading_day.strftime("%Y%m%d")
+                start_date = next_trading_day
                 
                 # 确保日期比较基于相同类型
-                start_date_obj = datetime.strptime(start_date, "%Y%m%d").date()
-                end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
-                
                 # 如果起始日期晚于结束日期，说明数据已经是最新
-                if start_date_obj >= end_date_obj:
+                if start_date >= end_date:
                     logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
                     return None, None
                 
                 # 确保不超过一年
                 one_year_ago = last_trading_day - timedelta(days=365)
-                if start_date_obj < one_year_ago:
-                    logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago.strftime('%Y%m%d')}开始")
-                    start_date = one_year_ago.strftime("%Y%m%d")
+                if start_date < one_year_ago:
+                    logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago}开始")
+                    start_date = one_year_ago
             except Exception as e:
                 logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}", exc_info=True)
                 # 出错时使用全量爬取一年数据
-                start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+                start_date = last_trading_day - timedelta(days=365)
         else:
             # 首次爬取，获取一年数据
-            start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+            start_date = last_trading_day - timedelta(days=365)
         
         logger.info(f"ETF {etf_code} 增量爬取日期范围：{start_date} 至 {end_date}")
         return start_date, end_date
@@ -231,8 +245,10 @@ def get_incremental_date_range(etf_code: str) -> (str, str):
         logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
         # 出错时使用全量爬取一年数据
         last_trading_day = get_last_trading_day()
-        end_date = last_trading_day.strftime("%Y%m%d")
-        start_date = (last_trading_day - timedelta(days=365)).strftime("%Y%m%d")
+        if not isinstance(last_trading_day, datetime):
+            last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+        end_date = last_trading_day
+        start_date = last_trading_day - timedelta(days=365)
         return start_date, end_date
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
@@ -246,13 +262,20 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     etf_daily_dir = Config.ETFS_DAILY_DIR
     ensure_dir_exists(etf_daily_dir)
     
+    # 【日期datetime类型规则】保存前将日期转换为字符串
+    if "日期" in df.columns:
+        df_save = df.copy()
+        df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
+    else:
+        df_save = df
+    
     # 保存到CSV
     save_path = os.path.join(etf_daily_dir, f"{etf_code}.csv")
     
     # 使用临时文件进行原子操作
     try:
         temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
-        df.to_csv(temp_file.name, index=False)
+        df_save.to_csv(temp_file.name, index=False)
         # 原子替换
         shutil.move(temp_file.name, save_path)
         
@@ -351,6 +374,10 @@ def crawl_all_etfs_daily_data() -> None:
                 try:
                     existing_df = pd.read_csv(save_path)
                     
+                    # 【日期datetime类型规则】确保日期列是datetime类型
+                    if "日期" in existing_df.columns:
+                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
+                    
                     # 合并数据并去重
                     combined_df = pd.concat([existing_df, df], ignore_index=True)
                     combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
@@ -431,6 +458,9 @@ def get_all_etf_codes() -> list:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
+        if "ETF代码" in etf_list.columns:
+            etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         return etf_list["ETF代码"].tolist()
     
     except Exception as e:

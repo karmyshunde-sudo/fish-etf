@@ -95,6 +95,14 @@ def get_daily_report() -> str:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
         
+        # 【日期datetime类型规则】确保时间是datetime类型
+        if not isinstance(utc_now, datetime):
+            logger.warning("UTC时间不是datetime类型，已转换")
+            utc_now = datetime.now()
+        if not isinstance(beijing_now, datetime):
+            logger.warning("北京时间不是datetime类型，已转换")
+            beijing_now = datetime.now()
+        
         # 构建报告
         report = f"【ETF量化策略每日报告】\n"
         report += f"📅 报告时间: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}\n"

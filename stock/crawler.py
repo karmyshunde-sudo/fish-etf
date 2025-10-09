@@ -236,6 +236,9 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 # 如果找不到交易日，使用最近一个交易日
                 last_trading_date = get_last_trading_day()
                 if last_trading_date:
+                    # 【日期datetime类型规则】确保last_trading_date是datetime类型
+                    if not isinstance(last_trading_date, datetime):
+                        last_trading_date = datetime.combine(last_trading_date, datetime.min.time())
                     start_date = last_trading_date
                     logger.warning(f"无法找到股票 {stock_code} 的下一个交易日，使用最近交易日: {start_date.strftime('%Y%m%d')}")
                 else:
@@ -244,6 +247,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             
             # 获取当前日期前的最近一个交易日作为结束日期
             end_date = get_last_trading_day()
+            
+            # 【日期datetime类型规则】确保end_date是datetime类型
+            if not isinstance(end_date, datetime):
+                end_date = datetime.combine(end_date, datetime.min.time())
             
             # 确保结束日期不晚于当前时间
             now = datetime.now()
@@ -268,6 +275,10 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             # 没有本地数据，爬取最近一年的数据
             start_date = datetime.now() - timedelta(days=365)
             end_date = get_last_trading_day()
+            
+            # 【日期datetime类型规则】确保end_date是datetime类型
+            if not isinstance(end_date, datetime):
+                end_date = datetime.combine(end_date, datetime.min.time())
             
             # 确保起始日期是交易日
             current_date = start_date

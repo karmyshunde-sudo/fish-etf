@@ -38,7 +38,6 @@ POSITION_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "position_record.cs
 TRADE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "trade_record.csv")
 # 策略表现记录路径
 PERFORMANCE_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "performance_record.csv")
-
 def recover_etf_data(etf_code: str) -> bool:
     """
     尝试恢复缺失的ETF数据
@@ -51,10 +50,8 @@ def recover_etf_data(etf_code: str) -> bool:
         # 动态导入爬虫模块（避免循环导入）
         from data_crawler.etf_crawler import crawl_single_etf
         logger.info(f"正在尝试恢复ETF {etf_code} 数据...")
-        
         # 调用爬虫获取数据
         success = crawl_single_etf(etf_code)
-        
         # 验证恢复结果
         etf_file = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
         if success and os.path.exists(etf_file) and os.path.getsize(etf_file) > 100:
@@ -66,7 +63,6 @@ def recover_etf_data(etf_code: str) -> bool:
     except Exception as e:
         logger.error(f"ETF {etf_code} 数据恢复失败: {str(e)}")
         return False
-
 def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
     """
     内部实现的ETF日线数据加载函数（不依赖utils.file_utils）
@@ -91,7 +87,6 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
                     return pd.DataFrame()
             else:
                 return pd.DataFrame()
-        
         # 读取CSV文件，明确指定数据类型
         df = pd.read_csv(
             file_path, 
@@ -112,18 +107,19 @@ def internal_load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         if missing_columns:
             logger.warning(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
             return pd.DataFrame()
-        # 确保日期列为字符串格式
-        df["日期"] = df["日期"].astype(str)
-        # 按日期排序并去重
-        df = df.sort_values("日期").drop_duplicates(subset=["日期"], keep="last")
+        # 【日期datetime类型规则】确保日期列是datetime类型
+        if "日期" in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+            # 按日期排序并去重
+            df = df.sort_values("日期").drop_duplicates(subset=["日期"], keep="last")
+        
         # 移除未来日期的数据
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now()
         df = df[df["日期"] <= today]
         return df
     except Exception as e:
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> bool:
     """
     严格验证ETF数据完整性（统一20天标准）
@@ -148,12 +144,16 @@ def internal_validate_etf_data(df: pd.DataFrame, etf_code: str = "Unknown") -> b
         file_path = os.path.join(Config.DATA_DIR, "etf_daily", f"{etf_code}.csv")
         logger.warning(f"ETF {etf_code} 数据量不足({len(df)}天)，需要至少20天数据。数据文件: {file_path}")
         return False
-    # 严格确保日期列为字符串格式
-    df["日期"] = df["日期"].astype(str)
-    # 按日期排序
-    df = df.sort_values("日期")
+    # 【日期datetime类型规则】确保日期列是datetime类型
+    if "日期" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+        try:
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+            df = df.sort_values("日期")
+        except Exception as e:
+            logger.error(f"日期列转换失败: {str(e)}")
+            df = df.sort_values("日期")
+    
     return True
-
 def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
     """
     获取评分前N的ETF列表（100分制）
@@ -213,7 +213,6 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
         for _, row in etf_list.iterrows():
             etf_code = str(row["ETF代码"])
             df = internal_load_etf_daily_data(etf_code)
-            
             # 【关键修复】确保数据有效性
             if not internal_validate_etf_data(df, etf_code):
                 # 尝试恢复数据
@@ -227,7 +226,6 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
                 else:
                     logger.warning(f"ETF {etf_code} 数据恢复失败，跳过评分")
                     continue
-            
             # 统一使用20天标准（永久记录在记忆库中）
             if len(df) < 20:
                 logger.debug(f"ETF {etf_code} 数据量不足({len(df)}天)，跳过评分")
@@ -293,7 +291,6 @@ def get_top_rated_etfs(top_n: int = 5) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取评分前N的ETF失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def calculate_strategy_score(df: pd.DataFrame, position_type: str) -> float:
     """
     计算ETF策略评分（100分制）
@@ -386,7 +383,6 @@ def calculate_strategy_score(df: pd.DataFrame, position_type: str) -> float:
     except Exception as e:
         logger.error(f"计算ETF策略评分失败: {str(e)}", exc_info=True)
         return 50.0  # 默认中等评分
-
 def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
     """
     计算平均方向指数(ADX)
@@ -420,7 +416,6 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
     except Exception as e:
         logger.error(f"计算ADX失败: {str(e)}", exc_info=True)
         return 0.0
-
 def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
     """
     计算相对强弱指数(RSI)
@@ -459,7 +454,6 @@ def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
     except Exception as e:
         logger.error(f"计算RSI失败: {str(e)}", exc_info=True)
         return 50.0
-
 def calculate_macd(df: pd.DataFrame, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """
     计算MACD指标
@@ -486,7 +480,6 @@ def calculate_macd(df: pd.DataFrame, fast_period: int = 12, slow_period: int = 2
         logger.error(f"计算MACD失败: {str(e)}", exc_info=True)
         # 返回空的Series
         return pd.Series(), pd.Series(), pd.Series()
-
 def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
     """
     筛选有效的ETF（基于20日均线的YES/NO信号）
@@ -530,7 +523,6 @@ def filter_valid_etfs(top_etfs: pd.DataFrame) -> List[Dict]:
             f"综合评分: {etf['评分']:.0f}/100 (价格偏离率:{etf['价格偏离率']:.1%})"
         )
     return valid_etfs
-
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
     """
     计算平均真实波幅(ATR)
@@ -553,7 +545,6 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
     except Exception as e:
         logger.error(f"计算ATR失败: {str(e)}", exc_info=True)
         return 0.0
-
 def calculate_single_position_strategy(
     position_type: str,
     current_position: pd.Series,
@@ -1235,7 +1226,6 @@ def calculate_single_position_strategy(
         error_msg = f"计算{position_type}策略失败: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return f"{position_type}：计算策略时发生错误，请检查日志", []
-
 def init_position_record() -> pd.DataFrame:
     """
     初始化仓位记录（稳健仓、激进仓各持1只ETF）
@@ -1387,7 +1377,6 @@ def init_position_record() -> pd.DataFrame:
                 "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
         ])
-
 def init_trade_record():
     """初始化交易记录文件"""
     try:
@@ -1414,7 +1403,6 @@ def init_trade_record():
             message=error_msg,
             message_type="error"
         )
-
 def init_performance_record():
     """初始化策略表现记录文件"""
     try:
@@ -1439,7 +1427,6 @@ def init_performance_record():
             message=error_msg,
             message_type="error"
         )
-
 def update_position_record(position_type: str, etf_code: str, etf_name: str, 
                          cost_price: float, current_price: float, 
                          quantity: int, action: str):
@@ -1453,15 +1440,16 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         position_df["持仓成本价"] = position_df["持仓成本价"].astype(float)
         position_df["持仓数量"] = position_df["持仓数量"].astype(int)
         position_df["持仓天数"] = position_df["持仓天数"].astype(int)
-        # 确保日期列是字符串类型
+        # 确保日期列是datetime类型
         if "持仓日期" in position_df.columns:
-            position_df["持仓日期"] = position_df["持仓日期"].astype(str)
+            position_df["持仓日期"] = pd.to_datetime(position_df["持仓日期"], errors='coerce')
         if "操作日期" in position_df.columns:
-            position_df["操作日期"] = position_df["操作日期"].astype(str)
+            position_df["操作日期"] = pd.to_datetime(position_df["操作日期"], errors='coerce')
         if "创建时间" in position_df.columns:
-            position_df["创建时间"] = position_df["创建时间"].astype(str)
+            position_df["创建时间"] = pd.to_datetime(position_df["创建时间"], errors='coerce')
         if "更新时间" in position_df.columns:
-            position_df["更新时间"] = position_df["更新时间"].astype(str)
+            position_df["更新时间"] = pd.to_datetime(position_df["更新时间"], errors='coerce')
+        
         # 检查是否存在指定的仓位类型
         mask = position_df['仓位类型'] == position_type
         if not mask.any():
@@ -1482,12 +1470,12 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
             position_df = pd.concat([position_df, pd.DataFrame([new_row])], ignore_index=True)
             mask = position_df['仓位类型'] == position_type
         # 更新指定仓位类型的数据
-        current_time = datetime.now().strftime("%Y-%m-%d")
-        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_time = datetime.now()
+        current_datetime = current_time.strftime("%Y-%m-%d %H:%M:%S")
         position_df.loc[mask, 'ETF代码'] = str(etf_code)
         position_df.loc[mask, 'ETF名称'] = str(etf_name)
         position_df.loc[mask, '持仓成本价'] = float(cost_price)
-        position_df.loc[mask, '持仓日期'] = current_time
+        position_df.loc[mask, '持仓日期'] = current_time.strftime("%Y-%m-%d")
         position_df.loc[mask, '持仓数量'] = int(quantity)
         position_df.loc[mask, '最新操作'] = str(action)
         position_df.loc[mask, '操作日期'] = current_datetime
@@ -1511,7 +1499,6 @@ def update_position_record(position_type: str, etf_code: str, etf_name: str,
         logger.error(error_msg, exc_info=True)
         # 发送错误通知
         send_wechat_message(message=error_msg, message_type="error")
-
 def record_trade(**kwargs):
     """
     记录交易动作
@@ -1591,7 +1578,6 @@ def record_trade(**kwargs):
             message=error_msg,
             message_type="error"
         )
-
 def get_strategy_performance() -> Dict[str, float]:
     """
     获取策略历史表现
@@ -1637,7 +1623,6 @@ def get_strategy_performance() -> Dict[str, float]:
             "calmar_ratio": 1.0,
             "hs300_return": 0.05
         }
-
 def generate_position_content(strategies: Dict[str, str]) -> str:
     """
     生成仓位策略内容（基于真实计算指标）
@@ -1737,7 +1722,6 @@ def generate_position_content(strategies: Dict[str, str]) -> str:
     content += f"⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
     content += "📊 策略版本: 20日均线趋势策略 v2.0.0\n"
     return content
-
 def calculate_position_strategy() -> str:
     """
     计算仓位操作策略（返回Top 5 ETF分析）
@@ -1861,7 +1845,6 @@ def calculate_position_strategy() -> str:
             message_type="error"
         )
         return "【ETF仓位操作提示】\n计算仓位策略时发生错误，请检查日志"
-
 # 模块初始化
 try:
     # 确保必要的目录存在
@@ -1877,7 +1860,6 @@ except Exception as e:
     logger.error(f"仓位管理模块初始化失败: {str(e)}", exc_info=True)
     # 不中断程序，仅记录错误
     pass
-
 if __name__ == "__main__":
     # 配置日志
     logging.basicConfig(

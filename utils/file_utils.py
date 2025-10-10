@@ -237,7 +237,9 @@ def internal_ensure_chinese_columns(df: pd.DataFrame) -> pd.DataFrame:
     final_mapping = {}
     for col in df.columns:
         # 标准化列名（小写、移除空格）
-        normalized_col = str(col).strip().lower().replace(' ', '').replace('\n', '')
+        temp_col = str(col).strip().lower().replace(' ', '')
+        normalized_col = temp_col.replace('\n', '')
+        # normalized_col = str(col).strip().lower().replace(' ', '').replace('\n', '')
         # 尝试匹配映射字典
         for src, target in column_mapping.items():
             normalized_src = src.strip().lower().replace(' ', '')

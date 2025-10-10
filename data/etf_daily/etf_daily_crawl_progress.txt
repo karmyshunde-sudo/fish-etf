@@ -1,5 +1,5 @@
-last_etf=159725
-processed=400
+last_etf=516000
+processed=500
 total=1238
-next_index=400
-timestamp=2025-10-10 17:47:13
+next_index=500
+timestamp=2025-10-10 17:54:44

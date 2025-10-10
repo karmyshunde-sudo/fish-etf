@@ -66,6 +66,11 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
                 # 【日期datetime类型规则】确保文件日期是datetime类型
                 file_date = datetime.strptime(file_date_str, "%Y%m%d")
                 
+                # 【关键修复】确保文件日期也是有时区信息的
+                # 将无时区的文件日期转换为与current_date相同的时区
+                if file_date.tzinfo is None:
+                    file_date = file_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                
                 # 计算日期差（使用datetime类型直接计算）
                 days_diff = (current_date - file_date).days
                 

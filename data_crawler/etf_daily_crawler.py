@@ -397,12 +397,17 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
-        # 关键修复：即使没有ETF需要处理，也要保存进度
+        # 关键修复：当索引到达总数时，重置索引为0
         if start_idx >= len(etf_codes):
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
-            # 保存进度为end_idx（即len(etf_codes)）
-            save_progress(None, start_idx, total_count, len(etf_codes))
-            logger.info(f"进度已更新为 {len(etf_codes)}/{total_count}")
+            # 重置索引为0（而不是保存为len(etf_codes)）
+            save_progress(None, start_idx, total_count, 0)
+            logger.info(f"进度已重置为 0/{total_count}")
+            # 发送通知
+            send_wechat_message(
+                message=f"ETF日线数据爬取已完成一轮（共{total_count}只ETF），索引已重置",
+                message_type="info"
+            )
             return
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")

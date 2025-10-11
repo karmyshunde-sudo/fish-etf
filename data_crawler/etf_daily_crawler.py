@@ -4,9 +4,9 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 确保进度索引总是前进，即使没有新数据
-- 无论是否爬取到新数据，进度文件都会更新并提交
-- 正确处理索引重置逻辑
+- 彻底解决索引重置后进度未提交的问题
+- 索引达到总数时直接重置为0并提交
+- 每次任务执行后强制提交进度文件
 - 100%可直接复制使用
 """
 
@@ -23,7 +23,7 @@ from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
-from utils.git_utils import commit_files_in_batches
+from utils.git_utils import commit_files_in_batches  # 确保从正确路径导入
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -33,8 +33,33 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 进度文件路径 - 与股票日线爬取相同
+# 进度文件路径
 PROGRESS_FILE = os.path.join(Config.ETFS_DAILY_DIR, "etf_daily_crawl_progress.txt")
+
+def commit_progress_file():
+    """
+    专门提交进度文件到Git
+    确保进度文件的任何更改都被提交
+    """
+    try:
+        # 获取进度文件内容
+        progress_content = ""
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                progress_content = f.read().strip()
+        
+        # 创建提交消息
+        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        if progress_content:
+            commit_message += f"\n\n{progress_content}"
+        
+        # 提交进度文件
+        commit_files_in_batches(PROGRESS_FILE, commit_message)
+        logger.info(f"✅ 进度文件已成功提交到仓库: {PROGRESS_FILE}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
+        return False
 
 def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
     """
@@ -56,11 +81,19 @@ def save_progress(etf_code: str, processed_count: int, total_count: int, next_in
             f.write(f"next_index={next_index}\n")
             f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
-        # 提交进度文件
-        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(PROGRESS_FILE, commit_message)
-        logger.info(f"✅ 进度文件已成功提交到仓库: {PROGRESS_FILE}")
-        logger.info(f"✅ 进度已保存并提交：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
+        # 保存后立即提交
+        success = commit_progress_file()
+        
+        if success:
+            logger.info(f"✅ 进度已保存并提交：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
+        else:
+            # 再次尝试提交
+            logger.error("❌ 进度文件已保存但提交失败，尝试再次提交")
+            if commit_progress_file():
+                logger.info("✅ 重试提交成功")
+            else:
+                logger.critical("❌ 进度文件提交失败，可能导致进度丢失")
+        
     except Exception as e:
         logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
 
@@ -123,7 +156,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 直接获取基础价格数据（无重试机制，简化逻辑）
+        # 直接获取基础价格数据
         df = ak.fund_etf_hist_em(
             symbol=etf_code,
             period="daily",
@@ -401,12 +434,16 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
-        # 关键修复：确保索引在有效范围内
-        if next_index >= total_count:
-            logger.warning(f"检测到索引 {next_index} 超过总数 {total_count}，已重置为0")
-            next_index = 0
+        # 关键修复：当索引到达总数时，直接重置索引为0并保存
+        if start_idx >= total_count:
+            logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
+            # 直接重置索引为0
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
+            logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
+            
+            # 立即保存重置后的进度
+            save_progress(None, start_idx, total_count, start_idx)
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
         
@@ -497,11 +534,10 @@ def crawl_all_etfs_daily_data() -> None:
             if processed_count % 10 == 0 or processed_count == (end_idx - start_idx):
                 logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
                 try:
-                    from utils.git_utils import commit_final
-                    commit_final()
-                    logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
+                    commit_files_in_batches("", "BATCH_COMMIT")
+                    logger.info(f"✅ 已提交前 {processed_count} 只ETF的数据到仓库")
                 except Exception as e:
-                    logger.error(f"提交文件时出错，继续执行: {str(e)}")
+                    logger.error(f"❌ 提交文件时出错，继续执行: {str(e)}")
             
             # 更新进度
             last_processed_code = etf_code
@@ -521,12 +557,19 @@ def crawl_all_etfs_daily_data() -> None:
                 new_index = 0
             # 保存进度
             save_progress(last_processed_code, start_idx + processed_count, total_count, new_index)
-            logger.info(f"进度已更新为 {new_index}/{total_count}")
+            logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
         else:
             # 已经在循环中更新了进度
             pass
         
-        # 确保进度文件已提交
+        # 关键修复：任务结束时确保进度文件已提交
+        try:
+            logger.info("✅ 确保进度文件已提交")
+            commit_progress_file()
+        except Exception as e:
+            logger.error(f"❌ 任务结束时提交进度文件失败: {str(e)}", exc_info=True)
+        
+        # 爬取完本批次后，直接退出，等待下一次调用
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")
         logger.info("程序将退出，等待工作流再次调用")
         
@@ -602,9 +645,9 @@ if __name__ == "__main__":
     try:
         crawl_all_etfs_daily_data()
     finally:
-        # 确保进度文件已保存
+        # 确保进度文件已提交
         try:
-            progress = load_progress()
-            logger.info(f"当前进度: {progress['next_index']}/{progress['total']}")
+            logger.info("✅ 确保进度文件已提交")
+            commit_progress_file()
         except Exception as e:
-            logger.error(f"读取进度文件失败: {str(e)}")
+            logger.error(f"❌ 确保进度文件提交失败: {str(e)}", exc_info=True)

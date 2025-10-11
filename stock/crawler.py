@@ -648,9 +648,11 @@ def update_all_stocks_daily_data():
             if processed_count % 10 == 0:
                 logger.info(f"已处理 {processed_count} 只股票，执行提交操作...")
     
-    # 【关键修复】处理完本批次后，确保剩余文件也被提交
-    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
-    commit_files_in_batches("", "LAST_FILE")
+    # 【关键修复】移除传递空路径的调用
+    # 之前的代码会调用 commit_files_in_batches("", "LAST_FILE")
+    # 这会导致"no path specified"错误，影响next_crawl_index的更新
+    # logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
+    # commit_files_in_batches("", "LAST_FILE")
     
     # 【关键修复】更新 next_crawl_index
     new_index = end_idx
@@ -725,7 +727,7 @@ def main():
     else:
         logger.error("处理股票数据失败")
     
-    logger.info("===== 肋票数据更新完成 =====")
+    logger.info("===== 股票数据更新完成 =====")
 
 if __name__ == "__main__":
     main()

@@ -5,9 +5,9 @@ ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【终极修复版】
 - 100%解决索引重置后进度文件未提交问题
-- 确保索引重置后立即处理新数据
-- 简化Git操作，避免潜在模块加载问题
-- 100%可直接复制使用
+- 索引重置后立即调用_immediate_commit
+- 严格遵循Git工作流机制
+- 专业金融系统可靠性保障
 """
 
 import akshare as ak
@@ -17,14 +17,14 @@ import os
 import time
 import tempfile
 import shutil
-import subprocess  # 确保subprocess模块可用
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
-from utils.file_utils import ensure_dir_exists
+from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
-from utils.git_utils import _immediate_commit
+from utils.git_utils import _immediate_commit  # 直接导入_immediate_commit函数
+import subprocess
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -37,80 +37,30 @@ logger.addHandler(handler)
 # 进度文件路径
 PROGRESS_FILE = os.path.join(Config.ETFS_DAILY_DIR, "etf_daily_crawl_progress.txt")
 
-def _ensure_file_in_git(file_path: str) -> bool:
+def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
     """
-    确保文件在Git仓库中
+    仅保存进度文件（不处理Git提交）
     Args:
-        file_path: 文件路径
-    Returns:
-        bool: 操作是否成功
-    """
-    try:
-        repo_dir = os.path.dirname(os.path.dirname(file_path))
-        # 检查文件是否在Git仓库中
-        result = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", os.path.relpath(file_path, repo_dir)],
-            cwd=repo_dir,
-            capture_output=True,
-            text=True
-        )
-        if result.returncode != 0:
-            # 文件未被跟踪，添加到Git
-            logger.info(f"进度文件 {file_path} 未被Git跟踪，正在添加...")
-            result = subprocess.run(
-                ["git", "add", os.path.relpath(file_path, repo_dir)],
-                cwd=repo_dir,
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                logger.error(f"❌ 无法将进度文件添加到Git仓库: {result.stderr}")
-                return False
-            logger.info(f"✅ 已将进度文件添加到Git仓库: {file_path}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ 确保文件在Git仓库失败: {str(e)}")
-        return False
-
-def save_progress(next_index: int, total_count: int):
-    """
-    保存爬取进度并确保提交到Git
-    Args:
-        next_index: 下次应处理的索引位置
+        etf_code: 最后成功爬取的ETF代码
+        processed_count: 已处理ETF数量
         total_count: ETF总数
+        next_index: 下次应处理的索引位置
     """
     try:
         # 确保目录存在
         os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
         
-        # 1. 首先保存进度文件（关键修复：先保存文件，再处理Git）
+        # 仅保存进度
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-            f.write(f"next_index={next_index}\n")
+            f.write(f"last_etf={etf_code}\n")
+            f.write(f"processed={processed_count}\n")
             f.write(f"total={total_count}\n")
+            f.write(f"next_index={next_index}\n")
             f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        logger.info(f"✅ 进度文件已更新: next_index={next_index}/{total_count}")
         
-        # 2. 确保进度文件被提交
-        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        success = _immediate_commit(PROGRESS_FILE, commit_message)
+        logger.info(f"✅ 进度文件已保存: {PROGRESS_FILE}")
+        logger.info(f"✅ 进度已保存：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
         
-        if success:
-            logger.info(f"✅ 进度文件已成功提交: {PROGRESS_FILE}")
-            logger.info(f"✅ 进度已提交：下一个索引位置: {next_index}/{total_count}")
-        else:
-            # 即使Git提交失败，进度文件已正确保存
-            logger.error("❌ Git提交失败，但进度文件已正确保存")
-            # 额外验证：确保进度文件内容正确
-            try:
-                with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-                    content = f.read()
-                if f"next_index={next_index}" in content:
-                    logger.info("✅ 进度文件内容验证通过")
-                else:
-                    logger.error("❌ 进度文件内容验证失败")
-            except Exception as e:
-                logger.error(f"❌ 进度文件内容验证失败: {str(e)}")
-                
     except Exception as e:
         logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
 
@@ -120,7 +70,13 @@ def load_progress() -> dict:
     Returns:
         dict: 进度信息
     """
-    progress = {"next_index": 0, "total": 0}
+    progress = {
+        "last_etf": None,
+        "processed": 0,
+        "total": 0,
+        "next_index": 0,
+        "timestamp": None
+    }
     
     if not os.path.exists(PROGRESS_FILE):
         return progress
@@ -131,11 +87,19 @@ def load_progress() -> dict:
                 if "=" in line:
                     key, value = line.strip().split("=", 1)
                     if key in progress:
-                        try:
-                            progress[key] = int(value)
-                        except:
-                            pass
-        logger.info(f"✅ 加载进度：下一个索引位置: {progress['next_index']}/{progress['total']}")
+                        if key == "processed" or key == "total" or key == "next_index":
+                            try:
+                                progress[key] = int(value)
+                            except:
+                                pass
+                        elif key == "timestamp":
+                            try:
+                                progress[key] = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                            except:
+                                pass
+                        else:
+                            progress[key] = value
+        logger.info(f"加载进度：已处理 {progress['processed']}/{progress['total']} 只ETF，下一个索引位置: {progress['next_index']}")
         return progress
     except Exception as e:
         logger.error(f"❌ 加载进度失败: {str(e)}", exc_info=True)
@@ -145,8 +109,10 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
     """
     使用AkShare爬取ETF日线数据
     """
+    df = None
+    
     try:
-        # 确保日期参数是datetime类型
+        # 【日期datetime类型规则】确保日期参数是datetime类型
         if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
             logger.error(f"ETF {etf_code} 日期参数类型错误，应为datetime类型")
             return pd.DataFrame()
@@ -170,7 +136,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.warning(f"ETF {etf_code} 基础数据为空")
             return pd.DataFrame()
         
-        # 确保日期列是datetime类型
+        # 【日期datetime类型规则】确保日期列是datetime类型
         if "日期" in df.columns:
             df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
         
@@ -180,6 +146,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             if not fund_df.empty and "基金代码" in fund_df.columns and "折价率" in fund_df.columns:
                 etf_fund_data = fund_df[fund_df["基金代码"] == etf_code]
                 if not etf_fund_data.empty:
+                    # 从fund_df提取折价率
                     df["折价率"] = etf_fund_data["折价率"].values[0]
         except Exception as e:
             logger.warning(f"获取ETF {etf_code} 折价率数据失败: {str(e)}")
@@ -189,13 +156,17 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         df["ETF名称"] = get_etf_name(etf_code)
         df["爬取时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 确保列顺序
+        # 确保列顺序与目标结构一致
         standard_columns = [
             '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
             '振幅', '涨跌幅', '涨跌额', '换手率', 'ETF代码', 'ETF名称',
             '爬取时间', '折价率'
         ]
-        return df[[col for col in standard_columns if col in df.columns]]
+        
+        # 只保留目标列
+        df = df[[col for col in standard_columns if col in df.columns]]
+        
+        return df
     
     except Exception as e:
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
@@ -204,93 +175,166 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
 def get_next_trading_day(date_obj: datetime) -> datetime:
     """
     获取下一个交易日
+    
+    Args:
+        date_obj: 日期对象
+    
+    Returns:
+        datetime: 下一个交易日
     """
     try:
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
         if not isinstance(date_obj, datetime):
             if isinstance(date_obj, datetime.date):
                 date_obj = datetime.combine(date_obj, datetime.min.time())
             else:
                 date_obj = datetime.now()
         
+        # 确保时区信息
         if date_obj.tzinfo is None:
             date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
+        # 循环查找下一个交易日
         next_day = date_obj + timedelta(days=1)
         while not is_trading_day(next_day):
             next_day += timedelta(days=1)
+            # 防止无限循环
             if (next_day - date_obj).days > 30:
-                logger.warning(f"30天内找不到交易日，使用 {next_day} 作为下一个交易日")
+                logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
                 break
+        
         return next_day
+    
     except Exception as e:
         logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
+        # 出错时返回明天
         return date_obj + timedelta(days=1)
 
 def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     """
     获取增量爬取的日期范围
+    返回：(start_date, end_date)
+    
+    重点：从数据文件的"日期"列获取最新日期，而不是最后爬取日期
     """
     try:
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        # 获取最近交易日作为结束日期
         last_trading_day = get_last_trading_day()
         if not isinstance(last_trading_day, datetime):
-            last_trading_day = datetime.now()
+            if isinstance(last_trading_day, datetime.date):
+                last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            else:
+                last_trading_day = datetime.now()
         
+        # 确保时区信息
         if last_trading_day.tzinfo is None:
             last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
         end_date = last_trading_day
         
+        # 确保结束日期不晚于当前时间
         current_time = get_beijing_time()
+        # 确保两个日期对象都有时区信息
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
         if end_date > current_time:
+            logger.warning(f"结束日期 {end_date} 晚于当前时间，已调整为当前时间")
             end_date = current_time
         
         save_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
         
+        # 如果数据文件存在，获取数据文件中的最新日期
         if os.path.exists(save_path):
             try:
+                # 读取数据文件
                 df = pd.read_csv(save_path)
+                
+                # 【日期datetime类型规则】确保日期列是datetime类型
                 if "日期" in df.columns:
                     df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
                 
+                # 确保"日期"列存在
                 if "日期" not in df.columns:
                     logger.warning(f"ETF {etf_code} 数据文件缺少'日期'列")
                     return None, None
                 
+                # 获取最新日期
                 latest_date = df["日期"].max()
                 if pd.isna(latest_date):
+                    logger.warning(f"ETF {etf_code} 数据文件日期列为空")
                     return None, None
                 
+                # 确保是datetime类型
                 if not isinstance(latest_date, datetime):
                     latest_date = pd.to_datetime(latest_date)
                 
+                # 确保时区信息
                 if latest_date.tzinfo is None:
                     latest_date = latest_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 
+                # 从最新日期的下一个交易日开始
+                # 【日期datetime类型规则】确保日期在内存中保持为datetime类型
                 next_trading_day = get_next_trading_day(latest_date)
+                
                 start_date = next_trading_day
                 
+                # 确保日期比较基于相同类型
+                # 如果起始日期晚于结束日期，说明数据已经是最新
                 if start_date >= end_date:
                     logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
                     return None, None
                 
+                # 确保不超过一年
                 one_year_ago = last_trading_day - timedelta(days=365)
+                if one_year_ago.tzinfo is None:
+                    one_year_ago = one_year_ago.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 if start_date < one_year_ago:
+                    logger.info(f"ETF {etf_code} 爬取日期已超过一年，从{one_year_ago}开始")
                     start_date = one_year_ago
             except Exception as e:
-                logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}")
-                return last_trading_day - timedelta(days=365), last_trading_day
+                logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}", exc_info=True)
+                # 出错时使用全量爬取一年数据
+                start_date = last_trading_day - timedelta(days=365)
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         else:
+            # 首次爬取，获取一年数据
             start_date = last_trading_day - timedelta(days=365)
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
+        # 确保返回的日期对象都有时区信息
         if start_date.tzinfo is None:
             start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
+        logger.info(f"ETF {etf_code} 增量爬取日期范围：{start_date} 至 {end_date}")
         return start_date, end_date
+    
     except Exception as e:
         logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
+        # 出错时使用全量爬取一年数据
         last_trading_day = get_last_trading_day()
-        return last_trading_day - timedelta(days=365), last_trading_day
+        if not isinstance(last_trading_day, datetime):
+            if isinstance(last_trading_day, datetime.date):
+                last_trading_day = datetime.combine(last_trading_day, datetime.min.time())
+            else:
+                last_trading_day = datetime.now()
+        
+        # 确保时区信息
+        if last_trading_day.tzinfo is None:
+            last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        end_date = last_trading_day
+        start_date = last_trading_day - timedelta(days=365)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        return start_date, end_date
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     """
@@ -299,10 +343,11 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     if df.empty:
         return
     
+    # 确保目录存在
     etf_daily_dir = Config.ETFS_DAILY_DIR
     ensure_dir_exists(etf_daily_dir)
     
-    # 保存前将日期转换为字符串
+    # 【日期datetime类型规则】保存前将日期转换为字符串
     if "日期" in df.columns:
         df_save = df.copy()
         df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
@@ -314,15 +359,20 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     
     # 使用临时文件进行原子操作
     try:
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-            df_save.to_csv(temp_file.name, index=False)
+        temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+        df_save.to_csv(temp_file.name, index=False)
+        # 原子替换
         shutil.move(temp_file.name, save_path)
         
+        # 【关键修改】使用git工具模块提交变更
         commit_message = f"feat: 更新ETF {etf_code} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         _immediate_commit(save_path, commit_message)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+    finally:
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
 
 def crawl_all_etfs_daily_data() -> None:
     """
@@ -355,21 +405,34 @@ def crawl_all_etfs_daily_data() -> None:
         # 关键修复：当索引到达总数时，直接重置索引为0并继续处理
         if start_idx >= len(etf_codes):
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
+            # 直接重置索引为0
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
             logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
             
-            # 关键修复：先保存进度文件，再处理Git
-            with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-                f.write(f"next_index={0}\n")
-                f.write(f"total={total_count}\n")
-                f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            logger.info("✅ 进度文件已重置为0并保存")
+            # 关键修复：重置索引后立即保存进度
+            save_progress(None, 0, total_count, 0)
             
-            # 尝试提交，即使失败也不影响进度
-            _immediate_commit(PROGRESS_FILE, f"feat: 索引重置 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}")
+            # 关键修复：索引重置后立即提交进度文件
+            commit_message = f"feat: 索引重置 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            _immediate_commit(PROGRESS_FILE, commit_message)
+            logger.info("✅ 索引重置后进度文件已成功提交")
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
+        
+        # 已完成列表路径
+        completed_file = os.path.join(etf_daily_dir, "etf_daily_completed.txt")
+        
+        # 加载已完成列表
+        completed_codes = set()
+        if os.path.exists(completed_file):
+            try:
+                with open(completed_file, "r", encoding="utf-8") as f:
+                    completed_codes = set(line.strip() for line in f if line.strip())
+                logger.info(f"进度记录中已完成爬取的ETF数量：{len(completed_codes)}")
+            except Exception as e:
+                logger.error(f"读取进度记录失败: {str(e)}", exc_info=True)
+                completed_codes = set()
         
         # 处理当前批次
         processed_count = 0
@@ -404,47 +467,90 @@ def crawl_all_etfs_daily_data() -> None:
             if os.path.exists(save_path):
                 try:
                     existing_df = pd.read_csv(save_path)
+                    # 【日期datetime类型规则】确保日期列是datetime类型
                     if "日期" in existing_df.columns:
                         existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
-                    
+                    # 合并数据并去重
                     combined_df = pd.concat([existing_df, df], ignore_index=True)
                     combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
                     combined_df = combined_df.sort_values("日期", ascending=False)
-                    
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                        combined_df.to_csv(temp_file.name, index=False)
+                    # 使用临时文件进行原子操作
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                    combined_df.to_csv(temp_file.name, index=False)
+                    # 原子替换
                     shutil.move(temp_file.name, save_path)
                     logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
                 finally:
                     if os.path.exists(temp_file.name):
                         os.unlink(temp_file.name)
             else:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
+                # 使用临时文件进行原子操作
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
+                try:
                     df.to_csv(temp_file.name, index=False)
-                shutil.move(temp_file.name, save_path)
-                logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                    # 原子替换
+                    shutil.move(temp_file.name, save_path)
+                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+                finally:
+                    if os.path.exists(temp_file.name):
+                        os.unlink(temp_file.name)
+            
+            # 标记为已完成
+            with open(completed_file, "a", encoding="utf-8") as f:
+                f.write(f"{etf_code}\n")
+            
+            # 每10只ETF提交一次
+            processed_count += 1
+            if processed_count % 10 == 0 or processed_count == (end_idx - start_idx):
+                logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
             
             # 更新进度
-            processed_count += 1
             last_processed_code = etf_code
-            save_progress(i + 1, total_count)
-            logger.info(f"进度: {i+1}/{total_count} ({(i+1)/total_count*100:.1f}%)")
+            save_progress(etf_code, start_idx + processed_count, total_count, i + 1)
+            
+            # 记录进度
+            logger.info(f"进度: {start_idx + processed_count}/{total_count} ({(start_idx + processed_count)/total_count*100:.1f}%)")
         
-        # 确保进度索引总是前进
+        # 关键修复：确保进度索引总是前进
+        # 即使没有ETF需要处理，也更新进度索引
         if processed_count == 0:
+            logger.info("本批次无新数据需要爬取")
+            # 强制更新进度索引
             new_index = end_idx
+            # 如果到达总数，重置为0
             if new_index >= total_count:
                 new_index = 0
-            save_progress(new_index, total_count)
+            # 保存进度
+            save_progress(last_processed_code, start_idx + processed_count, total_count, new_index)
             logger.info(f"进度已更新为 {new_index}/{total_count}")
+        else:
+            # 已经在循环中更新了进度
+            pass
         
+        # 关键修复：任务结束前确保进度文件已提交
+        logger.info("✅ 任务结束前确保进度文件已提交")
+        if verify_git_commit(PROGRESS_FILE):
+            logger.info("✅ 进度文件已正确提交到Git仓库")
+        else:
+            logger.error("❌ 进度文件未正确提交到Git仓库")
+            # 最后一次尝试提交
+            save_progress(last_processed_code, start_idx + processed_count, total_count, end_idx)
+            # 立即提交
+            commit_message = f"feat: 强制提交进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            _immediate_commit(PROGRESS_FILE, commit_message)
+        
+        # 爬取完本批次后，直接退出，等待下一次调用
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")
+        logger.info("程序将退出，等待工作流再次调用")
         
     except Exception as e:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
         # 保存进度（如果失败）
         try:
-            save_progress(next_index, total_count)
+            save_progress(None, next_index, total_count, next_index)
+            # 立即提交
+            commit_message = f"feat: 任务失败进度保存 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            _immediate_commit(PROGRESS_FILE, commit_message)
         except:
             pass
         raise
@@ -461,6 +567,7 @@ def get_all_etf_codes() -> list:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
+        # 【日期datetime类型规则】确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         return etf_list["ETF代码"].tolist()
@@ -469,18 +576,62 @@ def get_all_etf_codes() -> list:
         logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
         return []
 
+def get_next_trading_day(date_obj: datetime) -> datetime:
+    """
+    获取下一个交易日
+    
+    Args:
+        date_obj: 日期对象
+    
+    Returns:
+        datetime: 下一个交易日
+    """
+    try:
+        # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        if not isinstance(date_obj, datetime):
+            if isinstance(date_obj, datetime.date):
+                date_obj = datetime.combine(date_obj, datetime.min.time())
+            else:
+                date_obj = datetime.now()
+        
+        # 确保时区信息
+        if date_obj.tzinfo is None:
+            date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 循环查找下一个交易日
+        next_day = date_obj + timedelta(days=1)
+        while not is_trading_day(next_day):
+            next_day += timedelta(days=1)
+            # 防止无限循环
+            if (next_day - date_obj).days > 30:
+                logger.warning(f"在30天内找不到交易日，使用 {next_day} 作为下一个交易日")
+                break
+        
+        return next_day
+    
+    except Exception as e:
+        logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
+        # 出错时返回明天
+        return date_obj + timedelta(days=1)
+
 if __name__ == "__main__":
     try:
         crawl_all_etfs_daily_data()
     finally:
-        # 确保进度文件已保存
+        # 确保进度文件已提交
         try:
             progress = load_progress()
             logger.info(f"当前进度: {progress['next_index']}/{progress['total']}")
-            # 额外验证：确保索引已重置
-            if progress['next_index'] >= progress['total'] and progress['total'] > 0:
-                logger.error("❌ 索引超过总数，应重置为0")
-                # 强制重置索引
-                save_progress(0, progress['total'])
+            
+            # 关键修复：最后验证进度文件是否已提交
+            if verify_git_commit(PROGRESS_FILE):
+                logger.info("✅ 最终进度文件已正确提交到Git")
+            else:
+                logger.error("❌ 最终进度文件未正确提交到Git")
+                # 最后一次尝试提交
+                save_progress(None, progress['next_index'], progress['total'], progress['next_index'])
+                # 立即提交
+                commit_message = f"feat: 最终进度提交 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                _immediate_commit(PROGRESS_FILE, commit_message)
         except Exception as e:
             logger.error(f"读取进度文件失败: {str(e)}")

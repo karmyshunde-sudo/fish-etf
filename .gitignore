@@ -22,6 +22,7 @@ temp/
 # 若之前有忽略，添加以下行强制包含：
 !data/etf_daily/  
 !data/etf_daily/*.csv  
+!data/etf_daily/*.txt
 !data/arbitrage/
 !data/arbitrage/*.csv
 !data/flags/

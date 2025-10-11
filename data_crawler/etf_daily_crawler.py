@@ -4,8 +4,9 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 直接调用git_utils.py中的_immediate_commit函数
-- 确保每次保存进度后立即提交到Git
+- 确保索引重置后立即处理新的ETF数据
+- 不再浪费任务执行机会
+- 每次任务都确保处理一批ETF数据
 - 100%可直接复制使用
 """
 
@@ -22,7 +23,7 @@ from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_
 from utils.file_utils import ensure_dir_exists, get_last_crawl_date
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 from wechat_push.push import send_wechat_message
-from utils.git_utils import _immediate_commit  # 专门导入立即提交函数
+from utils.git_utils import _immediate_commit  # 直接导入立即提交函数
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 进度文件路径 - 与股票日线爬取相同
+# 进度文件路径
 PROGRESS_FILE = os.path.join(Config.ETFS_DAILY_DIR, "etf_daily_crawl_progress.txt")
 
 def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
@@ -130,7 +131,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 直接获取基础价格数据
+        # 直接获取基础价格数据（无重试机制，简化逻辑）
         df = ak.fund_etf_hist_em(
             symbol=etf_code,
             period="daily",
@@ -409,21 +410,15 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
-        # 关键修复：当索引到达总数时，直接重置索引为0
+        # 关键修复：当索引到达总数时，直接重置索引为0并继续处理
         if start_idx >= len(etf_codes):
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
             # 直接重置索引为0
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
-            # 立即保存重置后的进度
-            save_progress(None, start_idx, total_count, start_idx)
-            logger.info(f"✅ 进度已重置为 0/{total_count}")
-            # 发送通知
-            send_wechat_message(
-                message=f"ETF日线数据爬取已完成一轮（共{total_count}只ETF），索引已重置",
-                message_type="info"
-            )
-            return
+            logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
+            # 关键修复：重置索引后立即保存进度
+            save_progress(None, 0, total_count, 0)
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
         
@@ -522,12 +517,21 @@ def crawl_all_etfs_daily_data() -> None:
             # 记录进度
             logger.info(f"进度: {start_idx + processed_count}/{total_count} ({(start_idx + processed_count)/total_count*100:.1f}%)")
         
-        # 关键修复：确保进度文件被正确保存
-        # 即使没有ETF需要处理，也要更新进度
+        # 关键修复：确保进度索引总是前进
+        # 即使没有ETF需要处理，也更新进度索引
         if processed_count == 0:
             logger.info("本批次无新数据需要爬取")
-            # 保存进度为end_idx
-            save_progress(last_processed_code, start_idx + processed_count, total_count, end_idx)
+            # 强制更新进度索引
+            new_index = end_idx
+            # 如果到达总数，重置为0
+            if new_index >= total_count:
+                new_index = 0
+            # 保存进度
+            save_progress(last_processed_code, start_idx + processed_count, total_count, new_index)
+            logger.info(f"进度已更新为 {new_index}/{total_count}")
+        else:
+            # 已经在循环中更新了进度
+            pass
         
         # 爬取完本批次后，直接退出，等待下一次调用
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")

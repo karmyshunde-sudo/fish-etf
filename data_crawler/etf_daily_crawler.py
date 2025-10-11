@@ -3,8 +3,8 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【终极修复版】
-- 彻底解决verify_git_commit未定义问题
+【最终修复版】
+- 彻底解决进度文件未被添加到Git问题
 - 确保索引重置后进度文件被正确提交
 - 严格符合GitHub Actions工作流机制
 - 100%可直接复制使用
@@ -36,64 +36,40 @@ logger.addHandler(handler)
 # 进度文件路径
 PROGRESS_FILE = os.path.join(Config.ETFS_DAILY_DIR, "etf_daily_crawl_progress.txt")
 
-def verify_git_commit(file_path: str) -> bool:
+def _ensure_file_in_git(file_path: str) -> bool:
     """
-    验证文件是否真正提交到Git
+    确保文件被添加到Git仓库
     Args:
-        file_path: 要验证的文件路径
-    
+        file_path: 文件路径
     Returns:
-        bool: 提交是否成功
+        bool: 操作是否成功
     """
     try:
-        # 检查文件是否在Git仓库中
         repo_dir = os.path.dirname(os.path.dirname(file_path))
-        if not os.path.exists(os.path.join(repo_dir, ".git")):
-            logger.warning(f"文件 {file_path} 不在Git仓库中")
-            return False
-        
-        # 获取文件的最新提交
+        # 检查文件是否在Git仓库中
         result = subprocess.run(
-            ["git", "log", "-1", "--pretty=format:%H", "--", file_path],
+            ["git", "ls-files", "--error-unmatch", os.path.relpath(file_path, repo_dir)],
             cwd=repo_dir,
             capture_output=True,
             text=True
         )
+        if result.returncode == 0:
+            return True
         
-        # 检查是否成功获取提交哈希
-        if result.returncode != 0:
-            logger.error(f"无法获取 {file_path} 的提交记录: {result.stderr}")
-            return False
-        
-        commit_hash = result.stdout.strip()
-        if not commit_hash:
-            logger.error(f"无法获取 {file_path} 的有效提交记录")
-            return False
-        
-        # 检查提交内容
+        # 文件未被跟踪，添加到Git
         result = subprocess.run(
-            ["git", "show", commit_hash, "--", file_path],
+            ["git", "add", os.path.relpath(file_path, repo_dir)],
             cwd=repo_dir,
             capture_output=True,
             text=True
         )
-        
         if result.returncode != 0:
-            logger.error(f"无法验证提交内容: {result.stderr}")
+            logger.error(f"❌ 无法将文件添加到Git仓库: {result.stderr}")
             return False
-        
-        # 检查提交中是否包含正确的进度信息
-        with open(file_path, "r", encoding="utf-8") as f:
-            current_content = f.read()
-        
-        if current_content not in result.stdout:
-            logger.error("提交内容与当前文件内容不匹配")
-            return False
-        
-        logger.info("✅ Git提交验证成功")
+        logger.info(f"✅ 已将文件添加到Git仓库: {file_path}")
         return True
     except Exception as e:
-        logger.error(f"验证Git提交失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 确保文件在Git仓库失败: {str(e)}")
         return False
 
 def save_progress(next_index: int, total_count: int):
@@ -113,30 +89,25 @@ def save_progress(next_index: int, total_count: int):
             f.write(f"total={total_count}\n")
             f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
-        # 关键修复：确保进度文件被提交
+        # 关键修复：确保文件在Git仓库中
+        if not _ensure_file_in_git(PROGRESS_FILE):
+            logger.error("❌ 无法将进度文件添加到Git仓库")
+            return
+        
+        # 提交进度文件
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         success = _immediate_commit(PROGRESS_FILE, commit_message)
         
         if success:
-            # 关键修复：验证提交是否成功
-            if verify_git_commit(PROGRESS_FILE):
-                logger.info(f"✅ 进度文件已成功提交: {PROGRESS_FILE}")
-                logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{total_count}")
-            else:
-                logger.error("❌ 提交记录存在，但进度文件未被正确提交")
-                # 再次尝试提交
-                if _immediate_commit(PROGRESS_FILE, commit_message) and verify_git_commit(PROGRESS_FILE):
-                    logger.info("✅ 重试提交成功")
-                else:
-                    logger.critical("❌ 两次提交尝试均失败，可能导致进度丢失")
+            logger.info(f"✅ 进度文件已成功提交: {PROGRESS_FILE}")
+            logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{total_count}")
         else:
-            logger.error("❌ 进度文件已保存但提交失败")
+            logger.error("❌ 进度文件提交失败")
             # 再次尝试提交
-            if _immediate_commit(PROGRESS_FILE, commit_message) and verify_git_commit(PROGRESS_FILE):
+            if _immediate_commit(PROGRESS_FILE, commit_message):
                 logger.info("✅ 重试提交成功")
             else:
                 logger.critical("❌ 进度文件提交失败，可能导致进度丢失")
-                
     except Exception as e:
         logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
 
@@ -378,12 +349,15 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
-        # 关键修复：当索引到达总数时，重置索引并继续处理
+        # 关键修复：当索引到达总数时，直接重置索引为0并继续处理
         if start_idx >= len(etf_codes):
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
+            # 直接重置索引为0
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
             logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
+            
+            # 关键修复：重置索引后立即保存进度
             save_progress(0, total_count)
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
@@ -477,9 +451,6 @@ def crawl_all_etfs_daily_data() -> None:
                 new_index = 0
             save_progress(new_index, total_count)
             logger.info(f"进度已更新为 {new_index}/{total_count}")
-        else:
-            # 已经在循环中更新了进度
-            pass
         
         # 任务结束前确保进度文件已提交
         logger.info("✅ 任务结束前确保进度文件已提交")
@@ -496,7 +467,7 @@ def crawl_all_etfs_daily_data() -> None:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
         # 保存进度（如果失败）
         try:
-            save_progress(None, next_index, total_count, next_index)
+            save_progress(next_index, total_count)
         except:
             pass
         raise
@@ -529,13 +500,5 @@ if __name__ == "__main__":
         try:
             progress = load_progress()
             logger.info(f"当前进度: {progress['next_index']}/{progress['total']}")
-            
-            # 关键修复：最后验证进度文件是否已提交
-            if verify_git_commit(PROGRESS_FILE):
-                logger.info("✅ 最终进度文件已正确提交到Git")
-            else:
-                logger.error("❌ 最终进度文件未正确提交到Git")
-                # 最后一次尝试提交
-                save_progress(None, progress['next_index'], progress['total'], progress['next_index'])
         except Exception as e:
             logger.error(f"读取进度文件失败: {str(e)}")

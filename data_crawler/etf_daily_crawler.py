@@ -5,9 +5,8 @@ ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【专业级生产版】
 - 100%解决进度文件未被Git跟踪问题
+- 添加subprocess模块导入修复
 - 确保索引重置后进度文件被正确提交
-- 严格符合GitHub Actions工作流机制
-- 代码精简高效，无任何冗余
 - 100%可直接复制使用
 """
 
@@ -18,6 +17,7 @@ import os
 import time
 import tempfile
 import shutil
+import subprocess  # 关键修复：添加缺失的subprocess导入
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -56,6 +56,7 @@ def _ensure_file_in_git(file_path: str) -> bool:
         )
         if result.returncode != 0:
             # 文件未被跟踪，添加到Git
+            logger.info(f"进度文件 {file_path} 未被Git跟踪，正在添加...")
             result = subprocess.run(
                 ["git", "add", os.path.relpath(file_path, repo_dir)],
                 cwd=repo_dir,
@@ -63,9 +64,9 @@ def _ensure_file_in_git(file_path: str) -> bool:
                 text=True
             )
             if result.returncode != 0:
-                logger.error(f"❌ 无法将文件添加到Git仓库: {result.stderr}")
+                logger.error(f"❌ 无法将进度文件添加到Git仓库: {result.stderr}")
                 return False
-            logger.info(f"✅ 已将文件添加到Git仓库: {file_path}")
+            logger.info(f"✅ 已将进度文件添加到Git仓库: {file_path}")
         return True
     except Exception as e:
         logger.error(f"❌ 确保文件在Git仓库失败: {str(e)}")
@@ -107,6 +108,7 @@ def save_progress(next_index: int, total_count: int):
                 logger.info("✅ 重试提交成功")
             else:
                 logger.critical("❌ 进度文件提交失败，可能导致进度丢失")
+                
     except Exception as e:
         logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
 
@@ -202,18 +204,15 @@ def get_next_trading_day(date_obj: datetime) -> datetime:
     获取下一个交易日
     """
     try:
-        # 确保日期是datetime类型
         if not isinstance(date_obj, datetime):
             if isinstance(date_obj, datetime.date):
                 date_obj = datetime.combine(date_obj, datetime.min.time())
             else:
                 date_obj = datetime.now()
         
-        # 确保时区信息
         if date_obj.tzinfo is None:
             date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 查找下一个交易日
         next_day = date_obj + timedelta(days=1)
         while not is_trading_day(next_day):
             next_day += timedelta(days=1)
@@ -230,7 +229,6 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     获取增量爬取的日期范围
     """
     try:
-        # 获取最近交易日作为结束日期
         last_trading_day = get_last_trading_day()
         if not isinstance(last_trading_day, datetime):
             last_trading_day = datetime.now()
@@ -239,14 +237,12 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
             last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
         end_date = last_trading_day
         
-        # 确保结束日期不晚于当前时间
         current_time = get_beijing_time()
         if end_date > current_time:
             end_date = current_time
         
         save_path = os.path.join(Config.ETFS_DAILY_DIR, f"{etf_code}.csv")
         
-        # 如果数据文件存在，获取数据文件中的最新日期
         if os.path.exists(save_path):
             try:
                 df = pd.read_csv(save_path)
@@ -270,12 +266,10 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
                 next_trading_day = get_next_trading_day(latest_date)
                 start_date = next_trading_day
                 
-                # 确保日期比较基于相同类型
                 if start_date >= end_date:
                     logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
                     return None, None
                 
-                # 确保不超过一年
                 one_year_ago = last_trading_day - timedelta(days=365)
                 if start_date < one_year_ago:
                     start_date = one_year_ago
@@ -283,7 +277,6 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
                 logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}")
                 return last_trading_day - timedelta(days=365), last_trading_day
         else:
-            # 首次爬取，获取一年数据
             start_date = last_trading_day - timedelta(days=365)
         
         if start_date.tzinfo is None:
@@ -304,7 +297,6 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     if df.empty:
         return
     
-    # 确保目录存在
     etf_daily_dir = Config.ETFS_DAILY_DIR
     ensure_dir_exists(etf_daily_dir)
     
@@ -358,7 +350,7 @@ def crawl_all_etfs_daily_data() -> None:
         start_idx = next_index
         end_idx = min(start_idx + batch_size, len(etf_codes))
         
-        # 关键修复：当索引到达总数时，重置索引并立即处理
+        # 关键修复：当索引到达总数时，直接重置索引为0并继续处理
         if start_idx >= len(etf_codes):
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
             start_idx = 0
@@ -378,6 +370,7 @@ def crawl_all_etfs_daily_data() -> None:
             # 获取增量日期范围
             start_date, end_date = get_incremental_date_range(etf_code)
             if start_date is None or end_date is None:
+                logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
                 continue
             
             # 爬取数据
@@ -388,6 +381,11 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 检查是否成功获取数据
             if df.empty:
+                logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
+                logger.warning(f"⚠️ 未获取到数据")
+                # 记录失败日志
+                with open(os.path.join(etf_daily_dir, "failed_etfs.txt"), "a", encoding="utf-8") as f:
+                    f.write(f"{etf_code},{etf_name},未获取到数据\n")
                 continue
             
             # 处理已有数据

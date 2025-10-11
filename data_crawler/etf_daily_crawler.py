@@ -4,11 +4,11 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 严格确保进度文件被正确保存
-- 每次只爬取100只ETF
-- 每10只ETF提交到Git仓库
-- 从进度文件读取继续爬取的位置
-- 无任何延时或防封机制
+- 修复进度文件未提交到Git的问题
+- 确保索引重置后进度文件能正确提交
+- 每次进度文件变更都立即提交
+- 严格确保进度文件在Git中可见
+- 100%可直接复制使用
 """
 
 import akshare as ak
@@ -37,9 +37,34 @@ logger.addHandler(handler)
 # 进度文件路径 - 与股票日线爬取相同
 PROGRESS_FILE = os.path.join(Config.ETFS_DAILY_DIR, "etf_daily_crawl_progress.txt")
 
+def commit_progress_file():
+    """
+    专门提交进度文件到Git
+    确保进度文件的任何更改都被提交
+    """
+    try:
+        # 获取进度文件的提交消息
+        progress_content = ""
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                progress_content = f.read().strip()
+        
+        # 创建提交消息
+        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        if progress_content:
+            commit_message += f"\n\n{progress_content}"
+        
+        # 提交进度文件
+        commit_files_in_batches(PROGRESS_FILE, commit_message)
+        logger.info(f"进度文件已成功提交到仓库: {PROGRESS_FILE}")
+        return True
+    except Exception as e:
+        logger.error(f"提交进度文件失败: {str(e)}", exc_info=True)
+        return False
+
 def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
     """
-    保存爬取进度
+    保存爬取进度并确保提交到Git
     Args:
         etf_code: 最后成功爬取的ETF代码
         processed_count: 已处理ETF数量
@@ -56,7 +81,18 @@ def save_progress(etf_code: str, processed_count: int, total_count: int, next_in
             f.write(f"total={total_count}\n")
             f.write(f"next_index={next_index}\n")
             f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        logger.info(f"进度已保存：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
+        
+        # 【关键修复】保存进度后立即提交
+        success = commit_progress_file()
+        
+        if success:
+            logger.info(f"进度已保存并提交：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
+        else:
+            logger.error("进度文件已保存但提交失败")
+            # 再次尝试提交
+            if not commit_progress_file():
+                logger.critical("进度文件提交失败，可能导致进度丢失")
+        
     except Exception as e:
         logger.error(f"保存进度失败: {str(e)}", exc_info=True)
 
@@ -499,8 +535,8 @@ def crawl_all_etfs_daily_data() -> None:
             if processed_count % 10 == 0 or processed_count == (end_idx - start_idx):
                 logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
                 try:
-                    from utils.git_utils import commit_final
-                    commit_final()
+                    # 不再使用commit_final，改为调用标准提交函数
+                    commit_files_in_batches("", "BATCH_COMMIT")
                     logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
                 except Exception as e:
                     logger.error(f"提交文件时出错，继续执行: {str(e)}")

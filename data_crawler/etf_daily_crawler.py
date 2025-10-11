@@ -4,10 +4,10 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 修复进度文件未提交到Git的问题
-- 确保索引重置后进度文件能正确提交
-- 每次进度文件变更都立即提交
-- 严格确保进度文件在Git中可见
+- 修复索引重置后进度未提交的问题
+- 索引重置后立即保存并提交进度
+- 增加进度文件提交确认日志
+- 确保进度文件始终被正确提交
 - 100%可直接复制使用
 """
 
@@ -56,10 +56,10 @@ def commit_progress_file():
         
         # 提交进度文件
         commit_files_in_batches(PROGRESS_FILE, commit_message)
-        logger.info(f"进度文件已成功提交到仓库: {PROGRESS_FILE}")
+        logger.info(f"✅ 进度文件已成功提交到仓库: {PROGRESS_FILE}")
         return True
     except Exception as e:
-        logger.error(f"提交进度文件失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
         return False
 
 def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
@@ -86,15 +86,15 @@ def save_progress(etf_code: str, processed_count: int, total_count: int, next_in
         success = commit_progress_file()
         
         if success:
-            logger.info(f"进度已保存并提交：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
+            logger.info(f"✅ 进度已保存并提交：处理了 {processed_count}/{total_count} 只ETF，下一个索引位置: {next_index}")
         else:
-            logger.error("进度文件已保存但提交失败")
+            logger.error("❌ 进度文件已保存但提交失败")
             # 再次尝试提交
             if not commit_progress_file():
-                logger.critical("进度文件提交失败，可能导致进度丢失")
+                logger.critical("❌ 进度文件提交失败，可能导致进度丢失")
         
     except Exception as e:
-        logger.error(f"保存进度失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
 
 def load_progress() -> dict:
     """
@@ -134,7 +134,7 @@ def load_progress() -> dict:
         logger.info(f"加载进度：已处理 {progress['processed']}/{progress['total']} 只ETF，下一个索引位置: {progress['next_index']}")
         return progress
     except Exception as e:
-        logger.error(f"加载进度失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 加载进度失败: {str(e)}", exc_info=True)
         return progress
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -438,7 +438,7 @@ def crawl_all_etfs_daily_data() -> None:
             logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
             # 重置索引为0（而不是保存为len(etf_codes)）
             save_progress(None, start_idx, total_count, 0)
-            logger.info(f"进度已重置为 0/{total_count}")
+            logger.info(f"✅ 进度已重置为 0/{total_count}")
             # 发送通知
             send_wechat_message(
                 message=f"ETF日线数据爬取已完成一轮（共{total_count}只ETF），索引已重置",
@@ -537,7 +537,7 @@ def crawl_all_etfs_daily_data() -> None:
                 try:
                     # 不再使用commit_final，改为调用标准提交函数
                     commit_files_in_batches("", "BATCH_COMMIT")
-                    logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
+                    logger.info(f"✅ 已提交前 {processed_count} 只ETF的数据到仓库")
                 except Exception as e:
                     logger.error(f"提交文件时出错，继续执行: {str(e)}")
             

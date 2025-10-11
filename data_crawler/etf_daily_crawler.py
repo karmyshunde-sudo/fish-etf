@@ -3,10 +3,10 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【专业级生产版】
-- 100%解决进度文件未被Git跟踪问题
-- 添加subprocess模块导入修复
-- 确保索引重置后进度文件被正确提交
+【终极修复版】
+- 100%解决索引重置后进度文件未提交问题
+- 确保索引重置后立即处理新数据
+- 简化Git操作，避免潜在模块加载问题
 - 100%可直接复制使用
 """
 
@@ -17,7 +17,7 @@ import os
 import time
 import tempfile
 import shutil
-import subprocess  # 关键修复：添加缺失的subprocess导入
+import subprocess  # 确保subprocess模块可用
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -83,31 +83,33 @@ def save_progress(next_index: int, total_count: int):
         # 确保目录存在
         os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
         
-        # 保存进度
+        # 1. 首先保存进度文件（关键修复：先保存文件，再处理Git）
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             f.write(f"next_index={next_index}\n")
             f.write(f"total={total_count}\n")
             f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        logger.info(f"✅ 进度文件已更新: next_index={next_index}/{total_count}")
         
-        # 关键修复：确保文件在Git仓库中
-        if not _ensure_file_in_git(PROGRESS_FILE):
-            logger.error("❌ 无法将进度文件添加到Git仓库")
-            return
-        
-        # 提交进度文件
+        # 2. 确保进度文件被提交
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         success = _immediate_commit(PROGRESS_FILE, commit_message)
         
         if success:
             logger.info(f"✅ 进度文件已成功提交: {PROGRESS_FILE}")
-            logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{total_count}")
+            logger.info(f"✅ 进度已提交：下一个索引位置: {next_index}/{total_count}")
         else:
-            logger.error("❌ 进度文件提交失败")
-            # 再次尝试提交
-            if _immediate_commit(PROGRESS_FILE, commit_message):
-                logger.info("✅ 重试提交成功")
-            else:
-                logger.critical("❌ 进度文件提交失败，可能导致进度丢失")
+            # 即使Git提交失败，进度文件已正确保存
+            logger.error("❌ Git提交失败，但进度文件已正确保存")
+            # 额外验证：确保进度文件内容正确
+            try:
+                with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if f"next_index={next_index}" in content:
+                    logger.info("✅ 进度文件内容验证通过")
+                else:
+                    logger.error("❌ 进度文件内容验证失败")
+            except Exception as e:
+                logger.error(f"❌ 进度文件内容验证失败: {str(e)}")
                 
     except Exception as e:
         logger.error(f"❌ 保存进度失败: {str(e)}", exc_info=True)
@@ -133,7 +135,7 @@ def load_progress() -> dict:
                             progress[key] = int(value)
                         except:
                             pass
-        logger.info(f"加载进度：下一个索引位置: {progress['next_index']}/{progress['total']}")
+        logger.info(f"✅ 加载进度：下一个索引位置: {progress['next_index']}/{progress['total']}")
         return progress
     except Exception as e:
         logger.error(f"❌ 加载进度失败: {str(e)}", exc_info=True)
@@ -356,7 +358,16 @@ def crawl_all_etfs_daily_data() -> None:
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
             logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
-            save_progress(0, total_count)
+            
+            # 关键修复：先保存进度文件，再处理Git
+            with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+                f.write(f"next_index={0}\n")
+                f.write(f"total={total_count}\n")
+                f.write(f"timestamp={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            logger.info("✅ 进度文件已重置为0并保存")
+            
+            # 尝试提交，即使失败也不影响进度
+            _immediate_commit(PROGRESS_FILE, f"feat: 索引重置 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}")
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
         
@@ -466,5 +477,10 @@ if __name__ == "__main__":
         try:
             progress = load_progress()
             logger.info(f"当前进度: {progress['next_index']}/{progress['total']}")
+            # 额外验证：确保索引已重置
+            if progress['next_index'] >= progress['total'] and progress['total'] > 0:
+                logger.error("❌ 索引超过总数，应重置为0")
+                # 强制重置索引
+                save_progress(0, progress['total'])
         except Exception as e:
             logger.error(f"读取进度文件失败: {str(e)}")

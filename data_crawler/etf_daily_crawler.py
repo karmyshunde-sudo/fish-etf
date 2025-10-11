@@ -4,9 +4,9 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【最终修复版】
-- 彻底解决索引重置后进度未提交的问题
-- 索引达到总数时直接重置为0并继续处理
-- 每次任务都能有效处理数据，不浪费任何一次任务
+- 确保进度索引总是前进，即使没有新数据
+- 无论是否爬取到新数据，进度文件都会更新并提交
+- 正确处理索引重置逻辑
 - 100%可直接复制使用
 """
 
@@ -396,24 +396,17 @@ def crawl_all_etfs_daily_data() -> None:
         progress = load_progress()
         next_index = progress["next_index"]
         
+        # 确定处理范围
+        batch_size = 100
+        start_idx = next_index
+        end_idx = min(start_idx + batch_size, len(etf_codes))
+        
         # 关键修复：确保索引在有效范围内
         if next_index >= total_count:
             logger.warning(f"检测到索引 {next_index} 超过总数 {total_count}，已重置为0")
             next_index = 0
-            save_progress(None, next_index, total_count, next_index)
-        
-        # 确定处理范围
-        batch_size = 100
-        start_idx = next_index
-        end_idx = min(start_idx + batch_size, total_count)
-        
-        # 关键修复：当索引到达总数时，直接重置索引并继续处理
-        if start_idx >= total_count:
-            logger.info(f"所有ETF已处理完成，进度已达到 {start_idx}/{total_count}")
-            # 直接重置索引为0，并继续处理
             start_idx = 0
             end_idx = min(start_idx + batch_size, total_count)
-            logger.info(f"索引已重置为 0，开始新批次处理 {end_idx} 只ETF")
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
         
@@ -517,14 +510,23 @@ def crawl_all_etfs_daily_data() -> None:
             # 记录进度
             logger.info(f"进度: {start_idx + processed_count}/{total_count} ({(start_idx + processed_count)/total_count*100:.1f}%)")
         
-        # 关键修复：如果完成了所有ETF，确保进度文件正确保存
-        if end_idx == total_count:
-            # 确保进度文件保存为0
-            logger.info(f"本批次已处理至最后一个ETF，准备重置进度")
-            save_progress(last_processed_code, total_count, total_count, 0)
-            logger.info(f"进度已重置为 0/{total_count}")
+        # 关键修复：确保进度索引总是前进
+        # 无论是否处理了ETF，都更新进度索引
+        if processed_count == 0:
+            logger.info("本批次无新数据需要爬取")
+            # 强制更新进度索引
+            new_index = end_idx
+            # 如果到达总数，重置为0
+            if new_index >= total_count:
+                new_index = 0
+            # 保存进度
+            save_progress(last_processed_code, start_idx + processed_count, total_count, new_index)
+            logger.info(f"进度已更新为 {new_index}/{total_count}")
+        else:
+            # 已经在循环中更新了进度
+            pass
         
-        # 爬取完本批次后，直接退出，等待下一次调用
+        # 确保进度文件已提交
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")
         logger.info("程序将退出，等待工作流再次调用")
         

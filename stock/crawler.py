@@ -471,8 +471,9 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【关键修复】只需简单调用，无需任何额外逻辑
-        commit_files_in_batches(file_path)
+        # 【关键修复】传递提交消息，确保commit_files_in_batches能正确工作
+        commit_message = f"自动更新股票 {stock_code} 日线数据"
+        commit_files_in_batches(file_path, commit_message)
         logger.debug(f"已提交股票 {stock_code} 的日线数据到仓库")
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -562,228 +563,169 @@ def complete_missing_stock_data():
         return False
 
 def update_all_stocks_daily_data():
-    """
-    更新所有股票的日线数据，使用中文列名
-    """
+    """更新所有股票的日线数据，使用中文列名"""
+    ensure_directory_exists()
+    
+    # 确保基础信息文件存在
+    if not os.path.exists(BASIC_INFO_FILE):
+        logger.info("基础信息文件不存在，正在创建...")
+        if not create_or_update_basic_info():
+            logger.error("基础信息文件创建失败，无法更新日线数据")
+            return False
+    
+    # 获取基础信息文件
     try:
-        logger.info("=== 开始执行股票日线数据爬取 ===")
-        beijing_time = get_beijing_time()
-        logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("基础信息文件为空，无法更新日线数据")
+            return False
         
-        # 初始化目录
-        Config.init_dirs()
-        stock_daily_dir = os.path.join(Config.DATA_DIR, "etf_daily")
-        logger.info(f"✅ 确保目录存在: {stock_daily_dir}")
+        # 【关键修复】确保"代码"列是6位格式
+        basic_info_df["代码"] = basic_info_df["代码"].apply(format_stock_code)
+        # 移除无效股票
+        basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
+        basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
+        basic_info_df = basic_info_df.reset_index(drop=True)
         
-        # 获取股票列表
-        stock_list = get_all_stocks()
-        total_count = len(stock_list)
-        logger.info(f"待爬取股票总数：{total_count}只")
+        # 保存更新后的基础信息文件
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
+        logger.info(f"已更新基础信息文件，确保所有股票代码为6位格式，共 {len(basic_info_df)} 条记录")
         
-        # 加载进度
-        progress = load_progress()
-        next_index = progress["next_index"]
-        
-        # 确定处理范围
-        batch_size = 100
-        start_idx = next_index
-        end_idx = min(start_idx + batch_size, len(stock_list))
-        
-        # 关键修复：当索引到达总数时，重置索引
-        if start_idx >= len(stock_list):
-            logger.info("已爬取完所有股票，重置爬取状态")
-            start_idx = 0
-            end_idx = min(150, len(stock_list))
-        
-        logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
-        
-        # 已完成列表路径
-        completed_file = os.path.join(stock_daily_dir, "etf_daily_completed.txt")
-        
-        # 加载已完成列表
-        completed_codes = set()
-        if os.path.exists(completed_file):
-            try:
-                with open(completed_file, "r", encoding="utf-8") as f:
-                    completed_codes = set(line.strip() for line in f if line.strip())
-                logger.info(f"进度记录中已完成爬取的ETF数量：{len(completed_codes)}")
-            except Exception as e:
-                logger.error(f"读取进度记录失败: {str(e)}", exc_info=True)
-                completed_codes = set()
-        
-        # 处理当前批次
-        processed_count = 0
-        last_processed_code = None
-        for i in range(start_idx, end_idx):
-            stock_code = stock_list[i]
-            stock_name = get_stock_name(stock_code)
+    except Exception as e:
+        logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
+        return False
+    
+    # 【关键修复】获取 next_crawl_index 值
+    # 由于所有行的 next_crawl_index 值相同，取第一行即可
+    next_index = int(basic_info_df["next_crawl_index"].iloc[0])
+    total_stocks = len(basic_info_df)
+    
+    logger.info(f"当前爬取状态: next_crawl_index = {next_index} (共 {total_stocks} 只股票)")
+    
+    # 【关键修复】确定要爬取的股票范围
+    start_idx = next_index
+    end_idx = min(next_index + 150, total_stocks)
+    
+    # 如果已爬取完所有股票，重置索引
+    if start_idx >= total_stocks:
+        logger.info("已爬取完所有股票，重置爬取状态")
+        start_idx = 0
+        end_idx = min(150, total_stocks)
+    
+    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {end_idx - start_idx} 只股票 (索引 {start_idx} - {end_idx-1})")
+    
+    # 记录第一批和最后一批股票
+    first_stock = basic_info_df.iloc[start_idx]
+    last_stock = basic_info_df.iloc[min(end_idx-1, total_stocks-1)]
+    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {start_idx})")
+    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {end_idx-1})")
+    
+    # 处理这批股票
+    batch_df = basic_info_df.iloc[start_idx:end_idx]
+    batch_codes = batch_df["代码"].tolist()
+    
+    if not batch_codes:
+        logger.warning("没有可爬取的股票")
+        return False
+    
+    # 【关键修复】跟踪已处理股票数量，确保每10个提交一次
+    processed_count = 0
+    for stock_code in batch_codes:
+        # 【关键修复】确保股票代码是6位
+        stock_code = format_stock_code(stock_code)
+        if not stock_code:
+            continue
             
-            # 获取增量日期范围
-            start_date, end_date = get_incremental_date_range(stock_code)
-            if start_date is None or end_date is None:
-                logger.info(f"股票 {stock_code} 数据已最新，跳过爬取")
-                continue
-            
-            # 爬取数据
-            logger.info(f"股票代码：{stock_code}| 名称：{stock_name}")
-            logger.info(f"📅 增量爬取日期范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
-            
-            df = crawl_etf_daily_data(stock_code, start_date, end_date)
-            
-            # 检查是否成功获取数据
-            if df.empty:
-                logger.info(f"股票代码：{stock_code}| 名称：{stock_name}")
-                logger.warning(f"⚠️ 未获取到数据")
-                # 记录失败日志
-                with open(os.path.join(stock_daily_dir, "failed_etfs.txt"), "a", encoding="utf-8") as f:
-                    f.write(f"{stock_code},{stock_name},未获取到数据\n")
-                continue
-            
-            # 处理已有数据的追加逻辑
-            save_path = os.path.join(stock_daily_dir, f"{stock_code}.csv")
-            if os.path.exists(save_path):
-                try:
-                    existing_df = pd.read_csv(save_path)
-                    
-                    # 【日期datetime类型规则】确保日期列是datetime类型
-                    if "日期" in existing_df.columns:
-                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
-                    
-                    # 合并数据并去重
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                    combined_df = combined_df.sort_values("日期", ascending=False)
-                    
-                    # 使用临时文件进行原子操作
-                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
-                    combined_df.to_csv(temp_file.name, index=False)
-                    # 原子替换
-                    shutil.move(temp_file.name, save_path)
-                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
-                finally:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
-            else:
-                # 使用临时文件进行原子操作
-                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig')
-                try:
-                    df.to_csv(temp_file.name, index=False)
-                    # 原子替换
-                    shutil.move(temp_file.name, save_path)
-                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
-                finally:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
-            
-            # 标记为已完成
-            with open(completed_file, "a", encoding="utf-8") as f:
-                f.write(f"{stock_code}\n")
-            
-            # 每10只ETF提交一次
+        # 添加随机延时，避免请求过于频繁
+        time.sleep(random.uniform(1.5, 2.5))  # 增加延时，避免被限流
+        df = fetch_stock_daily_data(stock_code)
+        if not df.empty:
+            save_stock_daily_data(stock_code, df)
             processed_count += 1
-            if processed_count % 10 == 0 or processed_count == (end_idx - start_idx):
-                logger.info(f"已处理 {processed_count} 只ETF，执行提交操作...")
-                try:
-                    from utils.git_utils import commit_final
-                    commit_final()
-                    logger.info(f"已提交前 {processed_count} 只ETF的数据到仓库")
-                except Exception as e:
-                    logger.error(f"提交文件时出错，继续执行: {str(e)}")
             
-            # 更新进度
-            last_processed_code = stock_code
-            save_progress(stock_code, start_idx + processed_count, total_count, i + 1)
-            
-            # 记录进度
-            logger.info(f"进度: {start_idx + processed_count}/{total_count} ({(start_idx + processed_count)/total_count*100:.1f}%)")
-        
-        # 关键修复：确保进度文件被正确保存
-        # 即使没有ETF需要处理，也要更新进度
-        if processed_count == 0:
-            logger.info("本批次无新数据需要爬取")
-            # 保存进度
-            save_progress(last_processed_code, start_idx + processed_count, total_count, end_idx)
-        
-        # 爬取完本批次后，直接退出，等待下一次调用
-        logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF")
-        logger.info("程序将退出，等待工作流再次调用")
-        
-    except Exception as e:
-        logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
-        # 保存进度（如果失败）
-        try:
-            save_progress(None, next_index, total_count, next_index)
-        except:
-            pass
-        raise
+            # 【关键修复】每处理10个股票就检查一次提交状态
+            if processed_count % 10 == 0:
+                logger.info(f"已处理 {processed_count} 只股票，执行提交操作...")
+    
+    # 【关键修复】处理完本批次后，确保剩余文件也被提交
+    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
+    commit_files_in_batches("", "LAST_FILE")
+    
+    # 【关键修复】更新 next_crawl_index
+    new_index = end_idx
+    if new_index >= total_stocks:
+        new_index = 0  # 重置，下次从头开始
+    
+    logger.info(f"更新 next_crawl_index = {new_index}")
+    basic_info_df["next_crawl_index"] = new_index
+    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+    
+    # 提交更新后的基础信息文件
+    commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
+    logger.info(f"已提交更新后的基础信息文件到仓库: {BASIC_INFO_FILE}")
+    
+    # 检查是否还有未完成的股票
+    remaining_stocks = total_stocks - new_index
+    if remaining_stocks < 0:
+        remaining_stocks = total_stocks  # 重置后
+    
+    logger.info(f"已完成 {end_idx - start_idx} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
+    
+    return True
 
-def get_all_stocks() -> list:
-    """
-    获取所有股票代码
-    """
+def create_or_update_basic_info():
+    """创建或更新股票基础信息"""
     try:
-        # 这里应该有获取股票代码的实现
-        # 为简化示例，返回一个示例列表
-        return [f"00000{i:02d}" for i in range(3000)]
+        # 获取股票基础信息
+        logger.info("正在获取股票基础信息...")
+        stock_info = ak.stock_info_a_code_name()
+        
+        if stock_info.empty:
+            logger.error("获取股票基础信息失败：返回空数据")
+            return False
+        
+        # 确保代码列是6位格式
+        stock_info["代码"] = stock_info["代码"].apply(format_stock_code)
+        # 移除无效股票
+        stock_info = stock_info[stock_info["代码"].notna()]
+        stock_info = stock_info[stock_info["代码"].str.len() == 6]
+        stock_info = stock_info.reset_index(drop=True)
+        
+        # 添加 next_crawl_index 列
+        stock_info["next_crawl_index"] = 0
+        
+        # 保存基础信息
+        stock_info.to_csv(BASIC_INFO_FILE, index=False)
+        commit_files_in_batches(BASIC_INFO_FILE, "创建股票基础信息")
+        logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
+        
+        return True
     except Exception as e:
-        logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
-        return []
+        logger.error(f"获取股票基础信息失败: {str(e)}", exc_info=True)
+        return False
 
-def get_stock_name(stock_code: str) -> str:
-    """
-    根据股票代码获取股票名称
-    """
-    try:
-        # 这里应该有获取股票名称的实现
-        return f"股票{stock_code}"
-    except Exception as e:
-        logger.error(f"获取股票名称失败: {str(e)}", exc_info=True)
-        return ""
-
-def get_incremental_date_range(stock_code: str) -> tuple:
-    """
-    获取增量日期范围
-    """
-    try:
-        # 这里应该有获取增量日期范围的实现
-        return (datetime.now() - timedelta(days=30), datetime.now())
-    except Exception as e:
-        logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
-        return (None, None)
-
-def load_progress() -> dict:
-    """
-    加载爬取进度
-    """
-    # 这里应该有加载进度的实现
-    return {"next_index": 0}
-
-def save_progress(etf_code: str, processed_count: int, total_count: int, next_index: int):
-    """
-    保存爬取进度
-    """
-    # 这里应该有保存进度的实现
-    pass
+def main():
+    """主函数：更新所有股票数据"""
+    logger.info("===== 开始更新股票数据 =====")
+    
+    # 添加初始延时，避免立即请求
+    time.sleep(random.uniform(1.0, 2.0))
+    
+    # 1. 确保基础信息文件存在
+    if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
+        logger.info("基础信息文件不存在或为空，正在创建...")
+        if not create_or_update_basic_info():
+            logger.error("基础信息文件创建失败，无法继续")
+            return
+    
+    # 2. 只更新一批股票（最多150只）
+    if update_all_stocks_daily_data():
+        logger.info("已成功处理一批股票数据")
+    else:
+        logger.error("处理股票数据失败")
+    
+    logger.info("===== 肋票数据更新完成 =====")
 
 if __name__ == "__main__":
-    try:
-        # 配置日志
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler(os.path.join(Config.LOG_DIR, "stock_crawler.log"))
-            ]
-        )
-        
-        logger.info("===== 开始执行任务：crawl_stock_daily =====")
-        logger.info(f"UTC时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"北京时间：{get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        crawl_all_etfs_daily_data()
-        
-        logger.info("===== 任务执行结束：success =====")
-    except Exception as e:
-        logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
-        sys.exit(1)
+    main()

@@ -16,7 +16,6 @@ import logging
 import os
 from datetime import datetime
 from config import Config
-# 修改：导入_immediate_commit函数代替commit_files_in_batches
 from utils.git_utils import _immediate_commit
 
 # 初始化日志
@@ -51,6 +50,16 @@ def update_all_etf_list() -> pd.DataFrame:
         
         etf_list = etf_info[available_columns].copy()
         
+        # 提取需要的列
+        required_columns = ['代码', '名称', '流通市值']
+        available_columns = [col for col in required_columns if col in etf_info.columns]
+        
+        if not available_columns:
+            logger.error("ETF数据缺少必要列: 代码、名称、流通市值")
+            return pd.DataFrame()
+        
+        etf_list = etf_info[available_columns].copy()
+        
         # 重命名列
         column_mapping = {
             "代码": "ETF代码",
@@ -67,8 +76,10 @@ def update_all_etf_list() -> pd.DataFrame:
             # 填充缺失的基金规模数据
             etf_list["基金规模"] = etf_list["基金规模"].replace(0, pd.NA)
         
+        # 添加next_crawl_index列（专业金融系统要求）
+        etf_list["next_crawl_index"] = 0  # 所有ETF初始索引为0
+        
         # 初步过滤 - 根据config.py定义
-        # 注意：这里只用于过滤，不进行列名映射
         try:
             # 尝试获取配置项，如果不存在则使用默认值
             min_fund_size = getattr(Config, 'ETF_MIN_FUND_SIZE', 0.0)
@@ -97,8 +108,8 @@ def update_all_etf_list() -> pd.DataFrame:
             # 过滤无效的ETF代码（非6位数字）
             etf_list = etf_list[etf_list["ETF代码"].str.match(r'^\d{6}$')].copy()
         
-        # 确保列顺序
-        final_columns = ['ETF代码', 'ETF名称', '基金规模']
+        # 确保列顺序 - 专业金融系统要求
+        final_columns = ['ETF代码', 'ETF名称', '基金规模', 'next_crawl_index']
         final_columns = [col for col in final_columns if col in etf_list.columns]
         
         if not final_columns:
@@ -112,7 +123,7 @@ def update_all_etf_list() -> pd.DataFrame:
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
         
-        # 【关键修改】使用立即提交函数
+        # 使用立即提交函数
         logger.info("触发Git立即提交操作...")
         _immediate_commit(etf_list_file, "ETF列表更新")
         logger.info("Git提交操作已完成")
@@ -134,7 +145,7 @@ def get_all_etf_codes() -> list:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
-        # 【日期datetime类型规则】确保ETF代码是字符串类型
+        # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         return etf_list["ETF代码"].tolist()
@@ -153,7 +164,7 @@ def get_etf_name(etf_code: str) -> str:
             update_all_etf_list()
         
         etf_list = pd.read_csv(etf_list_file)
-        # 【日期datetime类型规则】确保ETF代码是字符串类型
+        # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         

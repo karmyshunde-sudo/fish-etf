@@ -50,16 +50,6 @@ def update_all_etf_list() -> pd.DataFrame:
         
         etf_list = etf_info[available_columns].copy()
         
-        # 提取需要的列
-        required_columns = ['代码', '名称', '流通市值']
-        available_columns = [col for col in required_columns if col in etf_info.columns]
-        
-        if not available_columns:
-            logger.error("ETF数据缺少必要列: 代码、名称、流通市值")
-            return pd.DataFrame()
-        
-        etf_list = etf_info[available_columns].copy()
-        
         # 重命名列
         column_mapping = {
             "代码": "ETF代码",
@@ -76,8 +66,17 @@ def update_all_etf_list() -> pd.DataFrame:
             # 填充缺失的基金规模数据
             etf_list["基金规模"] = etf_list["基金规模"].replace(0, pd.NA)
         
+        # 关键修复：确保索引列存在且正确
         # 添加next_crawl_index列（专业金融系统要求）
-        etf_list["next_crawl_index"] = 0  # 所有ETF初始索引为0
+        if "next_crawl_index" not in etf_list.columns:
+            etf_list["next_crawl_index"] = 0  # 所有ETF初始索引为0
+        else:
+            # 确保现有值是整数
+            try:
+                etf_list["next_crawl_index"] = etf_list["next_crawl_index"].fillna(0).astype(int)
+            except Exception as e:
+                logger.warning(f"索引列类型转换失败: {str(e)}，重置为0")
+                etf_list["next_crawl_index"] = 0
         
         # 初步过滤 - 根据config.py定义
         try:
@@ -122,6 +121,26 @@ def update_all_etf_list() -> pd.DataFrame:
         os.makedirs(Config.DATA_DIR, exist_ok=True)
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
         etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
+        
+        # 关键验证：确保索引列被正确保存
+        try:
+            # 重新加载验证
+            verify_df = pd.read_csv(etf_list_file)
+            if "next_crawl_index" not in verify_df.columns:
+                logger.error("索引列保存失败！文件中没有next_crawl_index列")
+                # 创建空列并重试
+                etf_list["next_crawl_index"] = 0
+                etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
+                # 再次验证
+                verify_df = pd.read_csv(etf_list_file)
+                if "next_crawl_index" not in verify_df.columns:
+                    logger.critical("索引列保存失败！文件仍然没有next_crawl_index列")
+                else:
+                    logger.info("索引列已成功保存到文件")
+            else:
+                logger.info("索引列验证通过：文件包含next_crawl_index列")
+        except Exception as e:
+            logger.error(f"索引列验证失败: {str(e)}")
         
         # 使用立即提交函数
         logger.info("触发Git立即提交操作...")

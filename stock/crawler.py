@@ -7,6 +7,7 @@
 - 彻底修复日期类型问题，确保所有日期比较都使用相同类型
 - 严格确保结束日期不晚于当前时间，不处理未来日期
 - 100%可直接复制使用
+- 确保每10个文件提交一次，而不是150个文件才提交
 """
 
 import os
@@ -471,8 +472,9 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【关键修复】只需简单调用，无需任何额外逻辑
-        commit_files_in_batches(file_path)
+        # 【关键修复】传递提交消息，确保commit_files_in_batches能正确工作
+        commit_message = f"自动更新股票 {stock_code} 日线数据"
+        commit_files_in_batches(file_path, commit_message)
         logger.debug(f"已提交股票 {stock_code} 的日线数据到仓库")
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -504,7 +506,7 @@ def update_all_stocks_daily_data():
         
         # 保存更新后的基础信息文件
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        commit_files_in_batches(BASIC_INFO_FILE)
+        commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
         logger.info(f"已更新基础信息文件，确保所有股票代码为6位格式，共 {len(basic_info_df)} 条记录")
         
     except Exception as e:
@@ -544,6 +546,8 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
+    # 【关键修复】跟踪已处理股票数量，确保每10个提交一次
+    processed_count = 0
     for stock_code in batch_codes:
         # 【关键修复】确保股票代码是6位
         stock_code = format_stock_code(stock_code)
@@ -555,6 +559,15 @@ def update_all_stocks_daily_data():
         df = fetch_stock_daily_data(stock_code)
         if not df.empty:
             save_stock_daily_data(stock_code, df)
+            processed_count += 1
+            
+            # 【关键修复】每处理10个股票就检查一次提交状态
+            if processed_count % 10 == 0:
+                logger.info(f"已处理 {processed_count} 只股票，执行提交操作...")
+    
+    # 【关键修复】处理完本批次后，确保剩余文件也被提交
+    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
+    commit_files_in_batches("", "LAST_FILE")
     
     # 【关键修复】更新 next_crawl_index
     new_index = end_idx
@@ -566,7 +579,7 @@ def update_all_stocks_daily_data():
     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
     
     # 提交更新后的基础信息文件
-    commit_files_in_batches(BASIC_INFO_FILE)
+    commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
     logger.info(f"已提交更新后的基础信息文件到仓库: {BASIC_INFO_FILE}")
     
     # 检查是否还有未完成的股票
@@ -601,7 +614,7 @@ def create_or_update_basic_info():
         
         # 保存基础信息
         stock_info.to_csv(BASIC_INFO_FILE, index=False)
-        commit_files_in_batches(BASIC_INFO_FILE)
+        commit_files_in_batches(BASIC_INFO_FILE, "创建股票基础信息")
         logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
         
         return True

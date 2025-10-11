@@ -61,31 +61,40 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
             subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
         
-        # 添加并提交
+        # 添加文件到暂存区
         subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
+        
+        # 关键修复：检查是否有实际的更改需要提交
+        # 检查暂存区是否有更改
+        diff_result = subprocess.run(['git', 'diff', '--cached', '--exit-code'], 
+                                   cwd=repo_root, 
+                                   capture_output=True,
+                                   text=True)
+        
+        # 如果没有实际更改，直接返回成功
+        if diff_result.returncode == 0:
+            logger.info(f"没有需要提交的更改，跳过提交: {relative_path}")
+            return True
         
         # 创建提交消息 - 确保包含 [skip ci]
         if "[skip ci]" not in commit_message:
             commit_message = f"{commit_message} [skip ci]"
         
         # 提交更改
-        subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
-        
-        # 推送
-        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
-        if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
-            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
-            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
-        
         try:
-            subprocess.run(['git', 'pull', 'origin', branch, '--no-rebase'], check=True, cwd=repo_root)
-        except subprocess.CalledProcessError:
-            pass
-        
-        subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
-        
-        logger.info(f"✅ 立即提交成功: {commit_message}")
-        return True
+            subprocess.run(['git', 'commit', '-m', commit_message], 
+                          check=True, 
+                          cwd=repo_root,
+                          capture_output=True)
+            logger.info(f"✅ 立即提交成功: {commit_message}")
+            return True
+        except subprocess.CalledProcessError as e:
+            # 捕获并处理空提交错误
+            if "nothing to commit" in str(e.output).lower() or "nothing to commit" in str(e.stderr).lower():
+                logger.info(f"没有需要提交的更改: {relative_path}")
+                return True
+            else:
+                raise e
     
     except subprocess.CalledProcessError as e:
         logger.error(f"立即提交失败: {str(e)}", exc_info=True)

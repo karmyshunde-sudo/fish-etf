@@ -8,6 +8,7 @@ ETF列表管理模块
 - 不考虑7天文件有效期
 - 仅根据config.py中定义的过滤条件进行ETF初步过滤
 - 确保更新后的文件提交到Git仓库
+- 彻底解决BOM字节导致的"假成功"问题
 """
 
 import akshare as ak
@@ -117,20 +118,40 @@ def update_all_etf_list() -> pd.DataFrame:
         
         etf_list = etf_list[final_columns]
         
-        # 保存到CSV
+        # 保存到CSV - 【关键修复】删除 encoding 参数
         os.makedirs(Config.DATA_DIR, exist_ok=True)
         etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
-        etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
+        etf_list.to_csv(etf_list_file, index=False)
         
         # 关键验证：确保索引列被正确保存
         try:
             # 重新加载验证
             verify_df = pd.read_csv(etf_list_file)
+            
+            # 【关键修复】检查列名是否包含BOM字符
+            has_bom = False
+            for col in verify_df.columns:
+                if col.startswith('\ufeff'):
+                    has_bom = True
+                    logger.error(f"发现BOM字符污染: {col}")
+                    break
+            
+            if has_bom:
+                # 重新加载时指定正确的编码
+                verify_df = pd.read_csv(etf_list_file, encoding='utf-8-sig')
+                # 修正列名
+                new_columns = [col.lstrip('\ufeff') for col in verify_df.columns]
+                verify_df.columns = new_columns
+                # 保存修复后的文件
+                verify_df.to_csv(etf_list_file, index=False)
+                logger.warning("已修复BOM字符问题，重新保存文件")
+            
+            # 确保索引列存在
             if "next_crawl_index" not in verify_df.columns:
                 logger.error("索引列保存失败！文件中没有next_crawl_index列")
                 # 创建空列并重试
                 etf_list["next_crawl_index"] = 0
-                etf_list.to_csv(etf_list_file, index=False, encoding="utf-8-sig")
+                etf_list.to_csv(etf_list_file, index=False)
                 # 再次验证
                 verify_df = pd.read_csv(etf_list_file)
                 if "next_crawl_index" not in verify_df.columns:
@@ -163,7 +184,19 @@ def get_all_etf_codes() -> list:
         if not os.path.exists(etf_list_file):
             update_all_etf_list()
         
-        etf_list = pd.read_csv(etf_list_file)
+        # 【关键修复】确保读取时不带BOM问题
+        try:
+            etf_list = pd.read_csv(etf_list_file)
+            # 检查BOM字符
+            if any(col.startswith('\ufeff') for col in etf_list.columns):
+                etf_list = pd.read_csv(etf_list_file, encoding='utf-8-sig')
+                # 修正列名
+                new_columns = [col.lstrip('\ufeff') for col in etf_list.columns]
+                etf_list.columns = new_columns
+        except Exception as e:
+            logger.error(f"读取ETF列表文件时出错: {str(e)}")
+            etf_list = pd.read_csv(etf_list_file)
+        
         # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
@@ -182,7 +215,19 @@ def get_etf_name(etf_code: str) -> str:
         if not os.path.exists(etf_list_file):
             update_all_etf_list()
         
-        etf_list = pd.read_csv(etf_list_file)
+        # 【关键修复】确保读取时不带BOM问题
+        try:
+            etf_list = pd.read_csv(etf_list_file)
+            # 检查BOM字符
+            if any(col.startswith('\ufeff') for col in etf_list.columns):
+                etf_list = pd.read_csv(etf_list_file, encoding='utf-8-sig')
+                # 修正列名
+                new_columns = [col.lstrip('\ufeff') for col in etf_list.columns]
+                etf_list.columns = new_columns
+        except Exception as e:
+            logger.error(f"读取ETF列表文件时出错: {str(e)}")
+            etf_list = pd.read_csv(etf_list_file)
+        
         # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
             etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)

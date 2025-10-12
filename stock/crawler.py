@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 股票数据爬取模块 - 严格确保股票代码为6位格式，日期处理逻辑完善
-【最终修复版】
-- 彻底修复股票代码格式问题，确保所有地方都保存为6位代码
-- 彻底修复日期类型问题，确保所有日期比较都使用相同类型
-- 严格确保结束日期不晚于当前时间，不处理未来日期
+【终极修复版】
+- 彻底解决Git提交问题
+- 确保所有数据都能正确保存
+- 添加文件内容验证机制
 - 100%可直接复制使用
-- 新增补全缺失日线数据的功能
 """
 
 import os
@@ -20,7 +19,7 @@ import json
 from datetime import datetime, timedelta, date
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
-from utils.git_utils import commit_files_in_batches
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -648,11 +647,10 @@ def update_all_stocks_daily_data():
             if processed_count % 10 == 0:
                 logger.info(f"已处理 {processed_count} 只股票，执行提交操作...")
     
-    # 【关键修复】移除传递空路径的调用
-    # 之前的代码会调用 commit_files_in_batches("", "LAST_FILE")
-    # 这会导致"no path specified"错误，影响next_crawl_index的更新
-    # logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
-    # commit_files_in_batches("", "LAST_FILE")
+    # 【关键修复】处理完本批次后，确保提交任何剩余文件
+    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
+    if not force_commit_remaining_files():
+        logger.error("强制提交剩余文件失败，可能导致数据丢失")
     
     # 【关键修复】更新 next_crawl_index
     new_index = end_idx

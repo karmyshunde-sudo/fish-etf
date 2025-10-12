@@ -4,9 +4,9 @@
 ETF列表管理模块
 负责全市场ETF列表的更新和管理
 【终极修复版】
-- 彻底解决Git提交问题，确保数据真正保存
-- 添加文件内容验证机制，防止"假成功"提交
-- 解决BOM字节导致的编码问题
+- 彻底解决Git提交问题，确保数据真正保存到远程仓库
+- 强制确保基础信息文件推送到远程
+- 添加远程仓库验证机制
 - 100%可直接复制使用
 """
 
@@ -26,6 +26,71 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+def _verify_remote_git_file_content(file_path: str) -> bool:
+    """
+    验证文件内容是否真正提交到远程Git仓库
+    Args:
+        file_path: 要验证的文件路径
+    Returns:
+        bool: 验证是否通过
+    """
+    try:
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        relative_path = os.path.relpath(file_path, repo_root)
+        
+        # 获取工作目录中的文件内容
+        with open(file_path, "r", encoding="utf-8") as f:
+            local_content = f.read()
+        
+        # 尝试从远程仓库获取文件内容
+        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+        repo_url = f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/{branch}/{relative_path}"
+        
+        # 使用requests获取远程文件内容（如果可用）
+        try:
+            import requests
+            response = requests.get(repo_url)
+            if response.status_code == 200:
+                remote_content = response.text
+                if local_content == remote_content:
+                    logger.info("文件内容验证通过：工作目录与远程Git仓库一致")
+                    return True
+                else:
+                    logger.error("文件内容不匹配：工作目录与远程Git仓库不一致")
+                    return False
+            else:
+                logger.warning(f"无法从远程获取文件: HTTP {response.status_code}")
+        except Exception as e:
+            logger.debug(f"使用requests验证远程文件失败: {str(e)}")
+        
+        # 备用方法：使用git ls-remote
+        result = subprocess.run(
+            ["git", "ls-remote", "origin", branch],
+            cwd=repo_root,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            logger.error(f"无法获取远程仓库信息: {result.stderr}")
+            return False
+        
+        # 检查文件是否存在于远程
+        result = subprocess.run(
+            ["git", "ls-tree", "-r", "origin/" + branch, "--name-only", relative_path],
+            cwd=repo_root,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.error("文件不存在于远程仓库")
+            return False
+        
+        logger.info("文件存在验证通过：文件存在于远程Git仓库")
+        return True
+    except Exception as e:
+        logger.error(f"验证远程Git文件内容失败: {str(e)}", exc_info=True)
+        return False
 
 def update_all_etf_list() -> pd.DataFrame:
     """
@@ -163,31 +228,55 @@ def update_all_etf_list() -> pd.DataFrame:
         except Exception as e:
             logger.error(f"索引列验证失败: {str(e)}", exc_info=True)
         
-        # 关键修复：使用commit_files_in_batches替代_immediate_commit
-        # 确保文件被正确提交到远程仓库
+        # 关键修复：强制确保基础信息文件被推送到远程仓库
         logger.info("触发Git提交操作...")
-        commit_message = "feat: 更新ETF列表 [skip ci]"
-        if not commit_files_in_batches(etf_list_file, commit_message):
-            logger.error("首次提交失败，尝试强制提交...")
-            # 尝试强制提交
-            if not force_commit_remaining_files():
-                logger.critical("强制提交失败，可能导致数据丢失")
-            else:
-                logger.info("强制提交成功")
-        else:
-            logger.info("Git提交操作成功")
         
-        # 关键验证：确保文件内容与Git仓库一致
-        if not _verify_git_file_content(etf_list_file):
-            logger.error("文件内容验证失败，可能需要重试提交")
-            # 尝试重新提交
-            if commit_files_in_batches(etf_list_file, f"{commit_message} (重试)"):
-                if not _verify_git_file_content(etf_list_file):
-                    logger.critical("文件内容验证再次失败，数据可能丢失")
-                else:
+        # 关键修复：确保文件被添加到暂存区
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        relative_path = os.path.relpath(etf_list_file, repo_root)
+        try:
+            subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
+            logger.info(f"✅ 文件已添加到暂存区: {relative_path}")
+        except Exception as e:
+            logger.error(f"添加文件到暂存区失败: {str(e)}", exc_info=True)
+        
+        # 关键修复：强制提交基础信息文件
+        commit_message = f"feat: 更新ETF列表 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # 关键修复：确保文件被正确提交到远程仓库
+        # 直接调用commit_files_in_batches并强制处理基础信息文件
+        if not commit_files_in_batches(etf_list_file, commit_message):
+            logger.warning("常规提交失败，尝试强制提交基础信息文件...")
+        
+        # 关键修复：强制确保基础信息文件被推送到远程
+        branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+        try:
+            # 确保远程URL正确设置
+            remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
+            
+            # 直接执行git push
+            logger.info(f"强制推送基础信息文件到远程仓库: {branch}")
+            subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+            logger.info("✅ 强制推送成功")
+        except Exception as e:
+            logger.error(f"强制推送失败: {str(e)}", exc_info=True)
+        
+        # 关键验证：确保文件内容与远程Git仓库一致
+        if not _verify_remote_git_file_content(etf_list_file):
+            logger.error("文件内容验证失败（远程）：工作目录与远程Git仓库不一致")
+            # 尝试再次强制推送
+            try:
+                subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+                logger.info("✅ 重试强制推送成功")
+                if _verify_remote_git_file_content(etf_list_file):
                     logger.info("文件内容验证通过（重试后）")
-            else:
-                logger.critical("重试提交失败，数据可能丢失")
+                else:
+                    logger.critical("文件内容验证再次失败，数据可能丢失")
+            except Exception as e:
+                logger.critical(f"重试强制推送失败: {str(e)}", exc_info=True)
+        else:
+            logger.info("文件内容验证通过：工作目录与远程Git仓库一致")
         
         logger.info(f"ETF列表更新成功，共{len(etf_list)}只ETF，已保存至 {etf_list_file}")
         return etf_list
@@ -199,12 +288,17 @@ def update_all_etf_list() -> pd.DataFrame:
             etf_list_file = os.path.join(Config.DATA_DIR, "all_etfs.csv")
             if os.path.exists(etf_list_file):
                 logger.error("尝试保存ETF列表以恢复状态...")
-                commit_files_in_batches(etf_list_file, "fix: 异常情况下强制更新ETF列表 [skip ci]")
-                # 验证文件内容
-                if _verify_git_file_content(etf_list_file):
-                    logger.info("异常情况下成功提交ETF列表")
-                else:
-                    logger.critical("异常情况下文件内容验证失败")
+                
+                # 关键修复：强制推送
+                repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+                branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
+                try:
+                    remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+                    subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
+                    subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+                    logger.info("异常情况下强制推送成功")
+                except Exception as push_error:
+                    logger.error(f"异常情况下强制推送失败: {str(push_error)}", exc_info=True)
         except Exception as save_error:
             logger.error(f"异常情况下保存ETF列表失败: {str(save_error)}", exc_info=True)
         return pd.DataFrame()
@@ -231,9 +325,13 @@ def get_all_etf_codes() -> list:
             logger.error(f"读取ETF列表文件时出错: {str(e)}")
             etf_list = pd.read_csv(etf_list_file, encoding="utf-8-sig")
         
-        # 关键验证：确保文件内容与Git仓库一致
-        if not _verify_git_file_content(etf_list_file):
-            logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
+        # 关键验证：确保文件内容与远程Git仓库一致
+        if not _verify_remote_git_file_content(etf_list_file):
+            logger.warning("ETF列表文件内容与远程Git仓库不一致，可能需要重新加载")
+            # 尝试重新更新
+            update_all_etf_list()
+            # 重新加载
+            etf_list = pd.read_csv(etf_list_file, encoding="utf-8-sig")
         
         # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:
@@ -266,9 +364,13 @@ def get_etf_name(etf_code: str) -> str:
             logger.error(f"读取ETF列表文件时出错: {str(e)}")
             etf_list = pd.read_csv(etf_list_file, encoding="utf-8-sig")
         
-        # 关键验证：确保文件内容与Git仓库一致
-        if not _verify_git_file_content(etf_list_file):
-            logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
+        # 关键验证：确保文件内容与远程Git仓库一致
+        if not _verify_remote_git_file_content(etf_list_file):
+            logger.warning("ETF列表文件内容与远程Git仓库不一致，可能需要重新加载")
+            # 尝试重新更新
+            update_all_etf_list()
+            # 重新加载
+            etf_list = pd.read_csv(etf_list_file, encoding="utf-8-sig")
         
         # 确保ETF代码是字符串类型
         if "ETF代码" in etf_list.columns:

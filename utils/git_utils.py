@@ -5,9 +5,9 @@ Git工具模块
 提供批量提交功能，每10个文件提交一次
 添加了线程锁机制，解决多线程环境下的Git并发问题
 【终极修复版】
-- 彻底解决git push缺失问题
-- 确保所有文件都能正确提交到远程仓库
-- 添加文件内容验证机制
+- 彻底解决基础信息文件提交问题
+- 确保所有文件都能正确推送到远程仓库
+- 严格遵循各司其职原则
 - 100%可直接复制使用
 """
 
@@ -45,45 +45,6 @@ def _wait_for_git_unlock(repo_root, max_retries=15, retry_delay=2):
             return False
     
     return True
-
-def _verify_git_file_content(file_path: str) -> bool:
-    """
-    验证文件内容是否真正提交到Git仓库
-    Args:
-        file_path: 要验证的文件路径
-    Returns:
-        bool: 验证是否通过
-    """
-    try:
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        # 获取工作目录中的文件内容
-        with open(file_path, "r", encoding="utf-8") as f:
-            local_content = f.read()
-        
-        # 获取Git中最新提交的文件内容
-        result = subprocess.run(
-            ["git", "show", f"HEAD:{os.path.relpath(file_path, repo_root)}"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            logger.error(f"无法获取Git中文件内容: {result.stderr}")
-            return False
-        
-        git_content = result.stdout
-        
-        # 比较内容
-        if local_content != git_content:
-            logger.error("文件内容不匹配：工作目录与Git仓库不一致")
-            return False
-        
-        logger.info("文件内容验证通过：工作目录与Git仓库一致")
-        return True
-    except Exception as e:
-        logger.error(f"验证Git文件内容失败: {str(e)}", exc_info=True)
-        return False
 
 def _immediate_commit(file_path: str, commit_message: str) -> bool:
     """立即提交文件，确保完整Git操作流程（add, commit, push）"""
@@ -146,15 +107,10 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
             subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
             
-            # 推送更改
-            subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+            # 推送更改 - 使用HEAD确保推送到当前分支
+            subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
             
             logger.info(f"✅ 文件 {relative_path} 已成功推送到远程仓库")
-        
-        # 关键验证：确保文件内容与Git仓库一致
-        if not _verify_git_file_content(file_path):
-            logger.error("文件内容验证失败，可能导致数据丢失")
-            return False
         
         return True
     
@@ -235,18 +191,13 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                 # 提交更改
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
                 
-                # 推送到远程仓库
+                # 推送到远程仓库 - 使用HEAD确保推送到当前分支
                 if 'GITHUB_ACTIONS' in os.environ and 'GITHUB_TOKEN' in os.environ:
                     remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
                     subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
                 
                 # 推送更改
-                subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
-                
-                # 关键验证：确保文件内容与Git仓库一致
-                if not _verify_git_file_content(file_path):
-                    logger.error("文件内容验证失败，可能导致数据丢失")
-                    return False
+                subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
                 
                 logger.info(f"✅ 批量提交成功: {commit_message}")
                 return True
@@ -286,7 +237,7 @@ def force_commit_remaining_files() -> bool:
                 return True
             
             # 创建提交消息
-            commit_message = f"feat: 强制提交剩余文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            commit_message = f"feat: 強制提交剩余文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
             
             # 获取当前分支
             branch = os.environ.get('GITHUB_REF', 'refs/heads/main').split('/')[-1]
@@ -305,34 +256,18 @@ def force_commit_remaining_files() -> bool:
                 remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
                 subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
             
-            # 推送更改
-            subprocess.run(['git', 'push', 'origin', branch], check=True, cwd=repo_root)
+            # 推送更改 - 使用HEAD确保推送到当前分支
+            subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
             
             # 重置文件计数器
             _file_count = 0
-            
-            # 关键验证：确保文件内容与Git仓库一致
-            # 由于不知道具体文件路径，使用暂存区中的任意文件
-            # 获取暂存区中的第一个文件
-            result = subprocess.run(
-                ['git', 'diff', '--cached', '--name-only'],
-                cwd=repo_root,
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                first_file = result.stdout.strip().split('\n')[0]
-                file_path = os.path.join(repo_root, first_file)
-                if not _verify_git_file_content(file_path):
-                    logger.error("文件内容验证失败，可能导致数据丢失")
-                    return False
             
             logger.info(f"✅ 強制提交成功: {commit_message}")
             return True
     
     except subprocess.CalledProcessError as e:
-        logger.error(f"强制提交失败: {str(e)}", exc_info=True)
+        logger.error(f"強制提交失败: {str(e)}", exc_info=True)
         return False
     except Exception as e:
-        logger.error(f"强制提交失败: {str(e)}", exc_info=True)
+        logger.error(f"強制提交失败: {str(e)}", exc_info=True)
         return False

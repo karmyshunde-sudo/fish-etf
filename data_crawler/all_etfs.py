@@ -15,6 +15,7 @@ import pandas as pd
 import logging
 import os
 import time
+import subprocess
 from datetime import datetime
 from config import Config
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content

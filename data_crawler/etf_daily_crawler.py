@@ -4,9 +4,9 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【终极修复版】
-- 彻底解决ETF日线全部跳过问题
-- 专业修复日期范围计算逻辑
-- 添加详细诊断日志
+- 彻底解决导入错误问题
+- 严格保持函数名一致性
+- 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
 
@@ -21,7 +21,7 @@ import shutil
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
-from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_remote_file_content
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 
 # 初始化日志
@@ -139,7 +139,7 @@ def get_valid_trading_date_range(start_date, end_date):
 
 def to_naive_datetime(dt):
     """
-    将换为naive datetime（无时区）
+    将日期转换为naive datetime（无时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -153,7 +153,7 @@ def to_naive_datetime(dt):
 
 def to_aware_datetime(dt):
     """
-    将换为aware datetime（有时区）
+    将日期转换为aware datetime（有时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -246,7 +246,7 @@ def get_next_crawl_index() -> int:
             return 0
         
         # 修复：使用正确的函数名
-        if not _verify_remote_file_content(BASIC_INFO_FILE):
+        if not _verify_git_file_content(BASIC_INFO_FILE):
             logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
         
         # 读取ETF列表
@@ -262,7 +262,7 @@ def get_next_crawl_index() -> int:
             # 保存更新后的文件
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
             # 修复：使用正确的函数名
-            if not _verify_remote_file_content(BASIC_INFO_FILE):
+            if not _verify_git_file_content(BASIC_INFO_FILE):
                 logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新提交")
             logger.info("已添加next_crawl_index列并初始化为0")
         
@@ -301,7 +301,7 @@ def save_crawl_progress(next_index: int):
         # 保存更新后的文件
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         # 修复：使用正确的函数名
-        if not _verify_remote_file_content(BASIC_INFO_FILE):
+        if not _verify_git_file_content(BASIC_INFO_FILE):
             logger.warning("文件内容验证失败，可能需要重试提交")
         # 提交更新
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -523,7 +523,7 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
             df_save.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
         # 修复：使用正确的函数名
-        if not _verify_remote_file_content(save_path):
+        if not _verify_git_file_content(save_path):
             logger.warning(f"ETF {etf_code} 文件内容验证失败，可能需要重试提交")
         commit_message = f"feat: 更新ETF {etf_code} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         commit_files_in_batches(save_path, commit_message)
@@ -651,7 +651,7 @@ def crawl_all_etfs_daily_data() -> None:
             logger.error("强制提交剩余文件失败，可能导致数据丢失")
         
         # 修复：使用正确的函数名
-        if not _verify_remote_file_content(BASIC_INFO_FILE):
+        if not _verify_git_file_content(BASIC_INFO_FILE):
             logger.error("进度文件未正确提交到Git仓库，尝试最后一次提交...")
             save_crawl_progress(new_index)
         

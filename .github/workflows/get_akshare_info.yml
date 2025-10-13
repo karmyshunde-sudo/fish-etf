@@ -1,4 +1,4 @@
-name: Get-akshare接口信息
+name: 6-akshare接口信息
 on:
   workflow_dispatch:
     inputs:

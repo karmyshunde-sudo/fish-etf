@@ -4,7 +4,7 @@
 Git工具模块
 提供可靠的提交功能，确保所有关键文件都能正确保存到远程仓库
 【终极修复版】
-- 彻底解决本地仓库状态不干净的问题
+- 彻底解决"nothing to commit"错误
 - 确保基础信息文件100%提交到远程仓库
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
@@ -65,41 +65,42 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
             subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
         
-        # 关键修复：确保本地仓库状态干净
-        try:
-            subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True, cwd=repo_root)
-            subprocess.run(['git', 'clean', '-fd'], check=True, cwd=repo_root)
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"清理本地仓库状态失败: {str(e)}")
-        
         # 添加文件到暂存区
         subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
         
-        # 检查是否有实际的更改需要提交
-        diff_result = subprocess.run(['git', 'diff', '--cached', '--exit-code'], 
-                                   cwd=repo_root, 
-                                   capture_output=True,
-                                   text=True)
+        # 关键修复：检查是否有实际更改需要提交
+        diff_result = subprocess.run(
+            ['git', 'diff', '--cached', '--exit-code'], 
+            cwd=repo_root, 
+            capture_output=True,
+            text=True
+        )
         
-        # 如果没有实际更改，但文件存在，创建一个空提交（特别针对基础信息文件）
+        # 如果没有实际更改，直接返回成功
         if diff_result.returncode == 0:
+            # 特别处理基础信息文件 - 即使没有更改也强制提交
             if "all_stocks.csv" in file_path or "all_etfs.csv" in file_path:
                 logger.info(f"检测到基础信息文件，即使无更改也强制提交: {relative_path}")
-                subprocess.run(['git', 'commit', '--allow-empty', '-m', commit_message], 
-                              check=True, 
-                              cwd=repo_root)
+                # 创建一个空提交
+                subprocess.run(
+                    ['git', 'commit', '--allow-empty', '-m', commit_message], 
+                    check=True, 
+                    cwd=repo_root
+                )
             else:
                 logger.info(f"没有需要提交的更改，跳过提交: {relative_path}")
                 return True
-        else:
-            # 有实际更改，正常提交
-            subprocess.run(['git', 'commit', '-m', commit_message], 
-                          check=True, 
-                          cwd=repo_root)
         
         # 创建提交消息 - 确保包含 [skip ci]
         if "[skip ci]" not in commit_message:
             commit_message = f"{commit_message} [skip ci]"
+        
+        # 提交更改
+        subprocess.run(
+            ['git', 'commit', '-m', commit_message], 
+            check=True, 
+            cwd=repo_root
+        )
         
         # 关键修复：正确处理分支名称
         branch = os.environ.get('GITHUB_REF', 'main')
@@ -121,8 +122,13 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
         return True
     
     except subprocess.CalledProcessError as e:
-        logger.error(f"立即提交失败: {str(e)}", exc_info=True)
-        return False
+        # 关键修复：特别处理"nothing to commit"错误
+        if "nothing to commit" in str(e.output).lower() or "nothing to commit" in str(e.stderr).lower():
+            logger.info(f"没有需要提交的更改（已处理）: {file_path}")
+            return True
+        else:
+            logger.error(f"立即提交失败: {str(e)}", exc_info=True)
+            return False
     except Exception as e:
         logger.error(f"提交文件失败: {str(e)}", exc_info=True)
         return False
@@ -175,6 +181,19 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
             # 添加文件到暂存区
             subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
             
+            # 关键修复：检查是否有实际更改需要提交
+            diff_result = subprocess.run(
+                ['git', 'diff', '--cached', '--exit-code'], 
+                cwd=repo_root, 
+                capture_output=True,
+                text=True
+            )
+            
+            # 如果没有实际更改，直接返回
+            if diff_result.returncode == 0:
+                logger.info(f"没有需要提交的更改，跳过批量提交: {relative_path}")
+                return True
+            
             # 检查是否达到10个文件或这是最后一个文件
             if _file_count % 10 == 0 or commit_message == "LAST_FILE":
                 # 创建提交消息 - 添加 [skip ci] 标记
@@ -189,17 +208,25 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                 
                 # 关键修复：确保本地仓库状态干净
                 try:
-                    subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True, cwd=repo_root)
-                    subprocess.run(['git', 'clean', '-fd'], check=True, cwd=repo_root)
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"清理本地仓库状态失败: {str(e)}")
-                
-                # 拉取远程仓库的最新更改（先拉取再推送，减少冲突）
-                branch = os.environ.get('GITHUB_REF', 'main')
-                if branch.startswith('refs/heads/'):
-                    branch = branch.split('refs/heads/')[1]
-                try:
-                    subprocess.run(['git', 'pull', 'origin', branch], check=True, cwd=repo_root)
+                    # 仅当有本地提交但未推送到远程时才执行pull
+                    status_result = subprocess.run(
+                        ['git', 'status', '-s'],
+                        cwd=repo_root,
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    # 如果有本地提交但未推送到远程，则拉取
+                    if "ahead" in status_result.stdout:
+                        logger.info("检测到本地提交领先，执行pull操作")
+                        branch = os.environ.get('GITHUB_REF', 'main')
+                        if branch.startswith('refs/heads/'):
+                            branch = branch.split('refs/heads/')[1]
+                        subprocess.run(
+                            ['git', 'pull', 'origin', branch], 
+                            check=True, 
+                            cwd=repo_root
+                        )
                 except subprocess.CalledProcessError:
                     logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
                 
@@ -220,8 +247,13 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
             return False
     
     except subprocess.CalledProcessError as e:
-        logger.error(f"Git操作失败: {str(e)}", exc_info=True)
-        return False
+        # 关键修复：特别处理"nothing to commit"错误
+        if "nothing to commit" in str(e.output).lower() or "nothing to commit" in str(e.stderr).lower():
+            logger.info("没有需要提交的更改（已处理）")
+            return True
+        else:
+            logger.error(f"Git操作失败: {str(e)}", exc_info=True)
+            return False
     except Exception as e:
         logger.error(f"提交文件失败: {str(e)}", exc_info=True)
         return False
@@ -241,10 +273,12 @@ def force_commit_remaining_files() -> bool:
             repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
             
             # 检查是否有暂存的更改
-            diff_result = subprocess.run(['git', 'diff', '--cached', '--exit-code'], 
-                                       cwd=repo_root, 
-                                       capture_output=True,
-                                       text=True)
+            diff_result = subprocess.run(
+                ['git', 'diff', '--cached', '--exit-code'], 
+                cwd=repo_root, 
+                capture_output=True,
+                text=True
+            )
             
             # 如果没有暂存的更改，直接返回
             if diff_result.returncode == 0:
@@ -253,24 +287,6 @@ def force_commit_remaining_files() -> bool:
             
             # 创建提交消息
             commit_message = f"feat: 強制提交剩余文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-            
-            # 关键修复：确保本地仓库状态干净
-            try:
-                subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True, cwd=repo_root)
-                subprocess.run(['git', 'clean', '-fd'], check=True, cwd=repo_root)
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"清理本地仓库状态失败: {str(e)}")
-            
-            # 获取当前分支
-            branch = os.environ.get('GITHUB_REF', 'main')
-            if branch.startswith('refs/heads/'):
-                branch = branch.split('refs/heads/')[1]
-            
-            # 拉取远程仓库的最新更改
-            try:
-                subprocess.run(['git', 'pull', 'origin', branch], check=True, cwd=repo_root)
-            except subprocess.CalledProcessError:
-                logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
             
             # 提交更改
             subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
@@ -290,8 +306,13 @@ def force_commit_remaining_files() -> bool:
             return True
     
     except subprocess.CalledProcessError as e:
-        logger.error(f"強制提交失败: {str(e)}", exc_info=True)
-        return False
+        # 关键修复：特别处理"nothing to commit"错误
+        if "nothing to commit" in str(e.output).lower() or "nothing to commit" in str(e.stderr).lower():
+            logger.info("没有需要提交的更改（已处理）")
+            return True
+        else:
+            logger.error(f"強制提交失败: {str(e)}", exc_info=True)
+            return False
     except Exception as e:
         logger.error(f"強制提交失败: {str(e)}", exc_info=True)
         return False

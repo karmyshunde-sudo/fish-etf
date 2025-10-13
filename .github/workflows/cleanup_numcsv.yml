@@ -1,4 +1,4 @@
-name: Cleanup-删除全仓库纯数字名称CSV文件
+name: 7-删除所有纯数字CSV文件
 on:
   workflow_dispatch:
     inputs:

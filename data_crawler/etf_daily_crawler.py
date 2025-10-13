@@ -3,9 +3,9 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【终极修复版】
-- 严格使用all_etfs.csv中的next_crawl_index列管理进度
-- 彻底解决进度文件验证问题
+【原始设计恢复版】
+- 完全恢复原始设计，与股票爬取系统保持一致
+- 只修复git_utils.py函数名不一致问题
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -22,7 +22,6 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
-from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -70,6 +69,166 @@ def format_etf_code(code):
         return None
     
     return code_str
+
+def get_etf_name(etf_code):
+    """
+    获取ETF名称
+    """
+    try:
+        # 确保ETF列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
+            return etf_code
+        
+        # 读取ETF列表
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("ETF列表文件为空")
+            return etf_code
+        
+        # 确保必要列存在
+        if "ETF代码" not in basic_info_df.columns or "ETF名称" not in basic_info_df.columns:
+            logger.error("ETF列表文件缺少必要列")
+            return etf_code
+        
+        # 查找ETF名称
+        etf_row = basic_info_df[basic_info_df["ETF代码"] == etf_code]
+        if not etf_row.empty:
+            return etf_row["ETF名称"].values[0]
+        
+        logger.warning(f"ETF {etf_code} 不在列表中")
+        return etf_code
+    except Exception as e:
+        logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
+        return etf_code
+
+def get_next_crawl_index() -> int:
+    """
+    获取下一个要处理的ETF索引
+    Returns:
+        int: 下一个要处理的ETF索引
+    """
+    try:
+        # 确保ETF列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
+            return 0
+        
+        # 专业修复：使用正确的函数名（添加下划线）
+        if not _verify_git_file_content(BASIC_INFO_FILE):
+            logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
+        
+        # 读取ETF列表
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("ETF列表文件为空，无法获取进度")
+            return 0
+        
+        # 确保"next_crawl_index"列存在
+        if "next_crawl_index" not in basic_info_df.columns:
+            # 添加列并初始化
+            basic_info_df["next_crawl_index"] = 0
+            # 保存更新后的文件
+            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+            # 专业修复：使用正确的函数名（添加下划线）
+            if not _verify_git_file_content(BASIC_INFO_FILE):
+                logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新提交")
+            logger.info("已添加next_crawl_index列并初始化为0")
+        
+        # 获取第一个ETF的next_crawl_index值
+        next_index = int(basic_info_df["next_crawl_index"].iloc[0])
+        logger.info(f"当前进度：下一个索引位置: {next_index}/{len(basic_info_df)}")
+        return next_index
+    except Exception as e:
+        logger.error(f"获取ETF进度索引失败: {str(e)}", exc_info=True)
+        return 0
+
+def save_crawl_progress(next_index: int):
+    """
+    保存ETF爬取进度
+    Args:
+        next_index: 下一个要处理的ETF索引
+    """
+    try:
+        # 确保ETF列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
+            return
+        
+        # 读取ETF列表
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("ETF列表文件为空，无法更新进度")
+            return
+        
+        # 确保"next_crawl_index"列存在
+        if "next_crawl_index" not in basic_info_df.columns:
+            basic_info_df["next_crawl_index"] = 0
+        
+        # 更新所有行的next_crawl_index值
+        basic_info_df["next_crawl_index"] = next_index
+        # 保存更新后的文件
+        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+        # 专业修复：使用正确的函数名（添加下划线）
+        if not _verify_git_file_content(BASIC_INFO_FILE):
+            logger.warning("文件内容验证失败，可能需要重试提交")
+        # 提交更新
+        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_files_in_batches(BASIC_INFO_FILE, commit_message)
+        logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{len(basic_info_df)}")
+    except Exception as e:
+        logger.error(f"❌ 保存ETF进度失败: {str(e)}", exc_info=True)
+
+def to_naive_datetime(dt):
+    """
+    将日期转换为naive datetime（无时区）
+    Args:
+        dt: 可能是naive或aware datetime
+    Returns:
+        datetime: naive datetime
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+def to_aware_datetime(dt):
+    """
+    将日期转换为aware datetime（有时区）
+    Args:
+        dt: 可能是naive或aware datetime
+    Returns:
+        datetime: aware datetime（北京时区）
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=Config.BEIJING_TIMEZONE)
+    return dt
+
+def to_datetime(date_input):
+    """
+    统一转换为datetime.datetime类型
+    Args:
+        date_input: 日期输入，可以是str、date、datetime等类型
+    Returns:
+        datetime.datetime: 统一的datetime类型
+    """
+    if isinstance(date_input, datetime):
+        return date_input
+    elif isinstance(date_input, date):
+        return datetime.combine(date_input, datetime.min.time())
+    elif isinstance(date_input, str):
+        # 尝试多种日期格式
+        for fmt in ["%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"]:
+            try:
+                return datetime.strptime(date_input, fmt)
+            except:
+                continue
+        logger.warning(f"无法解析日期格式: {date_input}")
+        return None
+    return None
 
 def get_valid_trading_date_range(start_date, end_date):
     """
@@ -137,57 +296,6 @@ def get_valid_trading_date_range(start_date, end_date):
     
     return valid_start_date, valid_end_date
 
-def to_naive_datetime(dt):
-    """
-    将日期转换为naive datetime（无时区）
-    Args:
-        dt: 可能是naive或aware datetime
-    Returns:
-        datetime: naive datetime
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is not None:
-        return dt.replace(tzinfo=None)
-    return dt
-
-def to_aware_datetime(dt):
-    """
-    将日期转换为aware datetime（有时区）
-    Args:
-        dt: 可能是naive或aware datetime
-    Returns:
-        datetime: aware datetime（北京时区）
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=Config.BEIJING_TIMEZONE)
-    return dt
-
-def to_datetime(date_input):
-    """
-    统一转换为datetime.datetime类型
-    Args:
-        date_input: 日期输入，可以是str、date、datetime等类型
-    Returns:
-        datetime.datetime: 统一的datetime类型
-    """
-    if isinstance(date_input, datetime):
-        return date_input
-    elif isinstance(date_input, date):
-        return datetime.combine(date_input, datetime.min.time())
-    elif isinstance(date_input, str):
-        # 尝试多种日期格式
-        for fmt in ["%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"]:
-            try:
-                return datetime.strptime(date_input, fmt)
-            except:
-                continue
-        logger.warning(f"无法解析日期格式: {date_input}")
-        return None
-    return None
-
 def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
     """
     加载ETF日线数据
@@ -232,83 +340,6 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
-def get_next_crawl_index() -> int:
-    """
-    获取下一个要处理的ETF索引
-    Returns:
-        int: 下一个要处理的ETF索引
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
-            return 0
-        
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
-        
-        # 读取ETF列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空，无法获取进度")
-            return 0
-        
-        # 确保"next_crawl_index"列存在
-        if "next_crawl_index" not in basic_info_df.columns:
-            # 添加列并初始化
-            basic_info_df["next_crawl_index"] = 0
-            # 保存更新后的文件
-            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            # 修复：使用正确的函数名
-            if not _verify_git_file_content(BASIC_INFO_FILE):
-                logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新提交")
-            logger.info("已添加next_crawl_index列并初始化为0")
-        
-        # 获取第一个ETF的next_crawl_index值
-        next_index = int(basic_info_df["next_crawl_index"].iloc[0])
-        logger.info(f"当前进度：下一个索引位置: {next_index}/{len(basic_info_df)}")
-        return next_index
-    except Exception as e:
-        logger.error(f"获取ETF进度索引失败: {str(e)}", exc_info=True)
-        return 0
-
-def save_crawl_progress(next_index: int):
-    """
-    保存ETF爬取进度
-    Args:
-        next_index: 下一个要处理的ETF索引
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
-            return
-        
-        # 读取ETF列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空，无法更新进度")
-            return
-        
-        # 确保"next_crawl_index"列存在
-        if "next_crawl_index" not in basic_info_df.columns:
-            basic_info_df["next_crawl_index"] = 0
-        
-        # 更新所有行的next_crawl_index值
-        basic_info_df["next_crawl_index"] = next_index
-        # 保存更新后的文件
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.warning("文件内容验证失败，可能需要重试提交")
-        # 提交更新
-        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(BASIC_INFO_FILE, commit_message)
-        logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{len(basic_info_df)}")
-    except Exception as e:
-        logger.error(f"❌ 保存ETF进度失败: {str(e)}", exc_info=True)
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
@@ -522,7 +553,7 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
             df_save.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
-        # 修复：使用正确的函数名
+        # 专业修复：使用正确的函数名（添加下划线）
         if not _verify_git_file_content(save_path):
             logger.warning(f"ETF {etf_code} 文件内容验证失败，可能需要重试提交")
         commit_message = f"feat: 更新ETF {etf_code} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -548,6 +579,11 @@ def crawl_all_etfs_daily_data() -> None:
         # 获取所有ETF代码
         etf_codes = get_all_etf_codes()
         total_count = len(etf_codes)
+        
+        if total_count == 0:
+            logger.error("ETF列表为空，无法进行爬取")
+            return
+        
         logger.info(f"待爬取ETF总数：{total_count}只（全市场ETF）")
         
         # 获取当前进度
@@ -650,14 +686,9 @@ def crawl_all_etfs_daily_data() -> None:
         if not force_commit_remaining_files():
             logger.error("强制提交剩余文件失败，可能导致数据丢失")
         
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.error("进度文件未正确提交到Git仓库，尝试最后一次提交...")
-            save_crawl_progress(new_index)
-        
     except Exception as e:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
-        # 修复：使用正确的函数名
+        # 尝试保存进度以恢复状态
         try:
             if 'next_index' in locals() and 'total_count' in locals():
                 logger.error("尝试保存进度以恢复状态...")

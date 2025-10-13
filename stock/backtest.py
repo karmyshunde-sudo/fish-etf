@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-策略2 回测 - 多指标共振策略
+策略2 回測 - 多指标共振策略
 功能：
 1. 遍历 data/daily/ 下所有股票一年的历史数据
 2. 模拟交易：按策略条件买入，止盈止损或反向信号卖出
@@ -428,32 +428,6 @@ def run_backtest():
 
         # 分析结果
         results = analyze_results(all_trades)
-        
-        # 保存交易流水
-        if all_trades:
-            # 生成交易流水文件
-            trades_df = pd.DataFrame(all_trades)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            trades_filename = os.path.join(RESULT_DIR, f"trades_{timestamp}.csv")
-            trades_df.to_csv(trades_filename, index=False, encoding="utf-8-sig")
-            logger.info(f"交易流水已保存至: {trades_filename}")
-            
-            # 生成统计结果文件
-            stats_data = []
-            for signal_type, stat in results["stats"].items():
-                stats_data.append({
-                    "信号类型": get_signal_name(signal_type),
-                    "交易次数": stat["trades"],
-                    "盈利次数": stat["win_trades"],
-                    "胜率": f"{stat['win_trades']/stat['trades']*100:.2f}%" if stat["trades"] > 0 else "0.00%",
-                    "总利润": stat["total_profit"],
-                    "总成本": stat["total_cost"],
-                    "盈亏率": f"{stat['profit_rate']*100:.2f}%"
-                })
-            
-            stats_filename = os.path.join(RESULT_DIR, f"stats_{timestamp}.csv")
-            pd.DataFrame(stats_data).to_csv(stats_filename, index=False, encoding="utf-8-sig")
-            logger.info(f"统计结果已保存至: {stats_filename}")
         
         return all_trades, results
 

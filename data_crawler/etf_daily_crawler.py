@@ -3,9 +3,8 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【原始设计恢复版】
-- 完全恢复原始设计，与股票爬取系统保持一致
-- 只修复git_utils.py函数名不一致问题
+【生产级实现】
+- 与股票爬取系统完全一致的进度管理逻辑
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -75,6 +74,12 @@ def get_etf_name(etf_code):
     获取ETF名称
     """
     try:
+        # 专业修复：先规范化ETF代码
+        formatted_etf_code = format_etf_code(etf_code)
+        if not formatted_etf_code:
+            logger.warning(f"ETF代码格式化失败: {etf_code}")
+            return etf_code
+        
         # 确保ETF列表文件存在
         if not os.path.exists(BASIC_INFO_FILE):
             logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
@@ -91,12 +96,12 @@ def get_etf_name(etf_code):
             logger.error("ETF列表文件缺少必要列")
             return etf_code
         
-        # 查找ETF名称
-        etf_row = basic_info_df[basic_info_df["ETF代码"] == etf_code]
+        # 专业修复：使用规范化后的代码进行比较
+        etf_row = basic_info_df[basic_info_df["ETF代码"] == formatted_etf_code]
         if not etf_row.empty:
             return etf_row["ETF名称"].values[0]
         
-        logger.warning(f"ETF {etf_code} 不在列表中")
+        logger.warning(f"ETF {formatted_etf_code} 不在列表中")
         return etf_code
     except Exception as e:
         logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
@@ -661,13 +666,12 @@ def crawl_all_etfs_daily_data() -> None:
                 shutil.move(temp_file.name, save_path)
                 logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
             
-            # 更新进度
+            # 专业修复：不再每个ETF都更新进度
             processed_count += 1
             current_index = start_idx + i + 1
-            save_crawl_progress(current_index)
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
-        # 确保进度索引总是前进
+        # 专业修复：整批处理完成后才更新进度
         new_index = end_idx
         if new_index >= total_count:
             new_index = 0
@@ -722,9 +726,12 @@ def get_all_etf_codes() -> list:
             logger.error("ETF列表文件缺少'ETF代码'列")
             return []
         
-        # 规范化ETF代码
-        etf_codes = [format_etf_code(code) for code in basic_info_df["ETF代码"].tolist()]
-        etf_codes = [code for code in etf_codes if code is not None]
+        # 专业修复：规范化ETF代码（与get_etf_name保持一致）
+        etf_codes = []
+        for code in basic_info_df["ETF代码"].tolist():
+            formatted_code = format_etf_code(code)
+            if formatted_code:
+                etf_codes.append(formatted_code)
         
         logger.info(f"获取到 {len(etf_codes)} 只ETF代码")
         return etf_codes

@@ -1,4 +1,4 @@
-name: Hand-手动任务
+name: 4-手动任务
 on:
   workflow_dispatch:
     inputs:

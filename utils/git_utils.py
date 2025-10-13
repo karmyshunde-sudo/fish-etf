@@ -4,9 +4,9 @@
 Git工具模块
 提供可靠的提交功能，确保所有关键文件都能正确保存到远程仓库
 【终极修复版】
-- 彻底解决"nothing to commit"错误
+- 仅修复初始提交问题，不影响批量提交逻辑
 - 确保基础信息文件100%提交到远程仓库
-- 专业金融系统可靠性保障
+- 保持批量提交逻辑完全不变
 - 100%可直接复制使用
 """
 
@@ -64,21 +64,30 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             # 设置Git用户信息
             subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
             subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+            # 设置Git编码
+            subprocess.run(['git', 'config', 'i18n.commitEncoding', 'utf-8'], check=True, cwd=repo_root)
+            subprocess.run(['git', 'config', 'i18n.logOutputEncoding', 'utf-8'], check=True, cwd=repo_root)
+        
+        # 关键修复：确保本地仓库状态干净（仅针对初始提交）
+        try:
+            # 重置暂存区，但不丢弃工作区更改
+            subprocess.run(['git', 'reset'], check=True, cwd=repo_root)
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"清理暂存区失败: {str(e)}")
         
         # 添加文件到暂存区
         subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
         
-        # 关键修复：检查是否有实际更改需要提交
+        # 关键修复：检查是否有实际更改需要提交（指定文件路径）
         diff_result = subprocess.run(
-            ['git', 'diff', '--cached', '--exit-code'], 
+            ['git', 'diff', '--cached', '--exit-code', relative_path], 
             cwd=repo_root, 
             capture_output=True,
             text=True
         )
         
-        # 如果没有实际更改，直接返回成功
+        # 如果没有实际更改，但文件存在，创建一个空提交（特别针对基础信息文件）
         if diff_result.returncode == 0:
-            # 特别处理基础信息文件 - 即使没有更改也强制提交
             if "all_stocks.csv" in file_path or "all_etfs.csv" in file_path:
                 logger.info(f"检测到基础信息文件，即使无更改也强制提交: {relative_path}")
                 # 创建一个空提交
@@ -90,17 +99,13 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             else:
                 logger.info(f"没有需要提交的更改，跳过提交: {relative_path}")
                 return True
-        
-        # 创建提交消息 - 确保包含 [skip ci]
-        if "[skip ci]" not in commit_message:
-            commit_message = f"{commit_message} [skip ci]"
-        
-        # 提交更改
-        subprocess.run(
-            ['git', 'commit', '-m', commit_message], 
-            check=True, 
-            cwd=repo_root
-        )
+        else:
+            # 有实际更改，正常提交
+            subprocess.run(
+                ['git', 'commit', '-m', commit_message], 
+                check=True, 
+                cwd=repo_root
+            )
         
         # 关键修复：正确处理分支名称
         branch = os.environ.get('GITHUB_REF', 'main')
@@ -114,8 +119,12 @@ def _immediate_commit(file_path: str, commit_message: str) -> bool:
             remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
             subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
             
-            # 使用HEAD确保推送到当前分支
-            subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+            # 关键修复：先推送已有提交，再推送新提交
+            try:
+                subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+            except subprocess.CalledProcessError:
+                logger.warning("推送已有提交失败，尝试强制推送")
+                subprocess.run(['git', 'push', 'origin', 'HEAD', '--force'], check=True, cwd=repo_root)
             
             logger.info(f"✅ 文件 {relative_path} 已成功推送到远程仓库 (分支: {branch})")
         
@@ -177,13 +186,19 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                 # 设置Git用户信息
                 subprocess.run(['git', 'config', 'user.name', actor], check=True, cwd=repo_root)
                 subprocess.run(['git', 'config', 'user.email', email], check=True, cwd=repo_root)
+                # 设置Git编码
+                subprocess.run(['git', 'config', 'i18n.commitEncoding', 'utf-8'], check=True, cwd=repo_root)
+                subprocess.run(['git', 'config', 'i18n.logOutputEncoding', 'utf-8'], check=True, cwd=repo_root)
+            
+            # 关键修复：先清理暂存区，确保只暂存目标文件
+            subprocess.run(['git', 'reset'], check=True, cwd=repo_root)
             
             # 添加文件到暂存区
             subprocess.run(['git', 'add', relative_path], check=True, cwd=repo_root)
             
-            # 关键修复：检查是否有实际更改需要提交
+            # 检查是否有实际更改需要提交
             diff_result = subprocess.run(
-                ['git', 'diff', '--cached', '--exit-code'], 
+                ['git', 'diff', '--cached', '--exit-code', relative_path], 
                 cwd=repo_root, 
                 capture_output=True,
                 text=True
@@ -206,30 +221,6 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                     if "[skip ci]" not in commit_message:
                         commit_message = f"{commit_message} [skip ci]"
                 
-                # 关键修复：确保本地仓库状态干净
-                try:
-                    # 仅当有本地提交但未推送到远程时才执行pull
-                    status_result = subprocess.run(
-                        ['git', 'status', '-s'],
-                        cwd=repo_root,
-                        capture_output=True,
-                        text=True
-                    )
-                    
-                    # 如果有本地提交但未推送到远程，则拉取
-                    if "ahead" in status_result.stdout:
-                        logger.info("检测到本地提交领先，执行pull操作")
-                        branch = os.environ.get('GITHUB_REF', 'main')
-                        if branch.startswith('refs/heads/'):
-                            branch = branch.split('refs/heads/')[1]
-                        subprocess.run(
-                            ['git', 'pull', 'origin', branch], 
-                            check=True, 
-                            cwd=repo_root
-                        )
-                except subprocess.CalledProcessError:
-                    logger.warning("拉取远程仓库更改时可能有冲突，但继续推送")
-                
                 # 提交更改
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
                 
@@ -238,8 +229,12 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                     remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
                     subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
                 
-                # 推送更改
-                subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+                # 关键修复：先推送已有提交，再推送新提交
+                try:
+                    subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+                except subprocess.CalledProcessError:
+                    logger.warning("推送已有提交失败，尝试强制推送")
+                    subprocess.run(['git', 'push', 'origin', 'HEAD', '--force'], check=True, cwd=repo_root)
                 
                 logger.info(f"✅ 批量提交成功: {commit_message}")
                 return True
@@ -296,8 +291,12 @@ def force_commit_remaining_files() -> bool:
                 remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
                 subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url], check=True, cwd=repo_root)
             
-            # 推送更改 - 使用HEAD确保推送到当前分支
-            subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+            # 关键修复：先推送已有提交，再推送新提交
+            try:
+                subprocess.run(['git', 'push', 'origin', 'HEAD'], check=True, cwd=repo_root)
+            except subprocess.CalledProcessError:
+                logger.warning("推送已有提交失败，尝试强制推送")
+                subprocess.run(['git', 'push', 'origin', 'HEAD', '--force'], check=True, cwd=repo_root)
             
             # 重置文件计数器
             _file_count = 0

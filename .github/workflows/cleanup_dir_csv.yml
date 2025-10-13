@@ -1,4 +1,4 @@
-name: 8清理自定义路径CSV文件
+name: 8-清理自定义路径CSV文件
 on:
   workflow_dispatch:
     inputs:

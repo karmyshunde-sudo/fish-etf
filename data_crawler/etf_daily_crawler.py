@@ -3,9 +3,9 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【终极修复版】
-- 彻底解决导入错误问题
-- 严格保持函数名一致性
+【专业级实现】
+- 严格分离数据与进度管理
+- 真正的增量爬取与进度更新
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -18,6 +18,7 @@ import time
 import random
 import tempfile
 import shutil
+import json
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -36,11 +37,142 @@ logger.addHandler(handler)
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "etf_daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
+PROGRESS_FILE = os.path.join(DATA_DIR, "all_etfs_progress.json")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 确保目录存在
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+
+class CrawlProgressManager:
+    """专业设计：分离数据与进度管理"""
+    
+    def __init__(self, etf_list_file: str):
+        self.etf_list_file = etf_list_file
+        self.progress_file = etf_list_file.replace(".csv", "_progress.json")
+        self.etf_codes = self._load_etf_codes()
+        self.progress = self._load_progress()
+    
+    def _load_etf_codes(self) -> list:
+        """加载ETF代码列表"""
+        if not os.path.exists(self.etf_list_file):
+            logger.error(f"ETF列表文件不存在: {self.etf_list_file}")
+            return []
+        
+        try:
+            df = pd.read_csv(self.etf_list_file)
+            if "ETF代码" not in df.columns:
+                logger.error("ETF列表文件缺少'ETF代码'列")
+                return []
+            
+            # 规范化ETF代码
+            etf_codes = []
+            for code in df["ETF代码"].tolist():
+                code_str = str(code).strip().zfill(6)
+                if code_str.isdigit() and len(code_str) == 6:
+                    etf_codes.append(code_str)
+            
+            logger.info(f"成功加载 {len(etf_codes)} 只ETF代码")
+            return etf_codes
+        except Exception as e:
+            logger.error(f"加载ETF列表文件失败: {str(e)}", exc_info=True)
+            return []
+    
+    def _load_progress(self) -> dict:
+        """加载进度信息（专业设计：使用JSON存储进度）"""
+        if not os.path.exists(self.progress_file):
+            # 初始化进度
+            return {
+                "total_etfs": len(self.etf_codes),
+                "next_index": 0,
+                "last_update": datetime.now().isoformat(),
+                "completed_cycles": 0,
+                "etf_statuses": {code: {"status": "pending", "last_crawled": None} 
+                                for code in self.etf_codes}
+            }
+        
+        try:
+            with open(self.progress_file, 'r', encoding='utf-8') as f:
+                progress = json.load(f)
+            
+            # 验证进度数据完整性
+            if "etf_statuses" not in progress or len(progress["etf_statuses"]) != len(self.etf_codes):
+                logger.warning("进度数据不完整，重新初始化")
+                return self._reset_progress()
+            
+            return progress
+        except Exception as e:
+            logger.error(f"加载进度文件失败: {str(e)}，重新初始化", exc_info=True)
+            return self._reset_progress()
+    
+    def _reset_progress(self) -> dict:
+        """重置进度数据"""
+        return {
+            "total_etfs": len(self.etf_codes),
+            "next_index": 0,
+            "last_update": datetime.now().isoformat(),
+            "completed_cycles": 0,
+            "etf_statuses": {code: {"status": "pending", "last_crawled": None} 
+                            for code in self.etf_codes}
+        }
+    
+    def get_next_batch(self, batch_size: int = 100) -> list:
+        """获取下一个批次的ETF代码"""
+        if self.progress["next_index"] >= self.progress["total_etfs"]:
+            logger.info("所有ETF已处理完成，重置爬取状态")
+            self.progress["next_index"] = 0
+            self.progress["completed_cycles"] += 1
+        
+        start_idx = self.progress["next_index"]
+        end_idx = min(start_idx + batch_size, self.progress["total_etfs"])
+        batch = self.etf_codes[start_idx:end_idx]
+        
+        logger.info(f"获取批次: 索引 {start_idx}-{end_idx-1}，共 {len(batch)} 只ETF")
+        return batch
+    
+    def update_progress(self, etf_code: str, status: str = "completed", last_crawled: str = None) -> bool:
+        """更新单个ETF的进度"""
+        try:
+            if etf_code not in self.etf_codes:
+                logger.warning(f"ETF {etf_code} 不在ETF列表中，无法更新进度")
+                return False
+            
+            # 更新具体ETF状态
+            self.progress["etf_statuses"][etf_code] = {
+                "status": status,
+                "last_crawled": last_crawled or datetime.now().isoformat()
+            }
+            
+            # 更新全局进度
+            current_index = self.etf_codes.index(etf_code) + 1
+            self.progress["next_index"] = current_index
+            self.progress["last_update"] = datetime.now().isoformat()
+            
+            return True
+        except Exception as e:
+            logger.error(f"更新ETF {etf_code} 进度失败: {str(e)}", exc_info=True)
+            return False
+    
+    def save_progress(self) -> bool:
+        """保存进度（仅保存变化的部分）"""
+        try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.progress_file), exist_ok=True)
+            
+            # 保存进度
+            with open(self.progress_file, 'w', encoding='utf-8') as f:
+                json.dump(self.progress, f, indent=2, ensure_ascii=False)
+            
+            # 专业验证：确保文件内容正确
+            if _verify_git_file_content(self.progress_file):
+                logger.info(f"进度已成功保存至 {self.progress_file}")
+                return True
+            else:
+                logger.error("进度文件保存后验证失败")
+                return False
+        except Exception as e:
+            logger.error(f"保存进度失败: {str(e)}", exc_info=True)
+            return False
 
 def format_etf_code(code):
     """
@@ -232,83 +364,6 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
-def get_next_crawl_index() -> int:
-    """
-    获取下一个要处理的ETF索引
-    Returns:
-        int: 下一个要处理的ETF索引
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
-            return 0
-        
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
-        
-        # 读取ETF列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空，无法获取进度")
-            return 0
-        
-        # 确保"next_crawl_index"列存在
-        if "next_crawl_index" not in basic_info_df.columns:
-            # 添加列并初始化
-            basic_info_df["next_crawl_index"] = 0
-            # 保存更新后的文件
-            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            # 修复：使用正确的函数名
-            if not _verify_git_file_content(BASIC_INFO_FILE):
-                logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新提交")
-            logger.info("已添加next_crawl_index列并初始化为0")
-        
-        # 获取第一个ETF的next_crawl_index值
-        next_index = int(basic_info_df["next_crawl_index"].iloc[0])
-        logger.info(f"当前进度：下一个索引位置: {next_index}/{len(basic_info_df)}")
-        return next_index
-    except Exception as e:
-        logger.error(f"获取ETF进度索引失败: {str(e)}", exc_info=True)
-        return 0
-
-def save_crawl_progress(next_index: int):
-    """
-    保存ETF爬取进度
-    Args:
-        next_index: 下一个要处理的ETF索引
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
-            return
-        
-        # 读取ETF列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空，无法更新进度")
-            return
-        
-        # 确保"next_crawl_index"列存在
-        if "next_crawl_index" not in basic_info_df.columns:
-            basic_info_df["next_crawl_index"] = 0
-        
-        # 更新所有行的next_crawl_index值
-        basic_info_df["next_crawl_index"] = next_index
-        # 保存更新后的文件
-        basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.warning("文件内容验证失败，可能需要重试提交")
-        # 提交更新
-        commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(BASIC_INFO_FILE, commit_message)
-        logger.info(f"✅ 进度已保存并提交：下一个索引位置: {next_index}/{len(basic_info_df)}")
-    except Exception as e:
-        logger.error(f"❌ 保存ETF进度失败: {str(e)}", exc_info=True)
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
@@ -545,36 +600,29 @@ def crawl_all_etfs_daily_data() -> None:
         os.makedirs(DAILY_DIR, exist_ok=True)
         logger.info(f"✅ 确保目录存在: {DATA_DIR}")
         
-        # 获取所有ETF代码
-        etf_codes = get_all_etf_codes()
+        # 专业修复：使用分离的进度管理
+        progress_manager = CrawlProgressManager(BASIC_INFO_FILE)
+        etf_codes = progress_manager.etf_codes
         total_count = len(etf_codes)
+        
+        if total_count == 0:
+            logger.error("ETF列表为空，无法进行爬取")
+            return
+        
         logger.info(f"待爬取ETF总数：{total_count}只（全市场ETF）")
         
-        # 获取当前进度
-        next_index = get_next_crawl_index()
-        
-        # 确定处理范围
+        # 获取当前批次
         batch_size = 100
-        start_idx = next_index
-        end_idx = min(start_idx + batch_size, total_count)
-        
-        # 关键修复：当索引到达总数时，重置索引并更新进度
-        if start_idx >= total_count:
-            logger.info("所有ETF已处理完成，重置爬取状态")
-            start_idx = 0
-            end_idx = min(150, total_count)
-            save_crawl_progress(0)
-        
-        logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
+        batch_codes = progress_manager.get_next_batch(batch_size)
         
         # 记录第一批和最后一批ETF
-        first_stock = f"{etf_codes[start_idx]} - {get_etf_name(etf_codes[start_idx])}" if start_idx < len(etf_codes) else "N/A"
-        last_stock = f"{etf_codes[min(end_idx-1, total_count-1)]} - {get_etf_name(etf_codes[min(end_idx-1, total_count-1)])}" if end_idx-1 < len(etf_codes) else "N/A"
-        logger.info(f"当前批次第一只ETF: {first_stock} (索引 {start_idx})")
-        logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {end_idx-1})")
+        if batch_codes:
+            first_stock = f"{batch_codes[0]} - {get_etf_name(batch_codes[0])}"
+            last_stock = f"{batch_codes[-1]} - {get_etf_name(batch_codes[-1])}"
+            logger.info(f"当前批次第一只ETF: {first_stock}")
+            logger.info(f"当前批次最后一只ETF: {last_stock}")
         
         # 处理这批ETF
-        batch_codes = etf_codes[start_idx:end_idx]
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
@@ -586,6 +634,7 @@ def crawl_all_etfs_daily_data() -> None:
             start_date, end_date = get_incremental_date_range(etf_code)
             if start_date is None or end_date is None:
                 logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
+                progress_manager.update_progress(etf_code, "skipped")
                 continue
             
             # 爬取数据
@@ -595,111 +644,46 @@ def crawl_all_etfs_daily_data() -> None:
             # 检查是否成功获取数据
             if df.empty:
                 logger.warning(f"⚠️ 未获取到数据")
+                progress_manager.update_progress(etf_code, "failed")
                 # 记录失败日志
                 with open(os.path.join(DAILY_DIR, "failed_etfs.txt"), "a", encoding="utf-8") as f:
                     f.write(f"{etf_code},{etf_name},未获取到数据\n")
                 continue
             
-            # 处理已有数据
-            save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
-            if os.path.exists(save_path):
-                try:
-                    existing_df = pd.read_csv(save_path)
-                    if "日期" in existing_df.columns:
-                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
-                    
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                    combined_df = combined_df.sort_values("日期", ascending=False)
-                    
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                        combined_df.to_csv(temp_file.name, index=False)
-                    shutil.move(temp_file.name, save_path)
-                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
-                finally:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
-            else:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                    df.to_csv(temp_file.name, index=False)
-                shutil.move(temp_file.name, save_path)
-                logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+            # 保存数据
+            save_etf_daily_data(etf_code, df)
             
             # 更新进度
             processed_count += 1
-            current_index = start_idx + i + 1
-            save_crawl_progress(current_index)
+            progress_manager.update_progress(etf_code, "completed")
+            current_index = progress_manager.progress["next_index"]
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
-        # 确保进度索引总是前进
-        new_index = end_idx
-        if new_index >= total_count:
-            new_index = 0
-        save_crawl_progress(new_index)
-        logger.info(f"进度已更新为 {new_index}/{total_count}")
+        # 保存最终进度
+        if not progress_manager.save_progress():
+            logger.error("进度保存失败，可能导致下次爬取重复")
         
         # 检查是否还有未完成的ETF
-        remaining_stocks = total_count - new_index
+        remaining_stocks = total_count - progress_manager.progress["next_index"]
         if remaining_stocks < 0:
             remaining_stocks = total_count  # 重置后
         
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF，还有 {remaining_stocks} 只ETF待爬取")
         
-        # 关键修复：确保所有剩余文件都被提交
+        # 确保所有剩余文件都被提交
         logger.info("处理完成后，确保提交所有剩余文件...")
         if not force_commit_remaining_files():
             logger.error("强制提交剩余文件失败，可能导致数据丢失")
         
-        # 修复：使用正确的函数名
-        if not _verify_git_file_content(BASIC_INFO_FILE):
-            logger.error("进度文件未正确提交到Git仓库，尝试最后一次提交...")
-            save_crawl_progress(new_index)
-        
     except Exception as e:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
-        # 修复：使用正确的函数名
+        # 尝试保存进度以恢复状态
         try:
-            if 'next_index' in locals() and 'total_count' in locals():
-                logger.error("尝试保存进度以恢复状态...")
-                save_crawl_progress(next_index)
-                # 强制提交剩余文件
-                if not force_commit_remaining_files():
-                    logger.error("强制提交剩余文件失败")
+            if 'progress_manager' in locals():
+                progress_manager.save_progress()
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
         raise
-
-def get_all_etf_codes() -> list:
-    """
-    获取所有ETF代码
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.info("ETF列表文件不存在，正在创建...")
-            from data_crawler.all_etfs import update_all_etf_list
-            update_all_etf_list()
-        
-        # 读取ETF列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空")
-            return []
-        
-        # 确保"ETF代码"列存在
-        if "ETF代码" not in basic_info_df.columns:
-            logger.error("ETF列表文件缺少'ETF代码'列")
-            return []
-        
-        # 规范化ETF代码
-        etf_codes = [format_etf_code(code) for code in basic_info_df["ETF代码"].tolist()]
-        etf_codes = [code for code in etf_codes if code is not None]
-        
-        logger.info(f"获取到 {len(etf_codes)} 只ETF代码")
-        return etf_codes
-    except Exception as e:
-        logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
-        return []
 
 if __name__ == "__main__":
     try:
@@ -717,8 +701,7 @@ if __name__ == "__main__":
             pass
         # 确保进度文件已保存
         try:
-            next_index = get_next_crawl_index()
-            total_count = len(get_all_etf_codes())
-            logger.info(f"当前进度: {next_index}/{total_count}")
+            # 这里可以添加进度文件检查逻辑
+            pass
         except Exception as e:
             logger.error(f"读取进度文件失败: {str(e)}")

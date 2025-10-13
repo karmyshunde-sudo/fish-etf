@@ -4,7 +4,7 @@
 股票日线数据爬取模块
 使用akshare爬取股票日线数据
 【终极修复版】
-- 彻底解决导入错误问题
+- 彻底解决导入问题
 - 严格保持函数名一致性
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
@@ -22,7 +22,6 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day, is_file_outdated
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
-from data_crawler.all_stocks import get_all_stock_codes, get_stock_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -70,6 +69,121 @@ def format_stock_code(code):
         return None
     
     return code_str
+
+def update_all_stock_list():
+    """
+    更新股票列表
+    专业实现：直接在模块内实现，不依赖外部模块
+    """
+    try:
+        logger.info("开始更新股票列表...")
+        
+        # 获取A股股票列表
+        stock_df = ak.stock_info_a_code_name()
+        
+        # 确保有必要的列
+        if "code" not in stock_df.columns or "name" not in stock_df.columns:
+            logger.error("获取的股票列表缺少必要列")
+            return False
+        
+        # 规范化列名
+        stock_df = stock_df.rename(columns={"code": "股票代码", "name": "股票名称"})
+        
+        # 规范化股票代码
+        stock_df["股票代码"] = stock_df["股票代码"].apply(format_stock_code)
+        
+        # 移除无效代码
+        stock_df = stock_df.dropna(subset=["股票代码"])
+        
+        # 添加next_crawl_index列（初始值为0）
+        stock_df["next_crawl_index"] = 0
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(BASIC_INFO_FILE), exist_ok=True)
+        
+        # 保存到CSV
+        stock_df.to_csv(BASIC_INFO_FILE, index=False, encoding="utf-8-sig")
+        logger.info(f"股票列表已更新，共 {len(stock_df)} 只股票")
+        
+        # 提交到Git
+        commit_message = f"feat: 更新股票列表 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_files_in_batches(BASIC_INFO_FILE, commit_message)
+        
+        return True
+    except Exception as e:
+        logger.error(f"更新股票列表失败: {str(e)}", exc_info=True)
+        return False
+
+def get_all_stock_codes() -> list:
+    """
+    获取所有股票代码
+    专业实现：直接在模块内实现，不依赖外部模块
+    """
+    try:
+        # 确保股票列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE) or is_file_outdated(BASIC_INFO_FILE, 7):
+            logger.info("股票列表文件不存在或已过期，正在更新...")
+            if not update_all_stock_list():
+                logger.error("无法更新股票列表，使用缓存数据（如果存在）")
+                if not os.path.exists(BASIC_INFO_FILE):
+                    return []
+        
+        # 读取股票列表
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("股票列表文件为空")
+            return []
+        
+        # 确保"股票代码"列存在
+        if "股票代码" not in basic_info_df.columns:
+            logger.error("股票列表文件缺少'股票代码'列")
+            return []
+        
+        # 规范化股票代码
+        stock_codes = []
+        for code in basic_info_df["股票代码"].tolist():
+            code_str = str(code).strip().zfill(6)
+            if code_str.isdigit() and len(code_str) == 6:
+                stock_codes.append(code_str)
+        
+        logger.info(f"获取到 {len(stock_codes)} 只股票代码")
+        return stock_codes
+    except Exception as e:
+        logger.error(f"获取股票代码列表失败: {str(e)}", exc_info=True)
+        return []
+
+def get_stock_name(stock_code):
+    """
+    获取股票名称
+    专业实现：直接在模块内实现，不依赖外部模块
+    """
+    try:
+        # 确保股票列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
+            return stock_code
+        
+        # 读取股票列表
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if basic_info_df.empty:
+            logger.error("股票列表文件为空")
+            return stock_code
+        
+        # 确保必要列存在
+        if "股票代码" not in basic_info_df.columns or "股票名称" not in basic_info_df.columns:
+            logger.error("股票列表文件缺少必要列")
+            return stock_code
+        
+        # 查找股票名称
+        stock_row = basic_info_df[basic_info_df["股票代码"] == stock_code]
+        if not stock_row.empty:
+            return stock_row["股票名称"].values[0]
+        
+        logger.warning(f"股票 {stock_code} 不在列表中")
+        return stock_code
+    except Exception as e:
+        logger.error(f"获取股票名称失败: {str(e)}", exc_info=True)
+        return stock_code
 
 def get_valid_trading_date_range(start_date, end_date):
     """
@@ -139,7 +253,7 @@ def get_valid_trading_date_range(start_date, end_date):
 
 def to_naive_datetime(dt):
     """
-    将换为naive datetime（无时区）
+    将日期转换为naive datetime（无时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -153,7 +267,7 @@ def to_naive_datetime(dt):
 
 def to_aware_datetime(dt):
     """
-    将换为aware datetime（有时区）
+    将日期转换为aware datetime（有时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -243,7 +357,11 @@ def get_next_crawl_index() -> int:
         # 确保股票列表文件存在
         if not os.path.exists(BASIC_INFO_FILE):
             logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
-            return 0
+            # 尝试更新股票列表
+            if update_all_stock_list():
+                logger.info("成功创建股票列表文件")
+            else:
+                return 0
         
         # 修复：使用正确的函数名
         if not _verify_git_file_content(BASIC_INFO_FILE):
@@ -659,38 +777,6 @@ def crawl_all_stocks_daily_data() -> None:
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
         raise
-
-def get_all_stock_codes() -> list:
-    """
-    获取所有股票代码
-    """
-    try:
-        # 确保股票列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.info("股票列表文件不存在，正在创建...")
-            from data_crawler.all_stocks import update_all_stock_list
-            update_all_stock_list()
-        
-        # 读取股票列表
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
-        if basic_info_df.empty:
-            logger.error("股票列表文件为空")
-            return []
-        
-        # 确保"股票代码"列存在
-        if "股票代码" not in basic_info_df.columns:
-            logger.error("股票列表文件缺少'股票代码'列")
-            return []
-        
-        # 规范化股票代码
-        stock_codes = [format_stock_code(code) for code in basic_info_df["股票代码"].tolist()]
-        stock_codes = [code for code in stock_codes if code is not None]
-        
-        logger.info(f"获取到 {len(stock_codes)} 只股票代码")
-        return stock_codes
-    except Exception as e:
-        logger.error(f"获取股票代码列表失败: {str(e)}", exc_info=True)
-        return []
 
 if __name__ == "__main__":
     try:

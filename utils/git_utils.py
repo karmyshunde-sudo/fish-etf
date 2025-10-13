@@ -5,7 +5,7 @@ Git工具模块
 提供可靠的提交功能，确保所有关键文件都能正确保存到远程仓库
 【终极修复版】
 - 彻底解决基础信息文件提交问题
-- 不再单独处理基础信息文件，而是与最后一批数据一起提交
+- 正确处理非10倍数的文件数量
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -20,7 +20,8 @@ from datetime import datetime
 # 初始化日志
 logger = logging.getLogger(__name__)
 
-# 文件计数器和线程锁
+# 文件列表和计数器
+_file_list = []
 _file_count = 0
 _git_lock = threading.Lock()  # 添加线程锁，确保Git操作线程安全
 
@@ -146,7 +147,7 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
     Returns:
         bool: 操作是否成功
     """
-    global _file_count
+    global _file_list, _file_count
     
     try:
         # 获取线程锁，确保同一时间只有一个线程操作Git
@@ -157,16 +158,13 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
             if not _wait_for_git_unlock(repo_root):
                 return False
             
-            # 递增文件计数器
+            # 将文件添加到列表
+            _file_list.append(file_path)
             _file_count += 1
-            logger.debug(f"文件计数器: {_file_count}")
-            
-            # 获取文件相对于仓库根目录的路径
-            relative_path = os.path.relpath(file_path, repo_root)
+            logger.debug(f"文件计数器: {_file_count} (文件: {file_path})")
             
             # 检查是否达到10个文件或这是最后一个文件
-            if _file_count % 10 == 0 or commit_message == "LAST_FILE":
-                # 关键修复：不再特殊处理基础信息文件
+            if _file_count >= 10 or commit_message == "LAST_FILE":
                 # 创建提交消息 - 添加 [skip ci] 标记
                 if commit_message == "LAST_FILE":
                     commit_message = f"feat: 批量提交最后一批文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
@@ -177,15 +175,17 @@ def commit_files_in_batches(file_path: str, commit_message: str = None) -> bool:
                     if "[skip ci]" not in commit_message:
                         commit_message = f"{commit_message} [skip ci]"
                 
-                # 关键修复：只提交当前批次的文件
-                # 不再单独处理基础信息文件
-                return _commit_and_push([file_path], commit_message)
+                # 提交所有文件
+                success = _commit_and_push(_file_list, commit_message)
+                
+                # 重置列表和计数器
+                _file_list = []
+                _file_count = 0
+                
+                return success
             
             return False
     
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Git操作失败: {str(e)}", exc_info=True)
-        return False
     except Exception as e:
         logger.error(f"提交文件失败: {str(e)}", exc_info=True)
         return False
@@ -197,14 +197,24 @@ def force_commit_remaining_files() -> bool:
     Returns:
         bool: 操作是否成功
     """
-    global _file_count
+    global _file_list, _file_count
     
     try:
         # 获取线程锁，确保同一时间只有一个线程操作Git
         with _git_lock:
-            repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+            # 如果_file_list不为空，提交这些文件
+            if _file_list:
+                commit_message = f"feat: 強制提交剩余文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                success = _commit_and_push(_file_list, commit_message)
+                
+                # 重置列表和计数器
+                _file_list = []
+                _file_count = 0
+                
+                return success
             
             # 检查是否有暂存的更改
+            repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
             diff_result = subprocess.run(
                 ['git', 'diff', '--cached', '--exit-code'], 
                 cwd=repo_root, 
@@ -217,10 +227,6 @@ def force_commit_remaining_files() -> bool:
                 logger.info("没有剩余的文件需要提交")
                 return True
             
-            # 创建提交消息
-            commit_message = f"feat: 強制提交剩余文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-            
-            # 关键修复：提交所有暂存的文件
             # 获取暂存区中的所有文件
             result = subprocess.run(
                 ['git', 'diff', '--cached', '--name-only'],
@@ -239,9 +245,6 @@ def force_commit_remaining_files() -> bool:
                 logger.warning("无法获取暂存区文件列表")
                 return False
     
-    except subprocess.CalledProcessError as e:
-        logger.error(f"強制提交失败: {str(e)}", exc_info=True)
-        return False
     except Exception as e:
         logger.error(f"強制提交失败: {str(e)}", exc_info=True)
         return False

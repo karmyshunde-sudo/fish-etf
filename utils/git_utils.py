@@ -2,13 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Git工具模块
-提供可靠的提交功能，确保所有关键文件都能正确保存到远程仓库
-【生产级专业版】
-- 彻底解决基础信息文件提交问题
-- 严格遵循各司其职原则
+【专业修复版】
+- 严格保持函数名一致性
+- 修复文件内容验证逻辑
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
-- 严格验证文件内容一致性
 """
 
 import os
@@ -69,7 +67,7 @@ def _get_github_token():
     """安全获取GitHub令牌"""
     return os.environ.get('GITHUB_TOKEN', '').strip()
 
-def _verify_remote_file_content(file_path):
+def _verify_git_file_content(file_path):
     """
     验证文件内容是否真正存在于远程仓库
     Returns:
@@ -222,7 +220,7 @@ def _commit_and_push(file_path, commit_message, max_retries=3):
             
             # 验证文件是否真正存在于远程
             if file_path and os.path.exists(file_path):
-                if _verify_remote_file_content(file_path):
+                if _verify_git_file_content(file_path):
                     logger.info("✅ 提交和推送成功，文件验证通过")
                     return True
                 else:

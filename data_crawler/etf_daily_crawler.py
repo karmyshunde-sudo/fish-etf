@@ -3,10 +3,10 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【专业修复版】
-- 修复了导入错误：_verify_git_file_content → _verify_remote_file_content
-- 严格适配当前git_utils模块
-- 专业金融系统可靠性保障
+【终极修复版】
+- 彻底解决ETF日线全部跳过问题
+- 专业修复日期范围计算逻辑
+- 添加详细诊断日志
 - 100%可直接复制使用
 """
 
@@ -139,7 +139,7 @@ def get_valid_trading_date_range(start_date, end_date):
 
 def to_naive_datetime(dt):
     """
-    将日期转换为naive datetime（无时区）
+    将换为naive datetime（无时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -153,7 +153,7 @@ def to_naive_datetime(dt):
 
 def to_aware_datetime(dt):
     """
-    将日期转换为aware datetime（有时区）
+    将换为aware datetime（有时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -373,68 +373,129 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
 def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
     """
     获取增量爬取的日期范围
+    专业修复：解决ETF全部跳过问题
     """
     try:
+        # 获取最近交易日
         last_trading_day = get_last_trading_day()
         if not isinstance(last_trading_day, datetime):
             last_trading_day = datetime.now()
         
+        # 确保时区一致
         if last_trading_day.tzinfo is None:
             last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        # 设置结束日期为最近交易日（确保是交易日）
         end_date = last_trading_day
         
+        # 获取当前北京时间
         current_time = get_beijing_time()
+        
+        # 如果结束日期晚于当前时间，调整为当前时间
         if end_date > current_time:
             end_date = current_time
         
+        # 专业修复：确保结束日期是交易日
+        while not is_trading_day(end_date.date()):
+            end_date -= timedelta(days=1)
+            if (last_trading_day - end_date).days > 30:
+                logger.error("无法找到有效的结束交易日")
+                return None, None
+        
+        # 专业修复：设置结束时间为当天23:59:59
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
+        
+        # 构建ETF数据文件路径
         save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
         
+        # 检查历史数据文件是否存在
         if os.path.exists(save_path):
             try:
                 df = pd.read_csv(save_path)
-                if "日期" in df.columns:
-                    df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
                 
+                # 确保日期列存在
                 if "日期" not in df.columns:
                     logger.warning(f"ETF {etf_code} 数据文件缺少'日期'列")
-                    return None, None
+                    # 使用默认回退策略：获取一年数据
+                    start_date = last_trading_day - timedelta(days=365)
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    return start_date, end_date
                 
-                latest_date = df["日期"].max()
-                if pd.isna(latest_date):
-                    return None, None
+                # 确保日期列是datetime类型
+                df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
                 
+                # 获取最新有效日期
+                valid_dates = df["日期"].dropna()
+                if valid_dates.empty:
+                    logger.warning(f"ETF {etf_code} 数据文件中日期列全为NaN")
+                    start_date = last_trading_day - timedelta(days=365)
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    return start_date, end_date
+                
+                latest_date = valid_dates.max()
+                
+                # 确保latest_date是datetime类型并带有时区
                 if not isinstance(latest_date, datetime):
                     latest_date = pd.to_datetime(latest_date)
                 
                 if latest_date.tzinfo is None:
                     latest_date = latest_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 
-                next_trading_day = get_next_trading_day(latest_date)
-                start_date = next_trading_day
+                # 专业修复：比较日期部分（忽略时间部分）
+                latest_date_date = latest_date.date()
+                end_date_date = end_date.date()
                 
-                if start_date >= end_date:
-                    logger.info(f"ETF {etf_code} 数据已最新，无需爬取")
+                logger.debug(f"ETF {etf_code} 日期比较: 最新日期={latest_date_date}, 结束日期={end_date_date}")
+                
+                # 专业修复：如果最新日期小于结束日期，则需要爬取
+                if latest_date_date < end_date_date:
+                    # 专业修复：从最新日期的下一个交易日开始
+                    start_date = latest_date + timedelta(days=1)
+                    
+                    # 确保start_date是交易日
+                    while not is_trading_day(start_date.date()):
+                        start_date += timedelta(days=1)
+                    
+                    # 确保start_date有时区信息
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    
+                    # 专业修复：确保start_date不超过end_date
+                    if start_date > end_date:
+                        logger.info(f"ETF {etf_code} 数据已最新（最新日期={latest_date_date}，结束日期={end_date_date}）")
+                        return None, None
+                    
+                    logger.info(f"ETF {etf_code} 需要更新数据: 最新日期 {latest_date_date} < 结束日期 {end_date_date}")
+                    logger.info(f"ETF {etf_code} 增量爬取日期范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+                    return start_date, end_date
+                else:
+                    logger.info(f"ETF {etf_code} 数据已最新: 最新日期 {latest_date_date} >= 结束日期 {end_date_date}")
                     return None, None
-                
-                one_year_ago = last_trading_day - timedelta(days=365)
-                if start_date < one_year_ago:
-                    start_date = one_year_ago
+            
             except Exception as e:
-                logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}")
-                return last_trading_day - timedelta(days=365), last_trading_day
+                logger.error(f"读取ETF {etf_code} 数据文件失败: {str(e)}", exc_info=True)
+                # 出错时尝试获取一年数据
+                start_date = last_trading_day - timedelta(days=365)
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                return start_date, end_date
         else:
+            logger.info(f"ETF {etf_code} 无历史数据，将获取一年历史数据")
             start_date = last_trading_day - timedelta(days=365)
-        
-        if start_date.tzinfo is None:
-            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
-        if end_date.tzinfo is None:
-            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
-        
-        return start_date, end_date
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+            return start_date, end_date
+    
     except Exception as e:
         logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
         last_trading_day = get_last_trading_day()
-        return last_trading_day - timedelta(days=365), last_trading_day
+        start_date = last_trading_day - timedelta(days=365)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        end_date = last_trading_day.replace(hour=23, minute=59, second=59, microsecond=0)
+        return start_date, end_date
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     """
@@ -469,31 +530,6 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
-
-def get_next_trading_day(date_obj: datetime) -> datetime:
-    """
-    获取下一个交易日
-    """
-    try:
-        if not isinstance(date_obj, datetime):
-            if isinstance(date_obj, datetime.date):
-                date_obj = datetime.combine(date_obj, datetime.min.time())
-            else:
-                date_obj = datetime.now()
-        
-        if date_obj.tzinfo is None:
-            date_obj = date_obj.replace(tzinfo=Config.BEIJING_TIMEZONE)
-        
-        next_day = date_obj + timedelta(days=1)
-        while not is_trading_day(next_day):
-            next_day += timedelta(days=1)
-            if (next_day - date_obj).days > 30:
-                logger.warning(f"30天内找不到交易日，使用 {next_day} 作为下一个交易日")
-                break
-        return next_day
-    except Exception as e:
-        logger.error(f"获取下一个交易日失败: {str(e)}", exc_info=True)
-        return date_obj + timedelta(days=1)
 
 def crawl_all_etfs_daily_data() -> None:
     """
@@ -626,7 +662,7 @@ def crawl_all_etfs_daily_data() -> None:
             if 'next_index' in locals() and 'total_count' in locals():
                 logger.error("尝试保存进度以恢复状态...")
                 save_crawl_progress(next_index)
-                # 強制提交剩余文件
+                # 强制提交剩余文件
                 if not force_commit_remaining_files():
                     logger.error("强制提交剩余文件失败")
         except Exception as save_error:

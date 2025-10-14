@@ -18,6 +18,27 @@ import time
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 【关键修复】专业修复日志重复问题（只修改此处）
+# 清除所有可能已存在的日志处理程序，确保只配置一次
+try:
+    # 清除根记录器的所有处理程序
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    
+    # 清除所有记录器的处理程序
+    for logger_name in logging.root.manager.loggerDict:
+        logger = logging.getLogger(logger_name)
+        logger.handlers = []
+        logger.propagate = True
+    
+    # 防止日志重复传播
+    logging.getLogger().propagate = False
+except Exception as e:
+    # 即使出错也不影响主流程
+    print(f"日志系统初始化警告: {str(e)}")
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 from config import Config
 # 修改1：从新文件导入函数
 from data_crawler.etf_daily_crawler import crawl_all_etfs_daily_data
@@ -139,7 +160,7 @@ def handle_update_etf_list() -> Dict[str, Any]:
     """
     try:
         logger.info("开始更新全市场ETF列表（周日强制更新）")
-        # 修改2：直接调用新函数
+        # 修改2：直按调用新函数
         etf_list = update_all_etf_list()
         
         if etf_list.empty:

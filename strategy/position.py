@@ -25,13 +25,15 @@ from utils.date_utils import (
 )
 from wechat_push.push import send_wechat_message
 from data_crawler.all_etfs import get_all_etf_codes, get_etf_name  # 直接导入必要函数
+
 # 初始化日志
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# logger.setLevel(logging.INFO)
+# handler = logging.StreamHandler()
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)
+
 # 仓位持仓记录路径
 POSITION_RECORD_PATH = os.path.join(Config.BASE_DIR, "data", "position_record.csv")
 # 交易记录路径

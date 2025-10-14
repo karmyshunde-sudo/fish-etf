@@ -4,6 +4,7 @@
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【生产级实现】
+- 严格遵循"各司其职"原则
 - 与股票爬取系统完全一致的进度管理逻辑
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
@@ -50,10 +51,10 @@ def get_etf_name(etf_code):
             logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
             return etf_code
         
-        # 专业修复：读取时指定ETF代码列为字符串类型
+        # 读取时指定ETF代码列为字符串类型
         basic_info_df = pd.read_csv(
             BASIC_INFO_FILE,
-            dtype={"ETF代码": str}  # 关键修复：确保ETF代码列为字符串
+            dtype={"ETF代码": str}
         )
         
         if basic_info_df.empty:
@@ -65,7 +66,7 @@ def get_etf_name(etf_code):
             logger.error("ETF列表文件缺少必要列")
             return etf_code
         
-        # 专业修复：确保比较时数据类型一致（都转为字符串）
+        # 确保比较时数据类型一致（都转为字符串）
         etf_code_str = str(etf_code).strip()
         etf_row = basic_info_df[basic_info_df["ETF代码"] == etf_code_str]
         
@@ -90,14 +91,14 @@ def get_next_crawl_index() -> int:
             logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
             return 0
         
-        # 专业修复：使用正确的函数名（添加下划线）
+        # 使用正确的函数名（添加下划线）
         if not _verify_git_file_content(BASIC_INFO_FILE):
             logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新加载")
         
-        # 专业修复：读取时指定ETF代码列为字符串类型
+        # 读取时指定ETF代码列为字符串类型
         basic_info_df = pd.read_csv(
             BASIC_INFO_FILE,
-            dtype={"ETF代码": str}  # 关键修复：确保ETF代码列为字符串
+            dtype={"ETF代码": str}
         )
         
         if basic_info_df.empty:
@@ -110,7 +111,6 @@ def get_next_crawl_index() -> int:
             basic_info_df["next_crawl_index"] = 0
             # 保存更新后的文件
             basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-            # 专业修复：使用正确的函数名（添加下划线）
             if not _verify_git_file_content(BASIC_INFO_FILE):
                 logger.warning("ETF列表文件内容与Git仓库不一致，可能需要重新提交")
             logger.info("已添加next_crawl_index列并初始化为0")
@@ -135,10 +135,10 @@ def save_crawl_progress(next_index: int):
             logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
             return
         
-        # 专业修复：读取时指定ETF代码列为字符串类型
+        # 读取时指定ETF代码列为字符串类型
         basic_info_df = pd.read_csv(
             BASIC_INFO_FILE,
-            dtype={"ETF代码": str}  # 关键修复：确保ETF代码列为字符串
+            dtype={"ETF代码": str}
         )
         
         if basic_info_df.empty:
@@ -153,7 +153,6 @@ def save_crawl_progress(next_index: int):
         basic_info_df["next_crawl_index"] = next_index
         # 保存更新后的文件
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        # 专业修复：使用正确的函数名（添加下划线）
         if not _verify_git_file_content(BASIC_INFO_FILE):
             logger.warning("文件内容验证失败，可能需要重试提交")
         # 提交更新
@@ -537,7 +536,7 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
             df_save.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
-        # 专业修复：使用正确的函数名（添加下划线）
+        # 使用正确的函数名（添加下划线）
         if not _verify_git_file_content(save_path):
             logger.warning(f"ETF {etf_code} 文件内容验证失败，可能需要重试提交")
         commit_message = f"feat: 更新ETF {etf_code} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -573,16 +572,16 @@ def crawl_all_etfs_daily_data() -> None:
         # 获取当前进度
         next_index = get_next_crawl_index()
         
-        # 确定处理范围
+        # 确定处理范围（只处理100只）
         batch_size = 100
         start_idx = next_index
         end_idx = min(start_idx + batch_size, total_count)
         
-        # 关键修复：当索引到达总数时，重置索引并更新进度
+        # 当索引到达总数时，重置索引并更新进度
         if start_idx >= total_count:
             logger.info("所有ETF已处理完成，重置爬取状态")
             start_idx = 0
-            end_idx = min(150, total_count)
+            end_idx = min(batch_size, total_count)
             save_crawl_progress(0)
         
         logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
@@ -678,7 +677,7 @@ def crawl_all_etfs_daily_data() -> None:
                 save_crawl_progress(next_index)
                 # 强制提交剩余文件
                 if not force_commit_remaining_files():
-                    logger.error("强制提交剩余文件失败")
+                    logger.error("強制提交剩余文件失败")
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
         raise
@@ -694,10 +693,10 @@ def get_all_etf_codes() -> list:
             from data_crawler.all_etfs import update_all_etf_list
             update_all_etf_list()
         
-        # 专业修复：读取时指定ETF代码列为字符串类型
+        # 读取时指定ETF代码列为字符串类型
         basic_info_df = pd.read_csv(
             BASIC_INFO_FILE,
-            dtype={"ETF代码": str}  # 关键修复：确保ETF代码列为字符串
+            dtype={"ETF代码": str}
         )
         
         if basic_info_df.empty:

@@ -5,7 +5,7 @@ ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【生产级实现】
 - 严格遵循"各司其职"原则
-- 与股票爬取系统完全一致的进度管理逻辑
+- 循环批处理机制（可配置批次大小）
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -40,6 +40,12 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 # 确保目录存在
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 【关键参数】可在此处修改每次处理的ETF数量
+# 专业修复：批次大小作为可配置参数
+BATCH_SIZE = 100  # 可根据需要调整为100、150、200等
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def get_etf_name(etf_code):
     """
@@ -572,28 +578,36 @@ def crawl_all_etfs_daily_data() -> None:
         # 获取当前进度
         next_index = get_next_crawl_index()
         
-        # 确定处理范围（只处理100只）
-        batch_size = 100
-        start_idx = next_index
-        end_idx = min(start_idx + batch_size, total_count)
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # 专业修复：循环批处理机制
+        # 1. 确定处理范围（使用循环处理）
+        start_idx = next_index % total_count
+        end_idx = start_idx + BATCH_SIZE
         
-        # 当索引到达总数时，重置索引并更新进度
-        if start_idx >= total_count:
-            logger.info("所有ETF已处理完成，重置爬取状态")
-            start_idx = 0
-            end_idx = min(batch_size, total_count)
-            save_crawl_progress(0)
+        # 2. 计算实际的end_idx（用于进度更新）
+        actual_end_idx = end_idx % total_count
         
-        logger.info(f"处理本批次 ETF ({end_idx - start_idx}只)，从索引 {start_idx} 开始")
+        # 3. 记录第一批和最后一批ETF（使用实际索引）
+        first_stock_idx = start_idx % total_count
+        last_stock_idx = (end_idx - 1) % total_count
         
+        # 4. 处理循环情况
+        if end_idx <= total_count:
+            batch_codes = etf_codes[start_idx:end_idx]
+            logger.info(f"处理本批次 ETF ({BATCH_SIZE}只)，从索引 {start_idx} 开始")
+        else:
+            # 循环处理：第一部分（start_idx到total_count）+ 第二部分（0到end_idx-total_count）
+            batch_codes = etf_codes[start_idx:total_count] + etf_codes[0:end_idx-total_count]
+            logger.info(f"处理本批次 ETF ({BATCH_SIZE}只)，从索引 {start_idx} 开始（循环处理）")
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
         # 记录第一批和最后一批ETF
-        first_stock = f"{etf_codes[start_idx]} - {get_etf_name(etf_codes[start_idx])}" if start_idx < len(etf_codes) else "N/A"
-        last_stock = f"{etf_codes[min(end_idx-1, total_count-1)]} - {get_etf_name(etf_codes[min(end_idx-1, total_count-1)])}" if end_idx-1 < len(etf_codes) else "N/A"
-        logger.info(f"当前批次第一只ETF: {first_stock} (索引 {start_idx})")
-        logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {end_idx-1})")
+        first_stock = f"{etf_codes[first_stock_idx]} - {get_etf_name(etf_codes[first_stock_idx])}" if first_stock_idx < len(etf_codes) else "N/A"
+        last_stock = f"{etf_codes[last_stock_idx]} - {get_etf_name(etf_codes[last_stock_idx])}" if last_stock_idx < len(etf_codes) else "N/A"
+        logger.info(f"当前批次第一只ETF: {first_stock} (索引 {first_stock_idx})")
+        logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {last_stock_idx})")
         
         # 处理这批ETF
-        batch_codes = etf_codes[start_idx:end_idx]
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
@@ -646,13 +660,11 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 专业修复：不再每个ETF都更新进度
             processed_count += 1
-            current_index = start_idx + i + 1
+            current_index = (start_idx + i) % total_count
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
         # 专业修复：整批处理完成后才更新进度
-        new_index = end_idx
-        if new_index >= total_count:
-            new_index = 0
+        new_index = actual_end_idx
         save_crawl_progress(new_index)
         logger.info(f"进度已更新为 {new_index}/{total_count}")
         

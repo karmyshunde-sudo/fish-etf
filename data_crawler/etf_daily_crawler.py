@@ -5,7 +5,7 @@ ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
 【生产级实现】
 - 严格遵循"各司其职"原则
-- 循环批处理机制（可配置批次大小）
+- 与股票爬取系统完全一致的进度管理逻辑
 - 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
@@ -519,7 +519,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     """
-    保存ETF日线数据
+    保存ETF日线数据 - 仅负责本地保存，不处理Git提交
     """
     if df.empty:
         return
@@ -542,11 +542,6 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
             df_save.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
-        # 使用正确的函数名（添加下划线）
-        if not _verify_git_file_content(save_path):
-            logger.warning(f"ETF {etf_code} 文件内容验证失败，可能需要重试提交")
-        commit_message = f"feat: 更新ETF {etf_code} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(save_path, commit_message)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -662,6 +657,12 @@ def crawl_all_etfs_daily_data() -> None:
             processed_count += 1
             current_index = (start_idx + i) % total_count
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
+            
+            # 【关键修复】每处理10只ETF就调用git_utils提交
+            if processed_count % 10 == 0:
+                logger.info(f"已处理 {processed_count} 只ETF，提交批量文件...")
+                if not force_commit_remaining_files():
+                    logger.error("提交批量文件失败")
         
         # 专业修复：整批处理完成后才更新进度
         new_index = actual_end_idx

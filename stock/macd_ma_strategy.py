@@ -452,9 +452,6 @@ def format_single_signal(category, signals):
             lines.append("RSI从超卖区回升代表市场情绪改善，变化幅度越大，反弹力度越强。建议关注变化幅度大且持续时间长的个股。")
         elif category == "KDJ":
             lines.append("KDJ低位金叉代表短期动能强劲，J线变化幅度越大，反弹力度越强。建议关注J线快速上升的个股。")
-        
-        lines.append("")
-        lines.append("⚠️ 注意：请结合大盘趋势判断，只在上升趋势中考虑买入。")
     
     return "\n".join(lines)
 
@@ -495,9 +492,6 @@ def format_double_signal(combination, signals):
         lines.append("")
         lines.append("💡 信号解读：")
         lines.append("双指标共振是趋势与动能的最佳配合，胜率高达65%。建议优先交易此类信号。")
-        
-        lines.append("")
-        lines.append("⚠️ 注意：请确认成交量配合，避免无量上涨的假突破。")
     
     return "\n".join(lines)
 
@@ -534,9 +528,6 @@ def format_triple_signal(combination, signals):
         lines.append("")
         lines.append("🌟 信号解读：")
         lines.append("三指标共振代表趋势、动能和超买超卖状态完美配合，是高质量信号。历史回测显示此类信号平均收益率比市场基准高2.8倍。")
-        
-        lines.append("")
-        lines.append("⚠️ 注意：请确认基本面无重大利空，避免在业绩预告期交易。")
     
     return "\n".join(lines)
 
@@ -566,9 +557,6 @@ def format_quadruple_signal(signals):
         lines.append("")
         lines.append("🎯 信号解读：")
         lines.append("全指标共振是最高质量的交易信号，历史胜率高达78%。建议重仓参与此类信号。")
-        
-        lines.append("")
-        lines.append("⚠️ 注意：此类信号极为罕见，请务必确认信号真实性，避免过度交易。")
     
     return "\n".join(lines)
 
@@ -719,35 +707,38 @@ def main():
     
     logger.info(f"处理完成，共处理 {processed_stocks} 只股票")
     
-    # 4. 生成并输出信号
-    output = []
+    # 4. 生成并发送信号
+    total_messages = 0
     
     # 单一指标信号
-    output.append(format_single_signal("MA", ma_signals))
-    output.append(format_single_signal("MACD", macd_signals))
-    output.append(format_single_signal("RSI", rsi_signals))
-    output.append(format_single_signal("KDJ", kdj_signals))
+    for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
+        message = format_single_signal(category, signals)
+        if message.strip():
+            send_wechat_message(message=message, message_type="position")
+            total_messages += 1
     
     # 双指标共振信号
     for combination in double_signals:
-        output.append(format_double_signal(combination, double_signals[combination]))
+        message = format_double_signal(combination, double_signals[combination])
+        if message.strip():
+            send_wechat_message(message=message, message_type="position")
+            total_messages += 1
     
     # 三指标共振信号
     for combination in triple_signals:
-        output.append(format_triple_signal(combination, triple_signals[combination]))
+        message = format_triple_signal(combination, triple_signals[combination])
+        if message.strip():
+            send_wechat_message(message=message, message_type="position")
+            total_messages += 1
     
     # 四指标共振信号
-    output.append(format_quadruple_signal(quadruple_signals))
+    message = format_quadruple_signal(quadruple_signals)
+    if message.strip():
+        send_wechat_message(message=message, message_type="position")
+        total_messages += 1
     
-    # 过滤空消息
-    output = [msg for msg in output if msg.strip()]
-    
-    # 5. 发送信号到微信
-    if output:
-        # 一次性发送所有信号（由推送模块自动处理分片）
-        full_message = "\n\n".join(output)
-        send_wechat_message(message=full_message, message_type="position")
-        logger.info(f"成功发送 {len(output)} 组交易信号到微信")
+    if total_messages > 0:
+        logger.info(f"成功发送 {total_messages} 组交易信号到微信")
     else:
         msg = "【策略2 - 多指标共振策略】\n今日未检测到有效交易信号"
         send_wechat_message(message=msg, message_type="position")

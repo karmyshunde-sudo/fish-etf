@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 股票数据爬取模块 - 严格确保股票代码为6位格式，日期处理逻辑完善
-【终极修复版】
+【2025-10-14-0836：循环索引，保证每次都是爬取150只股票】
 - 彻底解决Git提交问题
-- 确保所有数据都能正确保存
-- 添加文件内容验证机制
+- 循环批处理机制（可配置批次大小）
+- 专业金融系统可靠性保障
 - 100%可直接复制使用
 """
 
@@ -38,6 +38,12 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 # 确保目录存在
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 【关键参数】可在此处修改每次处理的股票数量
+# 专业修复：批次大小作为可配置参数
+BATCH_SIZE = 150  # 可根据需要调整为100、150、200等
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -602,26 +608,36 @@ def update_all_stocks_daily_data():
     
     logger.info(f"当前爬取状态: next_crawl_index = {next_index} (共 {total_stocks} 只股票)")
     
-    # 【关键修复】确定要爬取的股票范围
-    start_idx = next_index
-    end_idx = min(next_index + 150, total_stocks)
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # 专业修复：循环批处理机制
+    # 1. 确定处理范围（使用循环处理）
+    start_idx = next_index % total_stocks
+    end_idx = start_idx + BATCH_SIZE
     
-    # 如果已爬取完所有股票，重置索引
-    if start_idx >= total_stocks:
-        logger.info("已爬取完所有股票，重置爬取状态")
-        start_idx = 0
-        end_idx = min(150, total_stocks)
+    # 2. 计算实际的end_idx（用于进度更新）
+    actual_end_idx = end_idx % total_stocks
     
-    logger.info(f"正在处理第 {start_idx//150 + 1} 批，共 {end_idx - start_idx} 只股票 (索引 {start_idx} - {end_idx-1})")
+    # 3. 记录第一批和最后一批股票（使用实际索引）
+    first_stock_idx = start_idx % total_stocks
+    last_stock_idx = (end_idx - 1) % total_stocks
     
+    # 4. 处理循环情况
+    if end_idx <= total_stocks:
+        batch_df = basic_info_df.iloc[start_idx:end_idx]
+        logger.info(f"处理本批次 股票 ({BATCH_SIZE}只)，从索引 {start_idx} 开始")
+    else:
+        # 循环处理：第一部分（start_idx到total_stocks）+ 第二部分（0到end_idx-total_stocks）
+        batch_df = pd.concat([basic_info_df.iloc[start_idx:total_stocks], basic_info_df.iloc[0:end_idx-total_stocks]])
+        logger.info(f"处理本批次 股票 ({BATCH_SIZE}只)，从索引 {start_idx} 开始（循环处理）")
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
     # 记录第一批和最后一批股票
-    first_stock = basic_info_df.iloc[start_idx]
-    last_stock = basic_info_df.iloc[min(end_idx-1, total_stocks-1)]
-    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {start_idx})")
-    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {end_idx-1})")
+    first_stock = basic_info_df.iloc[first_stock_idx]
+    last_stock = basic_info_df.iloc[last_stock_idx]
+    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {first_stock_idx})")
+    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {last_stock_idx})")
     
     # 处理这批股票
-    batch_df = basic_info_df.iloc[start_idx:end_idx]
     batch_codes = batch_df["代码"].tolist()
     
     if not batch_codes:
@@ -653,10 +669,7 @@ def update_all_stocks_daily_data():
         logger.error("强制提交剩余文件失败，可能导致数据丢失")
     
     # 【关键修复】更新 next_crawl_index
-    new_index = end_idx
-    if new_index >= total_stocks:
-        new_index = 0  # 重置，下次从头开始
-    
+    new_index = actual_end_idx
     logger.info(f"更新 next_crawl_index = {new_index}")
     basic_info_df["next_crawl_index"] = new_index
     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
@@ -666,11 +679,8 @@ def update_all_stocks_daily_data():
     logger.info(f"已提交更新后的基础信息文件到仓库: {BASIC_INFO_FILE}")
     
     # 检查是否还有未完成的股票
-    remaining_stocks = total_stocks - new_index
-    if remaining_stocks < 0:
-        remaining_stocks = total_stocks  # 重置后
-    
-    logger.info(f"已完成 {end_idx - start_idx} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
+    remaining_stocks = (total_stocks - new_index) % total_stocks
+    logger.info(f"已完成 {BATCH_SIZE} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
     
     return True
 
@@ -719,7 +729,7 @@ def main():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 2. 只更新一批股票（最多150只）
+    # 2. 只更新一批股票（最多BATCH_SIZE只）
     if update_all_stocks_daily_data():
         logger.info("已成功处理一批股票数据")
     else:

@@ -23,11 +23,11 @@ from utils.git_utils import commit_files_in_batches, force_commit_remaining_file
 
 # 配置日志
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# logger.setLevel(logging.INFO)
+# handler = logging.StreamHandler()
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)
 
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR

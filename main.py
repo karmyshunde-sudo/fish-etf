@@ -7,53 +7,56 @@ ETF、指数、股票系统 - 主入口文件
 """
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键修复】专业修复日志重复问题（只修改此处）
+# 【终极修复】专业解决日志重复问题（必须放在文件最顶部！）
 # 1. 在导入任何其他模块前强制清除所有日志处理程序
 # 2. 确保日志系统只配置一次
 # 3. 禁止日志传播，避免重复处理
 # 4. 使用全局标志确保只执行一次
+# 5. 关键：必须在导入任何模块前执行
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 import logging
 import sys
 
 # ===== 日志系统初始化 - 专业修复日志重复问题 =====
-try:
-    # 1. 强制清除所有可能已存在的日志处理程序
-    logging.shutdown()
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-    
-    # 2. 确保只配置一次
-    if not hasattr(logging, 'configured') or not logging.configured:
-        # 3. 配置日志目录
-        from config import Config
-        import os
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
-        
-        # 4. 配置根日志记录器
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler(os.path.join(Config.LOG_DIR, "main.log"))
-            ]
-        )
-        
-        # 5. 设置全局标志
-        logging.configured = True
-        
-        # 6. 确保根记录器不重复处理已传播的日志
-        logging.getLogger().propagate = False
-    
-    # 7. 为所有现有记录器禁用传播
-    for logger_name in logging.root.manager.loggerDict:
-        logger = logging.getLogger(logger_name)
-        logger.propagate = False
-except Exception as e:
-    # 即使出错也不影响主流程
-    print(f"日志系统初始化警告: {str(e)}")
+# 1. 强制清除所有可能已存在的日志处理程序
+logging.shutdown()
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
+# 2. 确保根记录器不传播日志（关键修复）
+logging.getLogger().propagate = False
+
+# 3. 为所有现有记录器禁用传播
+for logger_name in logging.root.manager.loggerDict:
+    logger = logging.getLogger(logger_name)
+    logger.propagate = False
+
+# 4. 配置日志目录
+from config import Config
+import os
+os.makedirs(Config.LOG_DIR, exist_ok=True)
+
+# 5. 配置根日志记录器
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(Config.LOG_DIR, "main.log"))
+    ]
+)
+
+# 6. 设置全局标志
+logging.configured = True
+
+# 7. 再次确保根记录器不传播
+logging.getLogger().propagate = False
+
+# 8. 确保所有记录器不传播
+for logger_name in logging.root.manager.loggerDict:
+    logger = logging.getLogger(logger_name)
+    logger.propagate = False
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 import os
@@ -179,7 +182,7 @@ def should_execute_calculate_position() -> bool:
 
 def handle_update_etf_list() -> Dict[str, Any]:
     """
-    处理ETF列表更新任务 - 直接执行，不进行任何条件判断
+    处处理ETF列表更新任务 - 直接执行，不进行任何条件判断
     因为定时器已经确保只在周日触发此任务
     
     Returns:

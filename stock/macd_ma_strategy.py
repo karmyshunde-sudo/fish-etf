@@ -63,11 +63,11 @@ MIN_MARKET_UPWARD = True  # 是否要求大盘处于上升趋势
 
 # ========== 初始化日志 ==========
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# logger.setLevel(logging.INFO)
+# handler = logging.StreamHandler(sys.stdout)
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)
 
 def get_category_name(category):
     """获取指标类别名称"""

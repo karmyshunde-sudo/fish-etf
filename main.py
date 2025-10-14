@@ -6,10 +6,59 @@ ETF、指数、股票系统 - 主入口文件
 特别优化了时区处理，确保所有时间显示为北京时间
 """
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 【关键修复】专业修复日志重复问题（只修改此处）
+# 1. 在导入任何其他模块前强制清除所有日志处理程序
+# 2. 确保日志系统只配置一次
+# 3. 禁止日志传播，避免重复处理
+# 4. 使用全局标志确保只执行一次
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+import logging
+import sys
+
+# ===== 日志系统初始化 - 专业修复日志重复问题 =====
+try:
+    # 1. 强制清除所有可能已存在的日志处理程序
+    logging.shutdown()
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    
+    # 2. 确保只配置一次
+    if not hasattr(logging, 'configured') or not logging.configured:
+        # 3. 配置日志目录
+        from config import Config
+        import os
+        os.makedirs(Config.LOG_DIR, exist_ok=True)
+        
+        # 4. 配置根日志记录器
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler(os.path.join(Config.LOG_DIR, "main.log"))
+            ]
+        )
+        
+        # 5. 设置全局标志
+        logging.configured = True
+        
+        # 6. 确保根记录器不重复处理已传播的日志
+        logging.getLogger().propagate = False
+    
+    # 7. 为所有现有记录器禁用传播
+    for logger_name in logging.root.manager.loggerDict:
+        logger = logging.getLogger(logger_name)
+        logger.propagate = False
+except Exception as e:
+    # 即使出错也不影响主流程
+    print(f"日志系统初始化警告: {str(e)}")
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 import os
 import sys
 import json
-import logging
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
@@ -17,27 +66,6 @@ import time
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键修复】专业修复日志重复问题（只修改此处）
-# 清除所有可能已存在的日志处理程序，确保只配置一次
-try:
-    # 清除根记录器的所有处理程序
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-    
-    # 清除所有记录器的处理程序
-    for logger_name in logging.root.manager.loggerDict:
-        logger = logging.getLogger(logger_name)
-        logger.handlers = []
-        logger.propagate = True
-    
-    # 防止日志重复传播
-    logging.getLogger().propagate = False
-except Exception as e:
-    # 即使出错也不影响主流程
-    print(f"日志系统初始化警告: {str(e)}")
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 from config import Config
 # 修改1：从新文件导入函数
@@ -62,7 +90,6 @@ from utils.date_utils import (
 )
 
 # 初始化日志配置
-Config.setup_logging(log_file=Config.LOG_FILE)
 logger = logging.getLogger(__name__)
 
 def is_manual_trigger() -> bool:

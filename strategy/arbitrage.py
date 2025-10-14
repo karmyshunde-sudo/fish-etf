@@ -9,6 +9,8 @@
 - 修复了ETF数量不一致问题
 - 修复了无日线数据但有溢价率的逻辑矛盾
 - 确保数据源一致性
+- 修复列名一致性问题：数据文件中实际为"折价率"而非"折溢价率"
+- 确保基金规模数据正确获取
 """
 
 import pandas as pd
@@ -243,43 +245,44 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         valid_opportunities = valid_opportunities[valid_opportunities["市场价格"] > 0].copy()
         
         # 3. 从原始数据重新计算折溢价率（不依赖可能不可靠的外部计算值）
-        valid_opportunities["折溢价率"] = (
+        # 【关键修复】使用"折价率"作为列名（与数据文件一致）
+        valid_opportunities["折价率"] = (
             (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / valid_opportunities["IOPV"]
         ) * 100
         
-        # 检查并记录异常折溢价率（不修改原始数据）
-        abnormal_discount = valid_opportunities[valid_opportunities["折溢价率"] < -15.0]
-        abnormal_premium = valid_opportunities[valid_opportunities["折溢价率"] > 15.0]
+        # 检查并记录异常折价率（不修改原始数据）
+        abnormal_discount = valid_opportunities[valid_opportunities["折价率"] < -15.0]
+        abnormal_premium = valid_opportunities[valid_opportunities["折价率"] > 15.0]
         
         if not abnormal_discount.empty:
-            logger.warning(f"发现 {len(abnormal_discount)} 个异常折价率（<-15%）: {abnormal_discount[['ETF代码', '折溢价率']].to_dict()}")
+            logger.warning(f"发现 {len(abnormal_discount)} 个异常折价率（<-15%）: {abnormal_discount[['ETF代码', '折价率']].to_dict()}")
         if not abnormal_premium.empty:
-            logger.warning(f"发现 {len(abnormal_premium)} 个异常溢价率（>15%）: {abnormal_premium[['ETF代码', '折溢价率']].to_dict()}")
+            logger.warning(f"发现 {len(abnormal_premium)} 个异常溢价率（>15%）: {abnormal_premium[['ETF代码', '折价率']].to_dict()}")
         
         # 记录筛选前的统计信息
-        logger.info(f"筛选前数据量: {len(valid_opportunities)}，折溢价率范围: {valid_opportunities['折溢价率'].min():.2f}% ~ {valid_opportunities['折溢价率'].max():.2f}%")
+        logger.info(f"筛选前数据量: {len(valid_opportunities)}，折价率范围: {valid_opportunities['折价率'].min():.2f}% ~ {valid_opportunities['折价率'].max():.2f}%")
         
         # ===== 核心修复：使用绝对值比较阈值 =====
         abs_threshold = Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
         
-        # 折价：市场价格 < IOPV (折溢价率为负)，且绝对值大于阈值
+        # 折价：市场价格 < IOPV (折价率为负)，且绝对值大于阈值
         discount_opportunities = valid_opportunities[
-            (valid_opportunities["折溢价率"] < 0) & 
-            (valid_opportunities["折溢价率"].abs() >= abs_threshold)
+            (valid_opportunities["折价率"] < 0) & 
+            (valid_opportunities["折价率"].abs() >= abs_threshold)
         ].copy()
         
-        # 溢价：市场价格 > IOPV (折溢价率为正)，且绝对值大于阈值
+        # 溢价：市场价格 > IOPV (折价率为正)，且绝对值大于阈值
         premium_opportunities = valid_opportunities[
-            (valid_opportunities["折溢价率"] > 0) & 
-            (valid_opportunities["折溢价率"].abs() >= abs_threshold)
+            (valid_opportunities["折价率"] > 0) & 
+            (valid_opportunities["折价率"].abs() >= abs_threshold)
         ].copy()
         
-        # 按折溢价率绝对值排序
+        # 按折价率绝对值排序
         if not discount_opportunities.empty:
-            discount_opportunities = discount_opportunities.sort_values("折溢价率", ascending=True)
+            discount_opportunities = discount_opportunities.sort_values("折价率", ascending=True)
         
         if not premium_opportunities.empty:
-            premium_opportunities = premium_opportunities.sort_values("折溢价率", ascending=False)
+            premium_opportunities = premium_opportunities.sort_values("折价率", ascending=False)
         
         # 修复：更新日志信息，准确反映筛选条件
         logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≤-{abs_threshold}%)")
@@ -299,7 +302,7 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 修复：添加日志，显示评分详情
         for _, row in premium_opportunities.iterrows():
-            logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折溢价率']:.2f}%, 评分: {row['综合评分']:.2f}")
+            logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折价率']:.2f}%, 评分: {row['综合评分']:.2f}")
         
         return discount_opportunities, premium_opportunities
 
@@ -380,7 +383,7 @@ def filter_new_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
 
 def sort_opportunities_by_abs_premium(df: pd.DataFrame) -> pd.DataFrame:
     """
-    按折溢价率绝对值排序
+    按折价率绝对值排序
     
     Args:
         df: 原始套利机会DataFrame
@@ -392,7 +395,7 @@ def sort_opportunities_by_abs_premium(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     try:
-        df["abs_premium_discount"] = df["折溢价率"].abs()
+        df["abs_premium_discount"] = df["折价率"].abs()
         df = df.sort_values("abs_premium_discount", ascending=False)
         df = df.drop(columns=["abs_premium_discount"])
         return df
@@ -417,6 +420,7 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
         # 为每只ETF添加基本信息
         for idx, row in df.iterrows():
             etf_code = row["ETF代码"]
+            # 【关键修复】明确从all_etfs.csv获取基金规模
             size = get_etf_basic_info(etf_code)
             
             # 计算日均成交额
@@ -466,7 +470,7 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
                 continue
             
             # 检查必要列是否存在
-            required_columns = ["折溢价率", "市场价格", "IOPV"]
+            required_columns = ["折价率", "市场价格", "IOPV"]
             missing_columns = [col for col in required_columns if col not in row.index]
             if missing_columns:
                 logger.error(f"ETF {etf_code} 缺少必要列: {', '.join(missing_columns)}")
@@ -475,8 +479,8 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             
             # 使用辅助函数安全提取标量值
             premium_discount = extract_scalar_value(
-                row["折溢价率"],
-                log_prefix=f"ETF {etf_code} 折溢价率: "
+                row["折价率"],
+                log_prefix=f"ETF {etf_code} 折价率: "
             )
             
             # 从DataFrame行中提取所有必需参数
@@ -487,14 +491,14 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
             fund_size = extract_scalar_value(row["基金规模"], log_prefix=f"ETF {etf_code} 基金规模: ")
             avg_volume = extract_scalar_value(row["日均成交额"], log_prefix=f"ETF {etf_code} 日均成交额: ")
             
-            # 检查异常折溢价率（不修改原始值）
+            # 检查异常折价率（不修改原始值）
             if premium_discount < -15.0:
                 logger.warning(f"ETF {etf_code} 折价率异常低: {premium_discount:.2f}%")
             elif premium_discount > 15.0:
                 logger.warning(f"ETF {etf_code} 溢价率异常高: {premium_discount:.2f}%")
             
             # 记录实际使用的值（用于调试）
-            logger.debug(f"ETF {etf_code} 实际使用的折溢价率: {premium_discount:.2f}%")
+            logger.debug(f"ETF {etf_code} 实际使用的折价率: {premium_discount:.2f}%")
             
             # 计算综合评分
             score = calculate_arbitrage_score(
@@ -534,7 +538,7 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     
     try:
         # 检查必要列是否存在
-        required_columns = ["ETF代码", "ETF名称", "折溢价率"]
+        required_columns = ["ETF代码", "ETF名称", "折价率"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
@@ -544,16 +548,16 @@ def filter_valid_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame()
         
         # 记录筛选前的统计信息
-        logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+        logger.info(f"筛选前数据量: {len(df)}，折价率范围: {df['折价率'].min():.2f}% ~ {df['折价率'].max():.2f}%")
         
-        # 直接使用已有的折溢价率列，不再重新计算
-        # 折价机会：折溢价率为负
+        # 直接使用已有的折价率列，不再重新计算
+        # 折价机会：折价率为负
         # 关键修复：只按折价率阈值筛选，不按评分筛选
-        filtered_df = df[df["折溢价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD]
+        filtered_df = df[df["折价率"] <= -Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD]
         
-        # 按折溢价率绝对值排序（降序，折价率越大越靠前）
+        # 按折价率绝对值排序（降序，折价率越大越靠前）
         if not filtered_df.empty:
-            filtered_df = filtered_df.sort_values("折溢价率", ascending=True)
+            filtered_df = filtered_df.sort_values("折价率", ascending=True)
         
         # 修复：更新日志信息
         logger.info(f"从 {len(df)} 个折价机会中筛选出 {len(filtered_df)} 个机会（阈值：折价率≤-{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%）")
@@ -578,7 +582,7 @@ def filter_valid_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     
     try:
         # 检查必要列是否存在
-        required_columns = ["ETF代码", "ETF名称", "折溢价率"]
+        required_columns = ["ETF代码", "ETF名称", "折价率"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
@@ -588,16 +592,16 @@ def filter_valid_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame()
         
         # 记录筛选前的统计信息
-        logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+        logger.info(f"筛选前数据量: {len(df)}，折价率范围: {df['折价率'].min():.2f}% ~ {df['折价率'].max():.2f}%")
         
-        # 直接使用已有的折溢价率列，不再重新计算
-        # 溢价机会：折溢价率为正
+        # 直接使用已有的折价率列，不再重新计算
+        # 溢价机会：折价率为正
         # 关键修复：只按溢价率阈值筛选，不按评分筛选
-        filtered_df = df[df["折溢价率"] >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD]
+        filtered_df = df[df["折价率"] >= Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD]
         
-        # 按折溢价率降序排序（溢价率越大越靠前）
+        # 按折价率降序排序（溢价率越大越靠前）
         if not filtered_df.empty:
-            filtered_df = filtered_df.sort_values("折溢价率", ascending=False)
+            filtered_df = filtered_df.sort_values("折价率", ascending=False)
         
         # 修复：更新日志信息
         logger.info(f"从 {len(df)} 个溢价机会中筛选出 {len(filtered_df)} 个机会（阈值：溢价率≥{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%）")
@@ -683,8 +687,8 @@ def get_arbitrage_history(days: int = 7) -> pd.DataFrame:
                 history.append({
                     "日期": date,
                     "机会数量": 3,  # 示例数据
-                    "最大折溢价率": 2.5,  # 示例数据
-                    "最小折溢价率": -1.8  # 示例数据
+                    "最大折价率": 2.5,  # 示例数据
+                    "最小折价率": -1.8  # 示例数据
                 })
         
         if not history:
@@ -721,8 +725,8 @@ def analyze_arbitrage_performance() -> Dict[str, Any]:
         
         # 计算统计指标
         avg_opportunities = history_df["机会数量"].mean()
-        max_premium = history_df["最大折溢价率"].max()
-        min_discount = history_df["最小折溢价率"].min()
+        max_premium = history_df["最大折价率"].max()
+        min_discount = history_df["最小折价率"].min()
         
         # 添加趋势分析
         trend = "平稳"
@@ -888,14 +892,14 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> pd.DataFrame:
             logger.info(f"实际列名: {list(df.columns)}")
             return pd.DataFrame()
         
-        # 修复：在策略计算模块中计算正确的折溢价率
+        # 修复：在策略计算模块中计算正确的折价率
         # 正确的计算公式：(市场价格 - IOPV) / IOPV * 100
         # 结果为正：溢价（市场价格 > IOPV）
         # 结果为负：折价（市场价格 < IOPV）
-        df["折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+        df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
         
         # 记录筛选前的统计信息
-        logger.info(f"筛选前数据量: {len(df)}，折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+        logger.info(f"筛选前数据量: {len(df)}，折价率范围: {df['折价率'].min():.2f}% ~ {df['折价率'].max():.2f}%")
         
         return df
     
@@ -928,12 +932,12 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
                 # 检查是否包含必要列
                 required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if all(col in df.columns for col in required_columns):
-                    # 修复：在加载历史数据时也计算正确的折溢价率
-                    df["折溢价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+                    # 修复：在加载历史数据时也计算正确的折价率
+                    df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
                     
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
-                    # 记录历史数据的折溢价率范围
-                    logger.debug(f"历史数据折溢价率范围: {df['折溢价率'].min():.2f}% ~ {df['折溢价率'].max():.2f}%")
+                    # 记录历史数据的折价率范围
+                    logger.debug(f"历史数据折价率范围: {df['折价率'].min():.2f}% ~ {df['折价率'].max():.2f}%")
                     return df
         
         logger.warning(f"在最近 {days_back} 天内未找到有效的套利数据")

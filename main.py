@@ -81,6 +81,8 @@ from strategy import (
     check_arbitrage_exit_signals,
     mark_arbitrage_opportunities_pushed  # 新增：导入增量推送标记函数
 )
+# 新增：从股票分析模块导入函数
+from stock.analysis_one_stock import analyze_stock_strategy
 from wechat_push.push import send_wechat_message, send_task_completion_notification
 from utils.file_utils import check_flag, set_flag, get_file_mtime
 from utils.date_utils import (
@@ -182,7 +184,7 @@ def should_execute_calculate_position() -> bool:
 
 def handle_update_etf_list() -> Dict[str, Any]:
     """
-    处处理ETF列表更新任务 - 直接执行，不进行任何条件判断
+    处理ETF列表更新任务 - 直接执行，不进行任何条件判断
     因为定时器已经确保只在周日触发此任务
     
     Returns:
@@ -532,6 +534,56 @@ def handle_index_yesno() -> Dict[str, Any]:
         send_task_completion_notification("index_yesno", result, message_type="error")
         return result
 
+def handle_analyze_stock() -> Dict[str, Any]:
+    """
+    处理股票技术分析任务
+    
+    Returns:
+        Dict[str, Any]: 任务执行结果
+    """
+    try:
+        # 获取当前双时区时间
+        utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
+        logger.info(f"开始执行股票技术分析任务 (UTC: {utc_now}, CST: {beijing_now})")
+        
+        # 获取股票代码
+        stock_code = os.getenv("INPUT_STOCK_CODE", "")
+        if not stock_code:
+            error_msg = "缺少股票代码参数"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        
+        logger.info(f"开始分析股票 {stock_code}")
+        
+        # 执行分析
+        result = analyze_stock_strategy(stock_code)
+        
+        # 检查执行结果
+        if result["status"] == "success":
+            success_msg = f"股票技术分析完成: {stock_code}"
+            logger.info(success_msg)
+            return {
+                "status": "success",
+                "message": success_msg,
+                "stock_code": stock_code,
+                "stock_name": result.get("stock_name", ""),
+                "analysis_time_utc": utc_now.strftime("%Y-%m-%d %H:%M"),
+                "analysis_time_beijing": beijing_now.strftime("%Y-%m-%d %H:%M")
+            }
+        else:
+            error_msg = f"股票技术分析失败: {stock_code} - {result.get('message', '未知错误')}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+            
+    except Exception as e:
+        error_msg = f"股票技术分析任务执行失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        send_wechat_message(
+            message=error_msg,
+            message_type="error"
+        )
+        return {"status": "error", "message": error_msg}
+
 def main() -> Dict[str, Any]:
     """
     主函数：根据环境变量执行对应任务
@@ -564,7 +616,8 @@ def main() -> Dict[str, Any]:
             "update_etf_list": handle_update_etf_list,
             "send_daily_report": handle_send_daily_report,
             "check_arbitrage_exit": handle_check_arbitrage_exit,
-            "index_yesno": handle_index_yesno  # 新增：指数 Yes/No策略任务
+            "index_yesno": handle_index_yesno,  # 新增：指数 Yes/No策略任务
+            "analyze_stock": handle_analyze_stock  # 新增：股票技术分析任务
         }
         
         if task in task_handlers:
@@ -707,6 +760,13 @@ def run_scheduled_tasks():
             logger.info("执行ETF Yes/No策略任务")
             handle_index_yesno()
         
+        # 股票技术分析策略（每天晚上11:30点）
+        if beijing_now.hour == 23 and beijing_now.minute == 30:
+            logger.info("执行股票技术分析任务")
+            # 为测试设置默认股票代码
+            os.environ["INPUT_STOCK_CODE"] = "000001.SZ"
+            handle_analyze_stock()
+        
         logger.info("定时任务执行完成")
         
     except Exception as e:
@@ -742,6 +802,12 @@ def test_all_modules():
         # 测试指数 Yes/No策略
         logger.info("测试ETF Yes/No策略...")
         handle_index_yesno()
+        
+        # 测试股票技术分析策略
+        logger.info("测试股票技术分析策略...")
+        # 为测试设置默认股票代码
+        os.environ["INPUT_STOCK_CODE"] = "000001.SZ"
+        handle_analyze_stock()
         
         # 测试每日报告
         logger.info("测试每日报告...")

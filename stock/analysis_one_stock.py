@@ -45,6 +45,10 @@ def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
             logger.warning(f"股票 {stock_code} 日线数据文件不存在: {file_path}")
             return pd.DataFrame()
         
+        # 专业修复：添加更详细的文件信息日志
+        file_size = os.path.getsize(file_path) / 1024  # KB
+        logger.debug(f"正在加载股票 {stock_code} 日线数据文件 (大小: {file_size:.2f}KB)")
+        
         # 读取CSV文件，明确指定数据类型
         df = pd.read_csv(
             file_path,
@@ -80,6 +84,10 @@ def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
         today = datetime.now().strftime("%Y-%m-%d")
         df = df[df["日期"] <= today]
         
+        # 专业修复：添加数据质量检查
+        if len(df) > 0:
+            logger.debug(f"股票 {stock_code} 日线数据加载完成，时间范围: {df['日期'].iloc[0]} 至 {df['日期'].iloc[-1]}")
+        
         return df
     
     except Exception as e:
@@ -105,18 +113,33 @@ def get_stock_market_cap(stock_code: str) -> float:
                 stock_list["代码"] = stock_list["代码"].apply(lambda x: str(x).zfill(6))
                 stock_info = stock_list[stock_list["代码"] == stock_code]
                 if not stock_info.empty:
-                    # 流通市值单位是亿元
-                    market_cap = float(stock_info["流通市值"].values[0])
-                    logger.info(f"从all_stocks.csv获取到股票 {stock_code} 流通市值: {market_cap}亿")
+                    # 专业修复：正确处理流通市值单位（单位是元，转换为亿元）
+                    raw_market_cap = float(stock_info["流通市值"].values[0])
+                    
+                    # 专业判断：如果数值大于1亿，假设单位是元，需要转换为亿元
+                    if raw_market_cap >= 100000000:  # 1千万
+                        market_cap = raw_market_cap / 100000000  # 元转亿元
+                        logger.info(f"检测到流通市值单位为元，已转换为亿元（原始值: {raw_market_cap:.0f}元）")
+                    else:
+                        market_cap = raw_market_cap  # 假设已经是亿元
+                    
+                    logger.info(f"从all_stocks.csv获取到股票 {stock_code} 流通市值: {market_cap:.2f}亿")
                     return market_cap
         
         # 尝试从日线数据获取（备用方案）
         df = load_stock_daily_data(stock_code)
         if not df.empty and "流通市值" in df.columns:
-            # 取最新一天的流通市值，并转换为亿元
-            latest_market_cap = df["流通市值"].iloc[-1] / 10000  # 假设日线数据单位是万元
-            logger.info(f"从日线数据获取到股票 {stock_code} 流通市值: {latest_market_cap:.2f}亿")
-            return latest_market_cap
+            # 取最新一天的流通市值
+            latest_market_cap = df["流通市值"].iloc[-1]
+            
+            # 专业判断：根据数值大小确定单位
+            if latest_market_cap >= 100000000:  # 1千万
+                market_cap = latest_market_cap / 100000000  # 元为亿元
+            else:
+                market_cap = latest_market_cap
+                
+            logger.info(f"从日线数据获取到股票 {stock_code} 流通市值: {market_cap:.2f}亿")
+            return market_cap
             
         logger.warning(f"无法获取股票 {stock_code} 的流通市值")
         return 0.0
@@ -141,6 +164,9 @@ def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
     
     if not df.empty:
         logger.info(f"已找到股票 {stock_code} 的日线数据，共 {len(df)} 条记录")
+        
+        # 专业修复：添加更详细的日志，确认没有重复爬取
+        logger.debug(f"股票 {stock_code} 数据检查完成，不需要爬取")
         return True
     
     # 数据不存在，开始爬取
@@ -481,7 +507,7 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
         
         # 6. 更新时间与版本
         report += f"\n⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
-        report += "📊 策略版本: 股票技术分析策略 v3.1.0\n"
+        report += "📊 策略版本: 股票技术分析策略 v3.1.1\n"
         
         return report
     

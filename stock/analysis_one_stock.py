@@ -86,6 +86,45 @@ def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
         logger.error(f"加载股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def get_stock_market_cap(stock_code: str) -> float:
+    """
+    从all_stocks.csv获取股票流通市值（单位：亿元）
+    
+    Args:
+        stock_code: 股票代码
+    
+    Returns:
+        float: 流通市值（亿元），若获取失败返回0.0
+    """
+    try:
+        stock_list_path = os.path.join(Config.DATA_DIR, "all_stocks.csv")
+        if os.path.exists(stock_list_path):
+            stock_list = pd.read_csv(stock_list_path, encoding="utf-8")
+            if "代码" in stock_list.columns and "流通市值" in stock_list.columns:
+                # 确保股票代码格式一致
+                stock_list["代码"] = stock_list["代码"].apply(lambda x: str(x).zfill(6))
+                stock_info = stock_list[stock_list["代码"] == stock_code]
+                if not stock_info.empty:
+                    # 流通市值单位是亿元
+                    market_cap = float(stock_info["流通市值"].values[0])
+                    logger.info(f"从all_stocks.csv获取到股票 {stock_code} 流通市值: {market_cap}亿")
+                    return market_cap
+        
+        # 尝试从日线数据获取（备用方案）
+        df = load_stock_daily_data(stock_code)
+        if not df.empty and "流通市值" in df.columns:
+            # 取最新一天的流通市值，并转换为亿元
+            latest_market_cap = df["流通市值"].iloc[-1] / 10000  # 假设日线数据单位是万元
+            logger.info(f"从日线数据获取到股票 {stock_code} 流通市值: {latest_market_cap:.2f}亿")
+            return latest_market_cap
+            
+        logger.warning(f"无法获取股票 {stock_code} 的流通市值")
+        return 0.0
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 流通市值失败: {str(e)}", exc_info=True)
+        return 0.0
+
 def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
     """
     确保有指定股票的日线数据，如果没有则爬取
@@ -140,9 +179,40 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     """
     try:
         # 确保有足够的数据
-        if len(df) < 30:
-            logger.warning("数据量不足，无法准确计算技术指标")
-            return {}
+        if len(df) < 60:  # 至少需要60天数据计算所有均线
+            logger.warning(f"数据量不足（{len(df)}条），无法准确计算技术指标")
+            # 返回默认指标（处理数据不足的情况）
+            return {
+                "ma5": 0,
+                "ma10": 0,
+                "ma20": 0,
+                "ma30": 0,
+                "ma60": 0,
+                "ma50": 0,
+                "ma100": 0,
+                "ma250": 0,
+                "ma_trend": "数据不足",
+                "deviation_ma5": 0,
+                "deviation_ma10": 0,
+                "deviation_ma20": 0,
+                "deviation_ma30": 0,
+                "deviation_ma60": 0,
+                "deviation_ma250": 0,
+                "macd_line": 0,
+                "signal_line": 0,
+                "macd_value": 0,
+                "macd_status": "数据不足",
+                "rsi_value": 0,
+                "rsi_status": "数据不足",
+                "upper_band": 0,
+                "middle_band": 0,
+                "lower_band": 0,
+                "bollinger_status": "数据不足",
+                "volume_ratio": 0,
+                "turnover_rate": 0,
+                "last_5_volumes": [0, 0, 0, 0, 0],
+                "current_price": 0
+            }
         
         # 获取收盘价序列
         close = df["收盘"].values
@@ -150,13 +220,15 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Dict[str, Any]:
         low = df["最低"].values
         volume = df["成交量"].values
         
-        # 1. 移动平均线
+        # 1. 移动平均线（专业修复：添加30日和60日均线）
         ma5 = df["收盘"].rolling(5).mean().iloc[-1]
         ma10 = df["收盘"].rolling(10).mean().iloc[-1]
         ma20 = df["收盘"].rolling(20).mean().iloc[-1]
+        ma30 = df["收盘"].rolling(30).mean().iloc[-1]
+        ma60 = df["收盘"].rolling(60).mean().iloc[-1]
         ma50 = df["收盘"].rolling(50).mean().iloc[-1]
         ma100 = df["收盘"].rolling(100).mean().iloc[-1]
-        ma250 = df["收盘"].rolling(250).mean().iloc[-1]
+        ma250 = df["收盘"].rolling(250).mean().iloc[-1] if len(df) >= 250 else np.nan
         
         # 2. MACD指标
         macd_line, signal_line, _ = calculate_macd(df)
@@ -175,21 +247,40 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Dict[str, Any]:
         # 6. 换手率
         turnover_rate = df["换手率"].iloc[-1] if "换手率" in df.columns else 0
         
-        # 7. 流通市值
-        market_cap = df["流通市值"].iloc[-1] if "流通市值" in df.columns else 0
-        
-        # 8. 过去5个交易日成交量
-        last_5_volume = df["成交量"].tail(5).mean()
-        
-        # 9. 均线形态
-        ma_trend = "多头排列" if ma5 > ma10 > ma20 > ma50 > ma100 > ma250 else \
-                  "空头排列" if ma5 < ma10 < ma20 < ma50 < ma100 < ma250 else "震荡"
-        
-        # 10. 当前价格与各均线的偏离率
+        # 7. 当前价格
         current_price = close[-1]
-        deviation_ma5 = (current_price - ma5) / ma5 * 100 if ma5 > 0 else 0
-        deviation_ma20 = (current_price - ma20) / ma20 * 100 if ma20 > 0 else 0
-        deviation_ma250 = (current_price - ma250) / ma250 * 100 if ma250 > 0 else 0
+        
+        # 8. 过去5个交易日成交量（专业修复：获取5天分别的成交量）
+        last_5_volumes = df["成交量"].tail(5).tolist()
+        
+        # 9. 均线形态（专业修复：更精确的判断逻辑）
+        valid_ma = []
+        if not np.isnan(ma5): valid_ma.append(ma5)
+        if not np.isnan(ma10): valid_ma.append(ma10)
+        if not np.isnan(ma20): valid_ma.append(ma20)
+        if not np.isnan(ma30): valid_ma.append(ma30)
+        if not np.isnan(ma60): valid_ma.append(ma60)
+        if not np.isnan(ma50): valid_ma.append(ma50)
+        if not np.isnan(ma100): valid_ma.append(ma100)
+        if not np.isnan(ma250): valid_ma.append(ma250)
+        
+        if len(valid_ma) >= 2:
+            if all(valid_ma[i] > valid_ma[i+1] for i in range(len(valid_ma)-1)):
+                ma_trend = "多头排列"
+            elif all(valid_ma[i] < valid_ma[i+1] for i in range(len(valid_ma)-1)):
+                ma_trend = "空头排列"
+            else:
+                ma_trend = "震荡"
+        else:
+            ma_trend = "数据不足"
+        
+        # 10. 当前价格与各均线的偏离率（专业修复：处理NaN值）
+        deviation_ma5 = (current_price - ma5) / ma5 * 100 if not np.isnan(ma5) and ma5 > 0 else 0
+        deviation_ma10 = (current_price - ma10) / ma10 * 100 if not np.isnan(ma10) and ma10 > 0 else 0
+        deviation_ma20 = (current_price - ma20) / ma20 * 100 if not np.isnan(ma20) and ma20 > 0 else 0
+        deviation_ma30 = (current_price - ma30) / ma30 * 100 if not np.isnan(ma30) and ma30 > 0 else 0
+        deviation_ma60 = (current_price - ma60) / ma60 * 100 if not np.isnan(ma60) and ma60 > 0 else 0
+        deviation_ma250 = (current_price - ma250) / ma250 * 100 if not np.isnan(ma250) and ma250 > 0 else 0
         
         # 11. 布林带状态
         bollinger_status = "上轨" if current_price > upper_band else \
@@ -206,12 +297,17 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Dict[str, Any]:
             "ma5": ma5,
             "ma10": ma10,
             "ma20": ma20,
+            "ma30": ma30,
+            "ma60": ma60,
             "ma50": ma50,
             "ma100": ma100,
             "ma250": ma250,
             "ma_trend": ma_trend,
             "deviation_ma5": deviation_ma5,
+            "deviation_ma10": deviation_ma10,
             "deviation_ma20": deviation_ma20,
+            "deviation_ma30": deviation_ma30,
+            "deviation_ma60": deviation_ma60,
             "deviation_ma250": deviation_ma250,
             
             # MACD指标
@@ -233,8 +329,7 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Dict[str, Any]:
             # 量能指标
             "volume_ratio": volume_ratio,
             "turnover_rate": turnover_rate,
-            "market_cap": market_cap,
-            "last_5_volume": last_5_volume,
+            "last_5_volumes": last_5_volumes,
             
             # 其他指标
             "current_price": current_price
@@ -272,18 +367,28 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
         report += f"   • 布林带：上轨{indicators['upper_band']:.4f} | 中轨{indicators['middle_band']:.4f} | 下轨{indicators['lower_band']:.4f}\n"
         report += f"   • 量比：{indicators['volume_ratio']:.2f}，换手率：{indicators['turnover_rate']:.2f}%\n\n"
         
-        # 2. 价格位置分析
+        # 2. 价格位置分析（专业修复：显示所有关键均线）
         report += "2. 价格位置分析\n"
         report += f"   • 当前价格：{indicators['current_price']:.4f}\n"
         report += f"   • 5日均线：{indicators['ma5']:.4f} (偏离率：{indicators['deviation_ma5']:.2f}%)\n"
+        report += f"   • 10日均线：{indicators['ma10']:.4f} (偏离率：{indicators['deviation_ma10']:.2f}%)\n"
         report += f"   • 20日均线：{indicators['ma20']:.4f} (偏离率：{indicators['deviation_ma20']:.2f}%)\n"
+        report += f"   • 30日均线：{indicators['ma30']:.4f} (偏离率：{indicators['deviation_ma30']:.2f}%)\n"
+        report += f"   • 60日均线：{indicators['ma60']:.4f} (偏离率：{indicators['deviation_ma60']:.2f}%)\n"
         report += f"   • 250日均线：{indicators['ma250']:.4f} (偏离率：{indicators['deviation_ma250']:.2f}%)\n"
         report += f"   • 布林带位置：{indicators['bollinger_status']}\n\n"
         
-        # 3. 资金流向与市场情绪
+        # 3. 资金流向与市场情绪（专业修复：修正拼写错误，显示5天分别的成交量）
         report += "3. 资金流向与市场情绪\n"
-        report += f"   • 过甡去5日平均成交量：{indicators['last_5_volume']:.0f}\n"
-        report += f"   • 流通市值：{indicators['market_cap']:.2f}亿\n\n"
+        # 专业修复：显示5天分别的成交量
+        if len(indicators["last_5_volumes"]) >= 5:
+            report += f"   • 过去5日成交量：{indicators['last_5_volumes'][0]:.0f}, {indicators['last_5_volumes'][1]:.0f}, {indicators['last_5_volumes'][2]:.0f}, {indicators['last_5_volumes'][3]:.0f}, {indicators['last_5_volumes'][4]:.0f}\n"
+        else:
+            report += f"   • 过去5日成交量：数据不足\n"
+        
+        # 从all_stocks.csv获取流通市值
+        market_cap = get_stock_market_cap(stock_code)
+        report += f"   • 流通市值：{market_cap:.2f}亿\n\n"
         
         # 4. 操作建议
         report += "4. 操作建议\n"
@@ -346,27 +451,37 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
             report += f"     - 上沿操作（价格≈{resistance1:.4f}）：小幅减仓10%-20%\n"
             report += "     - 总仓位严格控制在≤50%\n"
         
-        # 5. 风险提示
+        # 5. 风险提示（专业修复：确保不为空）
         report += "\n5. 风险提示\n"
+        
+        has_risk = False
         
         if indicators["volume_ratio"] > 2.0:
             report += "   • 量比过高，注意短期波动风险\n"
+            has_risk = True
         
         if indicators["rsi_value"] > 75:
             report += "   • RSI严重超买，警惕回调风险\n"
+            has_risk = True
         
         if indicators["rsi_value"] < 25:
             report += "   • RSI严重超卖，注意反弹机会\n"
+            has_risk = True
         
         if indicators["deviation_ma20"] > 15.0:
             report += "   • 价格大幅偏离20日均线，警惕均值回归\n"
+            has_risk = True
         
         if indicators["deviation_ma20"] < -15.0:
             report += "   • 价格大幅低于20日均线，注意反弹机会\n"
+            has_risk = True
+        
+        if not has_risk:
+            report += "   • 当前市场风险水平适中，无明显风险信号\n"
         
         # 6. 更新时间与版本
         report += f"\n⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
-        report += "📊 策略版本: 股票技术分析策略 v3.0.0\n"
+        report += "📊 策略版本: 股票技术分析策略 v3.1.0\n"
         
         return report
     
@@ -415,8 +530,8 @@ def analyze_stock_strategy(stock_code: str) -> Dict[str, Any]:
         
         # 4. 计算技术指标
         indicators = calculate_technical_indicators(df)
-        if not indicators:
-            error_msg = f"计算股票 {stock_code} 技术指标失败"
+        if not indicators or indicators["ma_trend"] == "数据不足":
+            error_msg = f"计算股票 {stock_code} 技术指标失败或数据不足"
             logger.error(error_msg)
             return {
                 "status": "error",

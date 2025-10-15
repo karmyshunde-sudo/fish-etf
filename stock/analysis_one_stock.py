@@ -506,8 +506,8 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
             report += "   • 当前市场风险水平适中，无明显风险信号\n"
         
         # 6. 更新时间与版本
-        report += f"\n⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
-        report += "📊 策略版本: 股票技术分析策略 v3.1.1\n"
+        # report += f"\n⏰ 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
+        # report += "📊 策略版本: 股票技术分析策略 v3.1.1\n"
         
         return report
     

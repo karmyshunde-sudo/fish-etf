@@ -177,7 +177,7 @@ def check_network_connection():
     """检查网络连接是否正常"""
     try:
         import requests
-        response = requests.get('https://www.baidu.com  ', timeout=5)
+        response = requests.get('https://www.baidu.com    ', timeout=5)
         return response.status_code == 200
     except Exception:
         return False
@@ -210,16 +210,22 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             logger.info("使用 yfinance 获取恒生指数 (^HSI) 数据")
             
             try:
-                # 使用datetime对象进行转换
+                # 使用datetime对象
                 start_dt = start_date_dt.strftime("%Y-%m-%d")
                 end_dt = end_date_dt.strftime("%Y-%m-%d")
                 
                 # 获取数据
                 df = yf.download('^HSI', start=start_dt, end=end_dt)
                 
+                # 【关键修复】处理yfinance返回的MultiIndex列名
+                if isinstance(df.columns, pd.MultiIndex):
+                    # 扁平化列名：取最后一级（通常是OHLCV）
+                    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+                
                 if isinstance(df, pd.DataFrame) and not df.empty:
                     logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
-                    logger.info(f"数据列名: {', '.join(df.columns)}")
+                    # 【关键修复】正确显示列名，即使包含元组
+                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
                     
                     # 标准化列名
                     df = df.reset_index()
@@ -365,8 +371,8 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
         logger.error("可能解决方案:")
         logger.error("  - 确认指数代码为 'HSNDXIT'（无.HI后缀）")
         logger.error("  - 更新akshare: pip install --upgrade akshare")
-        logger.error("  - 检查akshare文档: https://www.akshare.xyz/  ")
-        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues  ")
+        logger.error("  - 检查akshare文档: https://www.akshare.xyz/    ")
+        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues    ")
         
         return pd.DataFrame()
     
@@ -460,8 +466,8 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
     logger.error("     - 结束日期: " + end_date_dt.strftime("%Y%m%d"))
     logger.error("  3. AKShare接口问题：")
     logger.error("     - 确认akshare版本: " + ak.__version__)
-    logger.error("     - 查看文档: https://www.akshare.xyz/  ")
-    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues  ")
+    logger.error("     - 查看文档: https://www.akshare.xyz/    ")
+    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues    ")
     
     return pd.DataFrame()
 

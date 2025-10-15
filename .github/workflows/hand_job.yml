@@ -15,14 +15,20 @@ on:
           - 'calculate_arbitrage'
           - 'calculate_position'
           - 'stock_backtest'      #股票均线缠绕回测
+          - 'analyze_stock'       # 新增：个股技术分析任务
+      stock_code:
+        description: '股票代码（6位数字，不带前缀后缀）'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   # ========================
   # 手动任务 - 每个任务都有独立Job
   # ========================
-  # 指数YesNo 策略（手动）
+  # 指数YesNo 策略（手動）
   index-yesno-manual:
-    name: 指数YesNo策略（手动）
+    name: 指数YesNo策略（手動）
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'index_yesno'
     permissions:
@@ -162,18 +168,6 @@ jobs:
             echo "task_status=success" >> $GITHUB_OUTPUT
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
-          fi
-      - name: 提交股票趋势策略信息
-        if: steps.execute_task.outputs.task_status == 'success'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          # 关键修改：添加data/all_stocks.csv到提交范围
-          git add data/all_stocks.csv
-          if [ -n "$(git diff --cached --name-only data/all_stocks.csv)" ]; then
-            git commit -m "自动更新股票基础信息 [手动]" && git push origin main
-          else
-            echo "data/all_stocks.csv 股票列表信息没有变化，无需提交"
           fi
       - name: 发送策略通知
         if: env.WECOM_WEBHOOK
@@ -677,3 +671,86 @@ jobs:
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票均线缠绕回测任务（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+  
+  # 个股技术分析（手动）
+  analyze-stock-manual:
+    name: 个股技术分析（手动）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'analyze_stock'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H%M%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H%M%S' CST)"
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{stock_daily,flags,logs} && chmod -R 777 data
+      - name: 验证股票代码
+        if: env.INPUT_STOCK_CODE != ''
+        run: |
+          # 检查是否为6位数字
+          if ! [[ $INPUT_STOCK_CODE =~ ^[0-9]{6}$ ]]; then
+            echo "❌ 错误: 股票代码必须是6位数字，当前值: $INPUT_STOCK_CODE"
+            exit 1
+          else
+            echo "✅ 有效股票代码: $INPUT_STOCK_CODE"
+          fi
+      - name: 执行个股技术分析（手动）
+        id: execute_task
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
+          TZ: Asia/Shanghai
+          TASK: 'analyze_stock'
+          INPUT_STOCK_CODE: ${{ github.event.inputs.stock_code }}
+        run: |
+          BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/analyze_stock_${BEIJING_TIME}.log"
+          echo "正在执行: 个股技术分析（手动）"
+          echo "股票代码: ${INPUT_STOCK_CODE}"
+          echo "日志文件: $LOG_FILE"
+          python main.py 2>&1 | tee "$LOG_FILE"
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+          [ ${PIPESTATUS[0]} -eq 0 ] || exit 1
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【个股技术分析（手动）】执行成功\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"
+      - name: 发送失败通知
+        if: failure() && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【个股技术分析（手动）】执行失败\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"

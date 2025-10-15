@@ -20,7 +20,7 @@ from utils.date_utils import (
     get_utc_time
 )
 from wechat_push.push import send_wechat_message
-# 专业修复：使用正确的函数名
+# 专业修复：从正确的模块导入函数
 from stock.crawler import fetch_stock_daily_data, save_stock_daily_data
 
 # 初始化日志
@@ -108,12 +108,13 @@ def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
     logger.info(f"股票 {stock_code} 日线数据不存在，开始爬取...")
     
     try:
-        # 爬取数据
+        # 爬取数据 - 专业修复：调用正确的函数
         df = fetch_stock_daily_data(stock_code)
         
+        # 保存数据 - 专业修复：调用正确的函数
         if not df.empty:
-            # 保存数据
             save_stock_daily_data(stock_code, df)
+            
             # 再次检查数据
             df = load_stock_daily_data(stock_code)
             if not df.empty:
@@ -281,7 +282,7 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
         
         # 3. 资金流向与市场情绪
         report += "3. 资金流向与市场情绪\n"
-        report += f"   • 过去5日平均成交量：{indicators['last_5_volume']:.0f}\n"
+        report += f"   • 过甡去5日平均成交量：{indicators['last_5_volume']:.0f}\n"
         report += f"   • 流通市值：{indicators['market_cap']:.2f}亿\n\n"
         
         # 4. 操作建议
@@ -473,10 +474,10 @@ def calculate_macd(df: pd.DataFrame, fast_period: int = 12, slow_period: int = 2
     Returns:
         Tuple[pd.Series, pd.Series, pd.Series]: MACD线, 信号线, MACD柱
     """
-    # 计算快速EMA
+    # 计算快线EMA
     fast_ema = df['收盘'].ewm(span=fast_period, adjust=False).mean()
     
-    # 计算慢速EMA
+    # 计算慢线EMA
     slow_ema = df['收盘'].ewm(span=slow_period, adjust=False).mean()
     
     # 计算MACD线

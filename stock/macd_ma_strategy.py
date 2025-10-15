@@ -439,7 +439,7 @@ def format_single_signal(category, signals):
         elif category == "RSI":
             lines.append(f"{i}. {code} {name}（RSI：{signal['rsi_value']:.0f}，变化：{signal['rsi_change']:.0f}点）")
         elif category == "KDJ":
-            lines.append(f"{i}. {code} {name}（KDJ：K={signal['k_value']:.0f}/D={signal['d_value']:.0f}/J={signal['j_value']:.0f}，变化：{signal['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（KDJ：{signal['k_value']:.0f}{signal['d_value']:.0f}{signal['j_value']:.0f}，变化：{signal['j_change']:.0f}点）")
     
     if signals:
         lines.append("")

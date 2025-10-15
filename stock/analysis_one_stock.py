@@ -38,7 +38,7 @@ def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """
     try:
         # 构建文件路径
-        file_path = os.path.join(Config.DATA_DIR, "stock_daily", f"{stock_code}.csv")
+        file_path = os.path.join(Config.DATA_DIR, "daily", f"{stock_code}.csv")
         
         # 检查文件是否存在
         if not os.path.exists(file_path):

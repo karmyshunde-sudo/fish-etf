@@ -1,4 +1,4 @@
-name: 2-定时指数Yes/No计算
+name: 2-定时-指数Yes/No计算
 on:
   schedule:
     - cron: '0 8 * * *'       # UTC 08:00 = 北京时间 16:00 (指数Yes/No计算)

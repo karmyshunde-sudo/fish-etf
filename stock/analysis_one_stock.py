@@ -20,7 +20,8 @@ from utils.date_utils import (
     get_utc_time
 )
 from wechat_push.push import send_wechat_message
-from data_crawler.stock_daily_crawler import crawl_stock_data
+# 专业修复：使用正确的函数名
+from stock.crawler import fetch_stock_daily_data, save_stock_daily_data
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -108,15 +109,17 @@ def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
     
     try:
         # 爬取数据
-        success = crawl_stock_data(stock_code, days=days)
+        df = fetch_stock_daily_data(stock_code)
         
-        if success:
+        if not df.empty:
+            # 保存数据
+            save_stock_daily_data(stock_code, df)
             # 再次检查数据
             df = load_stock_daily_data(stock_code)
             if not df.empty:
                 logger.info(f"成功获取股票 {stock_code} 日线数据，共 {len(df)} 条记录")
                 return True
-        
+    
         logger.error(f"爬取股票 {stock_code} 日线数据失败")
         return False
     
@@ -505,7 +508,7 @@ def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
     
-    # 计算平均增益和平均损失
+    # 计算平均涨跌幅
     avg_gain = gain.rolling(window=period).mean()
     avg_loss = loss.rolling(window=period).mean()
     
@@ -566,12 +569,15 @@ def get_stock_name(stock_code: str) -> str:
                     return stock_info["名称"].values[0]
         
         # 如果没有找到，尝试使用akshare获取
-        import akshare as ak
-        stock_info = ak.stock_info_a_code_name()
-        if not stock_info.empty and "code" in stock_info.columns and "name" in stock_info.columns:
-            stock_info = stock_info[stock_info["code"] == stock_code]
-            if not stock_info.empty:
-                return stock_info["name"].values[0]
+        try:
+            import akshare as ak
+            stock_info = ak.stock_info_a_code_name()
+            if not stock_info.empty and "code" in stock_info.columns and "name" in stock_info.columns:
+                stock_info = stock_info[stock_info["code"] == stock_code]
+                if not stock_info.empty:
+                    return stock_info["name"].values[0]
+        except ImportError:
+            logger.warning("akshare 模块未安装，无法获取股票名称")
         
         # 如果还是找不到，返回默认值
         return stock_code

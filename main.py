@@ -81,8 +81,6 @@ from strategy import (
     check_arbitrage_exit_signals,
     mark_arbitrage_opportunities_pushed  # 新增：导入增量推送标记函数
 )
-# 新增：从股票分析模块导入函数
-from stock.analysis_one_stock import analyze_stock_strategy
 from wechat_push.push import send_wechat_message, send_task_completion_notification
 from utils.file_utils import check_flag, set_flag, get_file_mtime
 from utils.date_utils import (
@@ -553,7 +551,21 @@ def handle_analyze_stock() -> Dict[str, Any]:
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
         
+        # 严格验证股票代码格式（6位数字）
+        if not stock_code.isdigit() or len(stock_code) != 6:
+            error_msg = f"股票代码格式错误: {stock_code}（应为6位数字）"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        
         logger.info(f"开始分析股票 {stock_code}")
+        
+        # 动态导入股票分析模块
+        try:
+            from stock.analysis_one_stock import analyze_stock_strategy
+        except Exception as e:
+            error_msg = f"股票分析模块导入失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"status": "error", "message": error_msg}
         
         # 执行分析
         result = analyze_stock_strategy(stock_code)
@@ -764,7 +776,7 @@ def run_scheduled_tasks():
         if beijing_now.hour == 23 and beijing_now.minute == 30:
             logger.info("执行股票技术分析任务")
             # 为测试设置默认股票代码
-            os.environ["INPUT_STOCK_CODE"] = "000001.SZ"
+            os.environ["INPUT_STOCK_CODE"] = "000001"
             handle_analyze_stock()
         
         logger.info("定时任务执行完成")
@@ -806,7 +818,7 @@ def test_all_modules():
         # 测试股票技术分析策略
         logger.info("测试股票技术分析策略...")
         # 为测试设置默认股票代码
-        os.environ["INPUT_STOCK_CODE"] = "000001.SZ"
+        os.environ["INPUT_STOCK_CODE"] = "000001"
         handle_analyze_stock()
         
         # 测试每日报告

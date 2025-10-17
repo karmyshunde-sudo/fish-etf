@@ -733,9 +733,9 @@ def send_wechat_message(message: Union[str, pd.DataFrame, Dict],
                 utc_time = get_utc_time()
                 # 添加底部格式
                 footer = f"\n\n==================\n"
-                footer += f"📅 UTC时间: {utc_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                footer += f"📅 北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                footer += "📊 环境：生产\n"
+                # footer += f"📅 UTC时间: {utc_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                # footer += f"📅 北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                # footer += "📊 环境：生产\n"
                 footer += f"📅 北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 footer += "📊 环境：Git-fish-etf"
                 

@@ -116,7 +116,7 @@ def get_stock_section(stock_code: str) -> str:
 
 def to_naive_datetime(dt):
     """
-    将日期转换为naive datetime（无时区）
+    将換日期转换为naive datetime（无时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -130,7 +130,7 @@ def to_naive_datetime(dt):
 
 def to_aware_datetime(dt):
     """
-    将日期转换为aware datetime（有时区）
+    将換日期转换为aware datetime（有时区）
     Args:
         dt: 可能是naive或aware datetime
     Returns:
@@ -685,7 +685,7 @@ def update_all_stocks_daily_data():
     return True
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息"""
+    """创建或更新股票基础信息，增加总市值列"""
     try:
         # 获取股票基础信息
         logger.info("正在获取股票基础信息...")
@@ -701,6 +701,78 @@ def create_or_update_basic_info():
         stock_info = stock_info[stock_info["代码"].notna()]
         stock_info = stock_info[stock_info["代码"].str.len() == 6]
         stock_info = stock_info.reset_index(drop=True)
+        
+        # 【关键修复】获取实时行情数据以添加总市值
+        logger.info("正在获取股票实时行情数据以获取总市值...")
+        try:
+            # 获取实时行情数据
+            spot_em_df = ak.stock_zh_a_spot_em()
+            
+            if not spot_em_df.empty:
+                # 确保行情数据中的代码格式一致
+                spot_em_df["代码"] = spot_em_df["代码"].apply(format_stock_code)
+                
+                # 检查总市值列是否存在
+                if "总市值" in spot_em_df.columns:
+                    # 创建市值映射字典
+                    market_cap_map = {}
+                    for _, row in spot_em_df.iterrows():
+                        stock_code = row["代码"]
+                        market_cap = row["总市值"]
+                        
+                        # 处理可能的NaN值和无效值
+                        if pd.isna(market_cap) or market_cap in ["--", "-", ""]:
+                            market_cap_map[stock_code] = 0.0
+                        else:
+                            # 确保是数值类型
+                            try:
+                                # 尝试直接转换为浮点数
+                                market_cap_value = float(market_cap)
+                                
+                                # 假设单位是亿元，转换为元
+                                market_cap_map[stock_code] = market_cap_value * 100000000
+                            except (TypeError, ValueError):
+                                # 尝试处理带单位的字符串
+                                try:
+                                    if isinstance(market_cap, str):
+                                        if "亿" in market_cap:
+                                            value = float(market_cap.replace("亿", ""))
+                                            market_cap_map[stock_code] = value * 100000000
+                                        elif "万" in market_cap:
+                                            value = float(market_cap.replace("万", ""))
+                                            market_cap_map[stock_code] = value * 10000
+                                        else:
+                                            # 尝试直接转换为浮点数
+                                            market_cap_map[stock_code] = float(market_cap)
+                                except:
+                                    market_cap_map[stock_code] = 0.0
+                else:
+                    logger.warning("实时行情数据中缺少'总市值'列，无法添加该列")
+                    # 添加默认列
+                    stock_info["总市值"] = 0.0
+                    # 继续执行，稍后会添加总市值列
+            else:
+                logger.warning("获取股票实时行情数据失败：返回空数据，跳过总市值列添加")
+                # 添加默认列
+                stock_info["总市值"] = 0.0
+        except Exception as e:
+            logger.error(f"获取实时行情数据失败，跳过总市值列添加: {str(e)}")
+            # 添加默认列
+            stock_info["总市值"] = 0.0
+        
+        # 【关键修复】添加总市值列到基础信息（如果之前没有添加）
+        if "总市值" not in stock_info.columns:
+            # 创建市值映射字典
+            market_cap_map = {}
+            if "总市值" in locals():
+                market_cap_map = market_cap_map
+            else:
+                market_cap_map = {row["代码"]: 0.0 for _, row in stock_info.iterrows()}
+            
+            # 添加总市值列
+            stock_info["总市值"] = stock_info["代码"].map(
+                lambda x: market_cap_map.get(x, 0.0)
+            )
         
         # 添加 next_crawl_index 列
         stock_info["next_crawl_index"] = 0

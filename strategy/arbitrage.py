@@ -11,6 +11,7 @@
 - 确保数据源一致性
 - 修复列名一致性问题：数据文件中实际为"折价率"而非"折溢价率"
 - 确保基金规模数据正确获取
+- 【关键修复】彻底修复折溢价标识错误问题
 """
 
 import pandas as pd
@@ -265,17 +266,33 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         # ===== 核心修复：使用绝对值比较阈值 =====
         abs_threshold = Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
         
+        # 【关键修复】明确区分折价和溢价：
         # 折价：市场价格 < IOPV (折价率为负)，且绝对值大于阈值
+        # 溢价：市场价格 > IOPV (折价率为正)，且绝对值大于阈值
         discount_opportunities = valid_opportunities[
             (valid_opportunities["折价率"] < 0) & 
             (valid_opportunities["折价率"].abs() >= abs_threshold)
         ].copy()
         
-        # 溢价：市场价格 > IOPV (折价率为正)，且绝对值大于阈值
         premium_opportunities = valid_opportunities[
             (valid_opportunities["折价率"] > 0) & 
             (valid_opportunities["折价率"].abs() >= abs_threshold)
         ].copy()
+        
+        # 【关键修复】添加验证逻辑，确保折价和溢价区分正确
+        # 检查折价机会是否真的为折价
+        invalid_discount = discount_opportunities[discount_opportunities["折价率"] >= 0]
+        if not invalid_discount.empty:
+            logger.error(f"发现 {len(invalid_discount)} 个错误标识为折价的机会（实际为溢价）: {invalid_discount[['ETF代码', '折价率']].to_dict()}")
+            # 从折价机会中移除
+            discount_opportunities = discount_opportunities[discount_opportunities["ETF代码"].isin(invalid_discount["ETF代码"]) == False]
+        
+        # 检查溢价机会是否真的为溢价
+        invalid_premium = premium_opportunities[premium_opportunities["折价率"] <= 0]
+        if not invalid_premium.empty:
+            logger.error(f"发现 {len(invalid_premium)} 个错误标识为溢价的机会（实际为折价）: {invalid_premium[['ETF代码', '折价率']].to_dict()}")
+            # 从溢价机会中移除
+            premium_opportunities = premium_opportunities[premium_opportunities["ETF代码"].isin(invalid_premium["ETF代码"]) == False]
         
         # 按折价率绝对值排序
         if not discount_opportunities.empty:

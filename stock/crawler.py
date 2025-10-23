@@ -685,22 +685,64 @@ def update_all_stocks_daily_data():
     return True
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息"""
+    """创建或更新股票基础信息，直接使用stock_zh_a_spot_em接口"""
     try:
-        # 获取股票基础信息
         logger.info("正在获取股票基础信息...")
-        stock_info = ak.stock_info_a_code_name()
+        
+        # 【专业修复】直接使用包含完整信息的接口
+        stock_info = ak.stock_zh_a_spot_em()
         
         if stock_info.empty:
             logger.error("获取股票基础信息失败：返回空数据")
             return False
         
+        # 【关键修复】检查必要列是否存在
+        required_columns = ["代码", "名称", "总市值", "流通市值"]
+        missing_columns = [col for col in required_columns if col not in stock_info.columns]
+        
+        if missing_columns:
+            logger.error(f"接口返回数据缺少必要列: {', '.join(missing_columns)}")
+            return False
+        
         # 确保代码列是6位格式
         stock_info["代码"] = stock_info["代码"].apply(format_stock_code)
+        
         # 移除无效股票
         stock_info = stock_info[stock_info["代码"].notna()]
         stock_info = stock_info[stock_info["代码"].str.len() == 6]
         stock_info = stock_info.reset_index(drop=True)
+        
+        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息")
+        
+        # 【关键修复】处理市值单位 - 确保单位统一为"元"
+        # 检查市值列是否包含单位标识
+        def process_market_cap(value):
+            if pd.isna(value) or value in ["--", "-", ""]:
+                return 0.0
+                
+            if isinstance(value, str):
+                if "亿" in value:
+                    return float(value.replace("亿", "")) * 100000000
+                elif "万" in value:
+                    return float(value.replace("万", "")) * 10000
+                else:
+                    try:
+                        return float(value)
+                    except:
+                        return 0.0
+            else:
+                # 假设数值单位是亿元，转换为元
+                if value > 1000:  # 1000亿元是合理的阈值
+                    return value * 100000000
+                else:
+                    return value
+        
+        # 处理总市值和流通市值
+        stock_info["总市值"] = stock_info["总市值"].apply(process_market_cap)
+        stock_info["流通市值"] = stock_info["流通市值"].apply(process_market_cap)
+        
+        # 添加所属板块列
+        stock_info["所属板块"] = stock_info["代码"].apply(get_stock_section)
         
         # 添加 next_crawl_index 列
         stock_info["next_crawl_index"] = 0
@@ -711,6 +753,7 @@ def create_or_update_basic_info():
         logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
         
         return True
+    
     except Exception as e:
         logger.error(f"获取股票基础信息失败: {str(e)}", exc_info=True)
         return False

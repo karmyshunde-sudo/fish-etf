@@ -25,146 +25,202 @@ logger = logging.getLogger(__name__)
 # handler.setFormatter(formatter)
 # logger.addHandler(handler)
 
-# 指定计算的指数列表（硬编码，包含完整策略信息）
+# 【关键修复】重构指数配置，按指数分组而非按ETF分组
 INDICES = [
-    # 新增的4个ETF放在最前面
+    # 原有指数（按指数分组）
     {
         "code": "^NDX",
         "name": "纳斯达克100",
-        "akshare_code": "^NDX",
-        "etf_code": "159892",
-        "etf_name": "华夏纳斯达克100ETF",
-        "description": "跟踪纳斯达克100指数，美股科技龙头"
-    },
-    {
-        "code": "^NDX",
-        "name": "纳斯达克100",
-        "akshare_code": "^NDX",
-        "etf_code": "513100",
-        "etf_name": "国泰纳斯达克100ETF",
-        "description": "跟踪纳斯达克100指数，美股科技龙头"
+        "description": "美国科技股代表指数",
+        "etfs": [
+            {"code": "159892", "name": "华夏纳斯达克100ETF", "description": "纳指科技"},
+            {"code": "513100", "name": "国泰纳斯达克100ETF", "description": "纳斯达克"}
+        ]
     },
     {
         "code": "H30533.CSI",
         "name": "中证海外中国互联网",
-        "akshare_code": "H30533.CSI",
-        "etf_code": "513500",
-        "etf_name": "易方达中概互联网ETF",
-        "description": "跟踪中证海外中国互联网指数，涵盖海外上市中概股"
+        "description": "海外上市中国互联网公司",
+        "etfs": [
+            {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
+        ]
     },
     {
         "code": "^HSI",  # 已修改为恒生指数代码
         "name": "恒生指数",
-        "akshare_code": "^HSI",
-        "etf_code": "513400",
-        "etf_name": "华夏恒生互联网ETF",
-        "description": "跟踪恒生指数，港股龙头"  # 已修改描述
+        "description": "港股蓝筹股指数",
+        "etfs": [
+            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
+        ]
     },
-    
-    # 原有ETF列表，保持完全不变
     {
         "code": "000300",
         "name": "沪深300",
-        "akshare_code": "sh000300",
-        "etf_code": "510300",
-        "etf_name": "华泰柏瑞沪深300ETF",
-        "description": "宽基核心，日均成交额超10亿"
+        "description": "A股大盘蓝筹股指数",
+        "etfs": [
+            {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
+        ]
     },
     {
         "code": "000905",
         "name": "中证500",
-        "akshare_code": "sh000905",
-        "etf_code": "510500",
-        "etf_name": "南方中证500ETF",
-        "description": "中证500流动性标杆ETF"
+        "description": "A股中小盘股指数",
+        "etfs": [
+            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
+        ]
     },
     {
         "code": "000688",
         "name": "科创50",
-        "akshare_code": "sh000688",
-        "etf_code": "588000",
-        "etf_name": "华夏科创50ETF",
-        "description": "科创板核心宽基ETF"
+        "description": "科创板龙头公司",
+        "etfs": [
+            {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
+        ]
     },
     {
         "code": "399006",
         "name": "创业板指数",
-        "akshare_code": "sz399006",
-        "etf_code": "159915",
-        "etf_name": "易方达创业板ETF",
-        "description": "创业板规模最大ETF之一"
+        "description": "创业板龙头公司",
+        "etfs": [
+            {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
+        ]
     },
     {
         "code": "399005",
         "name": "中小板指数",
-        "akshare_code": "sz399005",
-        "etf_code": "159902",
-        "etf_name": "华夏中小板ETF",
-        "description": "跟踪中小板全指"
+        "description": "中小板龙头公司",
+        "etfs": [
+            {"code": "159902", "name": "嘉实中小板ETF", "description": "中小板ETF"}
+        ]
     },
     {
         "code": "399395",
         "name": "国证有色金属",
-        "akshare_code": "sz399395",
-        "etf_code": "512400",
-        "etf_name": "南方有色金属ETF",
-        "description": "覆盖有色全产业链"
+        "description": "有色金属行业指数",
+        "etfs": [
+            {"code": "512400", "name": "南方有色金属ETF", "description": "有色ETF"}
+        ]
     },
     {
         "code": "399967",
         "name": "中证军工指数",
-        "akshare_code": "sz399967",
-        "etf_code": "512660",
-        "etf_name": "富国中证军工ETF",
-        "description": "军工行业规模领先ETF"
+        "description": "军工行业指数",
+        "etfs": [
+            {"code": "512660", "name": "国泰中证军工ETF", "description": "军工ETF"}
+        ]
     },
     {
         "code": "399975",
         "name": "中证证券指数",
-        "akshare_code": "sz399975",
-        "etf_code": "512880",
-        "etf_name": "国泰中证全指证券公司ETF",
-        "description": "证券行业流动性首选"
+        "description": "证券行业指数",
+        "etfs": [
+            {"code": "512880", "name": "国泰中证全指证券ETF", "description": "证券ETF"}
+        ]
     },
     {
         "code": "930713",
         "name": "中证AI产业",
-        "akshare_code": "sh930713",
-        "etf_code": "515070",
-        "etf_name": "华夏中证AI产业ETF",
-        "description": "AI全产业链覆盖"
+        "description": "人工智能产业指数",
+        "etfs": [
+            {"code": "515070", "name": "易方达中证AI产业ETF", "description": "AI智能ETF"}
+        ]
     },
     {
         "code": "990001",
         "name": "中证全指半导体",
-        "akshare_code": "sh990001",
-        "etf_code": "159813",
-        "etf_name": "国泰CES半导体ETF",
-        "description": "半导体行业主流标的"
+        "description": "半导体行业指数",
+        "etfs": [
+            {"code": "159813", "name": "国联安中证全指半导体ETF", "description": "半导体ETF"}
+        ]
     },
     {
         "code": "000821",
         "name": "中证红利低波动指数",
-        "akshare_code": "sh000821",
-        "etf_code": "515450",
-        "etf_name": "华泰柏瑞中证红利低波动ETF",
-        "description": "稳健型红利类ETF"
+        "description": "低波动高分红股票指数",
+        "etfs": [
+            {"code": "515450", "name": "景顺长城中证红利低波动ETF", "description": "红利低波ETF"}
+        ]
     },
     {
         "code": "000829",
         "name": "上海金ETF指数",
-        "akshare_code": "sh000829",
-        "etf_code": "518850",
-        "etf_name": "华安黄金ETF",
-        "description": "国内规模最大黄金ETF"
+        "description": "黄金价格指数",
+        "etfs": [
+            {"code": "518850", "name": "华安黄金ETF", "description": "黄金ETF"}
+        ]
     },
     {
         "code": "000012",
         "name": "上证国债指数",
-        "akshare_code": "sh000012",
-        "etf_code": "511260",
-        "etf_name": "博时上证国债ETF",
-        "description": "跟踪上证国债指数，低波动"
+        "description": "国债市场指数",
+        "etfs": [
+            {"code": "511260", "name": "国泰上证5年期国债ETF", "description": "国债ETF"}
+        ]
+    },
+    # 【关键修复】补充所有缺失的指数（按图片添加）
+    {
+        "code": "883418",
+        "name": "微盘股",
+        "description": "小微盘股票指数",
+        "etfs": [
+            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
+        ]
+    },
+    {
+        "code": "AUUSDO",
+        "name": "伦敦金现",
+        "description": "国际黄金价格",
+        "etfs": [
+            {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
+        ]
+    },
+    {
+        "code": "1B0016",
+        "name": "上证50",
+        "description": "上证50蓝筹股指数",
+        "etfs": [
+            {"code": "510050", "name": "华夏上证50ETF", "description": "上证50ETF"}
+        ]
+    },
+    {
+        "code": "932000",
+        "name": "中证2000",
+        "description": "小微盘股票指数",
+        "etfs": [
+            {"code": "561020", "name": "华夏中证2000ETF", "description": "中证2000ETF"}
+        ]
+    },
+    {
+        "code": "HSCEI",
+        "name": "国企指数",
+        "description": "港股国企指数",
+        "etfs": [
+            {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
+        ]
+    },
+    {
+        "code": "1B0852",
+        "name": "中证1000",
+        "description": "中盘股指数",
+        "etfs": [
+            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
+        ]
+    },
+    {
+        "code": "899050",
+        "name": "北证50",
+        "description": "北交所龙头公司",
+        "etfs": [
+            {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
+        ]
+    },
+    {
+        "code": "HS2083",
+        "name": "恒生科技",
+        "description": "港股科技龙头",
+        "etfs": [
+            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
+        ]
     }
 ]
 
@@ -177,7 +233,7 @@ def check_network_connection():
     """检查网络连接是否正常"""
     try:
         import requests
-        response = requests.get('https://www.baidu.com    ', timeout=5)
+        response = requests.get('https://www.baidu.com      ', timeout=5)
         return response.status_code == 200
     except Exception:
         return False
@@ -194,6 +250,9 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 指数日线数据
     """
     try:
+        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
+        time.sleep(random.uniform(2.0, 5.0))
+        
         # 计算日期范围 - 保持为datetime对象
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
@@ -371,8 +430,8 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
         logger.error("可能解决方案:")
         logger.error("  - 确认指数代码为 'HSNDXIT'（无.HI后缀）")
         logger.error("  - 更新akshare: pip install --upgrade akshare")
-        logger.error("  - 检查akshare文档: https://www.akshare.xyz/    ")
-        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues    ")
+        logger.error("  - 检查akshare文档: https://www.akshare.xyz/      ")
+        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues      ")
         
         return pd.DataFrame()
     
@@ -466,8 +525,8 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
     logger.error("     - 结束日期: " + end_date_dt.strftime("%Y%m%d"))
     logger.error("  3. AKShare接口问题：")
     logger.error("     - 确认akshare版本: " + ak.__version__)
-    logger.error("     - 查看文档: https://www.akshare.xyz/    ")
-    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues    ")
+    logger.error("     - 查看文档: https://www.akshare.xyz/      ")
+    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues      ")
     
     return pd.DataFrame()
 
@@ -484,6 +543,9 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
         pd.DataFrame: 指数日线数据
     """
     try:
+        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
+        time.sleep(random.uniform(2.0, 5.0))
+        
         # 转换日期格式 - 仅在需要时转换
         start_dt = start_date_dt.strftime("%Y-%m-%d")
         end_dt = end_date_dt.strftime("%Y-%m-%d")
@@ -823,8 +885,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
         message = (
             f"【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
             f"✅ 操作建议：\n"
-            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%（如{index_info['etf_code']}）\n"
-            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%（如{index_info['etf_code']}）\n"
+            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%\n"
+            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%\n"
             f"  • 总仓位严格控制在≤50%\n"
             f"⚠️ 避免频繁交易，等待趋势明朗\n"
         )
@@ -837,18 +899,16 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             message = (
                 f"【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）立即建仓30%\n"
-                f"  • 卫星行业ETF立即建仓20%\n"
+                f"  • 立即建仓30%\n"
                 f"  • 回调至5日均线（约{current * 0.99:.2f}）可加仓20%\n"
-                f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）\n"
+                f"⚠️ 止损：买入价下方5%\n"
             )
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
         elif 2 <= consecutive_above <= 3 and volume_change > 0.2:
             message = (
                 f"【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）可加仓至50%\n"
-                f"  • 卫星行业ETF可加仓至35%\n"
+                f"  • 可加仓至50%\n"
                 f"  • 严格跟踪5日均线作为止损位（约{current * 0.99:.2f}）\n"
                 f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
             )
@@ -890,7 +950,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 观望，不新增仓位\n"
-                    f"  • 逢高减仓10%-15%（{index_info['etf_code']}）\n"
+                    f"  • 逢高减仓10%-15%\n"
                     f"  • 若收盘跌破10日均线，减仓30%\n"
                     f"{pattern_msg}\n"
                 )
@@ -909,7 +969,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【超买风险】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 逢高减仓20%-30%（仅卫星ETF）\n"
+                    f"  • 逢高减仓20%-30%\n"
                     f"  • 当前价格已处高位，避免新增仓位\n"
                     f"  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回\n"
                     f"{pattern_msg}\n"
@@ -926,8 +986,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）立即减仓50%\n"
-                    f"  • 卫星行业ETF立即减仓70%-80%\n"
+                    f"  • 立即减仓50%\n"
                     f"  • 止损位：20日均线上方5%（约{critical * 1.05:.2f}）\n"
                     f"⚠️ 若收盘未收回均线，明日继续减仓至20%\n"
                 )
@@ -935,8 +994,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%，亏损{loss_percentage:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）立即清仓\n"
-                    f"  • 卫星行业ETF保留20%-30%底仓观察\n"
+                    f"  • 立即清仓\n"
+                    f"  • 保留20%-30%底仓观察\n"
                     f"  • 严格止损：收盘价站上20日均线才考虑回补\n"
                     f"⚠️ 重大亏损信号，避免盲目抄底\n"
                 )
@@ -945,8 +1004,8 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             message = (
                 f"【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
                 f"✅ 操作建议：\n"
-                f"  • 核心宽基ETF（{index_info['etf_code']}）严格止损清仓\n"
-                f"  • 卫星行业ETF仅保留20%-30%底仓\n"
+                f"  • 严格止损清仓\n"
+                f"  • 仅保留20%-30%底仓\n"
                 f"  • 严格止损：20日均线下方5%（约{critical * 0.95:.2f}）\n"
                 f"⚠️ 信号确认，避免侥幸心理\n"
             )
@@ -968,7 +1027,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"【下跌中期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
                     f"  • 空仓为主，避免抄底\n"
-                    f"  • 仅核心宽基ETF（{index_info['etf_code']}）可试仓5%-10%\n"
+                    f"  • 可试仓5%-10%\n"
                     f"  • 严格止损：收盘跌破前低即离场\n"
                     f"⚠️ 重点观察：行业基本面是否有利空，有利空则清仓\n"
                 )
@@ -977,7 +1036,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 message = (
                     f"【超卖机会】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
-                    f"  • 核心宽基ETF（{index_info['etf_code']}）小幅加仓10%-15%\n"
+                    f"  • 小幅加仓10%-15%\n"
                     f"  • 目标价：偏离率≥-5%（约{critical * 0.95:.2f}）\n"
                     f"  • 达到目标即卖出加仓部分\n"
                     f"⚠️ 重点观察：若跌破前低，立即止损\n"
@@ -994,7 +1053,7 @@ def generate_report():
         summary_lines = []
         valid_indices_count = 0
         
-        # 直接按INDICES顺序遍历
+        # 【关键修复】按指数分组处理
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
@@ -1005,7 +1064,11 @@ def generate_report():
                 logger.warning(f"无数据: {name}({code})")
                 # 即使没有数据，也发送一条消息通知
                 message_lines = []
-                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+                # 【关键修复】整合所有ETF到一条消息
+                etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
+                etf_str = "，".join(etf_list)
+                
+                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
                 message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"❌ 信号：数据获取失败\n")
@@ -1026,7 +1089,11 @@ def generate_report():
                 logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算\n")
                 # 发送数据不足的消息
                 message_lines = []
-                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+                # 【关键修复】整合所有ETF到一条消息
+                etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
+                etf_str = "，".join(etf_list)
+                
+                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
                 message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A\n")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"⚠️ 信号：数据不足\n")
@@ -1075,7 +1142,11 @@ def generate_report():
             
             # 构建消息
             message_lines = []
-            message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】\n")
+            # 【关键修复】整合所有ETF到一条消息
+            etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
+            etf_str = "，".join(etf_list)
+            
+            message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
             message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
@@ -1094,7 +1165,7 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
+            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1

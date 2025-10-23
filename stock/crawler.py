@@ -690,7 +690,7 @@ def create_or_update_basic_info():
         logger.info("正在获取股票基础信息...")
         
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(2.0, 5.0))
+        time.sleep(random.uniform(3.0, 6.0))
         
         # 获取股票基础信息
         stock_info = ak.stock_zh_a_spot_em()

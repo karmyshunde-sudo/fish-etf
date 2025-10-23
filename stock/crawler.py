@@ -685,12 +685,12 @@ def update_all_stocks_daily_data():
     return True
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息，只保留必需列"""
+    """创建或更新股票基础信息，确保市值数据格式正确"""
     try:
         logger.info("正在获取股票基础信息...")
         
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(3.0, 6.0))
+        time.sleep(random.uniform(2.0, 5.0))
         
         # 获取股票基础信息
         stock_info = ak.stock_zh_a_spot_em()
@@ -707,7 +707,6 @@ def create_or_update_basic_info():
             logger.error("接口返回数据缺少所有必要列")
             return False
         
-        # 创建只包含必需列的DataFrame
         stock_info = stock_info[available_columns].copy()
         
         # 确保代码列是6位格式
@@ -720,27 +719,36 @@ def create_or_update_basic_info():
         
         logger.info(f"成功获取 {len(stock_info)} 条股票基础信息")
         
-        # 【关键修复】处理市值单位 - 确保单位统一为"元"
+        # 【专业修复】处理市值单位 - 确保单位统一为"元"
         def process_market_cap(value):
             if pd.isna(value) or value in ["--", "-", ""]:
                 return 0.0
                 
             if isinstance(value, str):
+                value = value.strip().replace(",", "")
                 if "亿" in value:
-                    return float(value.replace("亿", "")) * 100000000
+                    num_part = value.replace("亿", "")
+                    try:
+                        return float(num_part) * 100000000
+                    except:
+                        return 0.0
                 elif "万" in value:
-                    return float(value.replace("万", "")) * 10000
+                    num_part = value.replace("万", "")
+                    try:
+                        return float(num_part) * 10000
+                    except:
+                        return 0.0
                 else:
                     try:
                         return float(value)
                     except:
                         return 0.0
             else:
-                # 假设数值单位是亿元，转换为元
-                if value > 1000:  # 1000亿元是合理的阈值
-                    return value * 100000000
+                # akshare的stock_zh_a_spot_em通常返回亿元单位
+                if value < 1000000:  # 小于100万，不太可能是元单位
+                    return value * 100000000  # 亿元转元
                 else:
-                    return value
+                    return value  # 已经是元单位
         
         # 处理总市值和流通市值
         if "总市值" in stock_info.columns:
@@ -762,8 +770,9 @@ def create_or_update_basic_info():
         final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "next_crawl_index"]
         stock_info = stock_info[final_columns]
         
-        # 保存基础信息
-        stock_info.to_csv(BASIC_INFO_FILE, index=False)
+        # 【专业修复】保存时指定格式，避免科学计数法
+        # 使用float_format='%.0f'确保所有浮点数以整数形式保存
+        stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.0f')
         commit_files_in_batches(BASIC_INFO_FILE, "创建股票基础信息")
         logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
         

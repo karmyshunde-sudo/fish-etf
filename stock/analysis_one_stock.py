@@ -62,7 +62,8 @@ def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 "成交量": float,
                 "成交额": float,
                 "换手率": float,
-                "流通市值": float
+                "流通市值": float,
+                "总市值": float
             }
         )
         
@@ -146,6 +147,60 @@ def get_stock_market_cap(stock_code: str) -> float:
     
     except Exception as e:
         logger.error(f"获取股票 {stock_code} 流通市值失败: {str(e)}", exc_info=True)
+        return 0.0
+
+def get_stock_total_market_cap(stock_code: str) -> float:
+    """
+    从all_stocks.csv获取股票总市值（单位：亿元）
+    
+    Args:
+        stock_code: 股票代码
+    
+    Returns:
+        float: 总市值（亿元），若获取失败返回0.0
+    """
+    try:
+        stock_list_path = os.path.join(Config.DATA_DIR, "all_stocks.csv")
+        if os.path.exists(stock_list_path):
+            stock_list = pd.read_csv(stock_list_path, encoding="utf-8")
+            if "代码" in stock_list.columns and "总市值" in stock_list.columns:
+                # 确保股票代码格式一致
+                stock_list["代码"] = stock_list["代码"].apply(lambda x: str(x).zfill(6))
+                stock_info = stock_list[stock_list["代码"] == stock_code]
+                if not stock_info.empty:
+                    # 专业修复：正确处理总市值单位（单位是元，转换为亿元）
+                    raw_market_cap = float(stock_info["总市值"].values[0])
+                    
+                    # 专业判断：如果数值大于1亿，假设单位是元，需要转换为亿元
+                    if raw_market_cap >= 100000000:  # 1千万
+                        market_cap = raw_market_cap / 100000000  # 元转亿元
+                        logger.info(f"检测到总市值单位为元，已转换为亿元（原始值: {raw_market_cap:.0f}元）")
+                    else:
+                        market_cap = raw_market_cap  # 假设已经是亿元
+                    
+                    logger.info(f"从all_stocks.csv获取到股票 {stock_code} 总市值: {market_cap:.2f}亿")
+                    return market_cap
+        
+        # 尝试从日线数据获取（备用方案）
+        df = load_stock_daily_data(stock_code)
+        if not df.empty and "总市值" in df.columns:
+            # 取最新一天的总市值
+            latest_market_cap = df["总市值"].iloc[-1]
+            
+            # 专业判断：根据数值大小确定单位
+            if latest_market_cap >= 100000000:  # 1千万
+                market_cap = latest_market_cap / 100000000  # 元为亿元
+            else:
+                market_cap = latest_market_cap
+                
+            logger.info(f"从日线数据获取到股票 {stock_code} 总市值: {market_cap:.2f}亿")
+            return market_cap
+            
+        logger.warning(f"无法获取股票 {stock_code} 的总市值")
+        return 0.0
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 总市值失败: {str(e)}", exc_info=True)
         return 0.0
 
 def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
@@ -412,9 +467,20 @@ def generate_analysis_report(stock_code: str, stock_name: str, indicators: Dict[
         else:
             report += f"   • 过去5日成交量：数据不足\n"
         
+        # 【关键修复】添加流通市值、总市值及差额百分比
         # 从all_stocks.csv获取流通市值
         market_cap = get_stock_market_cap(stock_code)
-        report += f"   • 流通市值：{market_cap:.2f}亿\n\n"
+        total_market_cap = get_stock_total_market_cap(stock_code)
+        
+        # 计算流通市值与总市值差额百分比
+        if total_market_cap > 0:
+            diff_percentage = (total_market_cap - market_cap) / total_market_cap * 100
+        else:
+            diff_percentage = 0
+        
+        report += f"   • 流通市值：{market_cap:.2f}亿\n"
+        report += f"   • 总市值：{total_market_cap:.2f}亿\n"
+        report += f"   • 流通市值与总市值差额百分比：{diff_percentage:.2f}%\n\n"
         
         # 4. 操作建议
         report += "4. 操作建议\n"

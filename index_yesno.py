@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
+import random  # 【关键修复】导入random模块
 
 # 初始化日志
 logger = logging.getLogger(__name__)

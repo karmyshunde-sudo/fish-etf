@@ -691,7 +691,7 @@ def create_or_update_basic_info():
         
         # 【专业修复】直接使用stock_zh_a_spot_em接口（包含所有必要列）
         # 添加随机延时避免被封（1.5-3.5秒）
-        time.sleep(random.uniform(1.5, 3.5))
+        time.sleep(random.uniform(2.0, 5.0))
         
         stock_info = ak.stock_zh_a_spot_em()
         

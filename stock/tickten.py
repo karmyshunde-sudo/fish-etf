@@ -291,7 +291,7 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
     
     # 从最新日期开始向前检查，找到最近一次站上均线的点
     buy_index = -1
-    for i in range(len(close_prices)-1, -1, -1):
+    for i in range(1, len(close_prices)):
         if i < CRITICAL_VALUE_DAYS - 1:
             continue
             
@@ -649,11 +649,11 @@ def load_stock_basic_info() -> pd.DataFrame:
                 logger.error(f"无法创建基础信息文件 {BASIC_INFO_FILE}")
                 return pd.DataFrame()
         
-        # 尝试加载现有文件
+        # 尝尝加载现有文件
         df = pd.read_csv(BASIC_INFO_FILE)
         
         # 严格检查中文列名
-        required_columns = ["代码", "名称", "所属板块", "流通市值", "next_crawl_index"]
+        required_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "next_crawl_index"]
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"基础信息文件缺少必要列: {col}")
@@ -665,7 +665,10 @@ def load_stock_basic_info() -> pd.DataFrame:
         # 确保流通市值列是数值类型
         df["流通市值"] = pd.to_numeric(df["流通市值"], errors='coerce')
         
-        # 保留无市值股票，但标记它们
+        # 【关键修复】确保总市值列是数值类型
+        df["总市值"] = pd.to_numeric(df["总市值"], errors='coerce')
+        
+        # 保留无流通市值股票，但标记它们
         invalid_mask = (df["流通市值"] <= 0) | df["流通市值"].isna()
         invalid_count = invalid_mask.sum()
         
@@ -674,7 +677,21 @@ def load_stock_basic_info() -> pd.DataFrame:
             if '数据状态' not in df.columns:
                 df['数据状态'] = '正常'
             df.loc[invalid_mask, '数据状态'] = '流通市值缺失'
-            logger.warning(f"检测到 {invalid_count} 条无市值数据的股票，已标记为'流通市值缺失'")
+            logger.warning(f"检测到 {invalid_count} 条无流通市值数据的股票，已标记为'流通市值缺失'")
+        
+        # 【关键修复】保留无总市值股票，但标记它们
+        invalid_mask = (df["总市值"] <= 0) | df["总市值"].isna()
+        invalid_count = invalid_mask.sum()
+        
+        if invalid_count > 0:
+            # 为无总市值股票添加状态标记
+            if '数据状态' not in df.columns:
+                df['数据状态'] = '正常'
+            # 如果已有标记，添加新标记
+            df.loc[invalid_mask, '数据状态'] = df.loc[invalid_mask, '数据状态'].apply(
+                lambda x: f"{x}, 总市值缺失" if x != '正常' else "总市值缺失"
+            )
+            logger.warning(f"检测到 {invalid_count} 条无总市值数据的股票，已标记为'总市值缺失'")
         
         logger.info(f"成功加载基础信息文件，共 {len(df)} 条记录")
         return df
@@ -939,9 +956,10 @@ def get_top_stocks_for_strategy() -> dict:
                 return None
             
             # 4. 检查市值数据状态
-            if '数据状态' in stock and stock['数据状态'] == '流通市值缺失':
-                logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
-                return None
+            if '数据状态' in stock:
+                if '流通市值缺失' in stock['数据状态'] or '总市值缺失' in stock['数据状态']:
+                    logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
+                    return None
             
             # 5. 计算策略评分
             score = calculate_stock_strategy_score(stock_code, df)

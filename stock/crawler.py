@@ -685,30 +685,33 @@ def update_all_stocks_daily_data():
     return True
 
 def create_or_update_basic_info():
-    """创建或更新股票基础信息，简洁专业版"""
+    """创建或更新股票基础信息，只保留必需列"""
     try:
         logger.info("正在获取股票基础信息...")
         
-        # 【专业修复】直接使用stock_zh_a_spot_em接口（包含所有必要列）
-        # 添加随机延时避免被封（1.5-3.5秒）
+        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
         time.sleep(random.uniform(2.0, 5.0))
         
+        # 获取股票基础信息
         stock_info = ak.stock_zh_a_spot_em()
         
         if stock_info.empty:
             logger.error("获取股票基础信息失败：返回空数据")
             return False
         
-        # 【关键修复】检查必要列是否存在
-        required_columns = ["代码", "名称", "总市值", "流通市值"]
-        missing_columns = [col for col in required_columns if col not in stock_info.columns]
+        # 【关键修复】只保留必需列
+        required_columns = ["代码", "名称", "流通市值", "总市值"]
+        available_columns = [col for col in required_columns if col in stock_info.columns]
         
-        if missing_columns:
-            logger.error(f"接口返回数据缺少必要列: {', '.join(missing_columns)}")
+        if not available_columns:
+            logger.error("接口返回数据缺少所有必要列")
             return False
         
+        # 创建只包含必需列的DataFrame
+        stock_info = stock_info[available_columns].copy()
+        
         # 确保代码列是6位格式
-        stock_info["代码"] = stock_info["代码"].apply(format_stock_code)
+        stock_info["代码"] = stock_info["代码"].apply(lambda x: str(x).zfill(6))
         
         # 移除无效股票
         stock_info = stock_info[stock_info["代码"].notna()]
@@ -740,14 +743,24 @@ def create_or_update_basic_info():
                     return value
         
         # 处理总市值和流通市值
-        stock_info["总市值"] = stock_info["总市值"].apply(process_market_cap)
-        stock_info["流通市值"] = stock_info["流通市值"].apply(process_market_cap)
+        if "总市值" in stock_info.columns:
+            stock_info["总市值"] = stock_info["总市值"].apply(process_market_cap)
+        else:
+            stock_info["总市值"] = 0.0
+            
+        if "流通市值" in stock_info.columns:
+            stock_info["流通市值"] = stock_info["流通市值"].apply(process_market_cap)
+        else:
+            stock_info["流通市值"] = 0.0
         
-        # 添加所属板块列
+        # 【关键修复】添加必需列
         stock_info["所属板块"] = stock_info["代码"].apply(get_stock_section)
-        
-        # 添加 next_crawl_index 列
+        stock_info["数据状态"] = "正常"
         stock_info["next_crawl_index"] = 0
+        
+        # 【关键修复】确保列顺序正确
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "next_crawl_index"]
+        stock_info = stock_info[final_columns]
         
         # 保存基础信息
         stock_info.to_csv(BASIC_INFO_FILE, index=False)

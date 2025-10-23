@@ -212,7 +212,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     try:
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(2.0, 5.0))
+        time.sleep(random.uniform(3.0, 8.0))
         
         # 计算日期范围 - 保持为datetime对象
         end_date_dt = datetime.now()
@@ -505,7 +505,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
     """
     try:
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(2.0, 5.0))
+        time.sleep(random.uniform(3.0, 8.0))
         
         # 转换日期格式 - 仅在需要时转换
         start_dt = start_date_dt.strftime("%Y-%m-%d")

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-import random  # 【关键修复】导入random模块
+import random  # 【关键修复】添加缺失的random模块导入
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -54,17 +54,17 @@ INDICES = [
         "description": "跟踪中证海外中国互联网指数，涵盖海外上市中概股"
     },
     {
-        "code": "^HSI",  # 已修改为恒生指数代码
+        "code": "^HSI",  # 保持^HSI格式
         "name": "恒生指数",
         "akshare_code": "^HSI",
         "etf_code": "513400",
         "etf_name": "华夏恒生互联网ETF",
-        "description": "跟踪恒生指数，港股龙头"  # 已修改描述
+        "description": "跟踪恒生指数，港股龙头"
     },
     
     # 原有ETF列表，保持完全不变
     {
-        "code": "000300",
+        "code": "sh000300",
         "name": "沪深300",
         "akshare_code": "sh000300",
         "etf_code": "510300",
@@ -72,7 +72,7 @@ INDICES = [
         "description": "宽基核心，日均成交额超10亿"
     },
     {
-        "code": "000905",
+        "code": "sh000905",
         "name": "中证500",
         "akshare_code": "sh000905",
         "etf_code": "510500",
@@ -80,7 +80,7 @@ INDICES = [
         "description": "中证500流动性标杆ETF"
     },
     {
-        "code": "000688",
+        "code": "sh000688",
         "name": "科创50",
         "akshare_code": "sh000688",
         "etf_code": "588000",
@@ -88,7 +88,7 @@ INDICES = [
         "description": "科创板核心宽基ETF"
     },
     {
-        "code": "399006",
+        "code": "sz399006",
         "name": "创业板指数",
         "akshare_code": "sz399006",
         "etf_code": "159915",
@@ -96,7 +96,7 @@ INDICES = [
         "description": "创业板规模最大ETF之一"
     },
     {
-        "code": "399005",
+        "code": "sz399005",
         "name": "中小板指数",
         "akshare_code": "sz399005",
         "etf_code": "159902",
@@ -104,7 +104,7 @@ INDICES = [
         "description": "跟踪中小板全指"
     },
     {
-        "code": "399395",
+        "code": "sz399395",
         "name": "国证有色金属",
         "akshare_code": "sz399395",
         "etf_code": "512400",
@@ -112,7 +112,7 @@ INDICES = [
         "description": "覆盖有色全产业链"
     },
     {
-        "code": "399967",
+        "code": "sz399967",
         "name": "中证军工指数",
         "akshare_code": "sz399967",
         "etf_code": "512660",
@@ -120,7 +120,7 @@ INDICES = [
         "description": "军工行业规模领先ETF"
     },
     {
-        "code": "399975",
+        "code": "sz399975",
         "name": "中证证券指数",
         "akshare_code": "sz399975",
         "etf_code": "512880",
@@ -128,7 +128,7 @@ INDICES = [
         "description": "证券行业流动性首选"
     },
     {
-        "code": "930713",
+        "code": "sh930713",
         "name": "中证AI产业",
         "akshare_code": "sh930713",
         "etf_code": "515070",
@@ -136,7 +136,7 @@ INDICES = [
         "description": "AI全产业链覆盖"
     },
     {
-        "code": "990001",
+        "code": "sh990001",
         "name": "中证全指半导体",
         "akshare_code": "sh990001",
         "etf_code": "159813",
@@ -144,7 +144,7 @@ INDICES = [
         "description": "半导体行业主流标的"
     },
     {
-        "code": "000821",
+        "code": "sh000821",
         "name": "中证红利低波动指数",
         "akshare_code": "sh000821",
         "etf_code": "515450",
@@ -152,7 +152,7 @@ INDICES = [
         "description": "稳健型红利类ETF"
     },
     {
-        "code": "000829",
+        "code": "sh000829",
         "name": "上海金ETF指数",
         "akshare_code": "sh000829",
         "etf_code": "518850",
@@ -160,7 +160,7 @@ INDICES = [
         "description": "国内规模最大黄金ETF"
     },
     {
-        "code": "000012",
+        "code": "sh000012",
         "name": "上证国债指数",
         "akshare_code": "sh000012",
         "etf_code": "511260",
@@ -171,14 +171,14 @@ INDICES = [
 
 # 【关键修复】补充缺失的指数
 ADDITIONAL_INDICES = [
-    {"code": "883418", "name": "微盘股", "akshare_code": "883418", "etf_code": "510530", "etf_name": "微盘股ETF", "description": "小微盘股票指数"},
-    {"code": "AUUSDO", "name": "伦敦金现", "akshare_code": "AUUSDO", "etf_code": "518880", "etf_name": "黄金基金", "description": "国际黄金价格"},
-    {"code": "1B0016", "name": "上证50", "akshare_code": "1B0016", "etf_code": "510050", "etf_name": "上证50ETF", "description": "上证50蓝筹股指数"},
-    {"code": "932000", "name": "中证2000", "akshare_code": "932000", "etf_code": "561020", "etf_name": "中证2000ETF", "description": "小微盘股票指数"},
+    {"code": "sh883418", "name": "微盘股", "akshare_code": "sh883418", "etf_code": "510530", "etf_name": "微盘股ETF", "description": "小微盘股票指数"},
+    {"code": "GC=F", "name": "伦敦金现", "akshare_code": "GC=F", "etf_code": "518880", "etf_name": "黄金基金", "description": "国际黄金价格"},
+    {"code": "sh000016", "name": "上证50", "akshare_code": "sh000016", "etf_code": "510050", "etf_name": "上证50ETF", "description": "上证50蓝筹股指数"},
+    {"code": "sh932000", "name": "中证2000", "akshare_code": "sh932000", "etf_code": "561020", "etf_name": "中证2000ETF", "description": "小微盘股票指数"},
     {"code": "HSCEI", "name": "国企指数", "akshare_code": "HSCEI", "etf_code": "510900", "etf_name": "H股ETF", "description": "港股国企指数"},
-    {"code": "1B0852", "name": "中证1000", "akshare_code": "1B0852", "etf_code": "512100", "etf_name": "中证1000ETF", "description": "中盘股指数"},
-    {"code": "899050", "name": "北证50", "akshare_code": "899050", "etf_code": "515200", "etf_name": "北证50ETF", "description": "北交所龙头公司"},
-    {"code": "HS2083", "name": "恒生科技", "akshare_code": "HS2083", "etf_code": "513130", "etf_name": "恒生科技ETF", "description": "港股科技龙头"}
+    {"code": "sh000852", "name": "中证1000", "akshare_code": "sh000852", "etf_code": "512100", "etf_name": "中证1000ETF", "description": "中盘股指数"},
+    {"code": "bj899050", "name": "北证50", "akshare_code": "bj899050", "etf_code": "515200", "etf_name": "北证50ETF", "description": "北交所龙头公司"},
+    {"code": "HSI", "name": "恒生科技", "akshare_code": "HSI", "etf_code": "513130", "etf_name": "恒生科技ETF", "description": "港股科技龙头"}
 ]
 
 # 将补充的指数添加到原始列表末尾
@@ -1017,82 +1017,48 @@ def generate_report():
         summary_lines = []
         valid_indices_count = 0
         
-        # 创建一个字典来存储每个指数的信息
-        index_to_etfs = {}
-        
-        # 第一遍遍历：按指数分组
+        # 直接按INDICES顺序遍历
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
             
-            if code not in index_to_etfs:
-                index_to_etfs[code] = {
-                    "name": name,
-                    "etfs": [],
-                    "data": None,
-                    "status": "pending"
-                }
-            
-            # 添加ETF信息
-            index_to_etfs[code]["etfs"].append({
-                "code": idx["etf_code"],
-                "name": idx["etf_name"],
-                "description": idx["description"]
-            })
-        
-        # 第二遍遍历：获取数据并计算
-        for code, index_info in index_to_etfs.items():
-            name = index_info["name"]
-            
             # 直接从AkShare获取指数数据（不使用本地文件）
             df = fetch_index_data(code)
-            index_info["data"] = df
-            
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
                 # 即使没有数据，也发送一条消息通知
                 message_lines = []
-                # 【关键修复】整合所有ETF到一条消息
-                etf_list = [f"{etf['code']}({etf['description']})" for etf in index_info["etfs"]]
-                etf_str = "，".join(etf_list)
-                
-                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
-                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A\n")
+                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
+                message_lines.append(f"📊 当前：数据获取失败| 临界值：N/A| 偏离率：N/A")
                 # 修正：错误信号类型显示问题
-                message_lines.append(f"❌ 信号：数据获取失败\n")
-                message_lines.append("──────────────────\n")
-                message_lines.append("⚠️ 获取指数数据失败，请检查数据源\n")
-                message_lines.append("──────────────────\n")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
-                message_lines.append("📊 数据来源：GIT：fish-etf\n")
-                
-                message = "\n".join(message_lines)
-                logger.info(f"推送 {name} 策略信号（数据获取失败）\n")
+                message_lines.append(f"❌ 信号：数据获取失败")
+                message_lines.append("──────────────────")
+                message_lines.append("⚠️ 获取指数数据失败，请检查数据源")
+                message_lines.append("──────────────────")
+                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
+                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message = "".join(message_lines)
+                logger.info(f"推送 {name} 策略信号（数据获取失败）")
                 send_wechat_message(message)
                 time.sleep(1)
                 continue
             
             # 确保有足够数据
             if len(df) < CRITICAL_VALUE_DAYS:
-                logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算\n")
+                logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
                 # 发送数据不足的消息
                 message_lines = []
-                # 【关键修复】整合所有ETF到一条消息
-                etf_list = [f"{etf['code']}({etf['description']})" for etf in index_info["etfs"]]
-                etf_str = "，".join(etf_list)
-                
-                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
-                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A\n")
+                message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
+                message_lines.append(f"📊 当前：数据不足| 临界值：N/A| 偏离率：N/A")
                 # 修正：错误信号类型显示问题
-                message_lines.append(f"⚠️ 信号：数据不足\n")
-                message_lines.append("──────────────────\n")
-                message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n")
-                message_lines.append("──────────────────\n")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}\n")
-                message_lines.append("📊 数据来源：GIT：fish-etf\n")
-                
-                message = "\n".join(message_lines)
-                logger.info(f"\n推送 {name} 策略信号（数据不足）\n")
+                message_lines.append(f"⚠️ 信号：数据不足")
+                message_lines.append("──────────────────")
+                message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天")
+                message_lines.append("──────────────────")
+                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
+                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message = "".join(message_lines)
+                logger.info(f"推送 {name} 策略信号（数据不足）")
                 send_wechat_message(message)
                 time.sleep(2)
                 continue
@@ -1126,21 +1092,17 @@ def generate_report():
             status = "YES" if close_price >= critical_value else "NO"
             
             # 生成详细策略信号
-            signal_message = generate_signal_message({"etf_code": index_info["etfs"][0]["code"]}, df, close_price, critical_value, deviation)
+            signal_message = generate_signal_message(idx, df, close_price, critical_value, deviation)
             
             # 构建消息
             message_lines = []
-            # 【关键修复】整合所有ETF到一条消息
-            etf_list = [f"{etf['code']}({etf['description']})" for etf in index_info["etfs"]]
-            etf_str = "，".join(etf_list)
-            
-            message_lines.append(f"{name} 【{code}；ETF：{etf_str}】\n")
-            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n")
+            message_lines.append(f"{name} 【{code}；ETF：{idx['etf_code']}，{idx['description']}】")
+            message_lines.append(f"📊 当前：{close_price:.2f}| 临界值：{critical_value:.2f}| 偏离率：{deviation:.2f}%")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status}\n")
+            message_lines.append(f"{signal_symbol} 信号：{status}")
             message_lines.append(signal_message)            
-            message = "\n".join(message_lines)
+            message = "".join(message_lines)
             
             # 发送消息
             logger.info(f"推送 {name} 策略信号")
@@ -1153,7 +1115,7 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
+            summary_line = f"{name_with_padding}【{code}；ETF：{idx['etf_code']}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             
             valid_indices_count += 1
@@ -1162,8 +1124,7 @@ def generate_report():
         # 如果有有效的指数数据，发送总结消息
         if valid_indices_count > 0:
             # 构建总结消息
-            summary_message = "\n".join(summary_lines) 
-            
+            summary_message = "".join(summary_lines) 
             logger.info("推送总结消息")
             send_wechat_message(summary_message)
             time.sleep(1)

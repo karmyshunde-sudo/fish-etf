@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-import random  # 【关键修复】添加随机延时避免被封
+import random  # 【关键修改】添加随机延时模块导入
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -25,8 +25,27 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 【关键修复】重构指数配置，按指数分组
+# 【关键修改】严格按照指定顺序排列指数列表
 INDICES = [
+    # 1. 伦敦金现 (GC=F)
+    {
+        "code": "GC=F",
+        "name": "伦敦金现",
+        "description": "国际黄金价格",
+        "etfs": [
+            {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
+        ]
+    },
+    # 2. 恒生科技 (HSI)
+    {
+        "code": "HSI",
+        "name": "恒生科技",
+        "description": "港股科技龙头",
+        "etfs": [
+            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
+        ]
+    },
+    # 3. 纳斯达克100 (^NDX)
     {
         "code": "^NDX",
         "name": "纳斯达克100",
@@ -36,142 +55,7 @@ INDICES = [
             {"code": "513100", "name": "国泰纳斯达克100ETF", "description": "纳斯达克"}
         ]
     },
-    {
-        "code": "H30533.CSI",
-        "name": "中证海外中国互联网",
-        "description": "海外上市中国互联网公司",
-        "etfs": [
-            {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
-        ]
-    },
-    {
-        "code": "^HSI",
-        "name": "恒生指数",
-        "description": "港股蓝筹股指数",
-        "etfs": [
-            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
-        ]
-    },
-    {
-        "code": "000300",
-        "name": "沪深300",
-        "description": "A股大盘蓝筹股指数",
-        "etfs": [
-            {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
-        ]
-    },
-    {
-        "code": "000905",
-        "name": "中证500",
-        "description": "A股中小盘股指数",
-        "etfs": [
-            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
-        ]
-    },
-    {
-        "code": "000688",
-        "name": "科创50",
-        "description": "科创板龙头公司",
-        "etfs": [
-            {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
-        ]
-    },
-    {
-        "code": "399006",
-        "name": "创业板指数",
-        "description": "创业板龙头公司",
-        "etfs": [
-            {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
-        ]
-    },
-    {
-        "code": "399005",
-        "name": "中小板指数",
-        "description": "中小板龙头公司",
-        "etfs": [
-            {"code": "159902", "name": "嘉实中小板ETF", "description": "中小板ETF"}
-        ]
-    },
-    {
-        "code": "399395",
-        "name": "国证有色金属",
-        "description": "有色金属行业指数",
-        "etfs": [
-            {"code": "512400", "name": "南方有色金属ETF", "description": "有色ETF"}
-        ]
-    },
-    {
-        "code": "399967",
-        "name": "中证军工指数",
-        "description": "军工行业指数",
-        "etfs": [
-            {"code": "512660", "name": "国泰中证军工ETF", "description": "军工ETF"}
-        ]
-    },
-    {
-        "code": "399975",
-        "name": "中证证券指数",
-        "description": "证券行业指数",
-        "etfs": [
-            {"code": "512880", "name": "国泰中证全指证券ETF", "description": "证券ETF"}
-        ]
-    },
-    {
-        "code": "930713",
-        "name": "中证AI产业",
-        "description": "人工智能产业指数",
-        "etfs": [
-            {"code": "515070", "name": "易方达中证AI产业ETF", "description": "AI智能ETF"}
-        ]
-    },
-    {
-        "code": "990001",
-        "name": "中证全指半导体",
-        "description": "半导体行业指数",
-        "etfs": [
-            {"code": "159813", "name": "国联安中证全指半导体ETF", "description": "半导体ETF"}
-        ]
-    },
-    {
-        "code": "000821",
-        "name": "中证红利低波动指数",
-        "description": "低波动高分红股票指数",
-        "etfs": [
-            {"code": "515450", "name": "景顺长城中证红利低波动ETF", "description": "红利低波ETF"}
-        ]
-    },
-    {
-        "code": "000829",
-        "name": "上海金ETF指数",
-        "description": "黄金价格指数",
-        "etfs": [
-            {"code": "518850", "name": "华安黄金ETF", "description": "黄金ETF"}
-        ]
-    },
-    {
-        "code": "000012",
-        "name": "上证国债指数",
-        "description": "国债市场指数",
-        "etfs": [
-            {"code": "511260", "name": "国泰上证5年期国债ETF", "description": "国债ETF"}
-        ]
-    },
-    {
-        "code": "883418",
-        "name": "微盘股",
-        "description": "小微盘股票指数",
-        "etfs": [
-            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
-        ]
-    },
-    {
-        "code": "GC=F",
-        "name": "伦敦金现",
-        "description": "国际黄金价格",
-        "etfs": [
-            {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
-        ]
-    },
+    # 4. 上证50 (000016)
     {
         "code": "000016",
         "name": "上证50",
@@ -180,14 +64,43 @@ INDICES = [
             {"code": "510050", "name": "华夏上证50ETF", "description": "上证50ETF"}
         ]
     },
+    # 5. 沪深300 (000300)
     {
-        "code": "932000",
-        "name": "中证2000",
-        "description": "中盘股指数",
+        "code": "000300",
+        "name": "沪深300",
+        "description": "A股大盘蓝筹股指数",
         "etfs": [
-            {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
+            {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
         ]
     },
+    # 6. 微盘股 (883418)
+    {
+        "code": "883418",
+        "name": "微盘股",
+        "description": "小微盘股票指数",
+        "etfs": [
+            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
+        ]
+    },
+    # 7. 创业板指数 (399006)
+    {
+        "code": "399006",
+        "name": "创业板指数",
+        "description": "创业板龙头公司",
+        "etfs": [
+            {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
+        ]
+    },
+    # 8. 科创50 (000688)
+    {
+        "code": "000688",
+        "name": "科创50",
+        "description": "科创板龙头公司",
+        "etfs": [
+            {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
+        ]
+    },
+    # 9. 北证50 (899050)
     {
         "code": "899050",
         "name": "北证50",
@@ -196,6 +109,16 @@ INDICES = [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
         ]
     },
+    # 10. 中证500 (000905)
+    {
+        "code": "000905",
+        "name": "中证500",
+        "description": "A股中小盘股指数",
+        "etfs": [
+            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
+        ]
+    },
+    # 11. 国企指数 (HSCEI)
     {
         "code": "HSCEI",
         "name": "国企指数",
@@ -204,12 +127,40 @@ INDICES = [
             {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
+    # 12. 中证2000 (932000)
     {
-        "code": "HSI",
-        "name": "恒生科技",
-        "description": "港股科技龙头",
+        "code": "932000",
+        "name": "中证2000",
+        "description": "中盘股指数",
         "etfs": [
-            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
+            {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
+        ]
+    },
+    # 13. 中证1000
+    {
+        "code": "000852",
+        "name": "中证1000",
+        "description": "中盘股指数",
+        "etfs": [
+            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
+        ]
+    },
+    # 14. 中证海外中国互联网 (H30533.CSI)
+    {
+        "code": "H30533.CSI",
+        "name": "中证海外中国互联网",
+        "description": "海外上市中国互联网公司",
+        "etfs": [
+            {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
+        ]
+    },
+    # 15. 恒生指数 (^HSI)
+    {
+        "code": "^HSI",
+        "name": "恒生指数",
+        "description": "港股蓝筹股指数",
+        "etfs": [
+            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
         ]
     }
 ]
@@ -240,7 +191,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
+        # 【关键修改】添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
         
         # 计算日期范围 - 保持为datetime对象
@@ -270,6 +221,10 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
                 
                 if isinstance(df, pd.DataFrame) and not df.empty:
+                    logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
+                    # 【关键修复】正确显示列名，即使包含元组
+                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
+                    
                     # 标准化列名
                     df = df.reset_index()
                     df = df.rename(columns={
@@ -310,6 +265,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         elif index_code.endswith('.CSI'):
             # 中证系列指数
             index_name = index_code.replace('.CSI', '')
+            # 传递datetime对象
             return ak.index_zh_a_hist(
                 symbol=index_name,
                 period="daily",
@@ -317,13 +273,9 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 end_date=end_date
             )
         
-        elif index_code in ["HSCEI", "HSI"]:
+        elif index_code.endswith('.HI'):
             # 恒生系列指数 - 使用专门的函数处理
             return fetch_hang_seng_index_data(index_code, start_date_dt, end_date_dt)
-        
-        elif index_code == "GC=F":
-            # 伦敦金现 - 使用YFinance
-            return fetch_us_index_from_yfinance(index_code, start_date_dt, end_date_dt)
         
         else:
             # A股指数
@@ -379,11 +331,16 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
             'volume': '成交量'
         })
         
-        # 确保日期列为datetime类型
+        # 【日期datetime类型规则】确保日期列为datetime类型
         df['日期'] = pd.to_datetime(df['日期'])
         
         # 排序
         df = df.sort_values('日期').reset_index(drop=True)
+        
+        # 检查数据量
+        if len(df) <= 1:
+            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+            return pd.DataFrame()
         
         logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
         return df
@@ -405,7 +362,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
+        # 【关键修改】添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
         
         # 转换日期格式
@@ -568,7 +525,7 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
 def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     """判断是否处于震荡市"""
     if len(df) < 10:
-        return False, 0, (0, 0)
+        return False, 0, (0, 0)  # 中文名称通常2-4个字
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
@@ -655,8 +612,8 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
                 m_top_confidence = min(m_top_confidence, 1.0)
     
     # 检测头肩顶（三个高点）
-    head_and_shoulders_detected = False
     head_and_shoulders_confidence = 0.0
+    head_and_shoulders_detected = False
     if len(peaks) >= 3:
         # 三个高点，中间最高，两侧较低
         shoulder1_idx, shoulder1_price = peaks[-3]
@@ -684,13 +641,15 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     
     # 确定主要检测结果
     if head_and_shoulders_detected and head_and_shoulders_confidence > m_top_confidence:
+        # 【关键修复】确保confidence是标量值
         return {
             "pattern_type": "头肩顶",
             "detected": True,
             "confidence": float(head_and_shoulders_confidence),
-            "peaks": peaks[-3:]
+            "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
     elif m_top_detected:
+        # 【关键修复】确保confidence是标量值
         return {
             "pattern_type": "M头",
             "detected": True,
@@ -765,6 +724,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
+                    # 【关键修复】确保confidence是标量值
+                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
+                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
                     elif confidence >= 0.5:
@@ -785,6 +747,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
+                    # 【关键修复】确保confidence是标量值
+                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
+                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
                     elif confidence >= 0.5:
@@ -805,6 +770,9 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
+                    # 【关键修复】确保confidence是标量值
+                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
+                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
                     elif confidence >= 0.5:
@@ -898,7 +866,7 @@ def generate_report():
         summary_lines = []
         valid_indices_count = 0
         
-        # 【关键修复】按指数分组处理
+        # 【关键修改】按指定顺序处理指数
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
@@ -909,7 +877,7 @@ def generate_report():
                 logger.warning(f"无数据: {name}({code})")
                 # 即使没有数据，也发送一条消息通知
                 message_lines = []
-                # 【关键修复】整合所有ETF到一条消息
+                # 【关键修改】整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 
@@ -933,7 +901,7 @@ def generate_report():
                 logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
                 # 发送数据不足的消息
                 message_lines = []
-                # 【关键修复】整合所有ETF到一条消息
+                # 【关键修改】整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 
@@ -983,7 +951,7 @@ def generate_report():
             
             # 构建消息
             message_lines = []
-            # 【关键修复】整合所有ETF到一条消息
+            # 【关键修改】整合所有ETF到一条消息
             etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
             etf_str = "，".join(etf_list)
             

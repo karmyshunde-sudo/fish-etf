@@ -4,7 +4,6 @@
 指数 Yes/No 策略执行器
 每天计算指定指数的策略信号并推送微信通知
 """
-
 import os
 import logging
 import pandas as pd
@@ -16,19 +15,18 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-import random  # 【关键修复】添加缺失的random模块导入
+import random
 
 # 初始化日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
-# 【关键修复】重构指数配置，按指数分组而非按ETF分组
+# 【永久正确配置】指数配置，按指数分组，不添加任何市场前缀
 INDICES = [
-    # 【关键修复】按指数分组，每个指数只出现一次
     {
         "code": "^NDX",
         "name": "纳斯达克100",
@@ -158,7 +156,6 @@ INDICES = [
             {"code": "511260", "name": "国泰上证5年期国债ETF", "description": "国债ETF"}
         ]
     },
-    # 【关键修复】添加缺失的指数
     {
         "code": "883418",
         "name": "微盘股",
@@ -168,7 +165,7 @@ INDICES = [
         ]
     },
     {
-        "code": "AUUSDO",
+        "code": "GC=F",
         "name": "伦敦金现",
         "description": "国际黄金价格",
         "etfs": [
@@ -181,22 +178,6 @@ INDICES = [
         "description": "上证50蓝筹股指数",
         "etfs": [
             {"code": "510050", "name": "华夏上证50ETF", "description": "上证50ETF"}
-        ]
-    },
-    {
-        "code": "932000",
-        "name": "中证2000",
-        "description": "小微盘股票指数",
-        "etfs": [
-            {"code": "561020", "name": "华夏中证2000ETF", "description": "中证2000ETF"}
-        ]
-    },
-    {
-        "code": "HSCEI",
-        "name": "国企指数",
-        "description": "港股国企指数",
-        "etfs": [
-            {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
     {
@@ -216,7 +197,15 @@ INDICES = [
         ]
     },
     {
-        "code": "HS2083",
+        "code": "HSCEI",
+        "name": "国企指数",
+        "description": "港股国企指数",
+        "etfs": [
+            {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
+        ]
+    },
+    {
+        "code": "HSI",
         "name": "恒生科技",
         "description": "港股科技龙头",
         "etfs": [
@@ -234,7 +223,7 @@ def check_network_connection():
     """检查网络连接是否正常"""
     try:
         import requests
-        response = requests.get('https://www.baidu.com      ', timeout=5)
+        response = requests.get('https://www.baidu.com', timeout=5)
         return response.status_code == 200
     except Exception:
         return False
@@ -244,7 +233,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     从可靠数据源获取指数历史数据
     
     Args:
-        index_code: 指数代码（如"000300"）
+        index_code: 指数代码
         days: 获取最近多少天的数据
         
     Returns:
@@ -270,7 +259,6 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             logger.info("使用 yfinance 获取恒生指数 (^HSI) 数据")
             
             try:
-                # 使用datetime对象
                 start_dt = start_date_dt.strftime("%Y-%m-%d")
                 end_dt = end_date_dt.strftime("%Y-%m-%d")
                 
@@ -279,14 +267,9 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 
                 # 【关键修复】处理yfinance返回的MultiIndex列名
                 if isinstance(df.columns, pd.MultiIndex):
-                    # 扁平化列名：取最后一级（通常是OHLCV）
                     df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
                 
                 if isinstance(df, pd.DataFrame) and not df.empty:
-                    logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
-                    # 【关键修复】正确显示列名，即使包含元组
-                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
-                    
                     # 标准化列名
                     df = df.reset_index()
                     df = df.rename(columns={
@@ -327,7 +310,6 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         elif index_code.endswith('.CSI'):
             # 中证系列指数
             index_name = index_code.replace('.CSI', '')
-            # 传递datetime对象
             return ak.index_zh_a_hist(
                 symbol=index_name,
                 period="daily",
@@ -335,14 +317,16 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 end_date=end_date
             )
         
-        elif index_code.endswith('.HI'):
+        elif index_code in ["HSCEI", "HSI"]:
             # 恒生系列指数 - 使用专门的函数处理
-            # 传递datetime对象
             return fetch_hang_seng_index_data(index_code, start_date_dt, end_date_dt)
+        
+        elif index_code == "GC=F":
+            # 伦敦金现
+            return fetch_us_index_from_yfinance("GC=F", start_date_dt, end_date_dt)
         
         else:
             # A股指数
-            # 传递datetime对象
             return ak.index_zh_a_hist(
                 symbol=index_code,
                 period="daily",
@@ -357,188 +341,57 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
 def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_date_dt: datetime) -> pd.DataFrame:
     """
     专门处理恒生指数数据获取
-    仅提供详细的日志输出，不保存任何文件
-    
-    Args:
-        index_code: 指数代码（如"HSNDXIT.HI"）
-        start_date_dt: 开始日期（datetime对象）
-        end_date_dt: 结束日期（datetime对象）
-        
-    Returns:
-        pd.DataFrame: 指数日线数据
     """
-    index_name = index_code.replace('.HI', '')
-    logger.info(f"获取恒生指数数据: {index_code} ({index_name})")
-    
-    # 1. 尝试使用AKShare的stock_hk_index_daily_em获取恒生科技指数历史数据
     try:
-        logger.info("尝试使用 ak.stock_hk_index_daily_em 获取恒生科技指数历史数据")
-        
-        # 恒生科技指数的正确代码是 "HSNDXIT" 而不是 "HSNDXIT.HI"
-        symbol = index_code.replace('.HI', '')
-        logger.info(f"使用指数代码: {symbol} (已移除'.HI'后缀)")
+        logger.info(f"获取恒生指数数据: {index_code}")
+        logger.info("使用 ak.stock_hk_index_daily 获取恒生指数数据")
         
         # 转换为字符串格式
         start_date = start_date_dt.strftime("%Y%m%d")
         end_date = end_date_dt.strftime("%Y%m%d")
         
-        # 获取数据
-        df = ak.stock_hk_index_daily_em(symbol=symbol, period="daily", 
-                                      start_date=start_date, end_date=end_date)
+        # 使用akshare获取恒生指数数据
+        df = ak.stock_hk_index_daily(
+            symbol=index_code,
+            start_date=start_date,
+            end_date=end_date
+        )
         
-        if not df.empty:
-            logger.info(f"✅ 成功获取到 {len(df)} 条数据")
-            
-            # 检查数据列
-            logger.info(f"数据列名: {', '.join(df.columns)}")
-            
-            # 【日期datetime类型规则】确保日期列为datetime类型
-            if '日期' in df.columns:
-                try:
-                    df['日期'] = pd.to_datetime(df['日期'])
-                except Exception as e:
-                    logger.error(f"日期格式转换失败: {str(e)}")
-                    return pd.DataFrame()
-            
-            # 检查日期范围
-            if '日期' in df.columns:
-                first_date = df['日期'].min()
-                last_date = df['日期'].max()
-                logger.info(f"数据日期范围: {first_date} 至 {last_date}")
-            
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            
-            return df
-        else:
-            logger.warning("⚠️ ak.stock_hk_index_daily_em 返回空数据")
-            logger.warning("可能原因:")
-            logger.warning("  - 指数代码不正确（应为 'HSNDXIT' 而不是 'HSNDXIT.HI'）")
-            logger.warning("  - 数据源无历史数据")
-            logger.warning("  - 网络连接问题")
-            logger.warning("  - 日期范围不正确")
+        if df.empty:
+            logger.warning(f"⚠️ ak.stock_hk_index_daily 返回空数据")
             return pd.DataFrame()
+        
+        # 标准化列名
+        df = df.rename(columns={
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量'
+        })
+        
+        # 确保日期列为datetime类型
+        df['日期'] = pd.to_datetime(df['日期'])
+        
+        # 排序
+        df = df.sort_values('日期').reset_index(drop=True)
+        
+        logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
+        return df
+    
     except Exception as e:
-        logger.error(f"❌ ak.stock_hk_index_daily_em 方法获取恒生科技指数历史数据失败: {str(e)}")
-        logger.error("详细错误信息:")
-        logger.error(str(e))
-        
-        # 检查akshare版本
-        import akshare as ak
-        logger.error(f"当前akshare版本: {ak.__version__}")
-        logger.error("可能解决方案:")
-        logger.error("  - 确认指数代码为 'HSNDXIT'（无.HI后缀）")
-        logger.error("  - 更新akshare: pip install --upgrade akshare")
-        logger.error("  - 检查akshare文档: https://www.akshare.xyz/      ")
-        logger.error("  - 查看akshare issue: https://github.com/akshare/akshare/issues      ")
-        
+        logger.error(f"❌ 获取恒生指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-    
-    # 2. 如果第一步失败，尝试使用AKShare的stock_hk_index_spot_em获取实时数据
-    try:
-        logger.info("尝试使用 ak.stock_hk_index_spot_em 获取恒生科技指数实时数据")
-        
-        # 获取数据
-        df = ak.stock_hk_index_spot_em()
-        
-        if not df.empty:
-            # 过滤指定的指数
-            filtered = df[df["代码"] == index_code.replace('.HI', '')]
-            
-            if not filtered.empty:
-                logger.info(f"✅ 成功获取到 {len(filtered)} 条实时数据")
-                logger.info(f"数据列名: {', '.join(filtered.columns)}")
-                
-                # 仅用于诊断，不返回实时数据
-                logger.info("⚠️ 注意: 实时数据无法用于历史分析")
-                logger.info(f"实时数据: {filtered.iloc[0].to_dict()}")
-                return pd.DataFrame()
-            else:
-                logger.warning("⚠️ 未找到指定指数的实时数据")
-        else:
-            logger.warning("⚠️ ak.stock_hk_index_spot_em 返回空数据")
-    except Exception as e:
-        logger.error(f"❌ ak.stock_hk_index_spot_em 方法获取数据失败: {str(e)}")
-    
-    # 3. 尝试使用yfinance获取恒生科技指数
-    try:
-        import yfinance as yf
-        # 使用datetime对象
-        start_dt = start_date_dt.strftime("%Y-%m-%d")
-        end_dt = end_date_dt.strftime("%Y-%m-%d")
-        
-        logger.info(f"尝试使用 yfinance.download 获取恒生科技指数历史数据 (HSTECH.HK)")
-        df = yf.download('HSTECH.HK', start=start_dt, end=end_dt)
-        
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            logger.info(f"✅ 成功获取到 {len(df)} 条数据")
-            logger.info(f"数据列名: {', '.join(df.columns)}")
-            
-            # 检查日期范围
-            if 'Date' in df.columns:
-                first_date = df.index.min().strftime("%Y-%m-%d")
-                last_date = df.index.max().strftime("%Y-%m-%d")
-                logger.info(f"数据日期范围: {first_date} 至 {last_date}")
-            
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            
-            # 标准化列名
-            df = df.reset_index()
-            df = df.rename(columns={
-                'Date': '日期',
-                'Open': '开盘',
-                'High': '最高',
-                'Low': '最低',
-                'Close': '收盘',
-                'Volume': '成交量',
-                'Adj Close': '复权收盘'
-            })
-            
-            # 【日期datetime类型规则】确保日期列为datetime类型
-            df['日期'] = pd.to_datetime(df['日期'])
-            
-            return df
-        else:
-            logger.warning("⚠️ yfinance 返回空数据或非DataFrame")
-            logger.warning("可能原因:")
-            logger.warning("  - 指数代码不正确（应为 'HSTECH.HK'）")
-            logger.warning("  - 数据源无历史数据")
-            logger.warning("  - 网络连接问题")
-            logger.warning("  - 日期范围不正确")
-    except Exception as e:
-        logger.error(f"❌ yfinance.download 方法获取恒生科技指数历史数据失败: {str(e)}")
-        logger.error("详细错误信息:")
-        logger.error(str(e))
-    
-    # 没有获取到任何有效数据
-    logger.error(f"❌ 无法获取恒生科技指数历史数据: {index_code}")
-    logger.error("❌ 可能原因：")
-    logger.error("  1. 指数代码不正确：")
-    logger.error("     - 应使用 'HSNDXIT' 而不是 'HSNDXIT.HI'")
-    logger.error("     - 恒生科技指数代码应为 'HSNDXIT'")
-    logger.error("  2. 日期范围问题：")
-    logger.error("     - 开始日期: " + start_date_dt.strftime("%Y%m%d"))
-    logger.error("     - 结束日期: " + end_date_dt.strftime("%Y%m%d"))
-    logger.error("  3. AKShare接口问题：")
-    logger.error("     - 确认akshare版本: " + ak.__version__)
-    logger.error("     - 查看文档: https://www.akshare.xyz/      ")
-    logger.error("     - 检查issue: https://github.com/akshare/akshare/issues      ")
-    
-    return pd.DataFrame()
 
 def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_date_dt: datetime) -> pd.DataFrame:
     """
     使用YFinance获取美股指数数据
     
     Args:
-        index_code: 指数代码（如"^NDX"）
-        start_date_dt: 开始日期（datetime对象）
-        end_date_dt: 结束日期（datetime对象）
+        index_code: 指数代码
+        start_date_dt: 开始日期
+        end_date_dt: 结束日期
         
     Returns:
         pd.DataFrame: 指数日线数据
@@ -547,22 +400,12 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
         time.sleep(random.uniform(2.0, 5.0))
         
-        # 转换日期格式 - 仅在需要时转换
+        # 转换日期格式
         start_dt = start_date_dt.strftime("%Y-%m-%d")
         end_dt = end_date_dt.strftime("%Y-%m-%d")
         
-        # 指数代码映射
-        symbol_map = {
-            '^NDX': '^NDX',  # 纳斯达克100
-            '^DJI': '^DJI',  # 道琼斯工业指数
-            '^GSPC': '^GSPC', # 标准普尔500
-            '^HSTECH': '^HSTECH' # 恒生科技指数
-        }
-        
-        symbol = symbol_map.get(index_code, index_code)
-        
         # 获取数据
-        df = yf.download(symbol, start=start_dt, end=end_dt)
+        df = yf.download(index_code, start=start_dt, end=end_dt)
         
         if df.empty:
             logger.warning(f"通过yfinance获取{index_code}数据为空")
@@ -580,7 +423,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
             'Adj Close': '复权收盘'
         })
         
-        # 【日期datetime类型规则】确保日期列为datetime类型
+        # 【关键修复】确保日期列为datetime类型
         df['日期'] = pd.to_datetime(df['日期'])
         
         logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
@@ -654,7 +497,7 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
         df: ETF日线数据
     
     Returns:
-        float: 成交量变化率（当前成交量相比前一日的变化百分比）
+        float: 成交量变化率
     """
     try:
         if len(df) < 2:
@@ -667,7 +510,6 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
         
         # 确保是数值类型
         if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
-            # 尝试转换为浮点数
             try:
                 current_volume = float(current_volume)
                 previous_volume = float(previous_volume)
@@ -716,11 +558,7 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
     return loss_percentage
 
 def is_in_volatile_market(df: pd.DataFrame) -> tuple:
-    """判断是否处于震荡市
-    
-    Returns:
-        tuple: (是否震荡市, 穿越次数, 最近10天偏离率范围)
-    """
+    """判断是否处于震荡市"""
     if len(df) < 10:
         return False, 0, (0, 0)
     
@@ -761,18 +599,13 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
         min_deviation = min(deviations)
         max_deviation = max(deviations)
     else:
-        # 当没有有效数据时，使用0作为默认值
         min_deviation = 0
         max_deviation = 0
     
     return is_volatile, cross_count, (min_deviation, max_deviation)
 
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
-    """检测M头和头肩顶形态
-    
-    Returns:
-        dict: 形态检测结果
-    """
+    """检测M头和头肩顶形态"""
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
     
@@ -815,7 +648,6 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     # 检测头肩顶（三个高点）
     head_and_shoulders_detected = False
     head_and_shoulders_confidence = 0.0
-    
     if len(peaks) >= 3:
         # 三个高点，中间最高，两侧较低
         shoulder1_idx, shoulder1_price = peaks[-3]
@@ -1062,7 +894,7 @@ def generate_report():
             code = idx["code"]
             name = idx["name"]
             
-            # 直接从AkShare获取指数数据（不使用本地文件）
+            # 直接从AkShare获取指数数据
             df = fetch_index_data(code)
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
@@ -1112,7 +944,6 @@ def generate_report():
                 continue
             
             # 修复：确保获取标量值而不是Series
-            # 使用.values[-1]确保获取标量值
             close_price = df['收盘'].values[-1]
             
             # 修复：确保critical_value是标量值
@@ -1136,7 +967,6 @@ def generate_report():
             deviation = calculate_deviation(close_price, critical_value)
             
             # 状态判断（收盘价在临界值之上为YES，否则为NO）
-            # 修复：现在close_price和critical_value都是标量值，可以安全比较
             status = "YES" if close_price >= critical_value else "NO"
             
             # 生成详细策略信号

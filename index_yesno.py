@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-import random  # 【关键修复】添加缺失的random模块导入
+import random  # 【关键修复】添加随机延时避免被封
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ INDICES = [
         "name": "中小板指数",
         "description": "中小板龙头公司",
         "etfs": [
-            {"code": "159902", "name": "华夏中小板ETF", "description": "中小板ETF"}
+            {"code": "159902", "name": "嘉实中小板ETF", "description": "中小板ETF"}
         ]
     },
     {
@@ -156,7 +156,6 @@ INDICES = [
             {"code": "511260", "name": "国泰上证5年期国债ETF", "description": "国债ETF"}
         ]
     },
-    # 【关键修复】添加缺失的指数
     {
         "code": "883418",
         "name": "微盘股",
@@ -184,17 +183,9 @@ INDICES = [
     {
         "code": "932000",
         "name": "中证2000",
-        "description": "小微盘股票指数",
+        "description": "中盘股指数",
         "etfs": [
-            {"code": "561020", "name": "华夏中证2000ETF", "description": "中证2000ETF"}
-        ]
-    },
-    {
-        "code": "HSCEI",
-        "name": "国企指数",
-        "description": "港股国企指数",
-        "etfs": [
-            {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
+            {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
         ]
     },
     {
@@ -203,6 +194,14 @@ INDICES = [
         "description": "北交所龙头公司",
         "etfs": [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
+        ]
+    },
+    {
+        "code": "HSCEI",
+        "name": "国企指数",
+        "description": "港股国企指数",
+        "etfs": [
+            {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
     {
@@ -242,7 +241,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     try:
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(4.0, 8.0))
+        time.sleep(random.uniform(2.0, 5.0))
         
         # 计算日期范围 - 保持为datetime对象
         end_date_dt = datetime.now()
@@ -271,10 +270,6 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
                 
                 if isinstance(df, pd.DataFrame) and not df.empty:
-                    logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
-                    # 【关键修复】正确显示列名，即使包含元组
-                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
-                    
                     # 标准化列名
                     df = df.reset_index()
                     df = df.rename(columns={
@@ -315,7 +310,6 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         elif index_code.endswith('.CSI'):
             # 中证系列指数
             index_name = index_code.replace('.CSI', '')
-            # 传递datetime对象
             return ak.index_zh_a_hist(
                 symbol=index_name,
                 period="daily",
@@ -326,6 +320,10 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         elif index_code in ["HSCEI", "HSI"]:
             # 恒生系列指数 - 使用专门的函数处理
             return fetch_hang_seng_index_data(index_code, start_date_dt, end_date_dt)
+        
+        elif index_code == "GC=F":
+            # 伦敦金现 - 使用YFinance
+            return fetch_us_index_from_yfinance(index_code, start_date_dt, end_date_dt)
         
         else:
             # A股指数
@@ -360,7 +358,7 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
         start_date = start_date_dt.strftime("%Y%m%d")
         end_date = end_date_dt.strftime("%Y%m%d")
         
-        # 获取数据
+        # 使用akshare获取恒生指数数据
         df = ak.stock_hk_index_daily_em(
             symbol=index_code,
             start_date=start_date,
@@ -378,26 +376,20 @@ def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_dat
             'high': '最高',
             'low': '最低',
             'close': '收盘',
-            'volume': '成交量',
-            'adj_close': '复权收盘'
+            'volume': '成交量'
         })
         
-        # 【日期datetime类型规则】确保日期列为datetime类型
+        # 确保日期列为datetime类型
         df['日期'] = pd.to_datetime(df['日期'])
         
         # 排序
         df = df.sort_values('日期').reset_index(drop=True)
         
-        # 检查数据量
-        if len(df) <= 1:
-            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-            return pd.DataFrame()
-        
-        logger.info(f"✅ 获取到恒生指数历史数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}，共{len(df)}条记录")
+        logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
         return df
     
     except Exception as e:
-        logger.error(f"❌ ak.stock_hk_index_daily_em 方法获取恒生指数历史数据失败: {str(e)}")
+        logger.error(f"❌ ak.stock_hk_index_daily_em 方法获取恒生指数历史数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_date_dt: datetime) -> pd.DataFrame:
@@ -414,7 +406,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
     """
     try:
         # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(4.0, 8.0))
+        time.sleep(random.uniform(2.0, 5.0))
         
         # 转换日期格式
         start_dt = start_date_dt.strftime("%Y-%m-%d")
@@ -439,7 +431,7 @@ def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_d
             'Adj Close': '复权收盘'
         })
         
-        # 【日期datetime类型规则】确保日期列为datetime类型
+        # 【关键修复】确保日期列为datetime类型
         df['日期'] = pd.to_datetime(df['日期'])
         
         logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
@@ -587,10 +579,11 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     deviations = []
     for i in range(len(last_10_days)):
         # 确保有足够的数据计算均线
-        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[-10 + i]):
+        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[i]):
             continue
             
-        deviation = (close_prices[-10 + i] - ma_values[-10 + i]) / ma_values[-10 + i] * 100
+        # 检查中间是否有明显低点
+        deviation = (close_prices[i] - ma_values[i]) / ma_values[i] * 100
         if abs(deviation) > 5.0:
             return False, 0, (0, 0)
         deviations.append(deviation)
@@ -691,15 +684,13 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     
     # 确定主要检测结果
     if head_and_shoulders_detected and head_and_shoulders_confidence > m_top_confidence:
-        # 【关键修复】确保confidence是标量值
         return {
             "pattern_type": "头肩顶",
             "detected": True,
             "confidence": float(head_and_shoulders_confidence),
-            "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
+            "peaks": peaks[-3:]
         }
     elif m_top_detected:
-        # 【关键修复】确保confidence是标量值
         return {
             "pattern_type": "M头",
             "detected": True,
@@ -774,9 +765,6 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
-                    # 【关键修复】确保confidence是标量值
-                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
                     elif confidence >= 0.5:
@@ -797,9 +785,6 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
-                    # 【关键修复】确保confidence是标量值
-                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
                     elif confidence >= 0.5:
@@ -820,9 +805,6 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                 if pattern_detection["detected"]:
                     pattern_name = pattern_detection["pattern_type"]
                     confidence = pattern_detection["confidence"]
-                    # 【关键修复】确保confidence是标量值
-                    confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
                     elif confidence >= 0.5:
@@ -932,7 +914,7 @@ def generate_report():
                 etf_str = "，".join(etf_list)
                 
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
+                message_lines.append(f"📊 当前：数据获取失败| 临界值：N/A| 偏离率：N/A")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"❌ 信号：数据获取失败")
                 message_lines.append("──────────────────")
@@ -956,7 +938,7 @@ def generate_report():
                 etf_str = "，".join(etf_list)
                 
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
+                message_lines.append(f"📊 当前：数据不足| 临界值：N/A| 偏离率：N/A")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"⚠️ 信号：数据不足")
                 message_lines.append("──────────────────")
@@ -1006,10 +988,11 @@ def generate_report():
             etf_str = "，".join(etf_list)
             
             message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
+            message_lines.append(f"📊 当前：{close_price:.2f}| 临界值：{critical_value:.2f}| 偏离率：{deviation:.2f}%")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status} {signal_message}")            
+            message_lines.append(f"{signal_symbol} 信号：{status}")
+            message_lines.append(signal_message)            
             message = "".join(message_lines)
             
             # 发送消息

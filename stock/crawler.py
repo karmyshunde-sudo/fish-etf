@@ -717,7 +717,11 @@ def create_or_update_basic_info():
         stock_info = stock_info[stock_info["代码"].str.len() == 6]
         stock_info = stock_info.reset_index(drop=True)
         
-        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息")
+        # 【关键修复】过滤ST股票（移除ST和*ST股票）
+        stock_info = stock_info[~stock_info["名称"].str.contains("ST", na=False)].copy()
+        stock_info = stock_info[~stock_info["名称"].str.contains("*ST", na=False)].copy()
+        
+        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息（已过滤ST股票）")
         
         # 【专业修复】处理市值单位 - 确保单位统一为"元"
         def process_market_cap(value):
@@ -774,7 +778,7 @@ def create_or_update_basic_info():
         # 使用float_format='%.0f'确保所有浮点数以整数形式保存
         stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.0f')
         commit_files_in_batches(BASIC_INFO_FILE, "创建股票基础信息")
-        logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录")
+        logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录（已过滤ST股票）")
         
         return True
     

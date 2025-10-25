@@ -204,6 +204,60 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
+        # 特殊处理黄金价格
+        if index_code == "GC=F":
+            logger.info("特殊处理黄金价格: GC=F")
+            logger.info("使用 yfinance 获取黄金价格 (GC=F) 数据")
+            
+            try:
+                # 获取数据
+                start_dt = start_date_dt.strftime("%Y-%m-%d")
+                end_dt = end_date_dt.strftime("%Y-%m-%d")
+                
+                # 获取黄金价格数据
+                df = yf.download('GC=F', start=start_dt, end=end_dt)
+                
+                # 【关键修复】处理yfinance返回的MultiIndex列名
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+                
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    logger.info(f"✅ 成功获取到 {len(df)} 条黄金价格数据")
+                    # 【关键修复】正确显示列名，即使包含元组
+                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
+                    
+                    # 标准化列名
+                    df = df.reset_index()
+                    df = df.rename(columns={
+                        'Date': '日期',
+                        'Open': '开盘',
+                        'High': '最高',
+                        'Low': '最低',
+                        'Close': '收盘',
+                        'Volume': '成交量',
+                        'Adj Close': '复权收盘'
+                    })
+                    
+                    # 【日期datetime类型规则】确保日期列为datetime类型
+                    df['日期'] = pd.to_datetime(df['日期'])
+                    
+                    # 排序
+                    df = df.sort_values('日期').reset_index(drop=True)
+                    
+                    # 检查数据量
+                    if len(df) <= 1:
+                        logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                        return pd.DataFrame()
+                    
+                    logger.info(f"✅ 获取到黄金价格历史数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}，共{len(df)}条记录")
+                    return df
+                else:
+                    logger.warning("⚠️ yfinance 返回空数据")
+                    return pd.DataFrame()
+            except Exception as e:
+                logger.error(f"❌ yfinance.download 方法获取黄金价格历史数据失败: {str(e)}")
+                return pd.DataFrame()
+        
         # 特殊处理恒生指数
         if index_code == "^HSI":
             logger.info("特殊处理恒生指数: ^HSI")
@@ -866,7 +920,7 @@ def generate_report():
         summary_lines = []
         valid_indices_count = 0
         
-        # 【关键修改】按指定顺序处理指数
+        # 【关键修改】按指定顺序处理
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
@@ -882,7 +936,7 @@ def generate_report():
                 etf_str = "，".join(etf_list)
                 
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据获取失败| 临界值：N/A| 偏离率：N/A")
+                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"❌ 信号：数据获取失败")
                 message_lines.append("──────────────────")
@@ -906,7 +960,7 @@ def generate_report():
                 etf_str = "，".join(etf_list)
                 
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据不足| 临界值：N/A| 偏离率：N/A")
+                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
                 # 修正：错误信号类型显示问题
                 message_lines.append(f"⚠️ 信号：数据不足")
                 message_lines.append("──────────────────")
@@ -956,11 +1010,10 @@ def generate_report():
             etf_str = "，".join(etf_list)
             
             message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-            message_lines.append(f"📊 当前：{close_price:.2f}| 临界值：{critical_value:.2f}| 偏离率：{deviation:.2f}%")
+            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status}")
-            message_lines.append(signal_message)            
+            message_lines.append(f"{signal_symbol} 信号：{status} {signal_message}")            
             message = "".join(message_lines)
             
             # 发送消息

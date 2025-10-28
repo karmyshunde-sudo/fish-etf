@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
-BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
+BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_ocks.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 策略参数
@@ -883,10 +883,10 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     
     # 2. 排除ST股票
     initial_count = len(filtered_df)
-    filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST", na=False)]
+    filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST|退市", na=False)]
     removed = initial_count - len(filtered_df)
     if removed > 0:
-        logger.info(f"已排除 {removed} 只ST股票")
+        ogger.info(f"已排除 {removed} 只ST和退市股票")
     
     # 3. 排除市值过小的股票
     initial_count = len(filtered_df)

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
-BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_ocks.csv")
+BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 策略参数
@@ -883,10 +883,10 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     
     # 2. 排除ST股票
     initial_count = len(filtered_df)
-    filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST|退市", na=False)]
+    filtered_df = filtered_df[~filtered_df["名称"].str.contains("ST|退[市休]", na=False)]
     removed = initial_count - len(filtered_df)
     if removed > 0:
-        ogger.info(f"已排除 {removed} 只ST和退市股票")
+        logger.info(f"已排除 {removed} 只ST和退市股票")
     
     # 3. 排除市值过小的股票
     initial_count = len(filtered_df)
@@ -1014,6 +1014,37 @@ def generate_strategy_report():
         if not top_stocks:
             logger.warning("没有找到符合条件的股票")
             return
+        
+        # 【关键修改】在推送消息前，保存股票代码到txt文件
+        try:
+            # 获取当前时间
+            now = get_beijing_time()
+            timestamp = now.strftime("%Y%m%d%H%M")
+            filename = f"tick{timestamp}.txt"
+            
+            # 构建文件路径
+            stock_dir = os.path.join(DATA_DIR, "stock")
+            if not os.path.exists(stock_dir):
+                os.makedirs(stock_dir, exist_ok=True)
+            
+            file_path = os.path.join(stock_dir, filename)
+            
+            # 收集所有股票代码
+            all_stock_codes = []
+            for section, stocks in top_stocks.items():
+                for stock in stocks:
+                    # 确保是6位股票代码
+                    code = str(stock['code']).zfill(6)
+                    all_stock_codes.append(code)
+            
+            # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
+            with open(file_path, 'w', encoding='ascii') as f:
+                for code in all_stock_codes:
+                    f.write(code + '\n')
+            
+            logger.info(f"已保存股票代码到 {file_path}")
+        except Exception as e:
+            logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
         
         # 【关键修改】按板块分组生成多个消息
         section_messages = []

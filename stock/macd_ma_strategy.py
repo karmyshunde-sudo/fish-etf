@@ -710,6 +710,59 @@ def main():
     # 4. 生成并发送信号
     total_messages = 0
     
+    # 【关键修改】在推送消息前，保存股票代码到txt文件
+    try:
+        # 获取当前时间
+        now = datetime.now()
+        timestamp = now.strftime("%Y%m%d%H%M")
+        filename = f"macd{timestamp}.txt"
+        
+        # 构建文件路径
+        stock_dir = os.path.join(Config.DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+        
+        file_path = os.path.join(stock_dir, filename)
+        
+        # 收集所有股票代码
+        all_stock_codes = set()
+        
+        # 从单一指标信号收集
+        for signals in [ma_signals, macd_signals, rsi_signals, kdj_signals]:
+            for signal in signals:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从双指标共振信号收集
+        for signals_list in double_signals.values():
+            for signal in signals_list:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从三指标共振信号收集
+        for signals_list in triple_signals.values():
+            for signal in signals_list:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从四指标共振信号收集
+        for signal in quadruple_signals:
+            # 确保是6位股票代码
+            code = str(signal['code']).zfill(6)
+            all_stock_codes.add(code)
+        
+        # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
+        with open(file_path, 'w', encoding='ascii') as f:
+            for code in sorted(all_stock_codes):
+                f.write(code + '\n')
+        
+        logger.info(f"已保存股票代码到 {file_path}")
+    except Exception as e:
+        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+    
     # 单一指标信号
     for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
         message = format_single_signal(category, signals)

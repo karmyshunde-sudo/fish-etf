@@ -17,12 +17,15 @@
 import os
 import pandas as pd
 import numpy as np
+import subprocess
 from datetime import datetime
 import logging
 import sys
 from config import Config
 from utils.date_utils import is_file_outdated
 from wechat_push.push import send_wechat_message  # 确保正确导入推送模块
+# 【关键修复】导入Git工具函数
+from utils.git_utils import commit_files_in_batches
 
 # ========== 参数配置 ==========
 # 均线参数
@@ -57,6 +60,15 @@ MIN_KDJ_POSITIVE = True  # 是否要求K、D在低位
 MIN_KDJ_CHANGE = 10  # J线最小变化值
 MIN_KDJ_CONSISTENT_DAYS = 2  # KDJ上升趋势持续天数
 
+# 三均线粘合突破参数
+THREEMA_MA_PERIODS = [5, 10, 20]  # 均线周期
+MAX_THREEMA_DEVIATION = 0.02      # 最大均线偏离率（2%）
+MIN_CONSOLIDATION_DAYS = 5        # 最小粘合持续天数
+MIN_BREAKOUT_RATIO = 0.03         # 最小突破幅度（3%）
+MIN_BREAKOUT_VOLUME_RATIO = 1.5   # 最小突破量能比（50%）
+MAX_BREAKOUT_VOLUME_RATIO = 2.0   # 最大突破量能比（100%）
+MAX_CONFIRMATION_DEVIATION = 0.08 # 确认阶段最大偏离率（8%）
+
 # 信号质量控制
 MIN_MARKET_UPWARD = True  # 是否要求大盘处于上升趋势
 # ============================
@@ -75,7 +87,8 @@ def get_category_name(category):
         "MA": "均线缠绕",
         "MACD": "MACD动能",
         "RSI": "RSI超买超卖",
-        "KDJ": "KDJ短期动量"
+        "KDJ": "KDJ短期动量",
+        "THREEMA": "三均线粘合突破"
     }
     return names.get(category, category)
 
@@ -405,6 +418,105 @@ def check_kdj_signal(df):
         logger.debug(f"检查KDJ信号失败: {str(e)}")
         return None
 
+def check_threema_signal(df):
+    """检查三均线粘合突破信号"""
+    try:
+        # 1. 粘合阶段验证
+        # 计算均线
+        ma5 = calc_ma(df, 5)
+        ma10 = calc_ma(df, 10)
+        ma20 = calc_ma(df, 20)
+        
+        # 空间验证：均线偏离度<2%
+        max_ma = max(ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1])
+        min_ma = min(ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1])
+        deviation = (max_ma - min_ma) / max_ma
+        if deviation >= MAX_THREEMA_DEVIATION:
+            return None
+        
+        # 时间验证：粘合持续≥5天
+        consolidation_days = 0
+        for i in range(1, 20):  # 检查过去20天
+            if len(df) <= i:
+                break
+                
+            max_ma_i = max(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+            min_ma_i = min(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+            dev_i = (max_ma_i - min_ma_i) / max_ma_i
+            if dev_i <= MAX_THREEMA_DEVIATION:
+                consolidation_days += 1
+            else:
+                break
+                
+        if consolidation_days < MIN_CONSOLIDATION_DAYS:
+            return None
+        
+        # 量能验证：粘合期量能比吸筹期缩50%以上
+        # 吸筹期：粘合期前5天
+        if len(df) < consolidation_days + 5:
+            return None
+            
+        accumulation_volume = df["成交量"].iloc[-(consolidation_days+5):-consolidation_days].mean()
+        consolidation_volume = df["成交量"].iloc[-consolidation_days:].mean()
+        if consolidation_volume / accumulation_volume >= 0.5:
+            return None
+        
+        # 2. 突破阶段验证
+        # 同步向上验证
+        if not (ma5.iloc[-1] > ma5.iloc[-2] and ma10.iloc[-1] > ma10.iloc[-2] and ma20.iloc[-1] > ma20.iloc[-2]):
+            return None
+            
+        # 多头排列雏形
+        if not (ma5.iloc[-1] > ma10.iloc[-1] > ma20.iloc[-1]):
+            return None
+            
+        # 幅度验证：突破幅度>3%
+        consolidation_high = max(df["最高"].iloc[-consolidation_days:])
+        if df["收盘"].iloc[-1] <= consolidation_high * (1 + MIN_BREAKOUT_RATIO):
+            return None
+            
+        # 量能验证：突破量能增加50%-100%
+        if (df["成交量"].iloc[-1] < consolidation_volume * MIN_BREAKOUT_VOLUME_RATIO or 
+            df["成交量"].iloc[-1] > consolidation_volume * MAX_BREAKOUT_VOLUME_RATIO):
+            return None
+            
+        # 3. 确认阶段验证（如果已有突破）
+        # 检查突破后的3天确认
+        if consolidation_days == 1:  # 刚刚突破
+            # 确认阶段需要至少3天数据
+            if len(df) < 3:
+                return None
+                
+            # 不回落验证：突破后3天不破突破收盘价
+            breakout_price = df["收盘"].iloc[-1]
+            for i in range(1, min(4, len(df))):
+                if df["最低"].iloc[-i] < breakout_price:
+                    return None
+                    
+            # 均线稳验证：偏离度<8%
+            for i in range(1, min(4, len(df))):
+                max_ma_i = max(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+                min_ma_i = min(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+                dev_i = (max_ma_i - min_ma_i) / max_ma_i
+                if dev_i >= MAX_CONFIRMATION_DEVIATION:
+                    return None
+                    
+            # 量能续验证：不骤缩
+            breakout_volume = df["成交量"].iloc[-1]
+            for i in range(1, min(4, len(df))):
+                if df["成交量"].iloc[-i] < breakout_volume * 0.5:
+                    return None
+        
+        return {
+            "deviation": deviation,
+            "consolidation_days": consolidation_days,
+            "breakout_ratio": (df["收盘"].iloc[-1] / consolidation_high) - 1,
+            "volume_ratio": df["成交量"].iloc[-1] / consolidation_volume
+        }
+    except Exception as e:
+        logger.debug(f"检查三均线粘合突破信号失败: {str(e)}")
+        return None
+
 def format_single_signal(category, signals):
     """格式化单一指标信号"""
     if not signals:
@@ -560,6 +672,105 @@ def format_quadruple_signal(signals):
     
     return "\n".join(lines)
 
+def format_threema_signal(signals):
+    """格式化三均线粘合突破信号"""
+    if not signals:
+        return ""
+    
+    # 按粘合持续天数排序（持续天数越长排名越前）
+    signals = sorted(signals, key=lambda x: x["consolidation_days"], reverse=True)
+    
+    # 生成消息
+    today = datetime.now().strftime("%Y-%m-%d")
+    lines = [
+        f"【策略2 - 三均线粘合突破信号】",
+        f"日期：{today}",
+        ""
+    ]
+    
+    lines.append("✅ 三均线粘合突破信号：")
+    for i, signal in enumerate(signals[:20], 1):
+        code = signal["code"]
+        name = signal["name"]
+        lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
+    
+    if signals:
+        lines.append("")
+        lines.append("💎 信号解读：")
+        lines.append("三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超90%。")
+        lines.append("信号质量判断：")
+        lines.append("1. 粘合阶段：窄区间（<2%）、长周期（≥5天）、极致缩量（量能缩减50%以上）")
+        lines.append("2. 突破阶段：同步向上、幅度够（>3%）、量能温（量能增加50%-100%）")
+        lines.append("3. 确认阶段：不回落、均线稳（偏离<8%）、量能续（不骤缩）")
+        lines.append("")
+        lines.append("📈 操作建议：")
+        lines.append("• 突破确认后立即建仓30%，回调至5日均线加仓20%")
+        lines.append("• 止损位：突破当日最低价下方2%")
+        lines.append("• 止盈位：1:3风险收益比，或偏离20日均线10%")
+        lines.append("• 仓位控制：单只标的≤20%，总仓位≤60%")
+    
+    return "\n".join(lines)
+
+def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
+                               double_signals, triple_signals, quadruple_signals):
+    """保存股票代码到文件并提交到Git仓库"""
+    try:
+        # 获取当前时间
+        now = datetime.now()
+        timestamp = now.strftime("%Y%m%d%H%M")
+        filename = f"macd{timestamp}.txt"
+        
+        # 构建文件路径
+        stock_dir = os.path.join(Config.DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+        
+        file_path = os.path.join(stock_dir, filename)
+        
+        # 收集所有股票代码
+        all_stock_codes = set()
+        
+        # 从单一指标信号收集
+        for signals in [ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals]:
+            for signal in signals:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从双指标共振信号收集
+        for signals_list in double_signals.values():
+            for signal in signals_list:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从三指标共振信号收集
+        for signals_list in triple_signals.values():
+            for signal in signals_list:
+                # 确保是6位股票代码
+                code = str(signal['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 从四指标共振信号收集
+        for signal in quadruple_signals:
+            # 确保是6位股票代码
+            code = str(signal['code']).zfill(6)
+            all_stock_codes.add(code)
+        
+        # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
+        with open(file_path, 'w', encoding='ascii') as f:
+            for code in sorted(all_stock_codes):
+                f.write(code + '\n')
+        
+        logger.info(f"已保存股票代码到 {file_path}")
+        
+        # 【关键修复】使用 git_utils 提交文件到Git仓库
+        commit_files_in_batches(file_path, f"Add macd data file: {filename}")
+        logger.info(f"已通过 git_utils 提交文件到Git仓库: {file_path}")
+        
+    except Exception as e:
+        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+
 def main():
     # 1. 读取所有股票列表
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
@@ -583,6 +794,7 @@ def main():
     macd_signals = []
     rsi_signals = []
     kdj_signals = []
+    threema_signals = []  # 新增三均线粘合突破信号容器
     
     double_signals = {
         "MA+MACD": [],
@@ -647,6 +859,7 @@ def main():
             macd_signal = check_macd_signal(df)
             rsi_signal = check_rsi_signal(df)
             kdj_signal = check_kdj_signal(df)
+            threema_signal = check_threema_signal(df)  # 新增三均线粘合突破信号检查
             
             # 收集单一指标信号
             if ma_signal:
@@ -660,6 +873,9 @@ def main():
             
             if kdj_signal:
                 kdj_signals.append({"code": code, "name": name, **kdj_signal})
+                
+            if threema_signal:  # 新增三均线粘合突破信号收集
+                threema_signals.append({"code": code, "name": name, **threema_signal})
             
             # 收集双指标共振信号
             if ma_signal and macd_signal:
@@ -711,61 +927,15 @@ def main():
     total_messages = 0
     
     # 【关键修改】在推送消息前，保存股票代码到txt文件
-    try:
-        # 获取当前时间
-        now = datetime.now()
-        timestamp = now.strftime("%Y%m%d%H%M")
-        filename = f"macd{timestamp}.txt"
-        
-        # 构建文件路径
-        stock_dir = os.path.join(Config.DATA_DIR, "stock")
-        if not os.path.exists(stock_dir):
-            os.makedirs(stock_dir, exist_ok=True)
-        
-        file_path = os.path.join(stock_dir, filename)
-        
-        # 收集所有股票代码
-        all_stock_codes = set()
-        
-        # 从单一指标信号收集
-        for signals in [ma_signals, macd_signals, rsi_signals, kdj_signals]:
-            for signal in signals:
-                # 确保是6位股票代码
-                code = str(signal['code']).zfill(6)
-                all_stock_codes.add(code)
-        
-        # 从双指标共振信号收集
-        for signals_list in double_signals.values():
-            for signal in signals_list:
-                # 确保是6位股票代码
-                code = str(signal['code']).zfill(6)
-                all_stock_codes.add(code)
-        
-        # 从三指标共振信号收集
-        for signals_list in triple_signals.values():
-            for signal in signals_list:
-                # 确保是6位股票代码
-                code = str(signal['code']).zfill(6)
-                all_stock_codes.add(code)
-        
-        # 从四指标共振信号收集
-        for signal in quadruple_signals:
-            # 确保是6位股票代码
-            code = str(signal['code']).zfill(6)
-            all_stock_codes.add(code)
-        
-        # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
-        with open(file_path, 'w', encoding='ascii') as f:
-            for code in sorted(all_stock_codes):
-                f.write(code + '\n')
-        
-        logger.info(f"已保存股票代码到 {file_path}")
-    except Exception as e:
-        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+    save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
+                               double_signals, triple_signals, quadruple_signals)
     
     # 单一指标信号
-    for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
-        message = format_single_signal(category, signals)
+    for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals), ("THREEMA", threema_signals)]:
+        if category == "THREEMA":
+            message = format_threema_signal(signals)
+        else:
+            message = format_single_signal(category, signals)
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1

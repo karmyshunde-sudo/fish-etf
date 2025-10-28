@@ -1108,6 +1108,89 @@ def get_arbitrage_push_statistics() -> Dict[str, Any]:
             }
         }
 
+def generate_arbitrage_message(discount_opportunities: pd.DataFrame, premium_opportunities: pd.DataFrame) -> List[str]:
+    """
+    生成套利机会消息，按照用户指定的格式
+    【关键修复】不区分折溢价，只按折溢价率绝对值排序
+    【关键修复】修正日均成交额单位（除以10000）
+    【关键修复】严格遵循用户指定的消息模板
+    """
+    try:
+        # 合并折价和溢价机会
+        all_opportunities = pd.concat([discount_opportunities, premium_opportunities], ignore_index=True)
+        
+        # 按折价率绝对值排序（降序）
+        if not all_opportunities.empty:
+            all_opportunities["abs_premium_discount"] = all_opportunities["折价率"].abs()
+            all_opportunities = all_opportunities.sort_values("abs_premium_discount", ascending=False)
+            all_opportunities = all_opportunities.drop(columns=["abs_premium_discount"])
+        
+        # 如果没有机会，返回空列表
+        if all_opportunities.empty:
+            logger.info("没有符合条件的套利机会")
+            return []
+        
+        # 获取当前时间
+        beijing_time = get_beijing_time()
+        date_str = beijing_time.strftime("%Y-%m-%d %H:%M")
+        env_name = os.getenv("ENVIRONMENT", "Git-fish-etf")
+        
+        # 消息分页（每页最多4个ETF）
+        messages = []
+        etfs_per_page = 4
+        total_pages = (len(all_opportunities) + etfs_per_page - 1) // etfs_per_page
+        
+        # 生成第一页：筛选条件信息
+        if all_opportunities.empty:
+            return []
+        
+        # 【关键修复】生成第一页消息
+        header_msg = "【以下ETF市场价格与净值有大差额】\n"
+        header_msg += f"💓共{len(all_opportunities)}只ETF，分{total_pages}条消息推送，这是第1/{total_pages}条消息\n\n"
+        header_msg += "📊 筛选条件：基金规模≥10.0亿元，日均成交额≥5000.0万元\n"
+        header_msg += "💰 交易成本：0.12%（含印花税和佣金）\n"
+        header_msg += f"🎯 折溢价阈值：折价率超过{Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD:.2f}%\n"
+        header_msg += "⭐ 综合评分：≥70.0\n"
+        header_msg += "==================\n"
+        header_msg += f"📅 北京时间: {date_str}\n"
+        header_msg += f"📊 环境：{env_name}"
+        messages.append(header_msg)
+        
+        # 生成后续页面：ETF列表
+        for page in range(total_pages):
+            start_idx = page * etfs_per_page
+            end_idx = min(start_idx + etfs_per_page, len(all_opportunities))
+            
+            # 【关键修复】生成页码信息
+            page_msg = f"【第{page+1}页 共{total_pages}页】\n\n"
+            
+            for i, (_, row) in enumerate(all_opportunities.iloc[start_idx:end_idx].iterrows(), 1):
+                # 【关键修复】修正日均成交额单位（除以10000）
+                daily_volume = row["日均成交额"] / 10000 if row["日均成交额"] > 0 else 0
+                
+                page_msg += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
+                page_msg += f"   ⭐ 综合评分: {row['综合评分']:.2f}分\n"
+                # 【关键修复】只显示"折溢价率"，不区分折价/溢价
+                page_msg += f"   💹 折溢价率: {row['折价率']:.2f}%\n"
+                page_msg += f"   📈 市场价格: {row['市场价格']:.3f}元\n"
+                page_msg += f"   📊 基金净值: {row['IOPV']:.3f}元\n"
+                page_msg += f"   🏦 基金规模: {row['基金规模']:.2f}亿元\n"
+                # 【关键修复】修正日均成交额显示
+                page_msg += f"   💰 日均成交额: {daily_volume:.2f}万元\n\n"
+            
+            page_msg = page_msg.rstrip()  # 移除最后一个空行
+            page_msg += "\n==================\n"
+            page_msg += f"📅 北京时间: {date_str}\n"
+            page_msg += f"📊 环境：{env_name}"
+            
+            messages.append(page_msg)
+        
+        return messages
+    
+    except Exception as e:
+        logger.error(f"生成套利消息失败: {str(e)}", exc_info=True)
+        return ["【ETF套利机会】生成消息时发生错误，请检查日志"]
+
 # 模块初始化
 try:
     # 确保必要的目录存在

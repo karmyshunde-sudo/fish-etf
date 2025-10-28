@@ -61,6 +61,7 @@ def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
     # 检查是否超过指定天数
     return (datetime.now() - mtime_date).days > max_age_days
 
+"""
 def complete_missing_stock_data():
     """补全缺失的日线数据文件"""
     try:
@@ -76,6 +77,7 @@ def complete_missing_stock_data():
     except Exception as e:
         logger.error(f"补全缺失日线数据失败: {str(e)}", exc_info=True)
         return False
+"""
 
 def create_basic_info_file():
     """创建基础信息文件，如果存在则更新"""
@@ -640,7 +642,7 @@ def load_stock_basic_info() -> pd.DataFrame:
     """加载股票基础信息，严格使用中文列名，并处理文件缺失或过期情况"""
     try:
         # 1. 补全缺失的日线数据
-        complete_missing_stock_data()
+        # complete_missing_stock_data()
         
         # 2. 检查基础信息文件是否存在或是否过期
         if not os.path.exists(BASIC_INFO_FILE) or is_file_expired(BASIC_INFO_FILE):

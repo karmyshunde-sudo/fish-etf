@@ -3,7 +3,7 @@
 """
 股票趋势策略 (TickTen)
 严格使用中文列名，与日线数据文件格式保持一致
-自动处理all_stocks.csv文件缺失或过期的问题
+直接使用仓库中已有的数据，不进行任何自动补全
 """
 
 import os
@@ -60,50 +60,6 @@ def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
     
     # 检查是否超过指定天数
     return (datetime.now() - mtime_date).days > max_age_days
-
-"""
-def complete_missing_stock_data():
-    # 补全缺失的日线数据文件
-    try:
-        # 动态导入股票爬取模块
-        from stock.crawler import complete_missing_stock_data as crawler_complete
-        logger.info("开始补全缺失的日线数据...")
-        success = crawler_complete()
-        if success:
-            logger.info("缺失日线数据补全成功")
-        else:
-            logger.error("缺失日线数据补全失败")
-        return success
-    except Exception as e:
-        logger.error(f"补全缺失日线数据失败: {str(e)}", exc_info=True)
-        return False
-"""
-
-def create_basic_info_file():
-    """创建基础信息文件，如果存在则更新"""
-    try:
-        logger.info("尝试创建或更新基础信息文件 all_stocks.csv...")
-        
-        # 尝试导入股票爬取模块
-        try:
-            from stock.crawler import create_or_update_basic_info
-            success = create_or_update_basic_info()
-            if success:
-                logger.info("基础信息文件 all_stocks.csv 已创建/更新")
-                return True
-            else:
-                logger.error("基础信息文件创建/更新失败")
-                return False
-        except ImportError:
-            logger.error("无法导入 stock.crawler 模块，无法创建基础信息文件")
-            return False
-        except Exception as e:
-            logger.error(f"创建基础信息文件时出错: {str(e)}", exc_info=True)
-            return False
-            
-    except Exception as e:
-        logger.error(f"创建基础信息文件失败: {str(e)}", exc_info=True)
-        return False
 
 def get_stock_section(stock_code: str) -> str:
     """
@@ -639,20 +595,14 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
     return message
 
 def load_stock_basic_info() -> pd.DataFrame:
-    """加载股票基础信息，严格使用中文列名，并处理文件缺失或过期情况"""
+    """直接加载股票基础信息，不处理文件缺失或过期情况"""
     try:
-        # 1. 补全缺失的日线数据
-        # complete_missing_stock_data()
+        # 直接加载基础信息文件，不进行任何自动补全
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.error(f"基础信息文件不存在: {BASIC_INFO_FILE}")
+            return pd.DataFrame()
         
-        # 2. 检查基础信息文件是否存在或是否过期
-        if not os.path.exists(BASIC_INFO_FILE) or is_file_expired(BASIC_INFO_FILE):
-            logger.warning(f"基础信息文件 {BASIC_INFO_FILE} 不存在或已过期，尝试创建...")
-            success = create_basic_info_file()
-            if not success:
-                logger.error(f"无法创建基础信息文件 {BASIC_INFO_FILE}")
-                return pd.DataFrame()
-        
-        # 尝尝加载现有文件
+        # 直接加载现有文件
         df = pd.read_csv(BASIC_INFO_FILE)
         
         # 严格检查中文列名
@@ -910,14 +860,14 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     return filtered_df
 
 def get_top_stocks_for_strategy() -> dict:
-    """获取各板块中适合策略的股票（使用本地已保存数据）"""
+    """获取各板块中适合策略的股票（直接使用本地已有数据）"""
     try:
         logger.info("=== 开始执行个股趋势策略(TickTen) ===")
         
-        # 1. 获取股票基础信息（自动处理文件缺失或过期）
+        # 1. 直接获取股票基础信息（不进行任何自动补全）
         basic_info_df = load_stock_basic_info()
         if basic_info_df.empty:
-            logger.error("获取股票基础信息失败，无法继续")
+            logger.error("基础信息文件不存在或加载失败，无法继续")
             return {}
         
         logger.info(f"已加载股票基础信息，共 {len(basic_info_df)} 条记录")
@@ -1048,46 +998,79 @@ def save_and_commit_stock_codes(top_stocks):
 def commit_and_push_file(file_path, filename):
     """将文件提交并推送到Git仓库"""
     try:
-        # 获取仓库根目录（假设data目录在仓库根目录下）
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(file_path), "../../../"))
+        # 【关键修复】使用GITHUB_WORKSPACE环境变量获取仓库根目录
+        repo_root = os.getenv('GITHUB_WORKSPACE', '.')
         logger.info(f"仓库根目录: {repo_root}")
         
+        # 确认仓库根目录存在
+        if not os.path.exists(repo_root):
+            logger.error(f"仓库根目录不存在: {repo_root}")
+            return
+            
         # 切换到仓库根目录
         os.chdir(repo_root)
+        logger.info(f"已切换到仓库根目录: {os.getcwd()}")
         
         # 检查是否是Git仓库
-        if not os.path.exists(os.path.join(repo_root, ".git")):
-            logger.warning("当前目录不是Git仓库，跳过提交和推送")
+        git_dir = os.path.join(repo_root, ".git")
+        if not os.path.exists(git_dir):
+            logger.error(f"当前目录不是Git仓库，无法提交和推送。.git目录不存在: {git_dir}")
             return
             
         # 添加文件
-        subprocess.run(['git', 'add', file_path], check=True, capture_output=True)
+        logger.info(f"执行: git add {file_path}")
+        add_result = subprocess.run(['git', 'add', file_path], check=True, capture_output=True, text=True)
+        logger.info(f"git add 输出: {add_result.stdout.strip()}")
+        logger.info(f"git add 错误: {add_result.stderr.strip()}")
         logger.info(f"已将 {file_path} 添加到Git暂存区")
         
         # 检查是否有更改
-        status = subprocess.run(['git', 'status', '--porcelain'], 
-                               capture_output=True, text=True)
-        if not status.stdout:
+        status_result = subprocess.run(['git', 'status', '--porcelain'], 
+                                      capture_output=True, text=True)
+        logger.info(f"git status 输出: {status_result.stdout.strip()}")
+        
+        if not status_result.stdout.strip():
             logger.info("没有更改需要提交")
             return
             
         # 提交更改
         commit_msg = f"Add tick data file: {filename}"
-        subprocess.run(['git', 'config', 'user.name', 'github-actions'], check=True)
-        subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True)
-        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True)
+        logger.info(f"执行: git config user.name 'github-actions'")
+        subprocess.run(['git', 'config', 'user.name', 'github-actions'], check=True, capture_output=True, text=True)
+        
+        logger.info(f"执行: git config user.email 'github-actions@github.com'")
+        subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True, capture_output=True, text=True)
+        
+        logger.info(f"执行: git commit -m '{commit_msg}'")
+        commit_result = subprocess.run(['git', 'commit', '-m', commit_msg], 
+                                      check=True, capture_output=True, text=True)
+        logger.info(f"git commit 输出: {commit_result.stdout.strip()}")
+        logger.info(f"git commit 错误: {commit_result.stderr.strip()}")
         logger.info(f"已提交更改: {commit_msg}")
         
         # 获取当前分支
-        branch = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
-                               capture_output=True, text=True).stdout.strip()
+        branch_result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
+                                      capture_output=True, text=True)
+        branch = branch_result.stdout.strip()
+        logger.info(f"当前分支: {branch}")
+        
+        # 检查远程配置
+        remote_result = subprocess.run(['git', 'remote', '-v'], 
+                                      capture_output=True, text=True)
+        logger.info(f"远程仓库配置: {remote_result.stdout.strip()}")
         
         # 推送到远程
-        subprocess.run(['git', 'push', 'origin', branch], check=True, capture_output=True)
+        logger.info(f"执行: git push origin {branch}")
+        push_result = subprocess.run(['git', 'push', 'origin', branch], 
+                                    check=True, capture_output=True, text=True)
+        logger.info(f"git push 输出: {push_result.stdout.strip()}")
+        logger.info(f"git push 错误: {push_result.stderr.strip()}")
         logger.info(f"已将更改推送到远程仓库 (分支: {branch})")
         
     except subprocess.CalledProcessError as e:
-        logger.error(f"Git操作失败: {e.stderr.decode('utf-8')}")
+        logger.error(f"Git操作失败: 命令 '{' '.join(e.cmd)}' 失败，状态码 {e.returncode}")
+        logger.error(f"Git错误输出: {e.stderr}")
+        logger.error(f"Git标准输出: {e.stdout}")
     except Exception as e:
         logger.error(f"提交并推送文件失败: {str(e)}", exc_info=True)
 
@@ -1163,10 +1146,10 @@ def main():
     # 确保目录存在
     ensure_directory_exists()
     
-    # 获取基础信息（自动处理文件缺失或过期）
+    # 获取基础信息（直接加载，不进行任何自动补全）
     basic_info = load_stock_basic_info()
     if basic_info.empty:
-        logger.error("基础信息文件处理失败，策略无法执行")
+        logger.error("基础信息文件不存在或加载失败，策略无法执行")
         return
     
     # 生成并发送策略报告

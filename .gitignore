@@ -29,3 +29,5 @@ temp/
 !data/flags/*.txt
 !data/debug/
 !data/debug/.csv
+!data/stock/
+!data/stock/*.txt

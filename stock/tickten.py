@@ -18,6 +18,7 @@ from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
 import sys
 import traceback
+import subprocess
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -1003,6 +1004,91 @@ def get_top_stocks_for_strategy() -> dict:
         logger.error(traceback.format_exc())
         return {}
 
+def save_and_commit_stock_codes(top_stocks):
+    """保存股票代码到文件并提交到Git仓库"""
+    try:
+        # 获取当前时间
+        now = get_beijing_time()
+        timestamp = now.strftime("%Y%m%d%H%M")
+        filename = f"tick{timestamp}.txt"
+        
+        # 构建文件路径
+        stock_dir = os.path.join(DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+        
+        file_path = os.path.join(stock_dir, filename)
+        
+        # 收集所有股票代码
+        all_stock_codes = set()
+        
+        # 从所有板块中收集股票代码
+        for section, stocks in top_stocks.items():
+            for stock in stocks:
+                # 确保是6位股票代码
+                code = str(stock['code']).zfill(6)
+                all_stock_codes.add(code)
+        
+        # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
+        with open(file_path, 'w', encoding='ascii') as f:
+            for code in sorted(all_stock_codes):
+                f.write(code + '\n')
+        
+        logger.info(f"已保存股票代码到 {file_path}")
+        
+        # 【关键修复】提交文件到Git仓库（仅在GitHub Actions环境中）
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            commit_and_push_file(file_path, filename)
+        
+    except Exception as e:
+        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+
+def commit_and_push_file(file_path, filename):
+    """将文件提交并推送到Git仓库"""
+    try:
+        # 获取仓库根目录（假设data目录在仓库根目录下）
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(file_path), "../../../"))
+        logger.info(f"仓库根目录: {repo_root}")
+        
+        # 切换到仓库根目录
+        os.chdir(repo_root)
+        
+        # 检查是否是Git仓库
+        if not os.path.exists(os.path.join(repo_root, ".git")):
+            logger.warning("当前目录不是Git仓库，跳过提交和推送")
+            return
+            
+        # 添加文件
+        subprocess.run(['git', 'add', file_path], check=True, capture_output=True)
+        logger.info(f"已将 {file_path} 添加到Git暂存区")
+        
+        # 检查是否有更改
+        status = subprocess.run(['git', 'status', '--porcelain'], 
+                               capture_output=True, text=True)
+        if not status.stdout:
+            logger.info("没有更改需要提交")
+            return
+            
+        # 提交更改
+        commit_msg = f"Add tick data file: {filename}"
+        subprocess.run(['git', 'config', 'user.name', 'github-actions'], check=True)
+        subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True)
+        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True)
+        logger.info(f"已提交更改: {commit_msg}")
+        
+        # 获取当前分支
+        branch = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
+                               capture_output=True, text=True).stdout.strip()
+        
+        # 推送到远程
+        subprocess.run(['git', 'push', 'origin', branch], check=True, capture_output=True)
+        logger.info(f"已将更改推送到远程仓库 (分支: {branch})")
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Git操作失败: {e.stderr.decode('utf-8')}")
+    except Exception as e:
+        logger.error(f"提交并推送文件失败: {str(e)}", exc_info=True)
+
 def generate_strategy_report():
     """生成策略报告并发送微信通知"""
     try:
@@ -1016,35 +1102,7 @@ def generate_strategy_report():
             return
         
         # 【关键修改】在推送消息前，保存股票代码到txt文件
-        try:
-            # 获取当前时间
-            now = get_beijing_time()
-            timestamp = now.strftime("%Y%m%d%H%M")
-            filename = f"tick{timestamp}.txt"
-            
-            # 构建文件路径
-            stock_dir = os.path.join(DATA_DIR, "stock")
-            if not os.path.exists(stock_dir):
-                os.makedirs(stock_dir, exist_ok=True)
-            
-            file_path = os.path.join(stock_dir, filename)
-            
-            # 收集所有股票代码
-            all_stock_codes = []
-            for section, stocks in top_stocks.items():
-                for stock in stocks:
-                    # 确保是6位股票代码
-                    code = str(stock['code']).zfill(6)
-                    all_stock_codes.append(code)
-            
-            # 保存到文件（ANSI编码，使用ASCII，因为股票代码是纯数字）
-            with open(file_path, 'w', encoding='ascii') as f:
-                for code in all_stock_codes:
-                    f.write(code + '\n')
-            
-            logger.info(f"已保存股票代码到 {file_path}")
-        except Exception as e:
-            logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+        save_and_commit_stock_codes(top_stocks)
         
         # 【关键修改】按板块分组生成多个消息
         section_messages = []

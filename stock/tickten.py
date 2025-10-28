@@ -19,6 +19,8 @@ from wechat_push.push import send_wechat_message
 import sys
 import traceback
 import subprocess
+# 【关键修复】导入Git工具函数
+from utils.git_utils import commit_files_in_batches
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -988,91 +990,12 @@ def save_and_commit_stock_codes(top_stocks):
         
         logger.info(f"已保存股票代码到 {file_path}")
         
-        # 【关键修复】提交文件到Git仓库（仅在GitHub Actions环境中）
-        if os.environ.get('GITHUB_ACTIONS') == 'true':
-            commit_and_push_file(file_path, filename)
+        # 【关键修复】使用 git_utils 提交文件到Git仓库
+        commit_files_in_batches(file_path, f"Add tick data file: {filename}")
+        logger.info(f"已通过 git_utils 提交文件到Git仓库: {file_path}")
         
     except Exception as e:
         logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
-
-def commit_and_push_file(file_path, filename):
-    """将文件提交并推送到Git仓库"""
-    try:
-        # 【关键修复】使用GITHUB_WORKSPACE环境变量获取仓库根目录
-        repo_root = os.getenv('GITHUB_WORKSPACE', '.')
-        logger.info(f"仓库根目录: {repo_root}")
-        
-        # 确认仓库根目录存在
-        if not os.path.exists(repo_root):
-            logger.error(f"仓库根目录不存在: {repo_root}")
-            return
-            
-        # 切换到仓库根目录
-        os.chdir(repo_root)
-        logger.info(f"已切换到仓库根目录: {os.getcwd()}")
-        
-        # 检查是否是Git仓库
-        git_dir = os.path.join(repo_root, ".git")
-        if not os.path.exists(git_dir):
-            logger.error(f"当前目录不是Git仓库，无法提交和推送。.git目录不存在: {git_dir}")
-            return
-            
-        # 添加文件
-        logger.info(f"执行: git add {file_path}")
-        add_result = subprocess.run(['git', 'add', file_path], check=True, capture_output=True, text=True)
-        logger.info(f"git add 输出: {add_result.stdout.strip()}")
-        logger.info(f"git add 错误: {add_result.stderr.strip()}")
-        logger.info(f"已将 {file_path} 添加到Git暂存区")
-        
-        # 检查是否有更改
-        status_result = subprocess.run(['git', 'status', '--porcelain'], 
-                                      capture_output=True, text=True)
-        logger.info(f"git status 输出: {status_result.stdout.strip()}")
-        
-        if not status_result.stdout.strip():
-            logger.info("没有更改需要提交")
-            return
-            
-        # 提交更改
-        commit_msg = f"Add tick data file: {filename}"
-        logger.info(f"执行: git config user.name 'github-actions'")
-        subprocess.run(['git', 'config', 'user.name', 'github-actions'], check=True, capture_output=True, text=True)
-        
-        logger.info(f"执行: git config user.email 'github-actions@github.com'")
-        subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True, capture_output=True, text=True)
-        
-        logger.info(f"执行: git commit -m '{commit_msg}'")
-        commit_result = subprocess.run(['git', 'commit', '-m', commit_msg], 
-                                      check=True, capture_output=True, text=True)
-        logger.info(f"git commit 输出: {commit_result.stdout.strip()}")
-        logger.info(f"git commit 错误: {commit_result.stderr.strip()}")
-        logger.info(f"已提交更改: {commit_msg}")
-        
-        # 获取当前分支
-        branch_result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
-                                      capture_output=True, text=True)
-        branch = branch_result.stdout.strip()
-        logger.info(f"当前分支: {branch}")
-        
-        # 检查远程配置
-        remote_result = subprocess.run(['git', 'remote', '-v'], 
-                                      capture_output=True, text=True)
-        logger.info(f"远程仓库配置: {remote_result.stdout.strip()}")
-        
-        # 推送到远程
-        logger.info(f"执行: git push origin {branch}")
-        push_result = subprocess.run(['git', 'push', 'origin', branch], 
-                                    check=True, capture_output=True, text=True)
-        logger.info(f"git push 输出: {push_result.stdout.strip()}")
-        logger.info(f"git push 错误: {push_result.stderr.strip()}")
-        logger.info(f"已将更改推送到远程仓库 (分支: {branch})")
-        
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Git操作失败: 命令 '{' '.join(e.cmd)}' 失败，状态码 {e.returncode}")
-        logger.error(f"Git错误输出: {e.stderr}")
-        logger.error(f"Git标准输出: {e.stdout}")
-    except Exception as e:
-        logger.error(f"提交并推送文件失败: {str(e)}", exc_info=True)
 
 def generate_strategy_report():
     """生成策略报告并发送微信通知"""

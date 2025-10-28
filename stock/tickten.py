@@ -63,7 +63,7 @@ def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
 
 """
 def complete_missing_stock_data():
-    """补全缺失的日线数据文件"""
+    # 补全缺失的日线数据文件
     try:
         # 动态导入股票爬取模块
         from stock.crawler import complete_missing_stock_data as crawler_complete

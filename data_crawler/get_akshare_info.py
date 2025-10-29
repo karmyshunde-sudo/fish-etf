@@ -21,9 +21,9 @@ import sys
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
 
-# 【终极修复】只添加这一行，确保正确导入
+# 正确导入git_utils模块（只有一行，与项目其他文件完全一致）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
+from utils.git_utils import commit_files_in_batches
 
 # ================================
 # 2. 全局常量/参数定义
@@ -127,13 +127,11 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 确保文件真正提交到Git仓库
+    # 【终极修复】确保文件真正提交到Git仓库
     try:
-        # 提交文件
-        success = commit_files_in_batches(file_path, "更新AkShare接口列表")
-        
-        # 立即强制提交剩余文件
-        force_commit_remaining_files()
+        # 直接使用"LAST_FILE"参数立即提交
+        print(f"ℹ️ 正在将文件提交到Git仓库...")
+        success = commit_files_in_batches(file_path, "LAST_FILE")
         
         if success:
             print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
@@ -141,6 +139,7 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
             print(f"⚠️ 提交文件到Git仓库失败，请检查Git配置")
     except Exception as e:
         print(f"❌ 提交文件到Git仓库失败: {str(e)}")
+        print(f"💡 专业提示: 请检查项目结构，确保utils目录位于项目根目录")
     
     print(f"📌 提示: 完整接口列表已保存至: {file_path}")
 else:

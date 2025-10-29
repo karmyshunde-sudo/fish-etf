@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-获取AkShare信息工具 - 严格语法正确的版本
+获取AkShare信息工具 - 专业级修复
 注意：这不是项目的主程序，而是被工作流调用的工具脚本
 """
 
@@ -33,11 +33,6 @@ API_TEST_PARAMS = {
         "option": ["option", "stock_option"]
     },
     
-    # 重试策略参数
-    "MAX_RETRIES": 3,           # 最大重试次数
-    "RETRY_DELAY": 1.0,         # 重试前等待秒数
-    "ALL_PARAM_RETRY": True,    # 是否尝试使用"all"参数重试
-    
     # 输出参数
     "SHOW_DATA_SAMPLE": True,   # 是否显示数据示例
     "SAMPLE_ROWS": 2,           # 数据示例显示的行数
@@ -66,6 +61,15 @@ import sys
 
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
+
+# 【关键修复】导入git提交函数
+try:
+    from utils.git_utils import commit_files_in_batches
+    GIT_UTILS_AVAILABLE = True
+    print("ℹ️ git_utils模块已成功导入，将自动提交文件到Git仓库")
+except ImportError:
+    GIT_UTILS_AVAILABLE = False
+    print("⚠️ 无法导入git_utils模块，文件将不会自动提交到Git仓库")
 
 # ================================
 # 3. 主要逻辑
@@ -127,6 +131,17 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
         f.write(output)
 
     print(f"📁 AkShare信息已保存到 {file_path}")
+    
+    # 【关键修复】确保文件真正提交到Git仓库
+    if GIT_UTILS_AVAILABLE:
+        try:
+            commit_files_in_batches(file_path, "更新AkShare接口列表")
+            print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
+        except Exception as e:
+            print(f"⚠️ 提交文件到Git仓库失败: {str(e)}")
+    else:
+        print("ℹ️ 由于缺少git_utils模块，文件未提交到Git仓库")
+    
     print(f"📌 提示: 完整接口列表已保存至: {file_path}")
 else:
     # 如果指定了接口，不创建完整接口列表文件
@@ -143,165 +158,91 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
         if inspect.isfunction(obj) and not name.startswith('_'):
             all_functions.append(name)
     
-    if interface_name in all_functions:
-        try:
-            # ================================
-            # 4. API类型识别
-            # ================================
-            
-            # 根据接口名称判断API类型
-            api_type = None
-            for type_name, keywords in API_TEST_PARAMS["API_TYPE_KEYWORDS"].items():
-                if any(keyword in interface_name for keyword in keywords):
-                    api_type = type_name
-                    break
-            
-            # 获取测试代码
-            test_code = API_TEST_PARAMS["TEST_CODES"].get(api_type, API_TEST_PARAMS["TEST_CODES"]["stock"])
-            
-            # ================================
-            # 5. 专业级API调用策略
-            # ================================
-            
-            result = None
-            attempt = 0
-            max_attempts = 4  # 无参数、特定测试代码、all、其他参数
-            
-            while result is None and attempt < max_attempts:
-                attempt += 1
-                
-                if attempt == 1:
-                    # 第1步：尝试无参数调用（最简单的方式）
-                    if API_TEST_PARAMS["VERBOSE"]:
-                        print(f"  📡 第{attempt}步：尝试无参数调用 {interface_name}()")
-                    try:
-                        result = getattr(ak, interface_name)()
-                    except Exception as e:
-                        if API_TEST_PARAMS["VERBOSE"]:
-                            print(f"  ⚠️ 无参数调用失败: {str(e)}")
-                
-                elif attempt == 2 and api_type:
-                    # 第2步：使用适合该API类型的测试代码
-                    if API_TEST_PARAMS["VERBOSE"]:
-                        print(f"  📡 第{attempt}步：尝试使用{api_type}测试代码({test_code})调用 {interface_name}(symbol='{test_code}')")
-                    try:
-                        result = getattr(ak, interface_name)(symbol=test_code)
-                    except Exception as e:
-                        if API_TEST_PARAMS["VERBOSE"]:
-                            print(f"  ⚠️ 使用{api_type}测试代码调用失败: {str(e)}")
-                
-                elif attempt == 3 and API_TEST_PARAMS["ALL_PARAM_RETRY"]:
-                    # 第3步：尝试使用"all"（数据量大但可能成功）
-                    if API_TEST_PARAMS["VERBOSE"]:
-                        print(f"  📡 第{attempt}步：尝试使用'all'调用 {interface_name}(symbol='all')")
-                    try:
-                        result = getattr(ak, interface_name)(symbol="all")
-                    except Exception as e:
-                        if API_TEST_PARAMS["VERBOSE"]:
-                            print(f"  ⚠️ 使用'all'调用失败: {str(e)}")
-                
-                else:
-                    # 第4步：尝试其他常见参数
-                    if API_TEST_PARAMS["VERBOSE"]:
-                        print(f"  📡 第{attempt}步：尝试其他常见参数")
-                    
-                    # 为避免嵌套try-except导致的语法问题，使用函数封装
-                    def try_stock_params():
-                        try:
-                            result = getattr(ak, interface_name)(symbol="sh600519")
-                            if API_TEST_PARAMS["VERBOSE"]:
-                                print(f"  📡 尝试调用: {interface_name}(symbol='sh600519')")
-                            return result
-                        except:
-                            try:
-                                result = getattr(ak, interface_name)(symbol="sz000001")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sz000001')")
-                                return result
-                            except:
-                                return None
-                    
-                    def try_etf_params():
-                        try:
-                            result = getattr(ak, interface_name)(symbol="sh510300")
-                            if API_TEST_PARAMS["VERBOSE"]:
-                                print(f"  📡 尝试调用: {interface_name}(symbol='sh510300')")
-                            return result
-                        except:
-                            try:
-                                result = getattr(ak, interface_name)(symbol="sh518880")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sh518880')")
-                                return result
-                            except:
-                                return None
-                    
-                    def try_index_params():
-                        try:
-                            result = getattr(ak, interface_name)(symbol="sh000001")
-                            if API_TEST_PARAMS["VERBOSE"]:
-                                print(f"  📡 尝试调用: {interface_name}(symbol='sh000001')")
-                            return result
-                        except:
-                            try:
-                                result = getattr(ak, interface_name)(symbol="sz399001")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sz399001')")
-                                return result
-                            except:
-                                return None
-                    
-                    def try_generic_params():
-                        try:
-                            return getattr(ak, interface_name)(period="daily")
-                        except:
-                            try:
-                                return getattr(ak, interface_name)(date="20230101")
-                            except:
-                                try:
-                                    return getattr(ak, interface_name)(market="sh")
-                                except:
-                                    return None
-                    
-                    # 根据API类型调用相应的尝试函数
-                    if api_type == "stock":
-                        result = try_stock_params()
-                    elif api_type == "etf":
-                        result = try_etf_params()
-                    elif api_type == "index":
-                        result = try_index_params()
-                    else:
-                        result = try_generic_params()
-                
-                # 检查是否成功获取列名
-                if result is not None:
-                    if hasattr(result, 'columns') and len(result.columns) > 0:
-                        if API_TEST_PARAMS["VERBOSE"]:
-                            print(f"  ✅ 第{attempt}步调用成功，成功获取列名")
-                        break
-                    else:
-                        result = None
-            
-            # ================================
-            # 6. 结果处理
-            # ================================
-            
-            if result is not None and hasattr(result, 'columns') and len(result.columns) > 0:
-                columns = ", ".join(result.columns)
-                print(f"  🗂️ 成功获取列名: {columns}")
-                
-                # 打印前几行数据示例
-                if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and hasattr(result, 'empty') and not result.empty:
-                    print(f"  📊 前{API_TEST_PARAMS['SAMPLE_ROWS']}行数据示例:\n{result.head(API_TEST_PARAMS['SAMPLE_ROWS'])}")
-            else:
-                print(f"  ❌ 尝试了{attempt}种方式，仍无法获取有效的列名")
-                
-        except Exception as e:
-            print(f"  ❌ 接口 {interface_name} 调用失败: {str(e)}")
-            print(f"  📝 Traceback: {traceback.format_exc()}")
-    else:
+    # 【关键修复】简化逻辑：接口不存在直接报告，不再尝试各种调用方式
+    if interface_name not in all_functions:
         print(f"  ❌ 错误: 接口 '{interface_name}' 未在AkShare中找到")
-        print(f"  📌 提示: 当前版本AkShare共有 {len(all_functions)} 个可用接口，您可以使用不带参数的方式运行脚本查看完整列表")
+        print(f"  📌 提示: 当前版本AkShare共有 {len(all_functions)} 个可用接口")
+        
+        # 提供可能的建议
+        if "financial" in interface_name.lower():
+            print("\n💡 专业提示：财务相关接口可能名称有误，常见财务接口包括：")
+            print("   - stock_financial_analysis_sina")
+            print("   - stock_financial_abstract")
+            print("   - stock_financial_report_sina")
+        elif "stock" in interface_name.lower():
+            print("\n💡 专业提示：股票相关接口可能名称有误，常见股票接口包括：")
+            print("   - stock_zh_a_spot_em")
+            print("   - stock_zh_a_hist")
+            print("   - stock_zh_a_hist_hfq_em")
+        elif "etf" in interface_name.lower():
+            print("\n💡 专业提示：ETF相关接口可能名称有误，常见ETF接口包括：")
+            print("   - fund_etf_hist_sina")
+            print("   - fund_etf_spot_em")
+            print("   - fund_etf_hist_em")
+            
+        print(f"\nℹ️ 提示: 运行不带参数的命令可查看所有可用接口")
+        sys.exit(1)
+    
+    try:
+        # ================================
+        # 4. API类型识别
+        # ================================
+        
+        # 根据接口名称判断API类型
+        api_type = None
+        for type_name, keywords in API_TEST_PARAMS["API_TYPE_KEYWORDS"].items():
+            if any(keyword in interface_name for keyword in keywords):
+                api_type = type_name
+                break
+        
+        # 获取测试代码
+        test_code = API_TEST_PARAMS["TEST_CODES"].get(api_type, API_TEST_PARAMS["TEST_CODES"]["stock"])
+        
+        # ================================
+        # 5. 简化API调用策略
+        # ================================
+        
+        result = None
+        
+        # 【关键修复】简化调用逻辑：只尝试两种方式（无参数和带测试代码）
+        print(f"  📡 尝试调用接口 {interface_name}...")
+        
+        # 尝试1：无参数调用
+        try:
+            print(f"  📡 尝试1：无参数调用 {interface_name}()")
+            result = getattr(ak, interface_name)()
+            print(f"  ✅ 无参数调用成功")
+        except Exception as e:
+            print(f"  ⚠️ 无参数调用失败: {str(e)}")
+            
+            # 尝试2：使用适合该API类型的测试代码
+            if api_type:
+                try:
+                    print(f"  📡 尝试2：使用{api_type}测试代码({test_code})调用 {interface_name}(symbol='{test_code}')")
+                    result = getattr(ak, interface_name)(symbol=test_code)
+                    print(f"  ✅ 使用测试代码调用成功")
+                except Exception as e2:
+                    print(f"  ⚠️ 使用测试代码调用失败: {str(e2)}")
+        
+        # ================================
+        # 6. 结果处理
+        # ================================
+        
+        if result is not None and hasattr(result, 'columns') and len(result.columns) > 0:
+            columns = ", ".join(result.columns)
+            print(f"  🗂️ 成功获取列名: {columns}")
+            
+            # 打印前几行数据示例
+            if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and hasattr(result, 'empty') and not result.empty:
+                print(f"  📊 前{API_TEST_PARAMS['SAMPLE_ROWS']}行数据示例:\n{result.head(API_TEST_PARAMS['SAMPLE_ROWS'])}")
+        else:
+            print(f"  ❌ 接口调用成功但返回空DataFrame，无法获取列名")
+            print(f"  ℹ️ 提示: 可能需要其他参数或该接口返回非DataFrame类型")
+            
+    except Exception as e:
+        print(f"  ❌ 接口 {interface_name} 调用失败: {str(e)}")
+        print(f"  📝 Traceback: {traceback.format_exc()}")
+
 else:
     print("\nℹ️ 提示: 如需查询特定接口的列名，请使用: python get_akshare_info.py 接口名称")
-    print("   例如: python get_akshare_info.py stock_financial_analysis_indicator")
+    print("   例如: python get_akshare_info.py stock_zh_a_spot_em")

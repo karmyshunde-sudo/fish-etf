@@ -988,14 +988,68 @@ def save_and_commit_stock_codes(top_stocks):
             for code in sorted(all_stock_codes):
                 f.write(code + '\n')
         
-        logger.info(f"已保存股票代码到 {file_path}")
+        logger.info(f"✅ 已保存股票代码到 {file_path}")
+        logger.info(f"文件内容预览: {list(all_stock_codes)[:5]}... (共{len(all_stock_codes)}个代码)")
         
-        # 【关键修复】使用 git_utils 提交文件到Git仓库
-        commit_files_in_batches(file_path, f"Add tick data file: {filename}")
-        logger.info(f"已通过 git_utils 提交文件到Git仓库: {file_path}")
+        # 【关键修复】使用 git_utils 提交文件到Git仓库 - 标记为LAST_FILE
+        logger.info("=== 开始Git提交流程 ===")
+        # 标记为LAST_FILE确保立即提交（不等待批量阈值）
+        success = commit_files_in_batches(file_path, "LAST_FILE")
+        
+        if success:
+            logger.info(f"✅ 成功提交文件到Git仓库: {file_path}")
+            
+            # 添加提交后验证
+            repo_root = os.getenv('GITHUB_WORKSPACE', '.')
+            relative_path = os.path.relpath(file_path, repo_root)
+            git_status = subprocess.run(
+                ['git', 'status', '--porcelain', relative_path],
+                cwd=repo_root,
+                capture_output=True,
+                text=True
+            )
+            
+            if not git_status.stdout.strip():
+                logger.info("✅ 文件已成功提交到远程仓库")
+            else:
+                logger.error("❌ 文件未完全提交到远程仓库")
+                # 尝试强制提交剩余文件
+                from utils.git_utils import force_commit_remaining_files
+                force_commit_remaining_files()
+        else:
+            logger.error(f"❌ 提交文件到Git仓库失败: {file_path}")
+            
+            # 添加详细的诊断信息
+            repo_root = os.getenv('GITHUB_WORKSPACE', '.')
+            logger.info(f"当前工作目录: {os.getcwd()}")
+            logger.info(f"仓库根目录: {repo_root}")
+            
+            # 检查Git状态
+            git_status = subprocess.run(
+                ['git', 'status'],
+                cwd=repo_root,
+                capture_output=True,
+                text=True
+            )
+            logger.info(f"Git状态:\n{git_status.stdout}")
+            
+            # 检查暂存区
+            git_diff = subprocess.run(
+                ['git', 'diff', '--cached'],
+                cwd=repo_root,
+                capture_output=True,
+                text=True
+            )
+            logger.info(f"暂存区差异:\n{git_diff.stdout}")
+            
+            # 发送错误通知
+            error_msg = f"❌ 股票筛选结果文件提交失败: {filename}\n请立即检查系统"
+            send_wechat_message(message=error_msg, message_type="error")
         
     except Exception as e:
-        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
+        error_msg = f"❌ 股票筛选结果文件保存失败: {str(e)}"
+        send_wechat_message(message=error_msg, message_type="error")
 
 def generate_strategy_report():
     """生成策略报告并发送微信通知"""

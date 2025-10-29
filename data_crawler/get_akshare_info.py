@@ -62,7 +62,8 @@ import sys
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
 
-# 【终极修复】正确且简单的导入方式
+# 【关键修复】正确导入git_utils模块
+# 仅添加一行简单导入，符合项目结构
 from utils.git_utils import commit_files_in_batches
 
 # ================================
@@ -126,7 +127,7 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 【关键修复】直接使用已有的git_utils模块中的函数
+    # 【关键修复】使用已有的git_utils模块中的函数
     try:
         commit_files_in_batches(file_path, "更新AkShare接口列表")
         print(f"✅ 文件 {file_name} 已成功提交到Git仓库")

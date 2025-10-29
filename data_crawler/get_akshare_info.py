@@ -6,7 +6,23 @@
 """
 
 # ================================
-# 1. 专业级参数定义区 (所有可配置参数都在这里)
+# 1. 导入模块和配置
+# ================================
+
+import akshare as ak
+import inspect
+import os
+import logging
+import time
+from datetime import datetime
+import traceback
+import sys
+
+# 配置日志
+logging.basicConfig(level=logging.ERROR)
+
+# ================================
+# 2. 全局常量/参数定义
 # ================================
 
 # API测试参数
@@ -45,32 +61,6 @@ FILE_PARAMS = {
     "FILE_PREFIX": "akshare_info",
     "DATE_FORMAT": "%Y%m%d"
 }
-
-# ================================
-# 2. 导入模块和配置
-# ================================
-
-import akshare as ak
-import inspect
-import os
-import logging
-import time
-from datetime import datetime
-import traceback
-import sys
-
-# 配置日志
-logging.basicConfig(level=logging.ERROR)
-
-# 【精确修复】正确解决模块导入路径问题
-# 获取当前文件所在目录的父目录（项目根目录）
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# 将项目根目录添加到Python路径
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# 现在可以安全导入git_utils模块
-from utils.git_utils import commit_files_in_batches
 
 # ================================
 # 3. 主要逻辑
@@ -133,10 +123,25 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 使用已有的git_utils模块中的函数
+    # 【关键修复】确保文件真正提交到Git仓库
     try:
-        commit_files_in_batches(file_path, "更新AkShare接口列表")
-        print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
+        # 1. 导入git_utils模块
+        from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
+        
+        # 2. 提交文件
+        print(f"ℹ️ 尝试将文件提交到Git仓库...")
+        success = commit_files_in_batches(file_path, "更新AkShare接口列表")
+        
+        if success:
+            # 3. 强制提交剩余文件（确保立即生效）
+            print(f"ℹ️ 强制提交剩余文件以确保更改生效...")
+            force_commit_remaining_files()
+            print(f"✅ 文件 {file_name} 已成功提交到Git仓库并强制推送")
+        else:
+            print(f"⚠️ 提交文件到Git仓库失败，请检查Git配置")
+    except ImportError as e:
+        print(f"❌ 无法导入git_utils模块: {str(e)}")
+        print(f"💡 提示: 请确保项目结构正确，utils目录位于项目根目录")
     except Exception as e:
         print(f"⚠️ 提交文件到Git仓库失败: {str(e)}")
     

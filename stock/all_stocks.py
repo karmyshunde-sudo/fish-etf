@@ -43,9 +43,10 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# 重试配置
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # 重试前等待时间（秒）
+# 专业级重试配置
+MAX_RETRIES = 5  # 增加重试次数
+BASE_RETRY_DELAY = 8  # 基础重试延迟（秒）
+MAX_RANDOM_DELAY = 15  # 最大随机延时（秒）
 
 def format_stock_code(code):
     """
@@ -116,9 +117,9 @@ def get_stock_financial_data():
     """
     for retry in range(MAX_RETRIES):
         try:
-            # 【关键修复】添加随机延时避免被封（5.0-8.0秒）
-            delay = random.uniform(5.0, 8.0)
-            logger.info(f"获取财务数据前等待 {delay:.2f} 秒...")
+            # 【终极修复】大幅增加随机延时（8.0-15.0秒）- 避免被封
+            delay = random.uniform(8.0, 15.0)
+            logger.info(f"获取财务数据前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
             time.sleep(delay)
             
             logger.info("正在获取股票财务数据...")
@@ -129,8 +130,11 @@ def get_stock_financial_data():
             if financial_data.empty:
                 logger.error("获取股票财务数据失败：返回空数据")
                 if retry < MAX_RETRIES - 1:
-                    logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                    time.sleep(RETRY_DELAY)
+                    # 【智能退避】每次重试增加额外延迟
+                    extra_delay = retry * 3
+                    total_delay = BASE_RETRY_DELAY + extra_delay
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                    time.sleep(total_delay)
                     continue
                 return pd.DataFrame()
             
@@ -160,8 +164,11 @@ def get_stock_financial_data():
         except Exception as e:
             logger.error(f"获取股票财务数据失败 (尝试 {retry+1}/{MAX_RETRIES}): {str(e)}", exc_info=True)
             if retry < MAX_RETRIES - 1:
-                logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY)
+                # 【智能退避】每次重试增加额外延迟
+                extra_delay = retry * 3
+                total_delay = BASE_RETRY_DELAY + extra_delay
+                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                time.sleep(total_delay)
     
     logger.error("获取股票财务数据失败，已达到最大重试次数")
     return pd.DataFrame()
@@ -175,9 +182,9 @@ def get_stock_pledge_data():
     """
     for retry in range(MAX_RETRIES):
         try:
-            # 【关键修复】添加随机延时避免被封（5.0-8.0秒）
-            delay = random.uniform(5.0, 8.0)
-            logger.info(f"获取质押数据前等待 {delay:.2f} 秒...")
+            # 【终极修复】大幅增加随机延时（8.0-15.0秒）- 避免被封
+            delay = random.uniform(8.0, 15.0)
+            logger.info(f"获取质押数据前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
             time.sleep(delay)
             
             logger.info("正在获取股票质押数据...")
@@ -188,8 +195,11 @@ def get_stock_pledge_data():
             if pledge_data.empty:
                 logger.error("获取股票质押数据失败：返回空数据")
                 if retry < MAX_RETRIES - 1:
-                    logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                    time.sleep(RETRY_DELAY)
+                    # 【智能退避】每次重试增加额外延迟
+                    extra_delay = retry * 3
+                    total_delay = BASE_RETRY_DELAY + extra_delay
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                    time.sleep(total_delay)
                     continue
                 return pd.DataFrame()
             
@@ -210,8 +220,11 @@ def get_stock_pledge_data():
         except Exception as e:
             logger.error(f"获取股票质押数据失败 (尝试 {retry+1}/{MAX_RETRIES}): {str(e)}", exc_info=True)
             if retry < MAX_RETRIES - 1:
-                logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY)
+                # 【智能退避】每次重试增加额外延迟
+                extra_delay = retry * 3
+                total_delay = BASE_RETRY_DELAY + extra_delay
+                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                time.sleep(total_delay)
     
     logger.error("获取股票质押数据失败，已达到最大重试次数")
     return pd.DataFrame()
@@ -225,9 +238,9 @@ def get_stock_basic_info():
     """
     for retry in range(MAX_RETRIES):
         try:
-            # 【关键修复】添加随机延时避免被封（5.0-8.0秒）
-            delay = random.uniform(5.0, 8.0)
-            logger.info(f"获取基础信息前等待 {delay:.2f} 秒...")
+            # 【终极修复】大幅增加随机延时（8.0-15.0秒）- 避免被封
+            delay = random.uniform(8.0, 15.0)
+            logger.info(f"获取基础信息前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
             time.sleep(delay)
             
             logger.info("正在获取股票基础信息...")
@@ -238,8 +251,11 @@ def get_stock_basic_info():
             if stock_info.empty:
                 logger.error("获取股票基础信息失败：返回空数据")
                 if retry < MAX_RETRIES - 1:
-                    logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                    time.sleep(RETRY_DELAY)
+                    # 【智能退避】每次重试增加额外延迟
+                    extra_delay = retry * 3
+                    total_delay = BASE_RETRY_DELAY + extra_delay
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                    time.sleep(total_delay)
                     continue
                 return pd.DataFrame()
             
@@ -250,8 +266,11 @@ def get_stock_basic_info():
             if not available_columns:
                 logger.error("接口返回数据缺少所有必要列")
                 if retry < MAX_RETRIES - 1:
-                    logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                    time.sleep(RETRY_DELAY)
+                    # 【智能退避】每次重试增加额外延迟
+                    extra_delay = retry * 3
+                    total_delay = BASE_RETRY_DELAY + extra_delay
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                    time.sleep(total_delay)
                     continue
                 return pd.DataFrame()
             
@@ -383,8 +402,11 @@ def get_stock_basic_info():
         except Exception as e:
             logger.error(f"获取股票基础信息失败 (尝试 {retry+1}/{MAX_RETRIES}): {str(e)}", exc_info=True)
             if retry < MAX_RETRIES - 1:
-                logger.warning(f"将在 {RETRY_DELAY} 秒后重试 ({retry+1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY)
+                # 【智能退避】每次重试增加额外延迟
+                extra_delay = retry * 3
+                total_delay = BASE_RETRY_DELAY + extra_delay
+                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                time.sleep(total_delay)
     
     logger.error("获取股票基础信息失败，已达到最大重试次数")
     return pd.DataFrame()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-获取AkShare信息工具 - 专业级API测试
+获取AkShare信息工具 - 严格语法正确的版本
 注意：这不是项目的主程序，而是被工作流调用的工具脚本
 """
 
@@ -204,62 +204,74 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                     # 第4步：尝试其他常见参数
                     if API_TEST_PARAMS["VERBOSE"]:
                         print(f"  📡 第{attempt}步：尝试其他常见参数")
-                    try:
-                        # 根据API类型尝试不同参数组合
-                        if api_type == "stock":
+                    
+                    # 为避免嵌套try-except导致的语法问题，使用函数封装
+                    def try_stock_params():
+                        try:
+                            result = getattr(ak, interface_name)(symbol="sh600519")
+                            if API_TEST_PARAMS["VERBOSE"]:
+                                print(f"  📡 尝试调用: {interface_name}(symbol='sh600519')")
+                            return result
+                        except:
                             try:
-                                result = getattr(ak, interface_name)(symbol="sh600519")
+                                result = getattr(ak, interface_name)(symbol="sz000001")
                                 if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sh600519')")
+                                    print(f"  📡 尝试调用: {interface_name}(symbol='sz000001')")
+                                return result
+                            except:
+                                return None
+                    
+                    def try_etf_params():
+                        try:
+                            result = getattr(ak, interface_name)(symbol="sh510300")
+                            if API_TEST_PARAMS["VERBOSE"]:
+                                print(f"  📡 尝试调用: {interface_name}(symbol='sh510300')")
+                            return result
+                        except:
+                            try:
+                                result = getattr(ak, interface_name)(symbol="sh518880")
+                                if API_TEST_PARAMS["VERBOSE"]:
+                                    print(f"  📡 尝试调用: {interface_name}(symbol='sh518880')")
+                                return result
+                            except:
+                                return None
+                    
+                    def try_index_params():
+                        try:
+                            result = getattr(ak, interface_name)(symbol="sh000001")
+                            if API_TEST_PARAMS["VERBOSE"]:
+                                print(f"  📡 尝试调用: {interface_name}(symbol='sh000001')")
+                            return result
+                        except:
+                            try:
+                                result = getattr(ak, interface_name)(symbol="sz399001")
+                                if API_TEST_PARAMS["VERBOSE"]:
+                                    print(f"  📡 尝试调用: {interface_name}(symbol='sz399001')")
+                                return result
+                            except:
+                                return None
+                    
+                    def try_generic_params():
+                        try:
+                            return getattr(ak, interface_name)(period="daily")
+                        except:
+                            try:
+                                return getattr(ak, interface_name)(date="20230101")
                             except:
                                 try:
-                                    result = getattr(ak, interface_name)(symbol="sz000001")
-                                    if API_TEST_PARAMS["VERBOSE"]:
-                                        print(f"  📡 尝试调用: {interface_name}(symbol='sz000001')")
+                                    return getattr(ak, interface_name)(market="sh")
                                 except:
-                                    pass
-                        elif api_type == "etf":
-                            try:
-                                result = getattr(ak, interface_name)(symbol="sh510300")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sh510300')")
-                            except:
-                                try:
-                                    result = getattr(ak, interface_name)(symbol="sh518880")
-                                    if API_TEST_PARAMS["VERBOSE"]:
-                                        print(f"  📡 尝试调用: {interface_name}(symbol='sh518880')")
-                                except:
-                                    pass
-                        elif api_type == "index":
-                            try:
-                                result = getattr(ak, interface_name)(symbol="sh000001")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(symbol='sh000001')")
-                            except:
-                                try:
-                                    result = getattr(ak, interface_name)(symbol="sz399001")
-                                    if API_TEST_PARAMS["VERBOSE"]:
-                                        print(f"  📡 尝试调用: {interface_name}(symbol='sz399001')")
-                                except:
-                                    pass
-                        else:
-                            # 尝试一些通用参数组合
-                            try:
-                                result = getattr(ak, interface_name)(period="daily")
-                                if API_TEST_PARAMS["VERBOSE"]:
-                                    print(f"  📡 尝试调用: {interface_name}(period='daily')")
-                            except:
-                                try:
-                                    result = getattr(ak, interface_name)(date="20230101")
-                                    if API_TEST_PARAMS["VERBOSE"]:
-                                        print(f"  📡 尝试调用: {interface_name}(date='20230101')")
-                                except:
-                                    try:
-                                        result = getattr(ak, interface_name)(market="sh")
-                                        if API_TEST_PARAMS["VERBOSE"]:
-                                            print(f"  📡 尝试调用: {interface_name}(market='sh')")
-                                    except:
-                                        pass
+                                    return None
+                    
+                    # 根据API类型调用相应的尝试函数
+                    if api_type == "stock":
+                        result = try_stock_params()
+                    elif api_type == "etf":
+                        result = try_etf_params()
+                    elif api_type == "index":
+                        result = try_index_params()
+                    else:
+                        result = try_generic_params()
                 
                 # 检查是否成功获取列名
                 if result is not None:

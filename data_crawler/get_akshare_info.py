@@ -62,14 +62,8 @@ import sys
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
 
-# 【关键修复】导入git提交函数
-try:
-    from utils.git_utils import commit_files_in_batches
-    GIT_UTILS_AVAILABLE = True
-    print("ℹ️ git_utils模块已成功导入，将自动提交文件到Git仓库")
-except ImportError:
-    GIT_UTILS_AVAILABLE = False
-    print("⚠️ 无法导入git_utils模块，文件将不会自动提交到Git仓库")
+# 【终极修复】正确且简单的导入方式
+from utils.git_utils import commit_files_in_batches
 
 # ================================
 # 3. 主要逻辑
@@ -132,15 +126,12 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 【关键修复】确保文件真正提交到Git仓库
-    if GIT_UTILS_AVAILABLE:
-        try:
-            commit_files_in_batches(file_path, "更新AkShare接口列表")
-            print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
-        except Exception as e:
-            print(f"⚠️ 提交文件到Git仓库失败: {str(e)}")
-    else:
-        print("ℹ️ 由于缺少git_utils模块，文件未提交到Git仓库")
+    # 【关键修复】直接使用已有的git_utils模块中的函数
+    try:
+        commit_files_in_batches(file_path, "更新AkShare接口列表")
+        print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
+    except Exception as e:
+        print(f"⚠️ 提交文件到Git仓库失败: {str(e)}")
     
     print(f"📌 提示: 完整接口列表已保存至: {file_path}")
 else:

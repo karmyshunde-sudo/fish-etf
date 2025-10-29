@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-获取AkShare信息工具 - 专业级参数管理
+获取AkShare信息工具 - 专业级API测试
 注意：这不是项目的主程序，而是被工作流调用的工具脚本
 """
 

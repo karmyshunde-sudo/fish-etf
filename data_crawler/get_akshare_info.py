@@ -102,6 +102,10 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 # 如果函数需要参数，尝试一些常见参数
                 print(f"  ⚠️ 接口 {interface_name} 需要参数，尝试常见参数...")
                 
+                # 【关键修复】统一使用贵州茅台股票代码600519，不添加任何市场前缀
+                # 这是您指定的唯一股票代码，不进行任何猜测
+                stock_code = "600519"
+                
                 if interface_name == 'fund_etf_hist_sina':
                     print("  📡 尝试调用: fund_etf_hist_sina(symbol='etf')")
                     result = ak.fund_etf_hist_sina(symbol="etf")
@@ -112,40 +116,100 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                     print("  📡 尝试调用: fund_aum_em()")
                     result = ak.fund_aum_em()
                 elif interface_name == 'stock_zh_a_hist':
-                    print("  📡 尝试调用: stock_zh_a_hist(symbol='sh000001', period='daily', start_date='20200101', end_date='20200110')")
-                    result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_hist(symbol='{stock_code}', period='daily', start_date='20200101', end_date='20200110')")
+                    result = ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_hist_min':
-                    print("  📡 尝试调用: stock_zh_a_hist_min(...)")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_hist_min(symbol='{stock_code}', period='5', start_date='2020-01-01 09:30:00', end_date='2020-01-01 15:00:00')")
                     result = ak.stock_zh_a_hist_min(
-                        symbol="sh000001", 
+                        symbol=stock_code, 
                         period="5", 
                         start_date="2020-01-01 09:30:00", 
                         end_date="2020-01-01 15:00:00"
                     )
                 elif interface_name == 'stock_zh_a_hist_hfq':
-                    print("  📡 尝试调用: stock_zh_a_hist_hfq(...)")
-                    result = ak.stock_zh_a_hist_hfq(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_hist_hfq(symbol='{stock_code}', period='daily', start_date='20200101', end_date='20200110')")
+                    result = ak.stock_zh_a_hist_hfq(symbol=stock_code, period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_hist_hfq_em':
-                    print("  📡 尝试调用: stock_zh_a_hist_hfq_em(...)")
-                    result = ak.stock_zh_a_hist_hfq_em(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_hist_hfq_em(symbol='{stock_code}', period='daily', start_date='20200101', end_date='20200110')")
+                    result = ak.stock_zh_a_hist_hfq_em(symbol=stock_code, period="daily", start_date="20200101", end_date="20200110")
                 elif interface_name == 'stock_zh_a_minute':
-                    print("  📡 尝试调用: stock_zh_a_minute(...)")
-                    result = ak.stock_zh_a_minute(symbol="sh000001", period="5", adjust="qfq")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_minute(symbol='{stock_code}', period='5', adjust='qfq')")
+                    result = ak.stock_zh_a_minute(symbol=stock_code, period="5", adjust="qfq")
                 elif interface_name == 'stock_zh_a_daily':
-                    print("  📡 尝试调用: stock_zh_a_daily(...)")
-                    result = ak.stock_zh_a_daily(symbol="sh000001", adjust="qfq")
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_daily(symbol='{stock_code}', adjust='qfq')")
+                    result = ak.stock_zh_a_daily(symbol=stock_code, adjust="qfq")
                 elif interface_name == 'stock_zh_a_spot_em':
                     print("  📡 尝试调用: stock_zh_a_spot_em()")
                     result = ak.stock_zh_a_spot_em()
-                elif interface_name == 'stock_zh_a_hist':
-                    print("  📡 尝试调用: stock_zh_a_hist(...)")
-                    result = ak.stock_zh_a_hist(symbol="sh000001", period="daily", start_date="20200101", end_date="20200110")
-                elif interface_name == 'fund_etf_hist_em':
-                    print("  📡 尝试调用: fund_etf_hist_em()")
-                    result = ak.fund_etf_hist_em()
-                elif interface_name == 'fund_etf_iopv_em':
-                    print("  📡 尝试调用: fund_etf_iopv_em()")
-                    result = ak.fund_etf_iopv_em()
+                elif interface_name == 'stock_zh_a_spot':
+                    print("  📡 尝试调用: stock_zh_a_spot()")
+                    result = ak.stock_zh_a_spot()
+                elif interface_name == 'stock_zh_a_tick_tx':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_tick_tx(symbol='{stock_code}')")
+                    result = ak.stock_zh_a_tick_tx(symbol=stock_code)
+                elif interface_name == 'stock_zh_a_tick_163':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_tick_163(symbol='{stock_code}')")
+                    result = ak.stock_zh_a_tick_163(symbol=stock_code)
+                elif interface_name == 'stock_zh_a_minute':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_minute(symbol='{stock_code}', period='5')")
+                    result = ak.stock_zh_a_minute(symbol=stock_code, period="5")
+                elif interface_name == 'stock_zh_a_cdr_daily':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_cdr_daily(symbol='{stock_code}')")
+                    result = ak.stock_zh_a_cdr_daily(symbol=stock_code)
+                elif interface_name == 'stock_zh_a_cdr_daily_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_cdr_daily_em(symbol='{stock_code}')")
+                    result = ak.stock_zh_a_cdr_daily_em(symbol=stock_code)
+                elif interface_name == 'stock_zh_a_gdfx_free_top_10_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_free_top_10_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_free_top_10_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_top_10_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_top_10_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_top_10_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_free_holding_detail_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_free_holding_detail_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_free_holding_detail_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_holding_detail_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_holding_detail_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_holding_detail_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_free_holding_change_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_free_holding_change_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_free_holding_change_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_holding_change_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_holding_change_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_holding_change_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_free_holding_institute_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_free_holding_institute_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_free_holding_institute_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_holding_institute_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_holding_institute_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_holding_institute_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_free_holding_person_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_free_holding_person_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_free_holding_person_em(symbol=stock_code, date="20230630")
+                elif interface_name == 'stock_zh_a_gdfx_holding_person_em':
+                    # 【关键修复】使用贵州茅台代码600519，不添加市场前缀
+                    print(f"  📡 尝试调用: stock_zh_a_gdfx_holding_person_em(symbol='{stock_code}', date='20230630')")
+                    result = ak.stock_zh_a_gdfx_holding_person_em(symbol=stock_code, date="20230630")
                 else:
                     print(f"  ⚠️ 接口 {interface_name} 需要特定参数，但未在预定义列表中")
                     result = None

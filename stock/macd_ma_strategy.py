@@ -584,7 +584,7 @@ def format_double_signal(combination, signals):
     ]
     
     lines.append(f"🔥 {get_combination_name(combination)}共振信号：")
-    for i, signal in enumerate(signals[:15], 1):
+    for i, signal in enumerate(signals, 1):
         code = signal["code"]
         name = signal["name"]
         if combination == "MA+MACD":
@@ -624,7 +624,7 @@ def format_triple_signal(combination, signals):
     ]
     
     lines.append(f"💎 {get_combination_name(combination)}共振信号：")
-    for i, signal in enumerate(signals[:10], 1):
+    for i, signal in enumerate(signals, 1):
         code = signal["code"]
         name = signal["name"]
         if combination == "MA+MACD+RSI":
@@ -660,7 +660,7 @@ def format_quadruple_signal(signals):
     ]
     
     lines.append("✨ MA+MACD+RSI+KDJ全指标共振信号：")
-    for i, signal in enumerate(signals[:5], 1):
+    for i, signal in enumerate(signals, 1):
         code = signal["code"]
         name = signal["name"]
         lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，MACD增长：{signal['macd']['growth_rate']:.0%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
@@ -673,50 +673,61 @@ def format_quadruple_signal(signals):
     return "\n".join(lines)
 
 def format_threema_signal(signals):
-    """格式化三均线粘合突破信号"""
+    """格式化三均线粘合突破信号（分页显示）"""
     if not signals:
         return ""
     
     # 按粘合持续天数排序（持续天数越长排名越前）
     signals = sorted(signals, key=lambda x: x["consolidation_days"], reverse=True)
     
-    # 生成消息
-    today = datetime.now().strftime("%Y-%m-%d")
-    lines = [
-        f"【策略2 - 三均线粘合突破信号】",
-        f"日期：{today}",
-        ""
-    ]
+    # 分页处理
+    page_size = 20
+    pages = [signals[i:i+page_size] for i in range(0, len(signals), page_size)]
+    messages = []
     
-    lines.append("✅ 三均线粘合突破信号：")
-    for i, signal in enumerate(signals[:20], 1):
-        code = signal["code"]
-        name = signal["name"]
-        lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
+    for page_num, page_signals in enumerate(pages, 1):
+        # 生成消息
+        today = datetime.now().strftime("%Y-%m-%d")
+        lines = [
+            f"【策略3 - 3均线粘合{MIN_CONSOLIDATION_DAYS}天】",
+            f"日期：{today}",
+            f"第{page_num}页（共{len(pages)}页）",
+            ""
+        ]
+        
+        lines.append(f"✅ 三均线粘合突破信号（共{len(signals)}只，本页{len(page_signals)}只）：")
+        for i, signal in enumerate(page_signals, 1):
+            code = signal["code"]
+            name = signal["name"]
+            lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
+        
+        if page_signals:
+            # 只在第一页显示信号解读
+            if page_num == 1:
+                lines.append("")
+                lines.append("💎 信号解读：")
+                lines.append("三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超90%。")
+                lines.append("信号质量判断：")
+                lines.append("1. 粘合阶段：窄区间（<2%）、长周期（≥5天）、极致缩量（量能缩减50%以上）")
+                lines.append("2. 突破阶段：同步向上、幅度够（>3%）、量能温（量能增加50%-100%）")
+                lines.append("3. 确认阶段：不回落、均线稳（偏离<8%）、量能续（不骤缩）")
+                lines.append("")
+                lines.append("📈 操作建议：")
+                lines.append("• 突破确认后立即建仓30%，回调至5日均线加仓20%")
+                lines.append("• 止损位：突破当日最低价下方2%")
+                lines.append("• 止盈位：1:3风险收益比，或偏离20日均线10%")
+                lines.append("• 仓位控制：单只标的≤20%，总仓位≤60%")
+        
+        messages.append("\n".join(lines))
     
-    if signals:
-        lines.append("")
-        lines.append("💎 信号解读：")
-        lines.append("三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超90%。")
-        lines.append("信号质量判断：")
-        lines.append("1. 粘合阶段：窄区间（<2%）、长周期（≥5天）、极致缩量（量能缩减50%以上）")
-        lines.append("2. 突破阶段：同步向上、幅度够（>3%）、量能温（量能增加50%-100%）")
-        lines.append("3. 确认阶段：不回落、均线稳（偏离<8%）、量能续（不骤缩）")
-        lines.append("")
-        lines.append("📈 操作建议：")
-        lines.append("• 突破确认后立即建仓30%，回调至5日均线加仓20%")
-        lines.append("• 止损位：突破当日最低价下方2%")
-        lines.append("• 止盈位：1:3风险收益比，或偏离20日均线10%")
-        lines.append("• 仓位控制：单只标的≤20%，总仓位≤60%")
-    
-    return "\n".join(lines)
+    return messages
 
 def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
                                double_signals, triple_signals, quadruple_signals):
-    """保存股票代码到文件并提交到Git仓库"""
+    """保存股票代码到文件并提交到Git仓库（严格遵循微信推送逻辑）"""
     try:
         # 获取当前时间
-        now = datetime.now()
+        now = get_beijing_time()
         timestamp = now.strftime("%Y%m%d%H%M")
         filename = f"macd{timestamp}.txt"
         
@@ -730,30 +741,32 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
         # 收集所有股票代码
         all_stock_codes = set()
         
-        # 从单一指标信号收集
-        for signals in [ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals]:
-            for signal in signals:
-                # 确保是6位股票代码
+        # 1. 单一指标信号：MA、MACD、RSI、KDJ 取前20名
+        for signals in [ma_signals, macd_signals, rsi_signals, kdj_signals]:
+            # 取前20名（与微信推送一致）
+            for signal in signals[:20]:
                 code = str(signal['code']).zfill(6)
                 all_stock_codes.add(code)
         
-        # 从双指标共振信号收集
+        # 2. THREEMA信号（三均线缠绕）不进行过滤，全部收集
+        for signal in threema_signals:
+            code = str(signal['code']).zfill(6)
+            all_stock_codes.add(code)
+        
+        # 3. 双指标共振信号：不进行过滤，全部收集
         for signals_list in double_signals.values():
             for signal in signals_list:
-                # 确保是6位股票代码
                 code = str(signal['code']).zfill(6)
                 all_stock_codes.add(code)
         
-        # 从三指标共振信号收集
+        # 4. 三指标共振信号：不进行过滤，全部收集
         for signals_list in triple_signals.values():
             for signal in signals_list:
-                # 确保是6位股票代码
                 code = str(signal['code']).zfill(6)
                 all_stock_codes.add(code)
         
-        # 从四指标共振信号收集
+        # 5. 四指标共振信号：不进行过滤，全部收集
         for signal in quadruple_signals:
-            # 确保是6位股票代码
             code = str(signal['code']).zfill(6)
             all_stock_codes.add(code)
         
@@ -762,14 +775,21 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
             for code in sorted(all_stock_codes):
                 f.write(code + '\n')
         
-        logger.info(f"已保存股票代码到 {file_path}")
+        logger.info(f"✅ 已保存股票代码到 {file_path}")
+        logger.info(f"文件内容预览: {list(all_stock_codes)[:5]}... (共{len(all_stock_codes)}个代码)")
         
-        # 【关键修复】使用 git_utils 提交文件到Git仓库
-        commit_files_in_batches(file_path, f"Add macd data file: {filename}")
-        logger.info(f"已通过 git_utils 提交文件到Git仓库: {file_path}")
+        # 【关键修复】使用 git_utils 提交文件到Git仓库 - 标记为LAST_FILE
+        logger.info("=== 开始Git提交流程 ===")
+        # 标记为LAST_FILE确保立即提交（不等待批量阈值）
+        success = commit_files_in_batches(file_path, "LAST_FILE")
         
+        if success:
+            logger.info(f"✅ 成功提交文件到Git仓库: {file_path}")
+        else:
+            logger.error(f"❌ 提交文件到Git仓库失败: {file_path}")
+            
     except Exception as e:
-        logger.error(f"保存股票代码文件失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
 
 def main():
     # 1. 读取所有股票列表
@@ -931,11 +951,15 @@ def main():
                                double_signals, triple_signals, quadruple_signals)
     
     # 单一指标信号
-    for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals), ("THREEMA", threema_signals)]:
-        if category == "THREEMA":
-            message = format_threema_signal(signals)
-        else:
-            message = format_single_signal(category, signals)
+    for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
+        message = format_single_signal(category, signals)
+        if message.strip():
+            send_wechat_message(message=message, message_type="position")
+            total_messages += 1
+    
+    # THREEMA信号（三均线粘合突破）- 分页显示
+    threema_messages = format_threema_signal(threema_signals)
+    for message in threema_messages:
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1

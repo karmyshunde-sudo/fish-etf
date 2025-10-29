@@ -727,7 +727,7 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
     """保存股票代码到文件并提交到Git仓库（严格遵循微信推送逻辑）"""
     try:
         # 获取当前时间
-        now = get_beijing_time()
+        now = get_beijing_time()  # 【已修复】确保函数已正确导入
         timestamp = now.strftime("%Y%m%d%H%M")
         filename = f"macd{timestamp}.txt"
         

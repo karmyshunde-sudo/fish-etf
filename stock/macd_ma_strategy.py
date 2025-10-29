@@ -22,7 +22,7 @@ from datetime import datetime
 import logging
 import sys
 from config import Config
-from utils.date_utils import is_file_outdated
+from utils.date_utils import get_beijing_time, is_file_outdated  # 确保正确导入get_beijing_time
 from wechat_push.push import send_wechat_message  # 确保正确导入推送模块
 # 【关键修复】导入Git工具函数
 from utils.git_utils import commit_files_in_batches
@@ -418,9 +418,11 @@ def check_kdj_signal(df):
         logger.debug(f"检查KDJ信号失败: {str(e)}")
         return None
 
-def check_threema_signal(df):
-    """检查三均线粘合突破信号"""
+def check_threema_signal(df, code, name):
+    """检查三均线粘合突破信号（带详细步骤日志）"""
     try:
+        logger.debug(f"【THREEMA筛选】开始检查股票 {code} {name}")
+        
         # 1. 粘合阶段验证
         # 计算均线
         ma5 = calc_ma(df, 5)
@@ -432,7 +434,10 @@ def check_threema_signal(df):
         min_ma = min(ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1])
         deviation = (max_ma - min_ma) / max_ma
         if deviation >= MAX_THREEMA_DEVIATION:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 空间验证失败，偏离度={deviation:.4f} >= {MAX_THREEMA_DEVIATION}")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过空间验证，偏离度={deviation:.4f}")
         
         # 时间验证：粘合持续≥5天
         consolidation_days = 0
@@ -449,72 +454,102 @@ def check_threema_signal(df):
                 break
                 
         if consolidation_days < MIN_CONSOLIDATION_DAYS:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 时间验证失败，粘合持续天数={consolidation_days} < {MIN_CONSOLIDATION_DAYS}")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过时间验证，粘合持续天数={consolidation_days}")
         
         # 量能验证：粘合期量能比吸筹期缩50%以上
         # 吸筹期：粘合期前5天
         if len(df) < consolidation_days + 5:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 数据不足，无法进行量能验证")
             return None
             
         accumulation_volume = df["成交量"].iloc[-(consolidation_days+5):-consolidation_days].mean()
         consolidation_volume = df["成交量"].iloc[-consolidation_days:].mean()
-        if consolidation_volume / accumulation_volume >= 0.5:
+        volume_ratio = consolidation_volume / accumulation_volume
+        if volume_ratio >= 0.5:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 量能验证失败，量能比={volume_ratio:.4f} >= 0.5")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过量能验证，量能比={volume_ratio:.4f}")
         
         # 2. 突破阶段验证
         # 同步向上验证
         if not (ma5.iloc[-1] > ma5.iloc[-2] and ma10.iloc[-1] > ma10.iloc[-2] and ma20.iloc[-1] > ma20.iloc[-2]):
+            logger.debug(f"【THREEMA筛选】{code} {name} - 同步向上验证失败")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过同步向上验证")
             
         # 多头排列雏形
         if not (ma5.iloc[-1] > ma10.iloc[-1] > ma20.iloc[-1]):
+            logger.debug(f"【THREEMA筛选】{code} {name} - 多头排列验证失败")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过多头排列验证")
             
         # 幅度验证：突破幅度>3%
         consolidation_high = max(df["最高"].iloc[-consolidation_days:])
-        if df["收盘"].iloc[-1] <= consolidation_high * (1 + MIN_BREAKOUT_RATIO):
+        breakout_ratio = (df["收盘"].iloc[-1] / consolidation_high) - 1
+        if breakout_ratio <= MIN_BREAKOUT_RATIO:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 幅度验证失败，突破幅度={breakout_ratio:.4f} <= {MIN_BREAKOUT_RATIO}")
             return None
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过幅度验证，突破幅度={breakout_ratio:.4f}")
             
         # 量能验证：突破量能增加50%-100%
-        if (df["成交量"].iloc[-1] < consolidation_volume * MIN_BREAKOUT_VOLUME_RATIO or 
-            df["成交量"].iloc[-1] > consolidation_volume * MAX_BREAKOUT_VOLUME_RATIO):
+        volume_ratio = df["成交量"].iloc[-1] / consolidation_volume
+        if volume_ratio < MIN_BREAKOUT_VOLUME_RATIO or volume_ratio > MAX_BREAKOUT_VOLUME_RATIO:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 量能验证失败，量能比={volume_ratio:.4f} (要求 {MIN_BREAKOUT_VOLUME_RATIO}-{MAX_BREAKOUT_VOLUME_RATIO})")
             return None
-            
+        else:
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过量能验证，量能比={volume_ratio:.4f}")
+        
         # 3. 确认阶段验证（如果已有突破）
         # 检查突破后的3天确认
-        if consolidation_days == 1:  # 刚刚突破
+        # 修复：检查突破后的情况，而不仅仅是刚刚突破
+        if consolidation_days <= 3:  # 突破后3天内
             # 确认阶段需要至少3天数据
             if len(df) < 3:
+                logger.debug(f"【THREEMA筛选】{code} {name} - 数据不足，无法进行确认阶段验证")
                 return None
                 
             # 不回落验证：突破后3天不破突破收盘价
-            breakout_price = df["收盘"].iloc[-1]
-            for i in range(1, min(4, len(df))):
+            breakout_price = df["收盘"].iloc[-consolidation_days]
+            for i in range(1, min(4, consolidation_days+1)):
                 if df["最低"].iloc[-i] < breakout_price:
+                    logger.debug(f"【THREEMA筛选】{code} {name} - 不回落验证失败，第{i}天价格低于突破价")
                     return None
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过不回落验证")
                     
             # 均线稳验证：偏离度<8%
-            for i in range(1, min(4, len(df))):
+            for i in range(1, min(4, consolidation_days+1)):
                 max_ma_i = max(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
                 min_ma_i = min(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
                 dev_i = (max_ma_i - min_ma_i) / max_ma_i
                 if dev_i >= MAX_CONFIRMATION_DEVIATION:
+                    logger.debug(f"【THREEMA筛选】{code} {name} - 均线稳验证失败，第{i}天偏离度={dev_i:.4f} >= {MAX_CONFIRMATION_DEVIATION}")
                     return None
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过均线稳验证")
                     
             # 量能续验证：不骤缩
-            breakout_volume = df["成交量"].iloc[-1]
-            for i in range(1, min(4, len(df))):
+            breakout_volume = df["成交量"].iloc[-consolidation_days]
+            for i in range(1, min(4, consolidation_days+1)):
                 if df["成交量"].iloc[-i] < breakout_volume * 0.5:
+                    logger.debug(f"【THREEMA筛选】{code} {name} - 量能续验证失败，第{i}天量能低于突破量能的50%")
                     return None
+            logger.debug(f"【THREEMA筛选】{code} {name} - 通过量能续验证")
         
+        logger.info(f"【THREEMA筛选】{code} {name} - 通过所有验证，确认三均线粘合突破信号")
         return {
             "deviation": deviation,
             "consolidation_days": consolidation_days,
-            "breakout_ratio": (df["收盘"].iloc[-1] / consolidation_high) - 1,
-            "volume_ratio": df["成交量"].iloc[-1] / consolidation_volume
+            "breakout_ratio": breakout_ratio,
+            "volume_ratio": volume_ratio
         }
     except Exception as e:
-        logger.debug(f"检查三均线粘合突破信号失败: {str(e)}")
+        logger.error(f"【THREEMA筛选】检查股票 {code} {name} 三均线粘合突破信号失败: {str(e)}", exc_info=True)
         return None
 
 def format_single_signal(category, signals):
@@ -672,38 +707,172 @@ def format_quadruple_signal(signals):
     
     return "\n".join(lines)
 
-def format_threema_signal(signals):
-    """格式化三均线粘合突破信号（分页显示）"""
-    if not signals:
+def format_threema_signal(threema_signals, all_threema_candidates):
+    """格式化三均线粘合突破信号（分页显示并展示筛选过程）"""
+    if not all_threema_candidates:
         return ""
     
     # 按粘合持续天数排序（持续天数越长排名越前）
-    signals = sorted(signals, key=lambda x: x["consolidation_days"], reverse=True)
+    all_candidates_sorted = sorted(all_threema_candidates, key=lambda x: x["consolidation_days"], reverse=True)
+    
+    # 1. 初始筛选：三均线缠绕
+    step1_count = len(all_candidates_sorted)
+    
+    # 2. 空间验证：均线偏离度<2%
+    step2_candidates = [s for s in all_candidates_sorted if s["deviation"] < MAX_THREEMA_DEVIATION]
+    step2_count = len(step2_candidates)
+    
+    # 3. 时间验证：粘合持续≥5天
+    step3_candidates = [s for s in step2_candidates if s["consolidation_days"] >= MIN_CONSOLIDATION_DAYS]
+    step3_count = len(step3_candidates)
+    
+    # 4. 量能验证：粘合期量能比吸筹期缩50%以上
+    step4_candidates = []
+    for s in step3_candidates:
+        # 重新计算量能比
+        code = s["code"]
+        df = get_stock_daily_data(code)
+        if df is not None and len(df) >= s["consolidation_days"] + 5:
+            consolidation_volume = df["成交量"].iloc[-s["consolidation_days"]:].mean()
+            accumulation_volume = df["成交量"].iloc[-(s["consolidation_days"]+5):-s["consolidation_days"]].mean()
+            volume_ratio = consolidation_volume / accumulation_volume
+            if volume_ratio < 0.5:  # 50%缩量
+                step4_candidates.append(s)
+    step4_count = len(step4_candidates)
+    
+    # 5. 突破阶段验证
+    step5_candidates = []
+    for s in step4_candidates:
+        code = s["code"]
+        df = get_stock_daily_data(code)
+        if df is not None and len(df) >= s["consolidation_days"] + 5:
+            # 同步向上验证
+            ma5 = calc_ma(df, 5)
+            ma10 = calc_ma(df, 10)
+            ma20 = calc_ma(df, 20)
+            if not (ma5.iloc[-1] > ma5.iloc[-2] and ma10.iloc[-1] > ma10.iloc[-2] and ma20.iloc[-1] > ma20.iloc[-2]):
+                continue
+                
+            # 多头排列雏形
+            if not (ma5.iloc[-1] > ma10.iloc[-1] > ma20.iloc[-1]):
+                continue
+                
+            # 幅度验证：突破幅度>3%
+            consolidation_high = max(df["最高"].iloc[-s["consolidation_days"]:])
+            breakout_ratio = (df["收盘"].iloc[-1] / consolidation_high) - 1
+            if breakout_ratio <= MIN_BREAKOUT_RATIO:
+                continue
+                
+            # 量能验证：突破量能增加50%-100%
+            consolidation_volume = df["成交量"].iloc[-s["consolidation_days"]:].mean()
+            volume_ratio = df["成交量"].iloc[-1] / consolidation_volume
+            if volume_ratio < MIN_BREAKOUT_VOLUME_RATIO or volume_ratio > MAX_BREAKOUT_VOLUME_RATIO:
+                continue
+                
+            step5_candidates.append(s)
+    step5_count = len(step5_candidates)
+    
+    # 6. 确认阶段验证
+    final_candidates = []
+    for s in step5_candidates:
+        code = s["code"]
+        df = get_stock_daily_data(code)
+        if df is not None and len(df) >= s["consolidation_days"] + 5:
+            consolidation_days = s["consolidation_days"]
+            # 确认阶段验证（如果已有突破）
+            if consolidation_days <= 3:  # 突破后3天内
+                # 确认阶段需要至少3天数据
+                if len(df) < 3:
+                    continue
+                    
+                # 不回落验证：突破后3天不破突破收盘价
+                breakout_price = df["收盘"].iloc[-consolidation_days]
+                valid = True
+                for i in range(1, min(4, consolidation_days+1)):
+                    if df["最低"].iloc[-i] < breakout_price:
+                        valid = False
+                        break
+                if not valid:
+                    continue
+                        
+                # 均线稳验证：偏离度<8%
+                for i in range(1, min(4, consolidation_days+1)):
+                    ma5 = calc_ma(df, 5)
+                    ma10 = calc_ma(df, 10)
+                    ma20 = calc_ma(df, 20)
+                    max_ma_i = max(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+                    min_ma_i = min(ma5.iloc[-i], ma10.iloc[-i], ma20.iloc[-i])
+                    dev_i = (max_ma_i - min_ma_i) / max_ma_i
+                    if dev_i >= MAX_CONFIRMATION_DEVIATION:
+                        valid = False
+                        break
+                if not valid:
+                    continue
+                        
+                # 量能续验证：不骤缩
+                breakout_volume = df["成交量"].iloc[-consolidation_days]
+                for i in range(1, min(4, consolidation_days+1)):
+                    if df["成交量"].iloc[-i] < breakout_volume * 0.5:
+                        valid = False
+                        break
+                if not valid:
+                    continue
+            
+            final_candidates.append(s)
+    
+    # 按粘合持续天数排序
+    final_candidates = sorted(final_candidates, key=lambda x: x["consolidation_days"], reverse=True)
+    final_count = len(final_candidates)
     
     # 分页处理
     page_size = 20
-    pages = [signals[i:i+page_size] for i in range(0, len(signals), page_size)]
+    pages = [final_candidates[i:i+page_size] for i in range(0, len(final_candidates), page_size)]
     messages = []
     
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    # 生成筛选过程消息
+    process_lines = [
+        f"【策略3 - 3均线缠绕{MIN_CONSOLIDATION_DAYS}天】",
+        f"日期：{today}",
+        "",
+        "🔍 三均线粘合突破信号筛选过程：",
+        f"1️⃣ 初始筛选（三均线缠绕）：{step1_count}只股票",
+        f"2️⃣ 空间验证（偏离率<2%）：{step2_count}只股票（筛选掉{step1_count-step2_count}只）",
+        f"3️⃣ 时间验证（粘合≥{MIN_CONSOLIDATION_DAYS}天）：{step3_count}只股票（筛选掉{step2_count-step3_count}只）",
+        f"4️⃣ 量能验证（缩量50%+）：{step4_count}只股票（筛选掉{step3_count-step4_count}只）",
+        f"5️⃣ 突破阶段验证：{step5_count}只股票（筛选掉{step4_count-step5_count}只）",
+        f"6️⃣ 确认阶段验证：{final_count}只股票（筛选掉{step5_count-final_count}只）",
+        "",
+        "📊 筛选结果：",
+        f"✅ 最终通过验证：{final_count}只股票",
+        ""
+    ]
+    
+    # 添加筛选过程消息作为第一页
+    pages = [final_candidates[:page_size]] + pages  # 将第一页作为筛选过程
+    
+    # 生成每页消息
     for page_num, page_signals in enumerate(pages, 1):
-        # 生成消息
-        today = datetime.now().strftime("%Y-%m-%d")
-        lines = [
-            f"【策略3 - 3均线粘合{MIN_CONSOLIDATION_DAYS}天】",
-            f"日期：{today}",
-            f"第{page_num}页（共{len(pages)}页）",
-            ""
-        ]
-        
-        lines.append(f"✅ 三均线粘合突破信号（共{len(signals)}只，本页{len(page_signals)}只）：")
-        for i, signal in enumerate(page_signals, 1):
-            code = signal["code"]
-            name = signal["name"]
-            lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
-        
-        if page_signals:
-            # 只在第一页显示信号解读
-            if page_num == 1:
+        if page_num == 1:
+            # 第一页是筛选过程
+            messages.append("\n".join(process_lines))
+        else:
+            # 生成信号详情
+            lines = [
+                f"【策略3 - 3均线缠绕{MIN_CONSOLIDATION_DAYS}天】",
+                f"日期：{today}",
+                f"第{page_num-1}页（共{len(pages)-1}页）",
+                ""
+            ]
+            
+            lines.append(f"✅ 三均线粘合突破信号（共{final_count}只，本页{len(page_signals)}只）：")
+            for i, signal in enumerate(page_signals, 1):
+                code = signal["code"]
+                name = signal["name"]
+                lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
+            
+            if page_signals and page_num == 2:  # 只在第一页信号详情显示信号解读
                 lines.append("")
                 lines.append("💎 信号解读：")
                 lines.append("三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超90%。")
@@ -717,8 +886,8 @@ def format_threema_signal(signals):
                 lines.append("• 止损位：突破当日最低价下方2%")
                 lines.append("• 止盈位：1:3风险收益比，或偏离20日均线10%")
                 lines.append("• 仓位控制：单只标的≤20%，总仓位≤60%")
-        
-        messages.append("\n".join(lines))
+            
+            messages.append("\n".join(lines))
     
     return messages
 
@@ -727,7 +896,7 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
     """保存股票代码到文件并提交到Git仓库（严格遵循微信推送逻辑）"""
     try:
         # 获取当前时间
-        now = get_beijing_time()  # 【已修复】确保函数已正确导入
+        now = get_beijing_time()  # 确保函数已正确导入
         timestamp = now.strftime("%Y%m%d%H%M")
         filename = f"macd{timestamp}.txt"
         
@@ -791,6 +960,56 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
     except Exception as e:
         logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
 
+def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
+    """从本地加载股票日线数据，严格使用中文列名"""
+    try:
+        # 确保股票代码是字符串，并且是6位（前面补零）
+        stock_code = str(stock_code).zfill(6)
+        
+        # 日线数据目录
+        daily_dir = os.path.join(Config.DATA_DIR, "daily")
+        
+        # 检查本地是否有历史数据
+        file_path = os.path.join(daily_dir, f"{stock_code}.csv")
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_csv(file_path)
+                
+                # 严格检查中文列名
+                required_columns = ["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+                for col in required_columns:
+                    if col not in df.columns:
+                        logger.error(f"股票 {stock_code} 数据缺少必要列: {col}")
+                        return pd.DataFrame()
+                
+                # 【日期datetime类型规则】确保日期列是datetime类型
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+                    # 移除可能存在的空格
+                    df = df.sort_values("日期", ascending=True)
+                
+                # 确保数值列是数值类型
+                numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+                for col in numeric_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # 移除NaN值
+                df = df.dropna(subset=['收盘', '成交量'])
+                
+                logger.debug(f"成功加载股票 {stock_code} 的本地日线数据，共 {len(df)} 条有效记录")
+                return df
+            except Exception as e:
+                logger.warning(f"读取股票 {stock_code} 数据失败: {str(e)}")
+                logger.debug(traceback.format_exc())
+        
+        logger.warning(f"股票 {stock_code} 的日线数据不存在")
+        return pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
 def main():
     # 1. 读取所有股票列表
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
@@ -815,6 +1034,7 @@ def main():
     rsi_signals = []
     kdj_signals = []
     threema_signals = []  # 新增三均线粘合突破信号容器
+    all_threema_candidates = []  # 收集所有初始三均线缠绕股票
     
     double_signals = {
         "MA+MACD": [],
@@ -879,7 +1099,29 @@ def main():
             macd_signal = check_macd_signal(df)
             rsi_signal = check_rsi_signal(df)
             kdj_signal = check_kdj_signal(df)
-            threema_signal = check_threema_signal(df)  # 新增三均线粘合突破信号检查
+            
+            # 1. 先检查初始三均线缠绕（用于展示筛选过程）
+            ma5 = calc_ma(df, 5)
+            ma10 = calc_ma(df, 10)
+            ma20 = calc_ma(df, 20)
+            
+            # 检查三均线缠绕
+            max_ma = max(ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1])
+            min_ma = min(ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1])
+            deviation = (max_ma - min_ma) / max_ma
+            
+            if deviation < MAX_THREEMA_DEVIATION:
+                # 收集所有初始三均线缠绕股票
+                all_threema_candidates.append({
+                    "code": code,
+                    "name": name,
+                    "deviation": deviation
+                })
+            
+            # 2. 检查完整的三均线粘合突破信号
+            threema_signal = check_threema_signal(df, code, name)
+            if threema_signal:
+                threema_signals.append({"code": code, "name": name, **threema_signal})
             
             # 收集单一指标信号
             if ma_signal:
@@ -894,9 +1136,6 @@ def main():
             if kdj_signal:
                 kdj_signals.append({"code": code, "name": name, **kdj_signal})
                 
-            if threema_signal:  # 新增三均线粘合突破信号收集
-                threema_signals.append({"code": code, "name": name, **threema_signal})
-            
             # 收集双指标共振信号
             if ma_signal and macd_signal:
                 double_signals["MA+MACD"].append({"code": code, "name": name, "ma": ma_signal, "macd": macd_signal})
@@ -935,7 +1174,7 @@ def main():
             
             processed_stocks += 1
             if processed_stocks % 100 == 0:
-                logger.info(f"已处理 {processed_stocks}/{total_stocks} 只股票...")
+                logger.info(f"已处理 {processed_stocks} 只股票...")
         
         except Exception as e:
             logger.debug(f"处理股票 {code} 时出错: {str(e)}")
@@ -953,13 +1192,6 @@ def main():
     # 单一指标信号
     for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
         message = format_single_signal(category, signals)
-        if message.strip():
-            send_wechat_message(message=message, message_type="position")
-            total_messages += 1
-    
-    # THREEMA信号（三均线粘合突破）- 分页显示
-    threema_messages = format_threema_signal(threema_signals)
-    for message in threema_messages:
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1
@@ -983,6 +1215,13 @@ def main():
     if message.strip():
         send_wechat_message(message=message, message_type="position")
         total_messages += 1
+    
+    # THREEMA信号（三均线粘合突破）- 分页显示
+    threema_messages = format_threema_signal(threema_signals, all_threema_candidates)
+    for message in threema_messages:
+        if message.strip():
+            send_wechat_message(message=message, message_type="position")
+            total_messages += 1
     
     if total_messages > 0:
         logger.info(f"成功发送 {total_messages} 组交易信号到微信")

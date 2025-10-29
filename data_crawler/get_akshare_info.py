@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-获取AkShare信息工具 - 专业级修复
+获取AkShare信息工具 - 终极修复版
 注意：这不是项目的主程序，而是被工作流调用的工具脚本
 """
 
@@ -20,6 +20,9 @@ import sys
 
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
+
+# 正确导入git_utils模块（只有一行，与项目其他文件完全一致）
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
 
 # ================================
 # 2. 全局常量/参数定义
@@ -123,27 +126,23 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 【关键修复】确保文件真正提交到Git仓库
+    # 【终极修复】确保文件真正提交到Git仓库
     try:
-        # 1. 导入git_utils模块
-        from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
-        
-        # 2. 提交文件
-        print(f"ℹ️ 尝试将文件提交到Git仓库...")
+        # 1. 提交文件
+        print(f"ℹ️ 正在将文件提交到Git仓库...")
         success = commit_files_in_batches(file_path, "更新AkShare接口列表")
         
+        # 2. 【关键】立即强制提交剩余文件（解决批量提交机制问题）
+        print(f"ℹ️ 强制提交剩余文件以确保立即生效...")
+        force_commit_remaining_files()
+        
         if success:
-            # 3. 强制提交剩余文件（确保立即生效）
-            print(f"ℹ️ 强制提交剩余文件以确保更改生效...")
-            force_commit_remaining_files()
-            print(f"✅ 文件 {file_name} 已成功提交到Git仓库并强制推送")
+            print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
         else:
             print(f"⚠️ 提交文件到Git仓库失败，请检查Git配置")
-    except ImportError as e:
-        print(f"❌ 无法导入git_utils模块: {str(e)}")
-        print(f"💡 提示: 请确保项目结构正确，utils目录位于项目根目录")
     except Exception as e:
-        print(f"⚠️ 提交文件到Git仓库失败: {str(e)}")
+        print(f"❌ 提交文件到Git仓库失败: {str(e)}")
+        print(f"💡 专业提示: 请检查项目结构，确保utils目录位于项目根目录")
     
     print(f"📌 提示: 完整接口列表已保存至: {file_path}")
 else:

@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, date
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
+# 导入股票列表更新模块
+from stock.all_stocks import update_stock_list
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -574,7 +576,7 @@ def update_all_stocks_daily_data():
     # 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE):
         logger.info("基础信息文件不存在，正在创建...")
-        if not create_or_update_basic_info():
+        if not update_stock_list():  # 调用股票列表更新模块
             logger.error("基础信息文件创建失败，无法更新日线数据")
             return False
     
@@ -684,108 +686,6 @@ def update_all_stocks_daily_data():
     
     return True
 
-def create_or_update_basic_info():
-    """创建或更新股票基础信息，确保市值数据格式正确"""
-    try:
-        logger.info("正在获取股票基础信息...")
-        
-        # 【关键修复】添加随机延时避免被封（2.0-5.0秒）
-        time.sleep(random.uniform(2.0, 5.0))
-        
-        # 获取股票基础信息
-        stock_info = ak.stock_zh_a_spot_em()
-        
-        if stock_info.empty:
-            logger.error("获取股票基础信息失败：返回空数据")
-            return False
-        
-        # 【关键修复】只保留必需列
-        required_columns = ["代码", "名称", "流通市值", "总市值"]
-        available_columns = [col for col in required_columns if col in stock_info.columns]
-        
-        if not available_columns:
-            logger.error("接口返回数据缺少所有必要列")
-            return False
-        
-        stock_info = stock_info[available_columns].copy()
-        
-        # 确保代码列是6位格式
-        stock_info["代码"] = stock_info["代码"].apply(lambda x: str(x).zfill(6))
-        
-        # 移除无效股票
-        stock_info = stock_info[stock_info["代码"].notna()]
-        stock_info = stock_info[stock_info["代码"].str.len() == 6]
-        stock_info = stock_info.reset_index(drop=True)
-        
-        # 【关键修复】过滤ST股票（移除ST和*ST股票）
-        stock_info = stock_info[~stock_info["名称"].str.contains("ST", na=False)].copy()
-        stock_info = stock_info[~stock_info["名称"].str.contains("*ST", na=False)].copy()
-        
-        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息（已过滤ST股票）")
-        
-        # 【专业修复】处理市值单位 - 确保单位统一为"元"
-        def process_market_cap(value):
-            if pd.isna(value) or value in ["--", "-", ""]:
-                return 0.0
-                
-            if isinstance(value, str):
-                value = value.strip().replace(",", "")
-                if "亿" in value:
-                    num_part = value.replace("亿", "")
-                    try:
-                        return float(num_part) * 100000000
-                    except:
-                        return 0.0
-                elif "万" in value:
-                    num_part = value.replace("万", "")
-                    try:
-                        return float(num_part) * 10000
-                    except:
-                        return 0.0
-                else:
-                    try:
-                        return float(value)
-                    except:
-                        return 0.0
-            else:
-                # akshare的stock_zh_a_spot_em通常返回亿元单位
-                if value < 1000000:  # 小于100万，不太可能是元单位
-                    return value * 100000000  # 亿元转元
-                else:
-                    return value  # 已经是元单位
-        
-        # 处理总市值和流通市值
-        if "总市值" in stock_info.columns:
-            stock_info["总市值"] = stock_info["总市值"].apply(process_market_cap)
-        else:
-            stock_info["总市值"] = 0.0
-            
-        if "流通市值" in stock_info.columns:
-            stock_info["流通市值"] = stock_info["流通市值"].apply(process_market_cap)
-        else:
-            stock_info["流通市值"] = 0.0
-        
-        # 【关键修复】添加必需列
-        stock_info["所属板块"] = stock_info["代码"].apply(get_stock_section)
-        stock_info["数据状态"] = "正常"
-        stock_info["next_crawl_index"] = 0
-        
-        # 【关键修复】确保列顺序正确
-        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "next_crawl_index"]
-        stock_info = stock_info[final_columns]
-        
-        # 【专业修复】保存时指定格式，避免科学计数法
-        # 使用float_format='%.0f'确保所有浮点数以整数形式保存
-        stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.0f')
-        commit_files_in_batches(BASIC_INFO_FILE, "创建股票基础信息")
-        logger.info(f"股票基础信息已保存至: {BASIC_INFO_FILE}，共{len(stock_info)}条记录（已过滤ST股票）")
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"获取股票基础信息失败: {str(e)}", exc_info=True)
-        return False
-
 def main():
     """主函数：更新所有股票数据"""
     logger.info("===== 开始更新股票数据 =====")
@@ -796,7 +696,7 @@ def main():
     # 1. 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
         logger.info("基础信息文件不存在或为空，正在创建...")
-        if not create_or_update_basic_info():
+        if not update_stock_list():  # 调用股票列表更新模块
             logger.error("基础信息文件创建失败，无法继续")
             return
     

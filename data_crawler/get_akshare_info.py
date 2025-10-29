@@ -62,8 +62,14 @@ import sys
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
 
-# 【关键修复】正确导入git_utils模块
-# 仅添加一行简单导入，符合项目结构
+# 【精确修复】正确解决模块导入路径问题
+# 获取当前文件所在目录的父目录（项目根目录）
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 将项目根目录添加到Python路径
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# 现在可以安全导入git_utils模块
 from utils.git_utils import commit_files_in_batches
 
 # ================================
@@ -127,7 +133,7 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 【关键修复】使用已有的git_utils模块中的函数
+    # 使用已有的git_utils模块中的函数
     try:
         commit_files_in_batches(file_path, "更新AkShare接口列表")
         print(f"✅ 文件 {file_name} 已成功提交到Git仓库")
@@ -150,7 +156,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
         if inspect.isfunction(obj) and not name.startswith('_'):
             all_functions.append(name)
     
-    # 【关键修复】简化逻辑：接口不存在直接报告，不再尝试各种调用方式
+    # 简化逻辑：接口不存在直接报告
     if interface_name not in all_functions:
         print(f"  ❌ 错误: 接口 '{interface_name}' 未在AkShare中找到")
         print(f"  📌 提示: 当前版本AkShare共有 {len(all_functions)} 个可用接口")
@@ -176,10 +182,6 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
         sys.exit(1)
     
     try:
-        # ================================
-        # 4. API类型识别
-        # ================================
-        
         # 根据接口名称判断API类型
         api_type = None
         for type_name, keywords in API_TEST_PARAMS["API_TYPE_KEYWORDS"].items():
@@ -190,13 +192,10 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
         # 获取测试代码
         test_code = API_TEST_PARAMS["TEST_CODES"].get(api_type, API_TEST_PARAMS["TEST_CODES"]["stock"])
         
-        # ================================
-        # 5. 简化API调用策略
-        # ================================
-        
+        # 简化API调用策略
         result = None
         
-        # 【关键修复】简化调用逻辑：只尝试两种方式（无参数和带测试代码）
+        # 简化调用逻辑：只尝试两种方式（无参数和带测试代码）
         print(f"  📡 尝试调用接口 {interface_name}...")
         
         # 尝试1：无参数调用
@@ -216,10 +215,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 except Exception as e2:
                     print(f"  ⚠️ 使用测试代码调用失败: {str(e2)}")
         
-        # ================================
-        # 6. 结果处理
-        # ================================
-        
+        # 结果处理
         if result is not None and hasattr(result, 'columns') and len(result.columns) > 0:
             columns = ", ".join(result.columns)
             print(f"  🗂️ 成功获取列名: {columns}")

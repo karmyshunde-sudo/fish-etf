@@ -7,8 +7,7 @@
 1. 基础过滤：
    - 移除ST和*ST股票
    - 移除名称以"N"开头的新上市股票
-   - 仅保留主板、创业板、科创板股票（代码以00、30、60、688开头）
-   - 确保流通市值≥5亿
+   - 移除名称包含"退市"的股票
 
 2. 财务数据过滤：
    - 市盈率(动态)：排除亏损股票（PE_TTM ≤ 0）
@@ -16,14 +15,8 @@
    - 市盈率(静态)：排除亏损股票（PE_STATIC ≤ 0）
    - 营业总收入：排除同比下降的股票（营业收入同比增长率 < 0）
    - 总质押股份数量：排除有质押的股票（质押数量 > 0）
-   - 净利润：排除连续两年亏损的股票
-   - 资产负债率：排除高于70%的股票
+   - 净利润：排除净利润同比下降的股票
    - ROE：排除低于5%的股票
-
-3. 其他过滤：
-   - 移除上市不足90天的新股
-   - 移除当日停牌股票
-   - 移除交易量过低的股票（过去20天平均成交量<10万股）
 """
 
 import os
@@ -136,7 +129,6 @@ def get_stock_financial_data():
             '市盈率-静态': 'PE_STATIC',
             '营业收入-同比增长': 'Revenue_Growth',
             '净利润-同比增长': 'NetProfit_Growth',
-            '资产负债率': 'Debt_Asset_Ratio',
             '净资产收益率': 'ROE'
         })
         
@@ -146,7 +138,6 @@ def get_stock_financial_data():
         financial_data['PE_STATIC'] = pd.to_numeric(financial_data['PE_STATIC'], errors='coerce')
         financial_data['Revenue_Growth'] = pd.to_numeric(financial_data['Revenue_Growth'], errors='coerce')
         financial_data['NetProfit_Growth'] = pd.to_numeric(financial_data['NetProfit_Growth'], errors='coerce')
-        financial_data['Debt_Asset_Ratio'] = pd.to_numeric(financial_data['Debt_Asset_Ratio'], errors='coerce')
         financial_data['ROE'] = pd.to_numeric(financial_data['ROE'], errors='coerce')
         
         logger.info(f"成功获取 {len(financial_data)} 条股票财务数据")
@@ -229,11 +220,18 @@ def get_stock_basic_info():
         stock_info = stock_info[stock_info["代码"].str.len() == 6]
         stock_info = stock_info.reset_index(drop=True)
         
-        # 【关键修复】过滤ST股票（移除ST和*ST股票）
+        # 【关键修复】应用基础过滤条件
+        # 1. 移除ST和*ST股票
         stock_info = stock_info[~stock_info["名称"].str.contains("ST", na=False)].copy()
         stock_info = stock_info[~stock_info["名称"].str.contains("*ST", na=False)].copy()
         
-        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息（已过滤ST股票）")
+        # 2. 移除名称以"N"开头的新上市股票
+        stock_info = stock_info[~stock_info["名称"].str.startswith("N")].copy()
+        
+        # 3. 移除名称包含"退市"的股票
+        stock_info = stock_info[~stock_info["名称"].str.contains("退市", na=False)].copy()
+        
+        logger.info(f"成功获取 {len(stock_info)} 条股票基础信息（已应用基础过滤条件）")
         
         # 【专业修复】处理市值单位 - 确保单位统一为"元"
         def process_market_cap(value):
@@ -317,30 +315,15 @@ def get_stock_basic_info():
         if 'Pledge_Total' in stock_info.columns:
             stock_info = stock_info[(stock_info['Pledge_Total'] <= 0) | (stock_info['Pledge_Total'].isna())]
         
-        # 6. 净利润：排除连续两年亏损的股票
-        # 7. 资产负债率：排除高于70%的股票
-        if 'Debt_Asset_Ratio' in stock_info.columns:
-            stock_info = stock_info[(stock_info['Debt_Asset_Ratio'] <= 70) | (stock_info['Debt_Asset_Ratio'].isna())]
+        # 6. 净利润：排除净利润同比下降的股票
+        if 'NetProfit_Growth' in stock_info.columns:
+            stock_info = stock_info[(stock_info['NetProfit_Growth'] >= 0) | (stock_info['NetProfit_Growth'].isna())]
         
-        # 8. ROE：排除低于5%的股票
+        # 7. ROE：排除低于5%的股票
         if 'ROE' in stock_info.columns:
             stock_info = stock_info[(stock_info['ROE'] >= 5) | (stock_info['ROE'].isna())]
         
-        # 【关键修复】应用基础过滤条件
-        # 1. 移除名称以"N"开头的新上市股票
-        stock_info = stock_info[~stock_info["名称"].str.startswith("N")].copy()
-        
-        # 2. 仅保留主板、创业板、科创板股票（代码以00、30、60、688开头）
-        stock_info = stock_info[stock_info["代码"].str.startswith(("00", "30", "60", "688"))].copy()
-        
-        # 3. 确保流通市值≥5亿
-        stock_info = stock_info[stock_info["流通市值"] >= 500000000].copy()
-        
-        # 4. 移除上市不足90天的新股
-        # 5. 移除当日停牌股票
-        # 6. 移除交易量过低的股票（过去20天平均成交量<10万股）
-        
-        logger.info(f"应用过滤条件后，剩余 {len(stock_info)} 条股票记录")
+        logger.info(f"应用财务数据过滤条件后，剩余 {len(stock_info)} 条股票记录")
         
         # 【关键修复】添加必需列
         stock_info["数据状态"] = "正常"

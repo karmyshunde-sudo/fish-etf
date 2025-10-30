@@ -17,13 +17,15 @@ import time
 from datetime import datetime
 import traceback
 import sys
+import json
+from pprint import pformat
 
 # 配置日志
 logging.basicConfig(level=logging.ERROR)
 
 # 正确导入git_utils模块（只有一行，与项目其他文件完全一致）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.git_utils import commit_files_in_batches
+from utils.git_utils import commit_files_in_batches, verify_file_in_remote
 
 # ================================
 # 2. 全局常量/参数定义
@@ -55,13 +57,14 @@ API_TEST_PARAMS = {
     
     # 输出参数
     "SHOW_DATA_SAMPLE": True,   # 是否显示数据示例
-    "SAMPLE_ROWS": 2,           # 数据示例显示的行数
+    "SAMPLE_ROWS": 5,           # 数据示例显示的行数 - 已增加到5行
     "VERBOSE": True             # 是否显示详细日志
 }
 
 # 文件和目录参数
 FILE_PARAMS = {
     "OUTPUT_DIR": "data/flags",
+    "SAVE_API_DIR": "data/saveapi",  # 专门用于保存API数据的目录
     "FILE_PREFIX": "akshare_info",
     "DATE_FORMAT": "%Y%m%d"
 }
@@ -127,7 +130,7 @@ if len(sys.argv) <= 1 or sys.argv[1].strip() == "":
 
     print(f"📁 AkShare信息已保存到 {file_path}")
     
-    # 【终极修复】确保文件真正提交到Git仓库
+    # 【关键修复】确保文件真正提交到Git仓库
     try:
         # 直接使用"LAST_FILE"参数立即提交
         print(f"ℹ️ 正在将文件提交到Git仓库...")
@@ -216,18 +219,161 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 except Exception as e2:
                     print(f"  ⚠️ 使用测试代码调用失败: {str(e2)}")
         
-        # 结果处理
-        if result is not None and hasattr(result, 'columns') and len(result.columns) > 0:
-            columns = ", ".join(result.columns)
-            print(f"  🗂️ 成功获取列名: {columns}")
-            
-            # 打印前几行数据示例
-            if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and hasattr(result, 'empty') and not result.empty:
-                print(f"  📊 前{API_TEST_PARAMS['SAMPLE_ROWS']}行数据示例:\n{result.head(API_TEST_PARAMS['SAMPLE_ROWS'])}")
+        # 【关键修复】结果处理 - 增强类型检测与展示
+        print(f"  🔍 分析返回结果类型...")
+        
+        if result is None:
+            print(f"  ❌ 接口调用返回None")
+            print(f"  ℹ️ 提示: 该接口可能没有返回数据或发生了错误")
         else:
-            print(f"  ❌ 接口调用成功但返回空DataFrame，无法获取列名")
-            print(f"  ℹ️ 提示: 可能需要其他参数或该接口返回非DataFrame类型")
+            # 获取返回结果的类型
+            result_type = type(result).__name__
+            print(f"  📦 返回类型: {result_type}")
             
+            # 检查是否是DataFrame
+            is_dataframe = hasattr(result, 'columns') and hasattr(result, 'empty')
+            
+            if is_dataframe:
+                if len(result.columns) > 0:
+                    columns = ", ".join(result.columns)
+                    print(f"  🗂️ 成功获取列名: {columns}")
+                    
+                    # 【终极修复】显示列数据类型
+                    print(f"  📊 列数据类型:")
+                    for col in result.columns:
+                        # 获取该列非空值的数据类型
+                        non_null_values = result[col].dropna()
+                        if len(non_null_values) > 0:
+                            sample_value = non_null_values.iloc[0]
+                            col_type = type(sample_value).__name__
+                        else:
+                            col_type = "empty"
+                        print(f"    - {col}: {col_type}")
+                    
+                    # 【终极修复】打印前5行数据示例（或实际行数，如果少于5）
+                    if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and not result.empty:
+                        rows_to_show = min(API_TEST_PARAMS["SAMPLE_ROWS"], len(result))
+                        print(f"  📊 前{rows_to_show}行数据示例:")
+                        
+                        # 为每行数据添加索引和格式化
+                        for i in range(rows_to_show):
+                            row = result.iloc[i]
+                            print(f"    [{i}] {row.to_dict()}")
+                        
+                        # 【终极修复】保存前5条数据到文件
+                        print(f"  💾 开始保存API数据到仓库...")
+                        
+                        # 创建保存目录
+                        save_dir = FILE_PARAMS["SAVE_API_DIR"]
+                        os.makedirs(save_dir, exist_ok=True)
+                        
+                        # 生成文件名：api名+时间戳
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M")
+                        file_name = f"{interface_name}_{timestamp}.csv"
+                        file_path = os.path.join(save_dir, file_name)
+                        
+                        # 保存前5条数据
+                        rows_to_save = min(5, len(result))
+                        result.head(rows_to_save).to_csv(file_path, index=False, encoding="utf-8-sig")
+                        print(f"  💾 已保存前{rows_to_save}条数据到: {file_path}")
+                        
+                        # 【关键修复】提交文件到Git仓库 - 使用"LAST_FILE"参数
+                        print(f"  📤 正在提交文件到Git仓库...")
+                        success = commit_files_in_batches(file_path, "LAST_FILE")
+                        
+                        if success:
+                            print(f"  ✅ 文件 {file_name} 已成功提交到Git仓库")
+                            
+                            # 【关键修复】验证文件是否真正存在于远程仓库
+                            print(f"  🔍 验证文件是否存在于远程Git仓库...")
+                            if verify_file_in_remote(file_path):
+                                print(f"  ✅ 文件存在验证通过：文件 {file_name} 存在于远程Git仓库")
+                            else:
+                                print(f"  ⚠️ 文件验证失败：文件 {file_name} 不存在于远程Git仓库")
+                                
+                                # 【关键修复】尝试再次提交
+                                print(f"  🔄 尝试再次提交文件: {file_name}")
+                                commit_files_in_batches(file_path, "LAST_FILE")
+                                
+                                # 再次验证
+                                if verify_file_in_remote(file_path):
+                                    print(f"  ✅ 二次提交成功：文件 {file_name} 存在于远程Git仓库")
+                                else:
+                                    print(f"  ❌ 二次提交失败：文件 {file_name} 仍然不存在于远程Git仓库")
+                        else:
+                            print(f"  ❌ 提交文件到Git仓库失败")
+                else:
+                    print(f"  ❌ 返回的DataFrame为空，无列名")
+            # 检查是否是字典
+            elif isinstance(result, dict):
+                print(f"  📂 返回的是字典，包含 {len(result)} 个键")
+                
+                # 显示字典结构
+                if result:
+                    print("  📂 字典结构预览:")
+                    
+                    # 尝试提取第一个键的值来展示结构
+                    first_key = next(iter(result))
+                    first_value = result[first_key]
+                    
+                    if isinstance(first_value, dict):
+                        print(f"    - 键值结构: {{'key': {{...}}}}")
+                        print(f"    - 示例键: '{first_key}'")
+                        print(f"    - 示例值结构: {list(first_value.keys())}")
+                    elif isinstance(first_value, list):
+                        print(f"    - 键值结构: {{'key': [...]}}")
+                        print(f"    - 示例键: '{first_key}'")
+                        if first_value:
+                            print(f"    - 列表示例: {list(first_value[0].keys()) if isinstance(first_value[0], dict) else '元素类型: ' + type(first_value[0]).__name__}")
+                    else:
+                        print(f"    - 键值结构: {{'key': value}}")
+                        print(f"    - 示例键: '{first_key}'")
+                        print(f"    - 值类型: {type(first_value).__name__}")
+                        
+                    # 显示前3个键
+                    sample_keys = list(result.keys())[:3]
+                    print(f"    - 前{len(sample_keys)}个键示例: {', '.join(sample_keys)}")
+            # 检查是否是列表
+            elif isinstance(result, list):
+                print(f"  📋 返回的是列表，包含 {len(result)} 个元素")
+                
+                if result:
+                    # 显示列表结构
+                    first_item = result[0]
+                    print(f"  📋 列表结构预览:")
+                    
+                    if isinstance(first_item, dict):
+                        print(f"    - 列表元素是字典")
+                        print(f"    - 字典键: {list(first_item.keys())}")
+                        print(f"    - 示例数据: {pformat(first_item)[:200]}{'...' if len(pformat(first_item)) > 200 else ''}")
+                    else:
+                        print(f"    - 元素类型: {type(first_item).__name__}")
+                        print(f"    - 示例数据: {str(first_item)[:200]}{'...' if len(str(first_item)) > 200 else ''}")
+            # 检查是否是字符串
+            elif isinstance(result, str):
+                print(f"  📝 返回的是字符串，长度: {len(result)}")
+                if len(result) > 200:
+                    print(f"  📄 内容预览: {result[:200]}...")
+                else:
+                    print(f"  📄 内容: {result}")
+            # 其他类型
+            else:
+                print(f"  📄 返回的是 {result_type} 类型")
+                # 尝试转换为字符串并截断
+                str_repr = str(result)
+                if len(str_repr) > 500:
+                    print(f"  📝 内容预览: {str_repr[:500]}...")
+                else:
+                    print(f"  📝 内容: {str_repr}")
+                    
+                # 尝试检查是否有属性
+                try:
+                    attrs = dir(result)
+                    if attrs:
+                        print(f"  🧩 对象属性: {', '.join([attr for attr in attrs if not attr.startswith('__')][:5])}{'...' if len(attrs) > 5 else ''}")
+                except:
+                    pass
+    
     except Exception as e:
         print(f"  ❌ 接口 {interface_name} 调用失败: {str(e)}")
         print(f"  📝 Traceback: {traceback.format_exc()}")

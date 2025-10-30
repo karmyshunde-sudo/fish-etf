@@ -219,7 +219,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 except Exception as e2:
                     print(f"  ⚠️ 使用测试代码调用失败: {str(e2)}")
         
-        # 【终极修复】结果处理 - 增强类型检测与展示
+        # 【关键修复】结果处理 - 全面分析各种返回类型
         print(f"  🔍 分析返回结果类型...")
         
         if result is None:
@@ -230,120 +230,113 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
             result_type = type(result).__name__
             print(f"  📦 返回类型: {result_type}")
             
-            # 检查是否是DataFrame
-            is_dataframe = hasattr(result, 'columns') and hasattr(result, 'empty')
+            # 【关键修复】统一处理各种返回类型
+            # 不再假设返回值是DataFrame，而是全面分析
+            print(f"  📊 开始全面分析返回结果...")
             
-            if is_dataframe:
-                # 【关键修复】移除错误假设，客观描述空DataFrame
-                if len(result.columns) > 0:
-                    columns = ", ".join(result.columns)
-                    print(f"  🗂️ 成功获取列名: {columns}")
-                    
-                    # 【关键修复】显示列数据类型
-                    print(f"  📊 列数据类型:")
-                    for col in result.columns:
-                        # 获取该列非空值的数据类型
-                        non_null_values = result[col].dropna()
-                        if len(non_null_values) > 0:
-                            sample_value = non_null_values.iloc[0]
-                            col_type = type(sample_value).__name__
-                        else:
-                            col_type = "empty"
-                        print(f"    - {col}: {col_type}")
-                    
-                    # 【关键修复】打印前5行数据示例（或实际行数，如果少于5）
-                    if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and not result.empty:
-                        rows_to_show = min(API_TEST_PARAMS["SAMPLE_ROWS"], len(result))
-                        print(f"  📊 前{rows_to_show}行数据示例:")
-                        
-                        # 为每行数据添加索引和格式化
-                        for i in range(rows_to_show):
-                            row = result.iloc[i]
-                            print(f"    [{i}] {row.to_dict()}")
-                        
-                        # 【关键修复】保存前5条数据到文件
-                        print(f"  💾 开始保存API数据到仓库...")
-                        
-                        # 创建保存目录
-                        save_dir = FILE_PARAMS["SAVE_API_DIR"]
-                        os.makedirs(save_dir, exist_ok=True)
-                        
-                        # 生成文件名：api名+时间戳
-                        timestamp = datetime.now().strftime("%Y%m%d%H%M")
-                        file_name = f"{interface_name}_{timestamp}.csv"
-                        file_path = os.path.join(save_dir, file_name)
-                        
-                        # 保存前5条数据
-                        rows_to_save = min(5, len(result))
-                        result.head(rows_to_save).to_csv(file_path, index=False, encoding="utf-8-sig")
-                        print(f"  💾 已保存前{rows_to_save}条数据到: {file_path}")
-                        
-                        # 【关键修复】提交文件到Git仓库 - 使用"LAST_FILE"参数
-                        print(f"  📤 正在提交文件到Git仓库...")
-                        success = commit_files_in_batches(file_path, "LAST_FILE")
-                        
-                        if success:
-                            print(f"  ✅ 文件 {file_name} 已成功提交到Git仓库")
-                        else:
-                            print(f"  ❌ 提交文件到Git仓库失败")
-                    else:
-                        print(f"  ℹ️ 返回的DataFrame为空，但包含列名")
+            # 1. 尝试获取对象的基本信息
+            try:
+                # 尝试获取对象的属性
+                attrs = dir(result)
+                if attrs:
+                    print(f"  🧩 对象属性: {', '.join([attr for attr in attrs if not attr.startswith('__')][:10])}{'...' if len(attrs) > 10 else ''}")
+            except Exception as e:
+                print(f"  ⚠️ 无法获取对象属性: {str(e)}")
+            
+            # 2. 尝试检查是否有错误信息
+            error_indicators = ['error', 'message', 'status', 'code', 'msg', 'desc', 'reason']
+            for indicator in error_indicators:
+                try:
+                    if hasattr(result, indicator):
+                        value = getattr(result, indicator)
+                        print(f"  ❗ 检测到可能的错误信息 ({indicator}): {value}")
+                    elif isinstance(result, dict) and indicator in result:
+                        print(f"  ❗ 检测到可能的错误信息 ({indicator}): {result[indicator]}")
+                except Exception as e:
+                    pass
+            
+            # 3. 尝试将结果转换为JSON
+            try:
+                json_data = json.dumps(result, default=str)
+                print(f"  📦 尝试将结果转换为JSON: 成功 (长度: {len(json_data)})")
+                # 保存JSON数据到文件
+                save_dir = FILE_PARAMS["SAVE_API_DIR"]
+                os.makedirs(save_dir, exist_ok=True)
+                
+                # 生成文件名：api名+时间戳+_json
+                timestamp = datetime.now().strftime("%Y%m%d%H%M")
+                file_name = f"{interface_name}_{timestamp}_json.txt"
+                file_path = os.path.join(save_dir, file_name)
+                
+                # 保存JSON数据
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(json_data)
+                print(f"  💾 已保存JSON数据到: {file_path}")
+                
+                # 提交文件到Git仓库 - 使用"LAST_FILE"参数
+                print(f"  📤 正在提交JSON文件到Git仓库...")
+                success = commit_files_in_batches(file_path, "LAST_FILE")
+                
+                if success:
+                    print(f"  ✅ JSON文件 {file_name} 已成功提交到Git仓库")
                 else:
-                    print(f"  ❌ 返回的DataFrame为空，无列名")
+                    print(f"  ❌ 提交JSON文件到Git仓库失败")
+            except Exception as e:
+                print(f"  ⚠️ 无法将结果转换为JSON: {str(e)}")
+            
+            # 4. 检查是否是DataFrame-like对象
+            has_columns = hasattr(result, 'columns')
+            has_empty = hasattr(result, 'empty')
+            
+            if has_columns and has_empty:
+                print(f"  📊 检测到DataFrame-like对象")
+                
+                # 尝试获取列数
+                try:
+                    num_columns = len(result.columns)
+                    print(f"  📊 检测到 {num_columns} 个列")
                     
-                    # 【关键修复】移除错误假设，提供客观建议
-                    print(f"  🔍 分析空DataFrame原因:")
-                    
-                    # 【关键修复】客观描述可能原因
-                    print(f"    - 无参数调用可能不返回有效数据，某些API需要参数才能获取完整数据")
-                    print(f"    - 该API可能只在特定时间段返回数据（如财报季）")
-                    print(f"    - 可能需要其他参数，建议参考AkShare文档")
-                    
-                    # 【关键修复】提供通用建议，不针对特定接口
-                    if api_type:
-                        print(f"    - 可尝试使用{api_type}类型的标准测试代码调用，例如: {interface_name}(symbol='{test_code}')")
+                    if num_columns > 0:
+                        columns = ", ".join(result.columns)
+                        print(f"  🗂️ 成功获取列名: {columns}")
                     else:
-                        print(f"    - 可尝试添加symbol参数调用，例如: {interface_name}(symbol='600519')")
+                        print(f"  ❌ 返回的DataFrame-like对象为空，无列名")
                     
-                    # 检查是否有属性可以提供线索
+                    # 尝试提取数据（如果可能）
                     try:
-                        attrs = dir(result)
-                        if attrs:
-                            print(f"    - DataFrame属性: {', '.join([attr for attr in attrs if not attr.startswith('__')][:10])}{'...' if len(attrs) > 10 else ''}")
+                        # 尝试使用to_dict方法
+                        if hasattr(result, 'to_dict'):
+                            dict_data = result.to_dict()
+                            print(f"  📊 成功通过to_dict获取数据")
                             
-                            # 检查是否有特殊属性
-                            if 'status' in attrs:
-                                print(f"    - 状态: {result.status}")
-                            if 'message' in attrs:
-                                print(f"    - 消息: {result.message}")
-                            if 'error' in attrs:
-                                print(f"    - 错误: {result.error}")
-                    except Exception as e:
-                        print(f"    - 无法获取DataFrame属性: {str(e)}")
-                    
-                    # 检查是否有索引
-                    try:
-                        if not result.index.empty:
-                            print(f"    - 索引存在但为空: {len(result.index)}个索引项")
+                            # 保存提取的数据
+                            save_dir = FILE_PARAMS["SAVE_API_DIR"]
+                            os.makedirs(save_dir, exist_ok=True)
+                            
+                            # 生成文件名
+                            timestamp = datetime.now().strftime("%Y%m%d%H%M")
+                            file_name = f"{interface_name}_{timestamp}_extracted.json"
+                            file_path = os.path.join(save_dir, file_name)
+                            
+                            # 保存数据
+                            with open(file_path, "w", encoding="utf-8") as f:
+                                json.dump(dict_data, f, indent=2, ensure_ascii=False)
+                            print(f"  💾 已保存提取的数据到: {file_path}")
+                            
+                            # 提交文件
+                            print(f"  📤 正在提交提取的数据文件到Git仓库...")
+                            success = commit_files_in_batches(file_path, "LAST_FILE")
+                            
+                            if success:
+                                print(f"  ✅ 提取的数据文件 {file_name} 已成功提交到Git仓库")
+                            else:
+                                print(f"  ❌ 提交提取的数据文件到Git仓库失败")
                         else:
-                            print(f"    - 索引为空")
+                            print(f"  ⚠️ 对象没有to_dict方法，无法直接提取数据")
                     except Exception as e:
-                        print(f"    - 无法获取索引信息: {str(e)}")
-                    
-                    # 检查是否有错误信息
-                    error_indicators = ['error', 'message', 'status', 'code']
-                    for indicator in error_indicators:
-                        if hasattr(result, indicator):
-                            value = getattr(result, indicator)
-                            print(f"    - 检测到可能的错误信息 ({indicator}): {value}")
-                    
-                    # 检查是否有其他线索
-                    try:
-                        str_repr = str(result)
-                        if str_repr and str_repr != "Empty DataFrame":
-                            print(f"    - DataFrame字符串表示: {str_repr[:200]}{'...' if len(str_repr) > 200 else ''}")
-                    except Exception as e:
-                        pass
+                        print(f"  ⚠️ 尝试提取DataFrame-like对象数据失败: {str(e)}")
+                except Exception as e:
+                    print(f"  ⚠️ 无法获取列信息: {str(e)}")
             # 检查是否是字典
             elif isinstance(result, dict):
                 print(f"  📂 返回的是字典，包含 {len(result)} 个键")
@@ -396,6 +389,64 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                     print(f"  📄 内容预览: {result[:200]}...")
                 else:
                     print(f"  📄 内容: {result}")
+                
+                # 尝试解析为JSON
+                try:
+                    json_obj = json.loads(result)
+                    print(f"  📦 检测到JSON字符串，成功解析")
+                    # 分析JSON结构
+                    if isinstance(json_obj, dict):
+                        print(f"    - JSON结构: 字典，包含 {len(json_obj)} 个键")
+                        sample_keys = list(json_obj.keys())[:3]
+                        print(f"    - 前{len(sample_keys)}个键示例: {', '.join(sample_keys)}")
+                    elif isinstance(json_obj, list):
+                        print(f"    - JSON结构: 列表，包含 {len(json_obj)} 个元素")
+                        if json_obj:
+                            print(f"    - 第一个元素类型: {type(json_obj[0]).__name__}")
+                except Exception as e:
+                    print(f"  ⚠️ 无法解析为JSON: {str(e)}")
+            # 检查是否是其他对象
+            elif hasattr(result, '__dict__'):
+                print(f"  🧪 返回的是自定义对象，尝试分析...")
+                
+                # 尝试获取对象的__dict__
+                try:
+                    obj_dict = result.__dict__
+                    print(f"  📂 对象字典结构预览:")
+                    
+                    if obj_dict:
+                        # 尝试提取第一个键的值来展示结构
+                        first_key = next(iter(obj_dict))
+                        first_value = obj_dict[first_key]
+                        
+                        if isinstance(first_value, dict):
+                            print(f"    - 键值结构: {{'key': {{...}}}}")
+                            print(f"    - 示例键: '{first_key}'")
+                            print(f"    - 示例值结构: {list(first_value.keys())}")
+                        elif isinstance(first_value, list):
+                            print(f"    - 键值结构: {{'key': [...]}}")
+                            print(f"    - 示例键: '{first_key}'")
+                            if first_value:
+                                print(f"    - 列表示例: {list(first_value[0].keys()) if isinstance(first_value[0], dict) else '元素类型: ' + type(first_value[0]).__name__}")
+                        else:
+                            print(f"    - 键值结构: {{'key': value}}")
+                            print(f"    - 示例键: '{first_key}'")
+                            print(f"    - 值类型: {type(first_value).__name__}")
+                        
+                        # 显示前3个键
+                        sample_keys = list(obj_dict.keys())[:3]
+                        print(f"    - 前{len(sample_keys)}个键示例: {', '.join(sample_keys)}")
+                except Exception as e:
+                    print(f"  ⚠️ 无法获取对象字典: {str(e)}")
+                
+                # 尝试获取对象的方法
+                try:
+                    methods = [method for method in dir(result) if callable(getattr(result, method)) and not method.startswith('__')]
+                    if methods:
+                        print(f"  🛠️ 对象包含 {len(methods)} 个方法:")
+                        print(f"    - 示例方法: {', '.join(methods[:3])}{'...' if len(methods) > 3 else ''}")
+                except Exception as e:
+                    print(f"  ⚠️ 无法获取对象方法: {str(e)}")
             # 其他类型
             else:
                 print(f"  📄 返回的是 {result_type} 类型")
@@ -405,14 +456,6 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                     print(f"  📝 内容预览: {str_repr[:500]}...")
                 else:
                     print(f"  📝 内容: {str_repr}")
-                    
-                # 尝试检查是否有属性
-                try:
-                    attrs = dir(result)
-                    if attrs:
-                        print(f"  🧩 对象属性: {', '.join([attr for attr in attrs if not attr.startswith('__')][:5])}{'...' if len(attrs) > 5 else ''}")
-                except:
-                    pass
     
     except Exception as e:
         print(f"  ❌ 接口 {interface_name} 调用失败: {str(e)}")

@@ -46,8 +46,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # 专业级重试配置
 MAX_RETRIES = 6  # 增加重试次数
-BASE_RETRY_DELAY = 15  # 基础重试延迟（秒）
-MAX_RANDOM_DELAY = 25  # 最大随机延时（秒）
+BASE_RETRY_DELAY = 20  # 基础重试延迟（秒）
+MAX_RANDOM_DELAY = 30  # 最大随机延时（秒）
 
 def format_stock_code(code):
     """
@@ -118,30 +118,38 @@ def get_stock_financial_data():
     """
     for retry in range(MAX_RETRIES):
         try:
-            # 【终极修复】大幅增加随机延时（25.0-35.0秒）- 避免被封
-            delay = random.uniform(25.0, 35.0)
+            # 【终极修复】大幅增加随机延时（20.0-30.0秒）- 避免被封
+            delay = random.uniform(20.0, 30.0)
             logger.info(f"获取财务数据前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
             time.sleep(delay)
             
             logger.info("正在获取股票财务数据...")
             
-            # 【关键修复】正确调用API - 不需要symbol="all"参数
+            # 【关键修复】正确调用API - 无参数调用（基于您提供的日志证据）
             financial_data = ak.stock_financial_analysis_indicator_em()
             
-            # 【关键修复】添加检查，确保返回的数据有效
-            if financial_data is None or financial_data.empty:
-                logger.error("获取股票财务数据失败：返回空数据或None")
+            # 【关键修复】添加严格的返回值检查
+            if financial_data is None:
+                logger.error("API返回None，可能是网络问题或数据源问题")
                 if retry < MAX_RETRIES - 1:
-                    # 【智能退避】每次重试增加额外延迟
-                    extra_delay = retry * 12
+                    extra_delay = retry * 10
                     total_delay = BASE_RETRY_DELAY + extra_delay
-                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES})")
+                    time.sleep(total_delay)
+                    continue
+                return pd.DataFrame()
+            
+            if financial_data.empty:
+                logger.error("获取股票财务数据失败：返回空数据")
+                if retry < MAX_RETRIES - 1:
+                    extra_delay = retry * 10
+                    total_delay = BASE_RETRY_DELAY + extra_delay
+                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES})")
                     time.sleep(total_delay)
                     continue
                 return pd.DataFrame()
             
             # 【终极修复】根据实际API列名精准映射（基于您提供的列名）
-            # 严格对应您的过滤条件，不再做任何假设
             financial_data = financial_data.rename(columns={
                 'SECURITY_CODE': '股票代码',
                 'SECURITY_NAME_ABBR': '股票名称',
@@ -149,89 +157,35 @@ def get_stock_financial_data():
                 'EPSKCJB': 'PE_STATIC',  # 每股收益(扣除非经常性损益) - 用于计算静态市盈率
                 'TOTALOPERATEREVETZ': 'Revenue_Growth',  # 营业总收入同比增长
                 'PARENTNETPROFITTZ': 'NetProfit_Growth',  # 净利润同比增长
-                'ROEJQ': 'ROE'  # 净资产收益率(加权)
+                'ROEJQ': 'ROE',  # 净资产收益率(加权)
+                'BPSTZ': 'Pledge_Total'  # 质押数量 - 从您提供的列名中确认
             })
             
             # 【关键修复】确保股票代码格式统一为6位
             financial_data['股票代码'] = financial_data['股票代码'].apply(format_stock_code)
             
             # 【关键修复】转换数据类型（只转换必需的列）
-            required_columns = ['EPS', 'Revenue_Growth', 'NetProfit_Growth', 'ROE']
+            required_columns = ['EPS', 'Revenue_Growth', 'NetProfit_Growth', 'ROE', 'Pledge_Total']
             for col in required_columns:
                 if col in financial_data.columns:
                     financial_data[col] = pd.to_numeric(financial_data[col], errors='coerce')
             
-            logger.info(f"成功获取 {len(financial_data)} 条股票财务数据")
+            # 【关键修复】确保股票代码唯一 - 移除重复项
+            financial_data = financial_data.drop_duplicates(subset=['股票代码'], keep='first')
+            
+            logger.info(f"成功获取 {len(financial_data)} 条股票财务数据（已去重）")
             return financial_data
         
         except Exception as e:
             logger.error(f"获取股票财务数据失败 (尝试 {retry+1}/{MAX_RETRIES}): {str(e)}", exc_info=True)
             logger.error(f"异常堆栈: {traceback.format_exc()}")
             if retry < MAX_RETRIES - 1:
-                # 【智能退避】每次重试增加额外延迟
-                extra_delay = retry * 12
+                extra_delay = retry * 10
                 total_delay = BASE_RETRY_DELAY + extra_delay
-                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
+                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES})")
                 time.sleep(total_delay)
     
     logger.error("获取股票财务数据失败，已达到最大重试次数")
-    return pd.DataFrame()
-
-def get_stock_pledge_data():
-    """
-    获取股票质押数据
-    
-    Returns:
-        pd.DataFrame: 股票质押数据
-    """
-    for retry in range(MAX_RETRIES):
-        try:
-            # 【专业修复】大幅增加随机延时（15.0-25.0秒）- 避免被封
-            delay = random.uniform(15.0, 25.0)
-            logger.info(f"获取质押数据前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
-            time.sleep(delay)
-            
-            logger.info("正在获取股票质押数据...")
-            
-            # 获取质押数据
-            pledge_data = ak.stock_a_pledge_ratio()
-            
-            if pledge_data.empty:
-                logger.error("获取股票质押数据失败：返回空数据")
-                if retry < MAX_RETRIES - 1:
-                    # 【智能退避】每次重试增加额外延迟
-                    extra_delay = retry * 8
-                    total_delay = BASE_RETRY_DELAY + extra_delay
-                    logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
-                    time.sleep(total_delay)
-                    continue
-                return pd.DataFrame()
-            
-            # 重命名列，确保一致性
-            pledge_data = pledge_data.rename(columns={
-                'code': '股票代码',
-                'name': '股票名称',
-                'pledge_ratio': 'Pledge_Ratio',
-                'pledge_total': 'Pledge_Total'
-            })
-            
-            # 确保股票代码是6位
-            pledge_data['股票代码'] = pledge_data['股票代码'].apply(format_stock_code)
-            
-            logger.info(f"成功获取 {len(pledge_data)} 条股票质押数据")
-            return pledge_data
-        
-        except Exception as e:
-            logger.error(f"获取股票质押数据失败 (尝试 {retry+1}/{MAX_RETRIES}): {str(e)}", exc_info=True)
-            logger.error(f"异常堆栈: {traceback.format_exc()}")
-            if retry < MAX_RETRIES - 1:
-                # 【智能退避】每次重试增加额外延迟
-                extra_delay = retry * 8
-                total_delay = BASE_RETRY_DELAY + extra_delay
-                logger.warning(f"将在 {total_delay:.1f} 秒后重试 ({retry+1}/{MAX_RETRIES}) - 智能退避策略")
-                time.sleep(total_delay)
-    
-    logger.error("获取股票质押数据失败，已达到最大重试次数")
     return pd.DataFrame()
 
 def get_stock_basic_info():
@@ -252,11 +206,8 @@ def get_stock_basic_info():
     # 第二阶段：获取财务数据（如果成功则更新）
     financial_data = get_stock_financial_data()
     
-    # 第三阶段：获取质押数据（如果成功则更新）
-    pledge_data = get_stock_pledge_data()
-    
-    # 【关键修复】应用财务数据过滤条件
-    filtered_stock_info = apply_financial_filters(base_stock_info, financial_data, pledge_data)
+    # 【关键修复】应用财务数据过滤条件 - 逐步过滤并保存
+    filtered_stock_info = apply_financial_filters_step_by_step(base_stock_info, financial_data)
     
     return filtered_stock_info
 
@@ -308,6 +259,9 @@ def get_base_stock_info():
             
             stock_info = stock_info[available_columns].copy()
             
+            # 【关键修复】确保股票代码唯一 - 移除重复项
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+            
             # 确保代码列是6位格式
             stock_info["代码"] = stock_info["代码"].apply(lambda x: str(x).zfill(6))
             
@@ -325,6 +279,9 @@ def get_base_stock_info():
             
             # 3. 移除名称包含"退市"的股票
             stock_info = stock_info[~stock_info["名称"].str.contains("退市", na=False, regex=False)].copy()
+            
+            # 【关键修复】再次确保股票代码唯一 - 移除重复项
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
             
             logger.info(f"成功获取 {len(stock_info)} 条股票基础信息（已应用基础过滤条件）")
             
@@ -417,14 +374,13 @@ def save_base_stock_info(stock_info):
     except Exception as e:
         logger.error(f"保存基础股票列表失败: {str(e)}", exc_info=True)
 
-def apply_financial_filters(base_stock_info, financial_data, pledge_data):
+def apply_financial_filters_step_by_step(base_stock_info, financial_data):
     """
-    应用财务数据过滤条件
+    【关键修复】应用财务数据过滤条件 - 逐步过滤并保存
     
     Args:
         base_stock_info: 基础股票列表
-        financial_data: 财务数据
-        pledge_ 质押数据
+        financial_ 财务数据
     
     Returns:
         pd.DataFrame: 应用财务过滤后的股票列表
@@ -432,91 +388,237 @@ def apply_financial_filters(base_stock_info, financial_data, pledge_data):
     if base_stock_info.empty:
         return pd.DataFrame()
     
-    # 创建副本，避免修改原始数据
+    # 【关键修复】创建副本，避免修改原始数据
     stock_info = base_stock_info.copy()
     
-    # 添加财务数据
-    if not financial_data.empty:
-        stock_info = pd.merge(stock_info, financial_data, left_on="代码", right_on="股票代码", how="left")
-        logger.info(f"已合并财务数据，共 {len(stock_info)} 条记录")
-    
-    # 添加质押数据
-    if not pledge_data.empty:
-        stock_info = pd.merge(stock_info, pledge_data, left_on="代码", right_on="股票代码", how="left")
-        logger.info(f"已合并质押数据，共 {len(stock_info)} 条记录")
-    
-    # 初始股票数量
+    # 【关键修复】记录初始股票数量
     initial_count = len(stock_info)
+    logger.info(f"开始应用财务过滤，初始股票数量: {initial_count}")
     
-    # 【关键修复】应用财务数据过滤条件（每一步都记录）
+    # 【关键修复】添加财务数据 - 确保只添加列，不增加行数
+    if not financial_data.empty:
+        # 【关键修复】使用inner join，确保只保留基础股票中的股票
+        stock_info = pd.merge(
+            stock_info, 
+            financial_data, 
+            left_on="代码", 
+            right_on="股票代码", 
+            how="left",
+            suffixes=('', '_financial')
+        )
+        
+        # 【关键修复】移除财务数据中的重复股票代码
+        stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        logger.info(f"已合并财务数据，共 {len(stock_info)} 条记录（基础股票: {initial_count}）")
+    
+    # 【关键修复】确保股票数量不会增加
+    if len(stock_info) > initial_count:
+        logger.warning(f"合并后股票数量增加! 初始: {initial_count}, 合并后: {len(stock_info)}")
+        # 【关键修复】强制移除重复项，确保股票数量不增加
+        stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        logger.warning(f"已移除重复股票，股票数量: {len(stock_info)}")
+    
+    # 【关键修复】逐步应用财务数据过滤条件，并每步保存
     # 1. 市盈率(动态)：排除亏损股票（PE_TTM ≤ 0）
-    if 'PE_TTM' in stock_info.columns:
+    if 'EPS' in stock_info.columns and '最新价' in stock_info.columns:
+        # 创建PE_TTM列
+        stock_info['PE_TTM'] = stock_info['最新价'] / stock_info['EPS']
+        
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['PE_TTM'] > 0) | (stock_info['PE_TTM'].isna())]
+        stock_info = stock_info[(stock_info['PE_TTM'] > 0) & (stock_info['PE_TTM'] != float('inf'))]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只PE_TTM ≤ 0 的股票（市盈率(动态)亏损）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（动态市盈率过滤后）")
+        else:
+            logger.error("动态市盈率过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 2. 每股收益：排除负数股票（EPS < 0）
     if 'EPS' in stock_info.columns:
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['EPS'] >= 0) | (stock_info['EPS'].isna())]
+        stock_info = stock_info[stock_info['EPS'] > 0]
         removed = before - len(stock_info)
         if removed > 0:
-            logger.info(f"排除 {removed} 只EPS < 0 的股票（每股收益为负）")
+            logger.info(f"排除 {removed} 只EPS ≤ 0 的股票（每股收益非正）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（每股收益过滤后）")
+        else:
+            logger.error("每股收益过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 3. 市盈率(静态)：排除亏损股票（PE_STATIC ≤ 0）
-    if 'PE_STATIC' in stock_info.columns:
+    if 'PE_STATIC' in stock_info.columns and '最新价' in stock_info.columns:
+        # 创建PE_STATIC列
+        stock_info['PE_STATIC'] = stock_info['最新价'] / stock_info['PE_STATIC']
+        
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['PE_STATIC'] > 0) | (stock_info['PE_STATIC'].isna())]
+        stock_info = stock_info[(stock_info['PE_STATIC'] > 0) & (stock_info['PE_STATIC'] != float('inf'))]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只PE_STATIC ≤ 0 的股票（市盈率(静态)亏损）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（静态市盈率过滤后）")
+        else:
+            logger.error("静态市盈率过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 4. 营业总收入：排除同比下降的股票（营业收入同比增长率 < 0）
     if 'Revenue_Growth' in stock_info.columns:
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['Revenue_Growth'] >= 0) | (stock_info['Revenue_Growth'].isna())]
+        stock_info = stock_info[stock_info['Revenue_Growth'] >= 0]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只Revenue_Growth < 0 的股票（营业总收入同比下降）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（营业总收入过滤后）")
+        else:
+            logger.error("营业总收入过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 5. 总质押股份数量：排除有质押的股票（质押数量 > 0）
     if 'Pledge_Total' in stock_info.columns:
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['Pledge_Total'] <= 0) | (stock_info['Pledge_Total'].isna())]
+        stock_info = stock_info[stock_info['Pledge_Total'] <= 0]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只Pledge_Total > 0 的股票（有质押）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（质押数量过滤后）")
+        else:
+            logger.error("质押数量过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 6. 净利润：排除净利润同比下降的股票
     if 'NetProfit_Growth' in stock_info.columns:
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['NetProfit_Growth'] >= 0) | (stock_info['NetProfit_Growth'].isna())]
+        stock_info = stock_info[stock_info['NetProfit_Growth'] >= 0]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只NetProfit_Growth < 0 的股票（净利润同比下降）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（净利润过滤后）")
+        else:
+            logger.error("净利润过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
     
     # 7. ROE：排除低于5%的股票
     if 'ROE' in stock_info.columns:
         before = len(stock_info)
-        stock_info = stock_info[(stock_info['ROE'] >= 5) | (stock_info['ROE'].isna())]
+        stock_info = stock_info[stock_info['ROE'] >= 5]
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只ROE < 5% 的股票（ROE过低）")
+        
+        # 【关键修复】确保股票数量减少
+        if len(stock_info) > before:
+            logger.error("过滤后股票数量增加！强制修正...")
+            stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        
+        # 【关键修复】立即保存并提交
+        if not stock_info.empty:
+            save_and_commit_filtered_stock_info(stock_info, "更新股票列表（ROE过滤后）")
+        else:
+            logger.error("ROE过滤后股票列表为空，无法继续")
+            return pd.DataFrame()
+    
+    # 【关键修复】最终检查：确保股票数量不会超过初始数量
+    if len(stock_info) > initial_count:
+        logger.error(f"最终股票数量({len(stock_info)})超过初始数量({initial_count})! 强制修正...")
+        stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+        if len(stock_info) > initial_count:
+            # 如果去重后仍然超过初始数量，说明有新股票被添加，这是不应该的
+            logger.critical("严重错误：过滤后股票数量仍然超过初始数量！")
+            # 尝试只保留初始股票列表中的股票
+            stock_info = stock_info[stock_info['代码'].isin(base_stock_info['代码'])]
     
     # 更新数据状态
     stock_info["数据状态"] = "完整数据已获取"
     
     # 【关键修复】保存应用财务过滤后的股票列表
     try:
+        # 确保列顺序正确
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "next_crawl_index"]
+        for col in final_columns:
+            if col not in stock_info.columns:
+                stock_info[col] = None
+                
+        stock_info = stock_info[final_columns]
+        
         stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.0f')
         commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（财务过滤后）")
-        logger.info(f"应用财务过滤后的股票列表已成功更新，共 {len(stock_info)} 条记录")
+        logger.info(f"应用财务过滤后的股票列表已成功更新，共 {len(stock_info)} 条记录（初始: {initial_count}）")
     except Exception as e:
         logger.error(f"保存财务过滤后的股票列表失败: {str(e)}", exc_info=True)
     
     return stock_info
+
+def save_and_commit_filtered_stock_info(stock_info, commit_message):
+    """
+    【关键修复】保存并提交过滤后的股票列表
+    
+    Args:
+        stock_info: 过滤后的股票列表DataFrame
+        commit_message: 提交信息
+    """
+    try:
+        # 确保列顺序正确
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "next_crawl_index"]
+        for col in final_columns:
+            if col not in stock_info.columns:
+                stock_info[col] = None
+                
+        stock_info = stock_info[final_columns]
+        
+        stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.0f')
+        commit_files_in_batches(BASIC_INFO_FILE, commit_message)
+        logger.info(f"已保存并提交过滤后的股票列表，共 {len(stock_info)} 条记录: {commit_message}")
+    except Exception as e:
+        logger.error(f"保存并提交过滤后的股票列表失败: {str(e)}", exc_info=True)
 
 def update_stock_list():
     """

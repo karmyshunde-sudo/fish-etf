@@ -219,7 +219,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 except Exception as e2:
                     print(f"  ⚠️ 使用测试代码调用失败: {str(e2)}")
         
-        # 【关键修复】结果处理 - 增强类型检测与展示
+        # 【终极修复】结果处理 - 增强类型检测与展示
         print(f"  🔍 分析返回结果类型...")
         
         if result is None:
@@ -234,11 +234,12 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
             is_dataframe = hasattr(result, 'columns') and hasattr(result, 'empty')
             
             if is_dataframe:
+                # 【关键修复】移除错误假设，客观描述空DataFrame
                 if len(result.columns) > 0:
                     columns = ", ".join(result.columns)
                     print(f"  🗂️ 成功获取列名: {columns}")
                     
-                    # 【终极修复】显示列数据类型
+                    # 【关键修复】显示列数据类型
                     print(f"  📊 列数据类型:")
                     for col in result.columns:
                         # 获取该列非空值的数据类型
@@ -250,7 +251,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                             col_type = "empty"
                         print(f"    - {col}: {col_type}")
                     
-                    # 【终极修复】打印前5行数据示例（或实际行数，如果少于5）
+                    # 【关键修复】打印前5行数据示例（或实际行数，如果少于5）
                     if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and not result.empty:
                         rows_to_show = min(API_TEST_PARAMS["SAMPLE_ROWS"], len(result))
                         print(f"  📊 前{rows_to_show}行数据示例:")
@@ -260,7 +261,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                             row = result.iloc[i]
                             print(f"    [{i}] {row.to_dict()}")
                         
-                        # 【终极修复】保存前5条数据到文件
+                        # 【关键修复】保存前5条数据到文件
                         print(f"  💾 开始保存API数据到仓库...")
                         
                         # 创建保存目录
@@ -283,12 +284,66 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                         
                         if success:
                             print(f"  ✅ 文件 {file_name} 已成功提交到Git仓库")
-                            # 【关键修复】不再尝试验证文件是否存在，因为verify_file_in_remote不存在
-                            print(f"  ℹ️ 提交成功，但无法验证文件是否存在于远程仓库（verify_file_in_remote函数不存在）")
                         else:
                             print(f"  ❌ 提交文件到Git仓库失败")
+                    else:
+                        print(f"  ℹ️ 返回的DataFrame为空，但包含列名")
                 else:
                     print(f"  ❌ 返回的DataFrame为空，无列名")
+                    
+                    # 【关键修复】移除错误假设，提供客观建议
+                    print(f"  🔍 分析空DataFrame原因:")
+                    
+                    # 【关键修复】客观描述可能原因
+                    print(f"    - 无参数调用可能不返回有效数据，某些API需要参数才能获取完整数据")
+                    print(f"    - 该API可能只在特定时间段返回数据（如财报季）")
+                    print(f"    - 可能需要其他参数，建议参考AkShare文档")
+                    
+                    # 【关键修复】提供通用建议，不针对特定接口
+                    if api_type:
+                        print(f"    - 可尝试使用{api_type}类型的标准测试代码调用，例如: {interface_name}(symbol='{test_code}')")
+                    else:
+                        print(f"    - 可尝试添加symbol参数调用，例如: {interface_name}(symbol='600519')")
+                    
+                    # 检查是否有属性可以提供线索
+                    try:
+                        attrs = dir(result)
+                        if attrs:
+                            print(f"    - DataFrame属性: {', '.join([attr for attr in attrs if not attr.startswith('__')][:10])}{'...' if len(attrs) > 10 else ''}")
+                            
+                            # 检查是否有特殊属性
+                            if 'status' in attrs:
+                                print(f"    - 状态: {result.status}")
+                            if 'message' in attrs:
+                                print(f"    - 消息: {result.message}")
+                            if 'error' in attrs:
+                                print(f"    - 错误: {result.error}")
+                    except Exception as e:
+                        print(f"    - 无法获取DataFrame属性: {str(e)}")
+                    
+                    # 检查是否有索引
+                    try:
+                        if not result.index.empty:
+                            print(f"    - 索引存在但为空: {len(result.index)}个索引项")
+                        else:
+                            print(f"    - 索引为空")
+                    except Exception as e:
+                        print(f"    - 无法获取索引信息: {str(e)}")
+                    
+                    # 检查是否有错误信息
+                    error_indicators = ['error', 'message', 'status', 'code']
+                    for indicator in error_indicators:
+                        if hasattr(result, indicator):
+                            value = getattr(result, indicator)
+                            print(f"    - 检测到可能的错误信息 ({indicator}): {value}")
+                    
+                    # 检查是否有其他线索
+                    try:
+                        str_repr = str(result)
+                        if str_repr and str_repr != "Empty DataFrame":
+                            print(f"    - DataFrame字符串表示: {str_repr[:200]}{'...' if len(str_repr) > 200 else ''}")
+                    except Exception as e:
+                        pass
             # 检查是否是字典
             elif isinstance(result, dict):
                 print(f"  📂 返回的是字典，包含 {len(result)} 个键")

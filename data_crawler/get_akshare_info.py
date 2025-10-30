@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.ERROR)
 
 # 正确导入git_utils模块（只有一行，与项目其他文件完全一致）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.git_utils import commit_files_in_batches, verify_file_in_remote
+from utils.git_utils import commit_files_in_batches
 
 # ================================
 # 2. 全局常量/参数定义
@@ -283,23 +283,8 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                         
                         if success:
                             print(f"  ✅ 文件 {file_name} 已成功提交到Git仓库")
-                            
-                            # 【关键修复】验证文件是否真正存在于远程仓库
-                            print(f"  🔍 验证文件是否存在于远程Git仓库...")
-                            if verify_file_in_remote(file_path):
-                                print(f"  ✅ 文件存在验证通过：文件 {file_name} 存在于远程Git仓库")
-                            else:
-                                print(f"  ⚠️ 文件验证失败：文件 {file_name} 不存在于远程Git仓库")
-                                
-                                # 【关键修复】尝试再次提交
-                                print(f"  🔄 尝试再次提交文件: {file_name}")
-                                commit_files_in_batches(file_path, "LAST_FILE")
-                                
-                                # 再次验证
-                                if verify_file_in_remote(file_path):
-                                    print(f"  ✅ 二次提交成功：文件 {file_name} 存在于远程Git仓库")
-                                else:
-                                    print(f"  ❌ 二次提交失败：文件 {file_name} 仍然不存在于远程Git仓库")
+                            # 【关键修复】不再尝试验证文件是否存在，因为verify_file_in_remote不存在
+                            print(f"  ℹ️ 提交成功，但无法验证文件是否存在于远程仓库（verify_file_in_remote函数不存在）")
                         else:
                             print(f"  ❌ 提交文件到Git仓库失败")
                 else:

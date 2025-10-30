@@ -57,7 +57,7 @@ API_TEST_PARAMS = {
     
     # 输出参数
     "SHOW_DATA_SAMPLE": True,   # 是否显示数据示例
-    "SAMPLE_ROWS": 5,           # 数据示例显示的行数 - 已增加到5行
+    "SAMPLE_ROWS": 100,           # 数据示例显示的行数 - 已增加到100行
     "VERBOSE": True             # 是否显示详细日志
 }
 
@@ -308,7 +308,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                             col_type = "empty"
                         print(f"    - {col}: {col_type}")
                     
-                    # 打印前5行数据示例（或实际行数，如果少于5）
+                    # 打印前100行数据示例（或实际行数，如果少于100）
                     if API_TEST_PARAMS["SHOW_DATA_SAMPLE"] and not result.empty:
                         rows_to_show = min(API_TEST_PARAMS["SAMPLE_ROWS"], len(result))
                         print(f"  📊 前{rows_to_show}行数据示例:")
@@ -318,7 +318,7 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                             row = result.iloc[i]
                             print(f"    [{i}] {row.to_dict()}")
                         
-                        # 保存前5条数据到文件
+                        # 保存前100条数据到文件
                         print(f"  💾 开始保存API数据到仓库...")
                         
                         # 创建保存目录
@@ -330,8 +330,8 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                         file_name = f"{interface_name}_{timestamp}.csv"
                         file_path = os.path.join(save_dir, file_name)
                         
-                        # 保存前5条数据
-                        rows_to_save = min(5, len(result))
+                        # 保存前100条数据
+                        rows_to_save = min(100, len(result))
                         result.head(rows_to_save).to_csv(file_path, index=False, encoding="utf-8-sig")
                         print(f"  💾 已保存前{rows_to_save}条数据到: {file_path}")
                         

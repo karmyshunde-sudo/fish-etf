@@ -1,35 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-策略2 - 专业级多指标共振策略（微信推送适配版）
+策略2 - 多指标共振、3均线策略
 
-核心设计原则：
-1. 严格遵循"先技术指标计算，后财务数据过滤"原则
-2. 财务数据仅对候选信号股票获取（避免对4000+股票无脑爬取）
-3. 仅处理all_stocks.csv中有效股票（已过滤退市、ST股），不遍历data/daily/下所有文件
-4. 三均线缠绕策略提供完整筛选过程日志（每一步筛选数量统计）
-5. 严格适配wechat_push/push.py模块，符合金融系统可靠性要求
-
-关键性能优化：
-- 财务数据获取：逐个股票代码获取（AKShare API要求），避免symbol="all"错误
-- 候选股票去重：仅对需要过滤的股票获取财务数据
-- 1秒延时：避免AKShare API频率限制
-- 数据完整性检查：严格验证列名、数值类型、时间格式
-
-错误处理机制：
-- 所有异常捕获并记录详细日志
-- 单个股票失败不影响整体流程
-- 财务数据获取失败时跳过过滤（避免程序中断）
-- 数据缺失时自动跳过计算
-
-数据流程：
-1. 读取all_stocks.csv → 有效股票列表（已过滤退市/ST股）
-2. 遍历股票列表 → 加载本地日线数据（严格检查中文列名）
-3. 计算四大技术指标（MA/MACD/RSI/KDJ）→ 生成候选信号
-4. 候选股票去重 → 批量获取财务数据（逐个股票代码）
-5. 财务数据过滤（5个核心条件）→ 生成最终信号
-6. 格式化多级信号（单一/双/三/四指标共振+三均线缠绕）
-7. 生成微信推送消息 → 保存股票代码到文件 → 提交Git
+1. 仅处理all_stocks.csv中有效股票（已过滤退市、ST股）
+2. 三均线缠绕策略提供完整筛选过程日志（每一步筛选数量统计）
+3. 严格适配wechat_push/push.py模块，符合金融系统可靠性要求
 
 三均线缠绕筛选过程（详细日志）：
 1️⃣ 初始缠绕（偏离率≤2%）：所有三均线间距≤2%的股票
@@ -37,13 +13,6 @@
 3️⃣ 量能验证（缩量≥50%）：成交量≤5日均量50%的股票
 4️⃣ 突破阶段验证（突破>1%）：收盘价突破三均线最大值1%以上
 5️⃣ 确认阶段验证（确认>0.5%）：当日涨幅>0.5%的确认信号
-
-财务数据过滤条件（严格遵循金融风控标准）：
-1. 每股收益(EPSJB) ≥ 0（排除亏损股）
-2. 静态市盈率(PE_STATIC) > 0（排除市盈率≤0的股票）
-3. 总质押股份数量(BPSTZ) ≤ 0（排除有质押的股票）
-4. 净利润同比增长(PARENTNETPROFITTZ) ≥ 0（排除净利润下降）
-【净资产收益率ROE过滤去掉！！】5. ROE(ROEJQ) ≥ 5%（排除ROE低于5%的股票）
 
 信号生成规则：
 - 单一指标信号（MA/MACD/RSI/KDJ）：仅取前20名
@@ -218,140 +187,8 @@ def check_threema_steps(df, code, name):
         }
     except Exception as e:
         logger.debug(f"检查三均线中间步骤失败 {code}: {str(e)}")
-        return None
+        return None    
 
-def get_financial_data_for_codes(codes):
-    """
-    逐个股票代码获取财务数据（修正AKShare API调用）
-    参数：
-    - codes: 需要获取财务数据的股票代码列表（字符串列表）
-    返回：
-    - DataFrame: 包含所有股票的财务数据
-    - 空DataFrame: 如果所有获取失败
-    
-    修改说明：
-    1. 严格使用6位股票代码（不添加sh/sz前缀）
-    2. 保持原始数据结构，不做额外处理
-    3. 确保正确处理中文列名
-    """
-    financial_data = pd.DataFrame()
-    for code in codes:
-        code = code.zfill(6)  # 确保6位格式
-        try:
-            # 直接使用6位数字代码调用API（无前缀）
-            # df = ak.stock_financial_analysis_indicator(symbol=code)
-            df = ak.stock_financial_abstract(symbol=code)
-
-            # 替换为：
-            #if code.startswith('6'):
-            #    symbol = 'sh' + code
-            #elif code.startswith(('0', '3')):
-            #    symbol = 'sz' + code
-            #else:
-            #    symbol = 'sh' + code  # 科创板等特殊情况
-            #df = ak.stock_financial_analysis_indicator(symbol=symbol)
-  
-            if df is not None and not df.empty:
-                # 添加股票代码列（原始数据可能没有）
-                df['股票代码'] = code
-                financial_data = pd.concat([financial_data, df], ignore_index=True)
-            else:
-                logger.warning(f"股票 {code} 财务数据get_financial-1为空")
-        except Exception as e:
-            logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
-        time.sleep(1)  # 避免触发AKShare频率限制
-    return financial_data
-
-def filter_signals(signals, financial_data):
-    """
-    应用财务过滤条件（仅三个有效条件）
-    参数：
-    - signals: 候选信号列表
-    - financial_data: 获取到的财务数据
-    返回：
-    - filtered_signals: 经过财务过滤的信号
-    
-    修改说明：
-    1. 移除了市盈率过滤条件（冗余）
-    2. 仅保留三个有效财务过滤条件
-    3. 优化了财务数据映射逻辑
-    """
-    if not signals:
-        return signals
-    
-    # 找到第三列作为最新日期
-    if len(financial_data.columns) < 3:
-        logger.warning("财务数据列数不足3列，无法确定最新日期")
-        return signals
-    
-    latest_date = financial_data.columns[2]
-    logger.info(f"使用第三列 '{latest_date}' 作为最新日期进行财务过滤")
-    
-    # 创建股票代码到财务指标的映射
-    financial_dict = {}
-    for _, row in financial_data.iterrows():
-        code = str(row['股票代码']).zfill(6)
-        option = row['选项']
-        indicator = row['指标']
-        
-        # 只处理有效行
-        if pd.isna(code) or pd.isna(option) or pd.isna(indicator):
-            continue
-            
-        if code not in financial_dict:
-            financial_dict[code] = {}
-        
-        # 收集关键指标
-        if option == "每股指标" and indicator == "基本每股收益":
-            try:
-                value = float(row[latest_date])
-                financial_dict[code]["EPSJB"] = value
-            except:
-                pass
-        elif option == "常用指标" and indicator == "归母净利润":
-            try:
-                value = float(row[latest_date])
-                financial_dict[code]["PARENTNETPROFIT"] = value
-            except:
-                pass
-        elif option == "常用指标" and indicator == "总质押股份数量":
-            try:
-                value = float(row[latest_date])
-                financial_dict[code]["BPSTZ"] = value
-            except:
-                pass
-    
-    # 应用三个有效财务过滤条件
-    filtered_signals = []
-    for signal in signals:
-        code = signal['code']
-        if code not in financial_dict:
-            continue
-            
-        financial_info = financial_dict[code]
-        
-        # 1. 每股收益：排除负数股票（EPSJB < 0）
-        if "EPSJB" in financial_info and financial_info["EPSJB"] < 0:
-            continue
-            
-        # 2. 总质押股份数量：排除有质押的股票（BPSTZ > 0）
-        if "BPSTZ" in financial_info and financial_info["BPSTZ"] > 0:
-            continue
-            
-        # 3. 净利润：排除净利润同比下降的股票
-        if "PARENTNETPROFIT" in financial_info and financial_info["PARENTNETPROFIT"] < 0:
-            continue
-            
-        # 通过所有条件
-        filtered_signals.append(signal)
-    
-    # 记录过滤结果
-    if len(filtered_signals) < len(signals):
-        logger.info(f"财务过滤后，保留 {len(filtered_signals)} 个信号（原 {len(signals)} 个）")
-        logger.info(f"过滤掉 {len(signals) - len(filtered_signals)} 个信号")
-    
-    return filtered_signals
-    
 def load_stock_daily_data(stock_code):
     """
     加载股票日线数据（严格使用中文列名）
@@ -768,24 +605,24 @@ def main():
         all_candidate_codes.add(signal['code'])
     
     # 6. 获取财务数据（仅对候选股票去重后获取）
-    financial_data = get_financial_data_for_codes(all_candidate_codes)
+    #financial_data = get_financial_data_for_codes(all_candidate_codes)
     
     # 7. 定义财务过滤函数（在main内部，移到外部）
     
     # 8. 应用财务过滤
-    ma_signals = filter_signals(ma_signals, financial_data)
-    macd_signals = filter_signals(macd_signals, financial_data)
-    rsi_signals = filter_signals(rsi_signals, financial_data)
-    kdj_signals = filter_signals(kdj_signals, financial_data)
-    threema_signals = filter_signals(threema_signals, financial_data)
+    #ma_signals = filter_signals(ma_signals, financial_data)
+    #macd_signals = filter_signals(macd_signals, financial_data)
+    #rsi_signals = filter_signals(rsi_signals, financial_data)
+    #kdj_signals = filter_signals(kdj_signals, financial_data)
+    #threema_signals = filter_signals(threema_signals, financial_data)
     
-    for key in double_signals:
-        double_signals[key] = filter_signals(double_signals[key], financial_data)
+    #for key in double_signals:
+    #    double_signals[key] = filter_signals(double_signals[key], financial_data)
     
-    for key in triple_signals:
-        triple_signals[key] = filter_signals(triple_signals[key], financial_data)
+    #for key in triple_signals:
+    #    triple_signals[key] = filter_signals(triple_signals[key], financial_data)
     
-    quadruple_signals = filter_signals(quadruple_signals, financial_data)
+    #quadruple_signals = filter_signals(quadruple_signals, financial_data)
     
     logger.info("财务数据过滤完成，信号统计:")
     logger.info(f"单一指标信号 - MA: {len(ma_signals)}, MACD: {len(macd_signals)}, RSI: {len(rsi_signals)}, KDJ: {len(kdj_signals)}")

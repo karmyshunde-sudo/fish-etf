@@ -35,7 +35,7 @@ from utils.git_utils import commit_files_in_batches
 API_TEST_PARAMS = {
     # 标准测试代码 - 为不同类型的API使用合适的测试代码
     "TEST_CODES": {
-        "stock": "600519",   # 贵州茅台 - A股股票
+        "stock": "300019",   # 贵州茅台 - A股股票
         "etf": "510300",     # 沪深300ETF
         "index": "000001",   # 上证指数
         "fund": "000001",    # 示例基金代码

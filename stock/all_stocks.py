@@ -43,8 +43,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # 专业级重试配置
 MAX_RETRIES = 6  # 增加重试次数
-BASE_RETRY_DELAY = 20  # 基础重试延迟（秒）
-MAX_RANDOM_DELAY = 30  # 最大随机延时（秒）
+BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
+MAX_RANDOM_DELAY = 8  # 最大随机延时（秒）
 
 def format_stock_code(code):
     """
@@ -140,7 +140,7 @@ def get_stock_list_data():
     for retry in range(MAX_RETRIES):
         try:
             # 【关键修复】大幅增加随机延时（20.0-30.0秒）- 避免被封
-            delay = random.uniform(20.0, 30.0)
+            delay = random.uniform(2.0, 8.0)
             logger.info(f"获取股票列表前等待 {delay:.2f} 秒（尝试 {retry+1}/{MAX_RETRIES}）...")
             time.sleep(delay)
             

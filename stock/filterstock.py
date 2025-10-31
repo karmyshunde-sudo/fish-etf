@@ -15,13 +15,13 @@
 
 使用说明：
 1. 该脚本应在每周固定时间运行（例如周末）
-2. 运行前确保已安装必要依赖：pip install akshare pandas
+2. 运行前确保已安装必要依赖：pip install baostock pandas
 3. 脚本会更新all_stocks.csv文件
 """
 
 import os
 import pandas as pd
-import akshare as ak
+import baostock as bs
 import time
 import logging
 import sys
@@ -33,6 +33,8 @@ from utils.git_utils import commit_files_in_batches
 # 配置日志
 logger = logging.getLogger(__name__)
 
+# 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
+BATCH_SIZE = 100  # 每次处理的股票数量
 
 # 财务指标过滤参数配置
 # 每个指标可以独立启用/禁用，并设置阈值
@@ -368,7 +370,7 @@ FINANCIAL_FILTER_PARAMS = {
 
 def get_financial_data(code):
     """
-    获取单只股票的财务数据
+    获取单只股票的财务数据（使用baostock接口）
     参数：
     - code: 股票代码（6位字符串）
     返回：
@@ -376,11 +378,37 @@ def get_financial_data(code):
     - None: 获取失败
     """
     try:
-        # 直接使用6位股票代码调用API
-        df = ak.stock_financial_abstract(symbol=code)
-        if df is not None and not df.empty:
-            return df
-        return None
+        # 转换为baostock格式的代码
+        bs_code = "sh." + code if code.startswith('6') else "sz." + code
+        
+        # 获取利润表数据（Baostock唯一财务接口）
+        rs = bs.query_profit_data(
+            code=bs_code,
+            year=datetime.now().year,
+            quarter=4
+        )
+        
+        if rs.error_code != '0':
+            logger.error(f"获取股票 {code} 财务数据失败: {rs.error_msg}")
+            return None
+        
+        # 转换为DataFrame
+        data_list = []
+        while rs.next():
+            data_list.append(rs.get_row_data())
+        
+        if not data_list:
+            logger.warning(f"获取股票 {code} 财务数据成功，但无数据返回")
+            return None
+        
+        # 【关键修改】记录返回的字段
+        logger.info(f"Baostock query_profit_data 返回的字段: {', '.join(rs.fields)}")
+        
+        # 创建DataFrame
+        df = pd.DataFrame(data_list, columns=rs.fields)
+        
+        # 返回财务数据
+        return df
     except Exception as e:
         logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
         return None
@@ -394,29 +422,39 @@ def apply_financial_filters(stock_code, df):
     返回：
     - bool: 是否通过所有财务条件
     """
-    # 确定最新报告期（第三列）
-    if len(df.columns) < 3:
-        logger.warning(f"股票 {stock_code} 财务数据列数不足3列")
+    if df is None or df.empty:
         return False
     
-    latest_date = df.columns[2]
-    
-    # 收集关键财务指标
+    # 从Baostock返回的财务数据中提取关键指标
     financial_data = {}
     
-    # 遍历财务数据行
-    for _, row in df.iterrows():
-        option = row["选项"] if "选项" in row else ""
-        indicator = row["指标"] if "指标" in row else ""
+    # 提取利润表数据
+    if not df.empty:
+        row = df.iloc[0]  # 取最新财务数据
         
-        # 检查是否是需要的指标
-        for param_name, param_config in FINANCIAL_FILTER_PARAMS.items():
-            if option == param_config["category"] and indicator == param_config["column"]:
-                try:
-                    value = float(row[latest_date])
-                    financial_data[param_name] = value
-                except (ValueError, TypeError):
-                    financial_data[param_name] = None
+        # 【关键修改】记录获取到的具体财务数据
+        logger.info(f"股票 {stock_code} 财务数据示例: {dict(row)}")
+        
+        # 基本每股收益
+        if 'basicEPS' in row.index:
+            try:
+                financial_data['basic_earnings_per_share'] = float(row['basicEPS'])
+            except (ValueError, TypeError):
+                financial_data['basic_earnings_per_share'] = None
+        
+        # 净资产收益率(ROE)
+        if 'roe' in row.index:
+            try:
+                financial_data['roe'] = float(row['roe'])
+            except (ValueError, TypeError):
+                financial_data['roe'] = None
+        
+        # 归母净利润
+        if 'netProfit' in row.index:
+            try:
+                financial_data['net_profit_growth'] = float(row['netProfit'])
+            except (ValueError, TypeError):
+                financial_data['net_profit_growth'] = None
     
     # 应用财务过滤条件
     for param_name, param_config in FINANCIAL_FILTER_PARAMS.items():
@@ -430,16 +468,12 @@ def apply_financial_filters(stock_code, df):
         
         # 处理计算型指标
         if param_name == "static_pe_ratio":
-            # 静态市盈率 = 收盘价 / 每股收益
-            # 如果收盘价不存在，无法计算，返回False
-            # 在实际应用中，这里应该有收盘价信息，但当前代码中没有
-            # 为简化，我们假设收盘价为正，只检查每股收益
-            if "basic_earnings_per_share" in financial_data:
+            # 静态市盈率 = 1 / 每股收益
+            if 'basic_earnings_per_share' in financial_data:
                 basic_earnings = financial_data["basic_earnings_per_share"]
                 if basic_earnings is None or basic_earnings <= 0:
                     logger.debug(f"股票 {stock_code} 静态市盈率条件不满足")
                     return False
-                # 静态市盈率大于0，因为收盘价假设为正，且basic_earnings > 0
                 continue
             else:
                 return False
@@ -503,40 +537,48 @@ def filter_and_update_stocks():
             logger.info("filter列已重置，退出执行")
             return
         
-        # 只处理前100只股票
-        process_batch = to_process.head(100)
+        # 只处理前BATCH_SIZE只股票
+        process_batch = to_process.head(BATCH_SIZE)
         logger.info(f"本次处理股票数量: {len(process_batch)}")
         
         # 用于存储处理结果
         valid_stocks = []
         
-        # 逐个处理股票
-        for idx, stock in process_batch.iterrows():
-            stock_code = str(stock["代码"]).zfill(6)
-            stock_name = stock["名称"]
-            
-            logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
-            
-            # 获取财务数据
-            df = get_financial_data(stock_code)
-            if df is None or df.empty:
-                logger.warning(f"股票 {stock_code} 财务数据为空，标记为未通过")
-                # 即使财务数据为空，也将filter设为True（跳过后续处理）
-                stock['filter'] = True
-                basic_info_df.loc[idx, 'filter'] = True
-                continue
-            
-            # 应用财务过滤
-            if apply_financial_filters(stock_code, df):
-                stock['filter'] = True
-                basic_info_df.loc[idx, 'filter'] = True
-                valid_stocks.append(stock)
-            else:
-                stock['filter'] = True
-                basic_info_df.loc[idx, 'filter'] = True
-            
-            # API调用频率限制
-            time.sleep(1)
+        # 登录Baostock
+        login_result = bs.login()
+        if login_result.error_code != '0':
+            logger.error(f"Baostock登录失败: {login_result.error_msg}")
+            return
+        
+        try:
+            # 逐个处理股票
+            for idx, stock in process_batch.iterrows():
+                stock_code = str(stock["代码"]).zfill(6)
+                stock_name = stock["名称"]
+                
+                logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
+                
+                # 获取财务数据
+                df = get_financial_data(stock_code)
+                if df is None or df.empty:
+                    logger.warning(f"股票 {stock_code} 财务数据为空，标记为未通过")
+                    # 即使财务数据为空，也将filter设为True（跳过后续处理）
+                    basic_info_df.loc[idx, 'filter'] = True
+                    continue
+                
+                # 应用财务过滤
+                if apply_financial_filters(stock_code, df):
+                    basic_info_df.loc[idx, 'filter'] = True
+                    valid_stocks.append(stock)
+                else:
+                    basic_info_df.loc[idx, 'filter'] = True
+                
+                # API调用频率限制
+                time.sleep(0.5)
+        
+        finally:
+            # 确保登出
+            bs.logout()
         
         # 保存更新后的股票列表
         basic_info_df.to_csv(basic_info_file, index=False)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票列表更新模块 - Baostock 数据源
+股票列表更新模块 - Baostock 数据源（已修正接口调用）
 
 【详细过滤条件】
 1. 基础过滤：
@@ -153,9 +153,8 @@ def get_stock_list_data():
                 logger.info("正在获取股票列表数据...")
                 
                 # 【关键修复】使用query_stock_basic接口获取数据
-                # 指定需要的字段
-                fields = "code,name,industry,outstanding,totalShare,status"
-                rs = bs.query_stock_basic(fields=fields)
+                # Baostock的query_stock_basic不支持fields参数，必须获取所有数据后再筛选
+                rs = bs.query_stock_basic()
                 
                 # 检查返回结果
                 if rs.error_code != '0':
@@ -187,6 +186,7 @@ def get_stock_list_data():
                 df = pd.DataFrame(data_list, columns=rs.fields)
                 
                 # 【关键修复】确保股票代码格式统一为6位
+                # 处理可能的格式: sh.600000, sz.000001
                 df['code'] = df['code'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
                 df['code'] = df['code'].apply(format_stock_code)
                 

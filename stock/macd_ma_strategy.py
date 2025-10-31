@@ -240,15 +240,16 @@ def get_financial_data_for_codes(codes):
         try:
             # 直接使用6位数字代码调用API（无前缀）
             # df = ak.stock_financial_analysis_indicator(symbol=code)
+            df = ak.stock_financial_abstract(symbol=code)
 
             # 替换为：
-            if code.startswith('6'):
-                symbol = 'sh' + code
-            elif code.startswith(('0', '3')):
-                symbol = 'sz' + code
-            else:
-                symbol = 'sh' + code  # 科创板等特殊情况
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            #if code.startswith('6'):
+            #    symbol = 'sh' + code
+            #elif code.startswith(('0', '3')):
+            #    symbol = 'sz' + code
+            #else:
+            #    symbol = 'sh' + code  # 科创板等特殊情况
+            #df = ak.stock_financial_analysis_indicator(symbol=symbol)
   
             if df is not None and not df.empty:
                 # 添加股票代码列（原始数据可能没有）

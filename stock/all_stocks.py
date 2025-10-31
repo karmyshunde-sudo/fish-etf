@@ -8,6 +8,7 @@
    - 移除ST和*ST股票
    - 移除名称以"N"开头的新上市股票
    - 移除名称包含"退市"的股票
+   - 移除指数股票
 
 注意：不再包含市盈率过滤，因为新CSV结构已移除该字段
 """
@@ -73,6 +74,24 @@ def format_stock_code(code):
         return None
     
     return code_str
+
+def is_valid_stock_code(code):
+    """
+    检查股票代码是否有效（不是指数代码）
+    Args:
+        code: 股票代码（6位字符串）
+    Returns:
+        bool: 是否是有效的股票代码
+    """
+    # 指数代码排除规则
+    if code == "000001" or code == "000002" or code == "000003" or code == "000004" or code == "000005" or code == "000006" or code == "000007" or code == "000008" or code == "000009" or code == "000010" or code == "000011" or code == "000012" or code == "000013" or code == "000015" or code == "000016" or code == "000017" or code == "000018" or code == "000098" or code == "000099" or code == "000100" or code == "000101" or code == "000102" or code == "000103" or code == "000104" or code == "000105" or code == "000106" or code == "000107" or code == "000108" or code == "000109" or code == "000110" or code == "000111" or code == "000112" or code == "000113" or code == "000114":
+        return False
+    
+    # 有效股票代码检查
+    if code.startswith(('00', '30', '60', '688', '8')) and code != '880001':
+        return True
+    
+    return False
 
 def get_stock_section(stock_code: str) -> str:
     """
@@ -318,6 +337,15 @@ def apply_basic_filters(stock_data):
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只已退市股票（基础过滤）")
+    
+    # 5. 【新增】移除指数股票
+    if "代码" in stock_info.columns:
+        before = len(stock_info)
+        # 应用is_valid_stock_code函数过滤指数代码
+        stock_info = stock_info[stock_info["代码"].apply(is_valid_stock_code)]
+        removed = before - len(stock_info)
+        if removed > 0:
+            logger.info(f"排除 {removed} 只指数股票（基础过滤）")
     
     # 【关键修复】确保股票代码唯一 - 移除重复项
     if "代码" in stock_info.columns:

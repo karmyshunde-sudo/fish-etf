@@ -239,13 +239,23 @@ def get_financial_data_for_codes(codes):
         code = code.zfill(6)  # 确保6位格式
         try:
             # 直接使用6位数字代码调用API（无前缀）
-            df = ak.stock_financial_analysis_indicator(symbol=code)
+            # df = ak.stock_financial_analysis_indicator(symbol=code)
+
+            # 替换为：
+            if code.startswith('6'):
+                symbol = 'sh' + code
+            elif code.startswith(('0', '3')):
+                symbol = 'sz' + code
+            else:
+                symbol = 'sh' + code  # 科创板等特殊情况
+            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+  
             if df is not None and not df.empty:
                 # 添加股票代码列（原始数据可能没有）
                 df['股票代码'] = code
                 financial_data = pd.concat([financial_data, df], ignore_index=True)
             else:
-                logger.warning(f"股票 {code} 财务数据为空")
+                logger.warning(f"股票 {code} 财务数据get_financial-1为空")
         except Exception as e:
             logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
         time.sleep(1)  # 避免触发AKShare频率限制

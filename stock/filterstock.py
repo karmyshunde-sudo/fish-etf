@@ -486,42 +486,61 @@ def filter_and_update_stocks():
         basic_info_df = pd.read_csv(basic_info_file)
         logger.info(f"成功读取基础信息文件，共 {len(basic_info_df)} 只股票")
         
-        # 过滤前的股票列表
-        original_count = len(basic_info_df)
+        # 确保有filter列，如果没有则添加
+        if 'filter' not in basic_info_df.columns:
+            basic_info_df['filter'] = False
+            logger.info("添加filter列到all_stocks.csv文件")
         
-        # 用于存储通过过滤的股票
+        # 找出需要处理的股票（filter为False）
+        to_process = basic_info_df[basic_info_df['filter'] == False]
+        logger.info(f"需要处理的股票数量: {len(to_process)}")
+        
+        # 如果没有需要处理的股票，重置所有filter为False并退出
+        if len(to_process) == 0:
+            logger.info("所有股票都已处理，重置filter列")
+            basic_info_df['filter'] = False
+            basic_info_df.to_csv(basic_info_file, index=False)
+            logger.info("filter列已重置，退出执行")
+            return
+        
+        # 只处理前100只股票
+        process_batch = to_process.head(100)
+        logger.info(f"本次处理股票数量: {len(process_batch)}")
+        
+        # 用于存储处理结果
         valid_stocks = []
         
         # 逐个处理股票
-        for idx, stock in basic_info_df.iterrows():
+        for idx, stock in process_batch.iterrows():
             stock_code = str(stock["代码"]).zfill(6)
             stock_name = stock["名称"]
             
-            logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{original_count})")
+            logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
             
             # 获取财务数据
             df = get_financial_data(stock_code)
             if df is None or df.empty:
-                logger.warning(f"股票 {stock_code} 财务数据为空，跳过")
-                valid_stocks.append(stock)
+                logger.warning(f"股票 {stock_code} 财务数据为空，标记为未通过")
+                # 即使财务数据为空，也将filter设为True（跳过后续处理）
+                stock['filter'] = True
+                basic_info_df.loc[idx, 'filter'] = True
                 continue
             
             # 应用财务过滤
             if apply_financial_filters(stock_code, df):
+                stock['filter'] = True
+                basic_info_df.loc[idx, 'filter'] = True
                 valid_stocks.append(stock)
+            else:
+                stock['filter'] = True
+                basic_info_df.loc[idx, 'filter'] = True
             
             # API调用频率限制
             time.sleep(1)
         
-        # 统计结果
-        filtered_count = len(valid_stocks)
-        logger.info(f"过滤完成，剩余 {filtered_count} 只股票（原 {original_count} 只）")
-        logger.info(f"共过滤掉 {original_count - filtered_count} 只股票")
-        
-        # 保存过滤后的股票列表
-        filtered_df = pd.DataFrame(valid_stocks)
-        filtered_df.to_csv(basic_info_file, index=False)
-        logger.info(f"已更新 {basic_info_file} 文件，保存 {filtered_count} 只股票")
+        # 保存更新后的股票列表
+        basic_info_df.to_csv(basic_info_file, index=False)
+        logger.info(f"已更新 {basic_info_file} 文件")
         
         # 提交到Git仓库
         try:

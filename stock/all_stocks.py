@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票列表更新模块 - Baostock 数据源（已修正字段问题）
+股票列表更新模块 - Baostock 数据源（已修正列名问题）
 
 【详细过滤条件】
 1. 基础过滤：
@@ -122,10 +122,16 @@ def save_top_500_stock_data(stock_data):
         commit_files_in_batches(TOP_500_FILE, "保存前500条股票数据用于验证")
         
         logger.info(f"已成功保存前500条股票数据到 {TOP_500_FILE}")
-        logger.info(f"前500条数据中包含的列: {', '.join(top_500.columns)}")
-        logger.info(f"前500条数据中ST股票数量: {top_500['名称'].str.contains('ST', na=False).sum()}")
-        logger.info(f"前500条数据中退市股票数量: {top_500['名称'].str.contains('退市', na=False).sum()}")
-        logger.info(f"前500条数据中N开头股票数量: {top_500['名称'].str.startswith('N').sum()}")
+        
+        # 【关键修复】检查"名称"列是否存在
+        if "名称" in top_500.columns:
+            logger.info(f"前500条数据中包含的列: {', '.join(top_500.columns)}")
+            logger.info(f"前500条数据中ST股票数量: {top_500['名称'].str.contains('ST', na=False).sum()}")
+            logger.info(f"前500条数据中退市股票数量: {top_500['名称'].str.contains('退市', na=False).sum()}")
+            logger.info(f"前500条数据中N开头股票数量: {top_500['名称'].str.startswith('N').sum()}")
+        else:
+            logger.warning("列'名称'不存在，无法进行ST/退市/N开头股票统计")
+            logger.info(f"实际可用列: {', '.join(top_500.columns)}")
     except Exception as e:
         logger.error(f"保存前500条股票数据失败: {str(e)}", exc_info=True)
 
@@ -187,44 +193,54 @@ def get_stock_list_data():
                 # 【关键修复】打印实际返回的字段，用于调试
                 logger.info(f"Baostock query_stock_basic 返回的字段: {', '.join(rs.fields)}")
                 
+                # 【关键修复】重命名列名
+                # Baostock返回的列名与代码期望的列名不同
+                column_mapping = {
+                    'code': '代码',
+                    'code_name': '名称',
+                    'ipoDate': '上市日期',
+                    'outDate': '退市日期',
+                    'type': '证券类型',
+                    'status': '上市状态'
+                }
+                
+                # 仅保留存在的列
+                existing_columns = {k: v for k, v in column_mapping.items() if k in df.columns}
+                df = df.rename(columns=existing_columns)
+                
+                # 确保有"名称"列
+                if "名称" not in df.columns:
+                    logger.error("返回数据中缺少'名称'列，无法继续处理")
+                    return pd.DataFrame()
+                
                 # 【关键修复】确保股票代码格式统一为6位
                 # 处理可能的格式: sh.600000, sz.000001
-                df['code'] = df['code'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
-                df['code'] = df['code'].apply(format_stock_code)
-                
-                # 【关键修复】过滤掉无效的股票代码
-                df = df[df['code'].notna()]
-                
-                # 【关键修复】检查并处理必要的列
-                # 确保有需要的列，如果没有则添加默认值
-                if 'outstanding' in df.columns:
-                    df['outstanding'] = pd.to_numeric(df['outstanding'], errors='coerce')
-                else:
-                    df['outstanding'] = 0.0
-                    logger.warning("outstanding列不存在，已添加默认值0.0")
-                
-                if 'totalShare' in df.columns:
-                    df['totalShare'] = pd.to_numeric(df['totalShare'], errors='coerce')
-                else:
-                    df['totalShare'] = 0.0
-                    logger.warning("totalShare列不存在，已添加默认值0.0")
-                
-                if 'status' not in df.columns:
-                    df['status'] = "1"  # 默认为上市状态
-                    logger.warning("status列不存在，已添加默认值'1'")
-                
-                # 【关键修复】重命名列名
-                df = df.rename(columns={
-                    'code': '代码',
-                    'name': '名称',
-                    'industry': '所属行业',
-                    'outstanding': '流通股本',
-                    'totalShare': '总股本',
-                    'status': '上市状态'
-                })
+                if "代码" in df.columns:
+                    df['代码'] = df['代码'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
+                    df['代码'] = df['代码'].apply(format_stock_code)
+                    df = df[df['代码'].notna()]
                 
                 # 【关键修复】添加所属板块列
-                df['所属板块'] = df['代码'].apply(get_stock_section)
+                if "代码" in df.columns:
+                    df['所属板块'] = df['代码'].apply(get_stock_section)
+                else:
+                    df['所属板块'] = "未知板块"
+                    logger.warning("代码列不存在，所属板块列已设为'未知板块'")
+                
+                # 【关键修复】添加流通股本和总股本（Baostock不直接提供）
+                df['流通股本'] = 0.0
+                df['总股本'] = 0.0
+                logger.warning("Baostock不提供流通股本和总股本数据，已设为0.0")
+                
+                # 【关键修复】确保有必要的列
+                required_columns = ["代码", "名称", "所属板块", "流通股本", "总股本", "上市状态"]
+                for col in required_columns:
+                    if col not in df.columns:
+                        if col in ["流通股本", "总股本"]:
+                            df[col] = 0.0
+                        else:
+                            df[col] = ""
+                        logger.warning(f"列 '{col}' 不存在，已添加默认值")
                 
                 logger.info(f"成功获取 {len(df)} 条股票列表数据")
                 
@@ -266,6 +282,11 @@ def apply_basic_filters(stock_data):
     initial_count = len(stock_info)
     logger.info(f"开始应用基础过滤，初始股票数量: {initial_count}")
     
+    # 【关键修复】检查是否包含必要列
+    if "名称" not in stock_info.columns:
+        logger.error("数据中缺少'名称'列，无法应用过滤条件")
+        return stock_info
+    
     # 【关键修复】应用基础过滤条件
     # 1. 移除ST和*ST股票
     before = len(stock_info)
@@ -297,7 +318,8 @@ def apply_basic_filters(stock_data):
             logger.info(f"排除 {removed} 只已退市股票（基础过滤）")
     
     # 【关键修复】确保股票代码唯一 - 移除重复项
-    stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
+    if "代码" in stock_info.columns:
+        stock_info = stock_info.drop_duplicates(subset=['代码'], keep='first')
     
     # 【关键修复】记录基础过滤后股票数量
     logger.info(f"基础过滤完成，剩余 {len(stock_info)} 条记录（初始: {initial_count}）")

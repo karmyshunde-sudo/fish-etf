@@ -2,8 +2,15 @@ name: 6-数据源接口信息
 on:
   workflow_dispatch:
     inputs:
+      data_source:
+        description: '选择数据源'
+        required: true
+        type: choice
+        options:
+          - 'akshare'
+          - 'baostock'
       interface_name:
-        description: '指定接口名称（可选）。格式: [ak:|bs:]接口名。示例: ak:stock_zh_a_spot_em 或 bs:query_history_k_data。留空获取全部接口。'
+        description: '接口名称（留空获取全部接口）'
         required: false
         type: string
         default: ''
@@ -14,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: ${{ !github.event.inputs.interface_name }}
+    if: ${{ inputs.data_source == 'akshare' && !inputs.interface_name }}
     env:
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     steps:
@@ -101,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: ${{ startsWith(github.event.inputs.interface_name, 'ak:') || (!startsWith(github.event.inputs.interface_name, 'bs:') && github.event.inputs.interface_name) }}
+    if: ${{ inputs.data_source == 'akshare' && inputs.interface_name }}
     env:
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     steps:
@@ -150,11 +157,7 @@ jobs:
       
       - name: 获取指定AkShare接口
         run: |
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"ak:"前缀
-          if [[ "$INTERFACE_NAME" == ak:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#ak:}
-          fi
+          INTERFACE_NAME="${{ inputs.interface_name }}"
           echo "正在查询AkShare接口: $INTERFACE_NAME"
           python data_crawler/get_akshare_info.py "$INTERFACE_NAME"
           
@@ -167,12 +170,7 @@ jobs:
         if: success()
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"ak:"前缀
-          if [[ "$INTERFACE_NAME" == ak:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#ak:}
-          fi
-          MSG="✅ 【AkShare】已查询接口: $INTERFACE_NAME"
+          MSG="✅ 【AkShare】已查询接口: ${{ inputs.interface_name }}"
           if [ -z "$WECOM_WEBHOOK" ]; then
             echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
           else
@@ -184,12 +182,7 @@ jobs:
         if: failure()
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"ak:"前缀
-          if [[ "$INTERFACE_NAME" == ak:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#ak:}
-          fi
-          MSG="❌ 【AkShare】查询接口失败: $INTERFACE_NAME"
+          MSG="❌ 【AkShare】查询接口失败: ${{ inputs.interface_name }}"
           if [ -z "$WECOM_WEBHOOK" ]; then
             echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
           else
@@ -202,7 +195,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: ${{ !github.event.inputs.interface_name }}
+    if: ${{ inputs.data_source == 'baostock' && !inputs.interface_name }}
     env:
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     steps:
@@ -289,7 +282,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: ${{ startsWith(github.event.inputs.interface_name, 'bs:') }}
+    if: ${{ inputs.data_source == 'baostock' && inputs.interface_name }}
     env:
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     steps:
@@ -338,11 +331,7 @@ jobs:
       
       - name: 获取指定Baostock接口
         run: |
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"bs:"前缀
-          if [[ "$INTERFACE_NAME" == bs:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#bs:}
-          fi
+          INTERFACE_NAME="${{ inputs.interface_name }}"
           echo "正在查询Baostock接口: $INTERFACE_NAME"
           python data_crawler/get_baostock_info.py "$INTERFACE_NAME"
           
@@ -355,12 +344,7 @@ jobs:
         if: success()
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"bs:"前缀
-          if [[ "$INTERFACE_NAME" == bs:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#bs:}
-          fi
-          MSG="✅ 【Baostock】已查询接口: $INTERFACE_NAME"
+          MSG="✅ 【Baostock】已查询接口: ${{ inputs.interface_name }}"
           if [ -z "$WECOM_WEBHOOK" ]; then
             echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
           else
@@ -372,12 +356,7 @@ jobs:
         if: failure()
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-          INTERFACE_NAME="${{ github.event.inputs.interface_name }}"
-          # 移除"bs:"前缀
-          if [[ "$INTERFACE_NAME" == bs:* ]]; then
-            INTERFACE_NAME=${INTERFACE_NAME#bs:}
-          fi
-          MSG="❌ 【Baostock】查询接口失败: $INTERFACE_NAME"
+          MSG="❌ 【Baostock】查询接口失败: ${{ inputs.interface_name }}"
           if [ -z "$WECOM_WEBHOOK" ]; then
             echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
           else

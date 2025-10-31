@@ -304,9 +304,10 @@ def save_base_stock_info(stock_info):
         
         stock_info["数据状态"] = "基础数据已获取"
         stock_info["next_crawl_index"] = 0
+        stock_info["filter"] = False  # 添加filter列并设置默认值为False
         
         # 【关键修复】确保列顺序正确，按要求添加"动态市盈率"
-        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "next_crawl_index"]
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index"]
         stock_info = stock_info[final_columns]
         
         # 保存到CSV文件

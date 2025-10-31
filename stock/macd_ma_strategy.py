@@ -43,7 +43,7 @@
 2. 静态市盈率(PE_STATIC) > 0（排除市盈率≤0的股票）
 3. 总质押股份数量(BPSTZ) ≤ 0（排除有质押的股票）
 4. 净利润同比增长(PARENTNETPROFITTZ) ≥ 0（排除净利润下降）
-5. ROE(ROEJQ) ≥ 5%（排除ROE低于5%的股票）
+【净资产收益率ROE过滤去掉！！】5. ROE(ROEJQ) ≥ 5%（排除ROE低于5%的股票）
 
 信号生成规则：
 - 单一指标信号（MA/MACD/RSI/KDJ）：仅取前20名
@@ -101,13 +101,16 @@ from config import Config
 from utils.date_utils import get_beijing_time, is_file_outdated
 from wechat_push.push import send_wechat_message
 
-# 配置日志
+
+# 初始化日志
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# logger.setLevel(logging.INFO)
+# handler = logging.StreamHandler()
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)
+
+
 
 # ========== 参数配置 ==========
 # 均线参数
@@ -220,64 +223,26 @@ def check_threema_steps(df, code, name):
 def get_financial_data_for_codes(codes):
     """
     逐个股票代码获取财务数据（修正AKShare API调用）
-    
     参数：
     - codes: 需要获取财务数据的股票代码列表（字符串列表）
-    
     返回：
     - DataFrame: 包含所有股票的财务数据
     - 空DataFrame: 如果所有获取失败
     
-    关键逻辑：
-    1. 对每个股票代码：
-       - 格式化为6位代码（zfill(6)）
-       - 根据代码前缀添加sh/sz前缀（6开头为sh，0/3开头为sz）
-       - 调用ak.stock_financial_analysis_indicator(symbol=code)
-    2. 处理返回数据：
-       - 清理股票代码列（移除sh/sz前缀）
-       - 保留最新一期财务数据（按报告期排序）
-    3. 添加1秒延时避免AKShare频率限制
-    
-    注意事项：
-    - AKShare官方文档要求必须传入具体股票代码（不能用symbol="all"）
-    - 此函数严格遵循AKShare API文档
-    - 财务数据列名处理：自动匹配"股票代码"或"code"相关列
-    
-    异常处理：
-    - 捕获API错误，记录error日志
-    - 单个股票失败不影响其他股票获取
-    - 返回部分成功数据（而非全部失败）
-    
-    性能优化：
-    - 逐个股票获取（避免API错误）
-    - 1秒延时防止被封
-    - 仅获取最新一期数据（减少传输量）
-    
-    调用时机：
-    - 仅在main()中候选股票去重后调用
-    - 避免对全量4000+股票无脑爬取
+    修改说明：
+    1. 严格使用6位股票代码（不添加sh/sz前缀）
+    2. 保持原始数据结构，不做额外处理
+    3. 确保正确处理中文列名
     """
     financial_data = pd.DataFrame()
     for code in codes:
-        code = code.zfill(6)
-        # 生成带前缀的symbol（sh/sz）
-        if code.startswith('6'):
-            symbol = 'sh' + code
-        elif code.startswith(('0', '3')):
-            symbol = 'sz' + code
-        else:
-            symbol = 'sh' + code  # 科创板等特殊情况
-        
+        code = code.zfill(6)  # 确保6位格式
         try:
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            # 直接使用6位数字代码调用API（无前缀）
+            df = ak.stock_financial_analysis_indicator(symbol=code)
             if df is not None and not df.empty:
-                # 处理股票代码格式（去掉前缀）
-                if '股票代码' in df.columns:
-                    df['股票代码'] = df['股票代码'].str.replace('sh', '').str.replace('sz', '').str.replace('bj', '')
-                # 保留最新一期数据
-                if '报告期' in df.columns:
-                    df = df.sort_values('报告期', ascending=False)
-                    df = df.drop_duplicates(subset=['股票代码'], keep='first')
+                # 添加股票代码列（原始数据可能没有）
+                df['股票代码'] = code
                 financial_data = pd.concat([financial_data, df], ignore_index=True)
             else:
                 logger.warning(f"股票 {code} 财务数据为空")
@@ -286,6 +251,96 @@ def get_financial_data_for_codes(codes):
         time.sleep(1)  # 避免触发AKShare频率限制
     return financial_data
 
+def filter_signals(signals, financial_data):
+    """
+    应用财务过滤条件（仅三个有效条件）
+    参数：
+    - signals: 候选信号列表
+    - financial_data: 获取到的财务数据
+    返回：
+    - filtered_signals: 经过财务过滤的信号
+    
+    修改说明：
+    1. 移除了市盈率过滤条件（冗余）
+    2. 仅保留三个有效财务过滤条件
+    3. 优化了财务数据映射逻辑
+    """
+    if not signals:
+        return signals
+    
+    # 找到第三列作为最新日期
+    if len(financial_data.columns) < 3:
+        logger.warning("财务数据列数不足3列，无法确定最新日期")
+        return signals
+    
+    latest_date = financial_data.columns[2]
+    logger.info(f"使用第三列 '{latest_date}' 作为最新日期进行财务过滤")
+    
+    # 创建股票代码到财务指标的映射
+    financial_dict = {}
+    for _, row in financial_data.iterrows():
+        code = str(row['股票代码']).zfill(6)
+        option = row['选项']
+        indicator = row['指标']
+        
+        # 只处理有效行
+        if pd.isna(code) or pd.isna(option) or pd.isna(indicator):
+            continue
+            
+        if code not in financial_dict:
+            financial_dict[code] = {}
+        
+        # 收集关键指标
+        if option == "每股指标" and indicator == "基本每股收益":
+            try:
+                value = float(row[latest_date])
+                financial_dict[code]["EPSJB"] = value
+            except:
+                pass
+        elif option == "常用指标" and indicator == "归母净利润":
+            try:
+                value = float(row[latest_date])
+                financial_dict[code]["PARENTNETPROFIT"] = value
+            except:
+                pass
+        elif option == "常用指标" and indicator == "总质押股份数量":
+            try:
+                value = float(row[latest_date])
+                financial_dict[code]["BPSTZ"] = value
+            except:
+                pass
+    
+    # 应用三个有效财务过滤条件
+    filtered_signals = []
+    for signal in signals:
+        code = signal['code']
+        if code not in financial_dict:
+            continue
+            
+        financial_info = financial_dict[code]
+        
+        # 1. 每股收益：排除负数股票（EPSJB < 0）
+        if "EPSJB" in financial_info and financial_info["EPSJB"] < 0:
+            continue
+            
+        # 2. 总质押股份数量：排除有质押的股票（BPSTZ > 0）
+        if "BPSTZ" in financial_info and financial_info["BPSTZ"] > 0:
+            continue
+            
+        # 3. 净利润：排除净利润同比下降的股票
+        if "PARENTNETPROFIT" in financial_info and financial_info["PARENTNETPROFIT"] < 0:
+            continue
+            
+        # 通过所有条件
+        filtered_signals.append(signal)
+    
+    # 记录过滤结果
+    if len(filtered_signals) < len(signals):
+        logger.info(f"财务过滤后，保留 {len(filtered_signals)} 个信号（原 {len(signals)} 个）")
+        logger.info(f"过滤掉 {len(signals) - len(filtered_signals)} 个信号")
+    
+    return filtered_signals
+    
 def load_stock_daily_data(stock_code):
     """
     加载股票日线数据（严格使用中文列名）
@@ -704,81 +759,7 @@ def main():
     # 6. 获取财务数据（仅对候选股票去重后获取）
     financial_data = get_financial_data_for_codes(all_candidate_codes)
     
-    # 7. 定义财务过滤函数（在main内部）
-    def filter_signals(signals, financial_data):
-        if not signals:
-            return signals
-        stock_codes = [signal['code'] for signal in signals]
-        stock_df = pd.DataFrame({'代码': stock_codes})
-        stock_df["代码"] = stock_df["代码"].astype(str).str.zfill(6)
-        
-        # 合并财务数据
-        if financial_data.empty:
-            logger.warning("财务数据为空，跳过财务过滤")
-            return signals
-        
-        # 处理财务数据中的股票代码列
-        security_code_col = None
-        for col in financial_data.columns:
-            if "code" in col.lower() or "代码" in col.lower():
-                security_code_col = col
-                break
-        
-        if security_code_col is None:
-            logger.error("无法找到财务数据中的股票代码列")
-            return signals
-        
-        financial_data[security_code_col] = financial_data[security_code_col].astype(str).str.zfill(6)
-        
-        # 合并
-        merged_data = pd.merge(stock_df, financial_data, left_on="代码", right_on=security_code_col, how="left")
-        initial_count = len(merged_data)
-        
-        # 应用财务过滤条件
-        # 1. 每股收益：排除负数股票（EPSJB >= 0）
-        if "EPSJB" in merged_data.columns:
-            before = len(merged_data)
-            merged_data = merged_data[merged_data["EPSJB"] >= 0]
-            removed = before - len(merged_data)
-            if removed > 0:
-                logger.info(f"排除 {removed} 只每股收益为负的股票（财务过滤）")
-        
-        # 2. 市盈率(静态)：排除亏损股票（PE_STATIC ≤ 0）
-        if "EPSKCJB" in merged_data.columns and "收盘" in merged_data.columns:
-            merged_data["PE_STATIC"] = merged_data["收盘"] / merged_data["EPSKCJB"]
-            before = len(merged_data)
-            merged_data = merged_data[merged_data["PE_STATIC"] > 0]
-            removed = before - len(merged_data)
-            if removed > 0:
-                logger.info(f"排除 {removed} 只市盈率(静态)≤0的股票（财务过滤）")
-        
-        # 3. 总质押股份数量：排除有质押的股票（质押数量 > 0）
-        if "BPSTZ" in merged_data.columns:
-            before = len(merged_data)
-            merged_data = merged_data[merged_data["BPSTZ"] <= 0]
-            removed = before - len(merged_data)
-            if removed > 0:
-                logger.info(f"排除 {removed} 只有质押的股票（财务过滤）")
-        
-        # 4. 净利润：排除净利润同比下降的股票
-        if "PARENTNETPROFITTZ" in merged_data.columns:
-            before = len(merged_data)
-            merged_data = merged_data[merged_data["PARENTNETPROFITTZ"] >= 0]
-            removed = before - len(merged_data)
-            if removed > 0:
-                logger.info(f"排除 {removed} 只净利润同比下降的股票（财务过滤）")
-        
-        # 5. ROE：排除低于5%的股票
-        if "ROEJQ" in merged_data.columns:
-            before = len(merged_data)
-            merged_data = merged_data[merged_data["ROEJQ"] >= 5]
-            removed = before - len(merged_data)
-            if removed > 0:
-                logger.info(f"排除 {removed} 只ROE低于5%的股票（财务过滤）")
-        
-        filtered_codes = set(merged_data["代码"].tolist())
-        filtered_signals = [signal for signal in signals if signal['code'] in filtered_codes]
-        return filtered_signals
+    # 7. 定义财务过滤函数（在main内部，移到外部）
     
     # 8. 应用财务过滤
     ma_signals = filter_signals(ma_signals, financial_data)

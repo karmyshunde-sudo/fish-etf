@@ -9,6 +9,7 @@ on:
         options:
           - 'index_yesno'
           - 'update_stock_list'     #新增的股票列表强制更新任务代码文件名stock/all_stocks.py
+          - 'stock_filterstock'     #新增的财务过滤股票列表任务代码文件名stock/filterstock.py
           - 'stock_tickten'         #就是原来的stock_fourty任务
           - 'crawl_stock_daily'     #就是原来的stock_crawler任务
           - 'stock_threema'         #新增的股票筛选任务代码文件名stock/macd_ma_strategy.py
@@ -1026,3 +1027,110 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+  # 股票财务过滤（手动）
+  stock-filterstock-manual:
+    name: 股票财务过滤（手动）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_filterstock'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H%M%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H%M%S' CST)"
+      
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 验证代码版本
+        run: |
+          echo "当前工作目录: $(pwd)"
+          echo "当前分支: $(git branch --show-current)"
+          echo "当前commit: $(git rev-parse HEAD)"
+          echo "最新远程commit: $(git ls-remote origin main | awk '{print $1}')"
+          echo "当前main分支的提交历史:"
+          git log --oneline -n 5
+          echo "本地仓库状态:"
+          git status
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          # 首先确认当前目录
+          echo "当前工作目录: $(pwd)"
+          # 检查文件是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la  # 列出当前目录内容以帮助诊断
+            exit 1
+          fi
+      
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{flags,logs} && chmod -R 777 data
+      
+      - name: 执行股票财务过滤（手动）
+        id: execute_task
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
+          TZ: Asia/Shanghai
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/stock_filterstock_${BEIJING_TIME}.log"
+          echo "正在执行: 股票财务过滤（手动）"
+          echo "日志文件: $LOG_FILE"
+          
+          # 执行股票财务过滤
+          if [ -f "stock/filterstock.py" ]; then
+            echo "找到股票财务过滤文件: stock/filterstock.py"
+            python -m stock.filterstock 2>&1 | tee "$LOG_FILE"
+          else
+            echo "错误: 未找到股票财务过滤文件 stock/filterstock.py"
+            exit 1
+          fi
+          
+          # 记录任务状态
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "task_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 提交更新的股票列表
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/all_stocks.csv
+          if [ -n "$(git diff --cached --name-only data/all_stocks.csv)" ]; then
+            git commit -m "手动执行股票财务过滤" && git push origin main
+          else
+            echo "股票列表没有变化，无需提交"
+          fi
+      
+      - name: 发送完成通知
+        if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【股票财务过滤（手动）】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
+      
+      - name: 发送失败通知
+        if: failure() && env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【股票财务过滤（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"

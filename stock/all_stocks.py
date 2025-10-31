@@ -42,7 +42,7 @@ os.makedirs(STOCK_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # 专业级重试配置
-MAX_RETRIES = 6  # 增加重试次数
+MAX_RETRIES = 1  # 增加重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
 MAX_RANDOM_DELAY = 8  # 最大随机延时（秒）
 

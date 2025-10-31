@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票列表更新模块 - Baostock 数据源（已修正接口调用）
+股票列表更新模块 - Baostock 数据源（已修正字段问题）
 
 【详细过滤条件】
 1. 基础过滤：
@@ -153,7 +153,6 @@ def get_stock_list_data():
                 logger.info("正在获取股票列表数据...")
                 
                 # 【关键修复】使用query_stock_basic接口获取数据
-                # Baostock的query_stock_basic不支持fields参数，必须获取所有数据后再筛选
                 rs = bs.query_stock_basic()
                 
                 # 检查返回结果
@@ -185,6 +184,9 @@ def get_stock_list_data():
                 # 转换为DataFrame
                 df = pd.DataFrame(data_list, columns=rs.fields)
                 
+                # 【关键修复】打印实际返回的字段，用于调试
+                logger.info(f"Baostock query_stock_basic 返回的字段: {', '.join(rs.fields)}")
+                
                 # 【关键修复】确保股票代码格式统一为6位
                 # 处理可能的格式: sh.600000, sz.000001
                 df['code'] = df['code'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
@@ -193,9 +195,23 @@ def get_stock_list_data():
                 # 【关键修复】过滤掉无效的股票代码
                 df = df[df['code'].notna()]
                 
-                # 【关键修复】转换数据类型
-                df['outstanding'] = pd.to_numeric(df['outstanding'], errors='coerce')
-                df['totalShare'] = pd.to_numeric(df['totalShare'], errors='coerce')
+                # 【关键修复】检查并处理必要的列
+                # 确保有需要的列，如果没有则添加默认值
+                if 'outstanding' in df.columns:
+                    df['outstanding'] = pd.to_numeric(df['outstanding'], errors='coerce')
+                else:
+                    df['outstanding'] = 0.0
+                    logger.warning("outstanding列不存在，已添加默认值0.0")
+                
+                if 'totalShare' in df.columns:
+                    df['totalShare'] = pd.to_numeric(df['totalShare'], errors='coerce')
+                else:
+                    df['totalShare'] = 0.0
+                    logger.warning("totalShare列不存在，已添加默认值0.0")
+                
+                if 'status' not in df.columns:
+                    df['status'] = "1"  # 默认为上市状态
+                    logger.warning("status列不存在，已添加默认值'1'")
                 
                 # 【关键修复】重命名列名
                 df = df.rename(columns={
@@ -303,11 +319,13 @@ def save_base_stock_info(stock_info):
             stock_info["流通股本"] = pd.to_numeric(stock_info["流通股本"], errors='coerce')
         else:
             stock_info["流通股本"] = 0.0
+            logger.warning("流通股本列不存在，已添加默认值0.0")
             
         if "总股本" in stock_info.columns:
             stock_info["总股本"] = pd.to_numeric(stock_info["总股本"], errors='coerce')
         else:
             stock_info["总股本"] = 0.0
+            logger.warning("总股本列不存在，已添加默认值0.0")
         
         # 【关键修复】添加必需列
         stock_info["数据状态"] = "基础数据已获取"
@@ -322,10 +340,13 @@ def save_base_stock_info(stock_info):
             if col not in stock_info.columns:
                 if col == "filter":
                     stock_info[col] = False
+                    logger.warning(f"列 {col} 不存在，已添加默认值 False")
                 elif col == "next_crawl_index":
                     stock_info[col] = 0
+                    logger.warning(f"列 {col} 不存在，已添加默认值 0")
                 else:
                     stock_info[col] = ""
+                    logger.warning(f"列 {col} 不存在，已添加默认值空字符串")
         
         # 选择正确的列并排序
         stock_info = stock_info[final_columns]

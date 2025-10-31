@@ -388,6 +388,9 @@ def get_financial_data(code):
             quarter=4
         )
         
+        # 【关键修改】无论是否成功，都记录返回的字段
+        logger.info(f"Baostock query_profit_data 返回的字段: {', '.join(rs.fields)}")
+        
         if rs.error_code != '0':
             logger.error(f"获取股票 {code} 财务数据失败: {rs.error_msg}")
             return None
@@ -401,13 +404,14 @@ def get_financial_data(code):
             logger.warning(f"获取股票 {code} 财务数据成功，但无数据返回")
             return None
         
-        # 【关键修改】记录返回的字段
-        logger.info(f"Baostock query_profit_data 返回的字段: {', '.join(rs.fields)}")
-        
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
         
-        # 返回财务数据
+        # 【关键修改】记录获取到的具体财务数据
+        if not df.empty:
+            row = df.iloc[0]  # 取最新财务数据
+            logger.info(f"股票 {code} 财务数据示例: {dict(row)}")
+        
         return df
     except Exception as e:
         logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
@@ -431,9 +435,6 @@ def apply_financial_filters(stock_code, df):
     # 提取利润表数据
     if not df.empty:
         row = df.iloc[0]  # 取最新财务数据
-        
-        # 【关键修改】记录获取到的具体财务数据
-        logger.info(f"股票 {stock_code} 财务数据示例: {dict(row)}")
         
         # 基本每股收益
         if 'basicEPS' in row.index:
@@ -555,6 +556,12 @@ def filter_and_update_stocks():
             for idx, stock in process_batch.iterrows():
                 stock_code = str(stock["代码"]).zfill(6)
                 stock_name = stock["名称"]
+                
+                # 【关键修改】跳过指数股票
+                if "指数" in stock["所属板块"]:
+                    logger.info(f"跳过指数股票: {stock_code} {stock_name}")
+                    basic_info_df.loc[idx, 'filter'] = True
+                    continue
                 
                 logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
                 

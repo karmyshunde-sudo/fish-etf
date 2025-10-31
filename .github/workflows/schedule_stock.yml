@@ -5,7 +5,7 @@ on:
     - cron: '50 0 * * 1-5'        # UTC 0:50 = 北京时间周一至五 8:50 一次(个股趋势策略)
     - cron: '30 0 * * 1-5'        # UTC 0:30 = 北京时间周一至五 8:30 一次(MACD均线策略)
     - cron: '0 2 * * 0'           # UTC 02:00 = 北京时间周日 10:00 一次(股票列表更新)
-    - cron: '*/10 3-7 * * 6,0'     # UTC 3-7点 = 北京时间周六日11-15点 每10分钟(股票列表财务过滤)
+    - cron: '*/10 2-7 * * 6,0'     # UTC 2-7点 = 北京时间周六日10-15点 每10分钟(股票列表财务过滤)
 
 jobs:
   # ========================
@@ -450,7 +450,7 @@ jobs:
   stock-filterstock-schedule:
     name: 股票列表财务过滤（定时）
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && (github.event.schedule == '0 3 * * 0')
+    if: github.event_name == 'schedule' && (github.event.schedule == '*/10 2-7 * * 6,0')
     permissions:
       contents: write
     steps:

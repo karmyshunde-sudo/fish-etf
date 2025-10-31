@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票列表更新模块 - Baostock 数据源（已修正列名问题）
+股票列表更新模块 - Baostock 数据源（严格单接口实现）
 
 【详细过滤条件】
 1. 基础过滤：
@@ -214,8 +214,8 @@ def get_stock_list_data():
                     return pd.DataFrame()
                 
                 # 【关键修复】确保股票代码格式统一为6位
-                # 处理可能的格式: sh.600000, sz.000001
                 if "代码" in df.columns:
+                    # 从 Baostock 格式转换为纯数字代码
                     df['代码'] = df['代码'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
                     df['代码'] = df['代码'].apply(format_stock_code)
                     df = df[df['代码'].notna()]
@@ -227,20 +227,22 @@ def get_stock_list_data():
                     df['所属板块'] = "未知板块"
                     logger.warning("代码列不存在，所属板块列已设为'未知板块'")
                 
-                # 【关键修复】添加流通股本和总股本（Baostock不直接提供）
-                df['流通股本'] = 0.0
-                df['总股本'] = 0.0
-                logger.warning("Baostock不提供流通股本和总股本数据，已设为0.0")
+                # 【关键修复】添加缺失的列（根据要求设为0或默认值）
+                # 注意：这些列在Baostock接口中不存在，根据要求设为0
+                df['流通市值'] = 0.0
+                df['总市值'] = 0.0
+                df['动态市盈率'] = 0.0
                 
                 # 【关键修复】确保有必要的列
-                required_columns = ["代码", "名称", "所属板块", "流通股本", "总股本", "上市状态"]
+                required_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "上市状态", "动态市盈率"]
                 for col in required_columns:
                     if col not in df.columns:
-                        if col in ["流通股本", "总股本"]:
+                        if col in ["流通市值", "总市值", "动态市盈率"]:
                             df[col] = 0.0
+                            logger.warning(f"列 '{col}' 不存在，已添加默认值 0.0")
                         else:
                             df[col] = ""
-                        logger.warning(f"列 '{col}' 不存在，已添加默认值")
+                            logger.warning(f"列 '{col}' 不存在，已添加默认值空字符串")
                 
                 logger.info(f"成功获取 {len(df)} 条股票列表数据")
                 
@@ -329,25 +331,31 @@ def apply_basic_filters(stock_data):
 def save_base_stock_info(stock_info):
     """
     【关键修复】保存基础股票列表到文件
-    确保文件结构: 代码,名称,所属板块,流通股本,总股本,数据状态,filter,next_crawl_index
+    确保文件结构: 代码,名称,所属板块,流通市值,总市值,数据状态,动态市盈率,filter,next_crawl_index
     
     Args:
         stock_info: 基础股票列表DataFrame
     """
     try:
         # 【关键修复】确保列名正确
-        # 确保流通股本和总股本是数值类型
-        if "流通股本" in stock_info.columns:
-            stock_info["流通股本"] = pd.to_numeric(stock_info["流通股本"], errors='coerce')
+        # 确保流通市值和总市值是数值类型
+        if "流通市值" in stock_info.columns:
+            stock_info["流通市值"] = pd.to_numeric(stock_info["流通市值"], errors='coerce')
         else:
-            stock_info["流通股本"] = 0.0
-            logger.warning("流通股本列不存在，已添加默认值0.0")
+            stock_info["流通市值"] = 0.0
+            logger.warning("流通市值列不存在，已添加默认值0.0")
             
-        if "总股本" in stock_info.columns:
-            stock_info["总股本"] = pd.to_numeric(stock_info["总股本"], errors='coerce')
+        if "总市值" in stock_info.columns:
+            stock_info["总市值"] = pd.to_numeric(stock_info["总市值"], errors='coerce')
         else:
-            stock_info["总股本"] = 0.0
-            logger.warning("总股本列不存在，已添加默认值0.0")
+            stock_info["总市值"] = 0.0
+            logger.warning("总市值列不存在，已添加默认值0.0")
+        
+        if "动态市盈率" in stock_info.columns:
+            stock_info["动态市盈率"] = pd.to_numeric(stock_info["动态市盈率"], errors='coerce')
+        else:
+            stock_info["动态市盈率"] = 0.0
+            logger.warning("动态市盈率列不存在，已添加默认值0.0")
         
         # 【关键修复】添加必需列
         stock_info["数据状态"] = "基础数据已获取"
@@ -355,7 +363,7 @@ def save_base_stock_info(stock_info):
         stock_info["next_crawl_index"] = 0
         
         # 【关键修复】确保列顺序正确
-        final_columns = ["代码", "名称", "所属板块", "流通股本", "总股本", "数据状态", "filter", "next_crawl_index"]
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index"]
         
         # 检查并添加缺失的列
         for col in final_columns:
@@ -366,6 +374,9 @@ def save_base_stock_info(stock_info):
                 elif col == "next_crawl_index":
                     stock_info[col] = 0
                     logger.warning(f"列 {col} 不存在，已添加默认值 0")
+                elif col in ["流通市值", "总市值", "动态市盈率"]:
+                    stock_info[col] = 0.0
+                    logger.warning(f"列 {col} 不存在，已添加默认值 0.0")
                 else:
                     stock_info[col] = ""
                     logger.warning(f"列 {col} 不存在，已添加默认值空字符串")

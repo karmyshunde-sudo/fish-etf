@@ -294,6 +294,8 @@ if len(sys.argv) > 1 and sys.argv[1].strip() != "":
                 # 检查列数
                 if len(result.columns) > 0:
                     columns = ", ".join(result.columns)
+                    print(f"✅ 接口 {interface_name} 调用成功")
+                    print(f" 🗂️ 列名: {columns}")
                     print(f"  🗂️ 成功获取列名: {columns}")
                     
                     # 显示列数据类型

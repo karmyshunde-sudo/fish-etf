@@ -447,10 +447,19 @@ def apply_pledge_filter(stock_data):
     if PLEDGE_FILTER["enabled"]:
         threshold = PLEDGE_FILTER["threshold"]
         before = len(merged_data)
+        # 记录被过滤的股票代码
+        filtered_stocks = merged_data[merged_data['质押股数'] > threshold]
+        filtered_codes = filtered_stocks['代码'].head(50).tolist()
+        
+        # 应用过滤
         merged_data = merged_data[merged_data['质押股数'] <= threshold]
         removed = before - len(merged_data)
+        
         if removed > 0:
             logger.info(f"排除 {removed} 只质押股数超过阈值({threshold})的股票（质押过滤）")
+            # 记录前50个被过滤的股票代码
+            if filtered_codes:
+                logger.info(f"前50个被过滤的股票代码: {', '.join(filtered_codes)}")
         else:
             logger.info(f"所有股票质押股数均未超过阈值({threshold})")
     
@@ -462,7 +471,7 @@ def apply_pledge_filter(stock_data):
 def save_base_stock_info(stock_info):
     """
     【关键修复】保存基础股票列表到文件
-    确保文件结构: 代码,名称,所属板块,流通市值,总市值,数据状态,动态市盈率,filter,next_crawl_index
+    确保文件结构: 代码,名称,所属板块,流通市值,总市值,数据状态,动态市盈率,filter,next_crawl_index,质押股数
     
     Args:
         stock_info: 基础股票列表DataFrame
@@ -494,7 +503,7 @@ def save_base_stock_info(stock_info):
         stock_info["next_crawl_index"] = 0
         
         # 【关键修复】确保列顺序正确
-        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index"]
+        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index", "质押股数"]
         
         # 检查并添加缺失的列
         for col in final_columns:
@@ -503,6 +512,9 @@ def save_base_stock_info(stock_info):
                     stock_info[col] = False
                     logger.warning(f"列 {col} 不存在，已添加默认值 False")
                 elif col == "next_crawl_index":
+                    stock_info[col] = 0
+                    logger.warning(f"列 {col} 不存在，已添加默认值 0")
+                elif col == "质押股数":
                     stock_info[col] = 0
                     logger.warning(f"列 {col} 不存在，已添加默认值 0")
                 elif col in ["流通市值", "总市值", "动态市盈率"]:

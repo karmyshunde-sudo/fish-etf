@@ -9,6 +9,8 @@
    - 移除名称以"N"开头的新上市股票
    - 移除名称包含"退市"的股票
    - 移除指数股票（在数据获取阶段完成）
+2. 质押数据过滤：
+   - 移除质押股数超过阈值的股票
 
 注意：不再包含市盈率过滤，因为新CSV结构已移除该字段
 """
@@ -24,6 +26,7 @@ from datetime import datetime
 from config import Config
 from utils.date_utils import get_beijing_time
 from utils.git_utils import commit_files_in_batches
+import akshare as ak  # 新增：用于获取质押数据
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -45,6 +48,14 @@ os.makedirs(LOG_DIR, exist_ok=True)
 MAX_RETRIES = 3  # 增加重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
 MAX_RANDOM_DELAY = 8  # 最大随机延时（秒）
+
+# 质押过滤参数配置
+PLEDGE_FILTER = {
+    "enabled": True,
+    "threshold": 0,  # 默认为0，表示移除所有有质押的股票
+    "column": "质押股数",
+    "condition": "<= {threshold}（排除质押股数超过阈值的股票）"
+}
 
 def format_stock_code(code):
     """
@@ -363,6 +374,91 @@ def apply_basic_filters(stock_data):
     
     return stock_info
 
+def get_pledge_data():
+    """
+    获取股票质押数据
+    返回:
+        pd.DataFrame: 包含质押数据的DataFrame
+    """
+    try:
+        logger.info("正在获取股票质押数据...")
+        df = ak.stock_gpzy_pledge_ratio_em()
+        
+        if df.empty:
+            logger.error("获取股票质押数据失败：返回空数据")
+            return pd.DataFrame()
+        
+        # 确保列名正确
+        required_columns = ['股票代码', '质押股数']
+        for col in required_columns:
+            if col not in df.columns:
+                logger.error(f"质押数据缺少必要列: {col}")
+                return pd.DataFrame()
+        
+        # 确保股票代码格式正确
+        df['股票代码'] = df['股票代码'].apply(lambda x: str(x).zfill(6))
+        
+        # 筛选有效数据
+        df = df[df['股票代码'].apply(lambda x: len(x) == 6)]
+        
+        # 重命名列，确保与主数据匹配
+        df = df.rename(columns={
+            '股票代码': '代码',
+            '质押股数': '质押股数'
+        })
+        
+        # 选择需要的列
+        df = df[['代码', '质押股数']]
+        
+        logger.info(f"成功获取 {len(df)} 条股票质押数据")
+        return df
+    
+    except Exception as e:
+        logger.error(f"获取股票质押数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def apply_pledge_filter(stock_data):
+    """
+    应用质押数据过滤条件
+    
+    Args:
+        stock_data: 基础股票列表DataFrame
+    
+    Returns:
+        pd.DataFrame: 应用质押过滤后的股票数据
+    """
+    # 获取质押数据
+    pledge_data = get_pledge_data()
+    if pledge_data.empty:
+        logger.warning("质押数据获取失败，跳过质押过滤")
+        return stock_data
+    
+    # 合并质押数据
+    merged_data = pd.merge(stock_data, pledge_data, on='代码', how='left')
+    
+    # 填充缺失的质押数据为0
+    merged_data['质押股数'] = merged_data['质押股数'].fillna(0)
+    
+    # 记录过滤前的股票数量
+    initial_count = len(merged_data)
+    logger.info(f"开始应用质押过滤，初始股票数量: {initial_count}")
+    
+    # 应用质押过滤条件
+    if PLEDGE_FILTER["enabled"]:
+        threshold = PLEDGE_FILTER["threshold"]
+        before = len(merged_data)
+        merged_data = merged_data[merged_data['质押股数'] <= threshold]
+        removed = before - len(merged_data)
+        if removed > 0:
+            logger.info(f"排除 {removed} 只质押股数超过阈值({threshold})的股票（质押过滤）")
+        else:
+            logger.info(f"所有股票质押股数均未超过阈值({threshold})")
+    
+    # 记录质押过滤后股票数量
+    logger.info(f"质押过滤完成，剩余 {len(merged_data)} 条记录（初始: {initial_count}）")
+    
+    return merged_data
+
 def save_base_stock_info(stock_info):
     """
     【关键修复】保存基础股票列表到文件
@@ -453,7 +549,22 @@ def update_stock_list():
         # 【关键修复】保存基础股票列表
         save_base_stock_info(filtered_data)
         
-        logger.info(f"股票列表已成功更新")
+        # 【新增】应用质押数据过滤
+        logger.info("开始应用质押数据过滤...")
+        pledge_filtered_data = apply_pledge_filter(filtered_data)
+        
+        # 【新增】保存过滤后的股票列表
+        if not pledge_filtered_data.empty:
+            # 保留基础过滤后的其他列
+            # 只替换过滤后的数据，保持其他列不变
+            stock_info = filtered_data[filtered_data['代码'].isin(pledge_filtered_data['代码'])]
+            
+            # 保存过滤后的数据
+            save_base_stock_info(stock_info)
+            logger.info(f"股票列表已成功应用质押过滤并更新")
+        else:
+            logger.warning("质押过滤后无股票数据，跳过保存")
+        
         return True
     
     except Exception as e:

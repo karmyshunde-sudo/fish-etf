@@ -52,7 +52,7 @@ MAX_RANDOM_DELAY = 8  # 最大随机延时（秒）
 # 质押过滤参数配置
 PLEDGE_FILTER = {
     "enabled": True,
-    "threshold": 10000,  # 默认为0，表示移除所有有质押的股票
+    "threshold": 0,  # 默认为0，表示移除所有有质押的股票
     "column": "质押股数",
     "condition": "<= {threshold}（排除质押股数超过阈值的股票）"
 }
@@ -436,8 +436,13 @@ def apply_pledge_filter(stock_data):
     # 合并质押数据
     merged_data = pd.merge(stock_data, pledge_data, on='代码', how='left')
     
-    # 填充缺失的质押数据为0
-    merged_data['质押股数'] = merged_data['质押股数'].fillna(0)
+    # 确保"质押股数"列存在，如果不存在则添加
+    if '质押股数' not in merged_data.columns:
+        logger.warning("质押数据中没有'质押股数'列，添加默认值为0")
+        merged_data['质押股数'] = 0
+    else:
+        # 填充缺失的质押数据为0
+        merged_data['质押股数'] = merged_data['质押股数'].fillna(0)
     
     # 记录过滤前的股票数量
     initial_count = len(merged_data)
@@ -501,6 +506,11 @@ def save_base_stock_info(stock_info):
         stock_info["数据状态"] = "基础数据已获取"
         stock_info["filter"] = False  # 添加filter列并设置默认值为False
         stock_info["next_crawl_index"] = 0
+        
+        # 确保"质押股数"列存在
+        if '质押股数' not in stock_info.columns:
+            logger.warning("质押股数列不存在，添加默认值0")
+            stock_info['质押股数'] = 0
         
         # 【关键修复】确保列顺序正确
         final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index", "质押股数"]

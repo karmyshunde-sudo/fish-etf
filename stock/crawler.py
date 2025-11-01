@@ -427,6 +427,15 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         # 移除NaN值
         df = df.dropna(subset=['收盘', '成交量'])
         
+        # 【关键修复】确保"股票代码"列存在且格式正确
+        if '股票代码' not in df.columns:
+            df['股票代码'] = stock_code
+        else:
+            # 确保股票代码是6位格式
+            df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
+            # 移除格式化失败的行
+            df = df[df['股票代码'].notna()]
+        
         # 【关键修复】合并新数据与已有数据
         if existing_data is not None and not existing_data.empty:
             # 合并数据并去重
@@ -466,6 +475,17 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
             return
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
+        
+        # 【关键修复】确保数据中的"股票代码"列是6位格式
+        if '股票代码' in df.columns:
+            # 确保数据中的股票代码列是6位格式
+            df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
+            # 移除格式化失败的行
+            df = df[df['股票代码'].notna()]
+        else:
+            # 如果没有股票代码列，添加它
+            df['股票代码'] = stock_code
+        
         # 【日期datetime类型规则】保存前将日期列转换为字符串
         if '日期' in df.columns:
             df_save = df.copy()

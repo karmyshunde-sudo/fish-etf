@@ -8,7 +8,7 @@
    - 移除ST和*ST股票
    - 移除名称以"N"开头的新上市股票
    - 移除名称包含"退市"的股票
-   - 移除指数股票
+   - 移除指数股票（在数据获取阶段完成）
 
 注意：不再包含市盈率过滤，因为新CSV结构已移除该字段
 """
@@ -75,21 +75,32 @@ def format_stock_code(code):
     
     return code_str
 
-def is_valid_stock_code(code):
+def is_index_stock(row):
     """
-    检查股票代码是否有效（不是指数代码）
+    检查股票是否为指数
     Args:
-        code: 股票代码（6位字符串）
+        row: 股票数据行
     Returns:
-        bool: 是否是有效的股票代码
+        bool: 是否是指数
     """
-    # 指数代码排除规则
-    if code == "000001" or code == "000002" or code == "000003" or code == "000004" or code == "000005" or code == "000006" or code == "000007" or code == "000008" or code == "000009" or code == "000010" or code == "000011" or code == "000012" or code == "000013" or code == "000015" or code == "000016" or code == "000017" or code == "000018" or code == "000098" or code == "000099" or code == "000100" or code == "000101" or code == "000102" or code == "000103" or code == "000104" or code == "000105" or code == "000106" or code == "000107" or code == "000108" or code == "000109" or code == "000110" or code == "000111" or code == "000112" or code == "000113" or code == "000114":
-        return False
-    
-    # 有效股票代码检查
-    if code.startswith(('00', '30', '60', '688', '8')) and code != '880001':
+    # 方法1: 检查名称是否包含指数相关关键词
+    index_keywords = ["指数", "ETF", "LOF", "基金", "债券", "国债", "信用债", "可转债", "期货", "期权", "理财", "票据"]
+    if "名称" in row and any(keyword in str(row["名称"]) for keyword in index_keywords):
         return True
+    
+    # 方法2: 检查股票类型
+    if "证券类型" in row:
+        # 只保留普通股（A股），其他类型（如指数、基金等）都过滤掉
+        # 根据Baostock文档，普通股的type为1
+        return str(row["证券类型"]) != "1"
+    
+    # 方法3: 检查市场代码
+    if "代码" in row:
+        code = str(row["代码"])
+        # 排除以000开头的指数代码（除了000001上证指数外，其他000开头的代码可能是股票）
+        if code.startswith("000") and code != "000001":
+            # 000开头且不是000001的可能是指数
+            return True
     
     return False
 
@@ -209,7 +220,7 @@ def get_stock_list_data():
                 # 转换为DataFrame
                 df = pd.DataFrame(data_list, columns=rs.fields)
                 
-                # 【关键修复】打印实际返回的字段，用于调试
+                # 【关键修改】打印实际返回的字段，用于调试
                 logger.info(f"Baostock query_stock_basic 返回的字段: {', '.join(rs.fields)}")
                 
                 # 【关键修复】重命名列名
@@ -232,27 +243,27 @@ def get_stock_list_data():
                     logger.error("返回数据中缺少'名称'列，无法继续处理")
                     return pd.DataFrame()
                 
-                # 【关键修复】确保股票代码格式统一为6位
+                # 【关键修改】确保股票代码格式统一为6位
                 if "代码" in df.columns:
                     # 从 Baostock 格式转换为纯数字代码
                     df['代码'] = df['代码'].apply(lambda x: x[3:] if x.startswith(('sh.', 'sz.')) else x)
                     df['代码'] = df['代码'].apply(format_stock_code)
                     df = df[df['代码'].notna()]
                 
-                # 【关键修复】添加所属板块列
+                # 【关键修改】添加所属板块列
                 if "代码" in df.columns:
                     df['所属板块'] = df['代码'].apply(get_stock_section)
                 else:
                     df['所属板块'] = "未知板块"
                     logger.warning("代码列不存在，所属板块列已设为'未知板块'")
                 
-                # 【关键修复】添加缺失的列（根据要求设为0或默认值）
+                # 【关键修改】添加缺失的列（根据要求设为0或默认值）
                 # 注意：这些列在Baostock接口中不存在，根据要求设为0
                 df['流通市值'] = 0.0
                 df['总市值'] = 0.0
                 df['动态市盈率'] = 0.0
                 
-                # 【关键修复】确保有必要的列
+                # 【关键修改】确保有必要的列
                 required_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "上市状态", "动态市盈率"]
                 for col in required_columns:
                     if col not in df.columns:
@@ -263,7 +274,12 @@ def get_stock_list_data():
                             df[col] = ""
                             logger.warning(f"列 '{col}' 不存在，已添加默认值空字符串")
                 
-                logger.info(f"成功获取 {len(df)} 条股票列表数据")
+                # 【关键修改】移除所有指数股票（在基础过滤前）
+                original_count = len(df)
+                df = df[~df.apply(is_index_stock, axis=1)]
+                logger.info(f"指数过滤：从 {original_count} 条中移除了 {original_count - len(df)} 条指数/ETF/基金/债券股票")
+                
+                logger.info(f"成功获取 {len(df)} 条股票列表数据（已过滤指数）")
                 
                 # 【关键修复】保存前500条数据用于验证
                 save_top_500_stock_data(df)
@@ -337,15 +353,6 @@ def apply_basic_filters(stock_data):
         removed = before - len(stock_info)
         if removed > 0:
             logger.info(f"排除 {removed} 只已退市股票（基础过滤）")
-    
-    # 5. 【新增】移除指数股票
-    if "代码" in stock_info.columns:
-        before = len(stock_info)
-        # 应用is_valid_stock_code函数过滤指数代码
-        stock_info = stock_info[stock_info["代码"].apply(is_valid_stock_code)]
-        removed = before - len(stock_info)
-        if removed > 0:
-            logger.info(f"排除 {removed} 只指数股票（基础过滤）")
     
     # 【关键修复】确保股票代码唯一 - 移除重复项
     if "代码" in stock_info.columns:

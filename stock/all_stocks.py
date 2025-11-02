@@ -765,9 +765,8 @@ def update_stock_list():
             logger.info(f"股票列表已成功应用质押过滤并更新")
         else:
             logger.warning("质押过滤后无股票数据，跳过保存")
+            return False
         
-        return True
-
         # ✅ 新增：调用独立函数处理市值/PE补充与过滤
         logger.info("开始应用市值与PE过滤...")
         if not apply_market_value_and_pe_filters():

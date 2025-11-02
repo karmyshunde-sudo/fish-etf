@@ -52,7 +52,7 @@ MAX_RANDOM_DELAY = 8  # 最大随机延时（秒）
 # 质押过滤参数配置
 PLEDGE_FILTER = {
     "enabled": True,
-    "threshold": 0,  # 默认为0，表示移除所有有质押的股票
+    "threshold": 1000000,  # 默认为一百万股，表示移除所有质押股数>1000000的股票
     "column": "质押股数",
     "condition": "<= {threshold}（排除质押股数超过阈值的股票）"
 }

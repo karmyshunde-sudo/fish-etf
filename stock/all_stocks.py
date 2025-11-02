@@ -633,37 +633,68 @@ def apply_market_value_and_pe_filters():
             logger.error("读取的股票数据为空，无法补充指标")
             return False
 
-        # 2. 获取实时行情数据（含流通市值、总市值、动态市盈率）
+        # 2. 获取实时行情数据（含流通市值、总市值、动态市盈率）—— 分批次处理
         try:
-            spot_df = ak.stock_zh_a_spot_em()
-            if spot_df.empty:
+            # 🔥 第一步：先获取全量数据（这是 ak 的限制，我们只能这么干）
+            logger.info("正在获取全量实时行情数据...")
+            spot_all_df = ak.stock_zh_a_spot_em()
+            if spot_all_df.empty:
                 logger.error("获取实时行情数据失败：返回空数据")
                 return False
-            
+
             # 重命名列以匹配我们的需求
-            spot_df.rename(columns={
+            spot_all_df.rename(columns={
                 '代码': '代码',
                 '名称': '名称',
                 '总市值': '总市值',
                 '流通市值': '流通市值',
                 '市盈率-动态': '动态市盈率'
             }, inplace=True)
-            
+
             # 只保留我们需要的列
             required_cols = ['代码', '名称', '总市值', '流通市值', '动态市盈率']
-            spot_df = spot_df[required_cols]
-            
+            spot_all_df = spot_all_df[required_cols]
+
             # 转换为数值型（避免字符串导致计算错误）
             for col in ['总市值', '流通市值', '动态市盈率']:
-                spot_df[col] = pd.to_numeric(spot_df[col], errors='coerce')
-            
-            logger.info(f"成功获取 {len(spot_df)} 条实时行情数据（含流通市值/总市值/动态市盈率）")
-            
+                spot_all_df[col] = pd.to_numeric(spot_all_df[col], errors='coerce')
+
+            logger.info(f"成功获取 {len(spot_all_df)} 条实时行情数据（含流通市值/总市值/动态市盈率）")
+
         except Exception as e:
             logger.error(f"获取实时行情数据失败: {str(e)}", exc_info=True)
             return False
 
-        # 3. 合并数据：基于“代码”左连接，保留所有原始股票，缺失值设为 NaN
+        # 3. 分批次处理：把股票代码分成小批次，每次处理 50 只
+        stock_codes = latest_stock_df['代码'].tolist()
+        batch_size = 50
+        all_batch_data = []
+
+        for i in range(0, len(stock_codes), batch_size):
+            batch_codes = stock_codes[i:i+batch_size]
+            logger.info(f"正在处理第 {i//batch_size + 1} 批次（{len(batch_codes)} 只股票）...")
+
+            # 从全量数据中筛选出本批次的股票
+            batch_df = spot_all_df[spot_all_df['代码'].isin(batch_codes)]
+
+            # 如果本批次没有数据，记录日志
+            if batch_df.empty:
+                logger.warning(f"第 {i//batch_size + 1} 批次无对应行情数据")
+            else:
+                logger.info(f"✅ 第 {i//batch_size + 1} 批次获取到 {len(batch_df)} 条数据")
+
+            all_batch_data.append(batch_df)
+
+            # 每批之间加延时（避免被封）
+            time.sleep(random.uniform(1.0, 3.0))
+
+        # 4. 合并所有批次的数据
+        if all_batch_data:
+            spot_df = pd.concat(all_batch_data, ignore_index=True)
+        else:
+            spot_df = pd.DataFrame()
+
+        # 5. 合并数据：基于“代码”左连接，保留所有原始股票，缺失值设为 NaN
         merged_df = latest_stock_df.merge(
             spot_df[['代码', '总市值', '流通市值', '动态市盈率']],
             on='代码',
@@ -671,11 +702,11 @@ def apply_market_value_and_pe_filters():
             suffixes=('', '_new')
         )
 
-        # 4. 记录补充前状态
+        # 6. 记录补充前状态
         initial_count = len(merged_df)
         logger.info(f"补充指标前股票数量: {initial_count}")
 
-        # 5. 应用新过滤条件
+        # 7. 应用新过滤条件
         # 条件1：动态市盈率 >= 0
         before_pe = len(merged_df)
         merged_df = merged_df.dropna(subset=['动态市盈率'])  # 先排除NaN
@@ -685,19 +716,18 @@ def apply_market_value_and_pe_filters():
 
         # 条件2：流通市值 / 总市值 > 90%
         before_ratio = len(merged_df)
-        # 防止除零或NaN
         merged_df = merged_df.dropna(subset=['总市值', '流通市值'])
-        merged_df = merged_df[merged_df['总市值'] > 0]  # 避免除零
+        merged_df = merged_df[merged_df['总市值'] > 0]
         merged_df['流通市值占比'] = merged_df['流通市值'] / merged_df['总市值']
         merged_df = merged_df[merged_df['流通市值占比'] > 0.9]
         removed_ratio = before_ratio - len(merged_df)
         logger.info(f"排除 {removed_ratio} 只流通市值占比 <= 90% 的股票（市值结构过滤）")
 
-        # 6. 清理临时列
+        # 8. 清理临时列
         if '流通市值占比' in merged_df.columns:
             merged_df = merged_df.drop(columns=['流通市值占比'])
 
-        # 7. 重新整理列顺序（确保与原结构一致）
+        # 9. 重新整理列顺序（确保与原结构一致）
         target_columns = [
             "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", 
             "动态市盈率", "filter", "next_crawl_index", "质押股数"
@@ -719,7 +749,7 @@ def apply_market_value_and_pe_filters():
         # 选择目标列并排序
         merged_df = merged_df[target_columns]
 
-        # 8. 保存最终结果
+        # 10. 保存最终结果
         merged_df.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
         commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（补充流通市值/总市值/动态市盈率并过滤）")
         logger.info(f"股票列表已成功补充财务指标并完成最终过滤，共 {len(merged_df)} 条记录")

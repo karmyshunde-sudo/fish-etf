@@ -492,6 +492,9 @@ def save_base_stock_info(stock_info):
         stock_info: 基础股票列表DataFrame
     """
     try:
+       # 创建副本避免SettingWithCopyWarning
+        stock_info = stock_info.copy()
+       
         # 【关键修复】确保列名正确
         # 确保流通市值和总市值是数值类型
         if "流通市值" in stock_info.columns:

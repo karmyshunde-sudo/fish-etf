@@ -613,6 +613,123 @@ def save_base_stock_info(stock_info, include_pledge=False):
     except Exception as e:
         logger.error(f"保存基础股票列表失败: {str(e)}", exc_info=True)
 
+def apply_market_value_and_pe_filters():
+    """
+    读取最新的 all_stocks.csv，补充【流通市值、总市值、动态市盈率】，
+    并应用以下两个过滤条件：
+        1. 动态市盈率 >= 0
+        2. 流通市值 / 总市值 > 90%
+    
+    最后将结果保存回 all_stocks.csv。
+    """
+    try:
+        logger.info("开始补充流通市值、总市值、动态市盈率并应用新过滤条件...")
+
+        # 1. 读取刚刚保存的 all_stocks.csv
+        latest_stock_df = pd.read_csv(BASIC_INFO_FILE)
+        logger.info(f"从 {BASIC_INFO_FILE} 读取到 {len(latest_stock_df)} 条股票数据用于补充指标")
+
+        if latest_stock_df.empty:
+            logger.error("读取的股票数据为空，无法补充指标")
+            return False
+
+        # 2. 获取实时行情数据（含流通市值、总市值、动态市盈率）
+        try:
+            spot_df = ak.stock_zh_a_spot_em()
+            if spot_df.empty:
+                logger.error("获取实时行情数据失败：返回空数据")
+                return False
+            
+            # 重命名列以匹配我们的需求
+            spot_df.rename(columns={
+                '代码': '代码',
+                '名称': '名称',
+                '总市值': '总市值',
+                '流通市值': '流通市值',
+                '市盈率-动态': '动态市盈率'
+            }, inplace=True)
+            
+            # 只保留我们需要的列
+            required_cols = ['代码', '名称', '总市值', '流通市值', '动态市盈率']
+            spot_df = spot_df[required_cols]
+            
+            # 转换为数值型（避免字符串导致计算错误）
+            for col in ['总市值', '流通市值', '动态市盈率']:
+                spot_df[col] = pd.to_numeric(spot_df[col], errors='coerce')
+            
+            logger.info(f"成功获取 {len(spot_df)} 条实时行情数据（含流通市值/总市值/动态市盈率）")
+            
+        except Exception as e:
+            logger.error(f"获取实时行情数据失败: {str(e)}", exc_info=True)
+            return False
+
+        # 3. 合并数据：基于“代码”左连接，保留所有原始股票，缺失值设为 NaN
+        merged_df = latest_stock_df.merge(
+            spot_df[['代码', '总市值', '流通市值', '动态市盈率']],
+            on='代码',
+            how='left',
+            suffixes=('', '_new')
+        )
+
+        # 4. 记录补充前状态
+        initial_count = len(merged_df)
+        logger.info(f"补充指标前股票数量: {initial_count}")
+
+        # 5. 应用新过滤条件
+        # 条件1：动态市盈率 >= 0
+        before_pe = len(merged_df)
+        merged_df = merged_df.dropna(subset=['动态市盈率'])  # 先排除NaN
+        merged_df = merged_df[merged_df['动态市盈率'] >= 0]
+        removed_pe = before_pe - len(merged_df)
+        logger.info(f"排除 {removed_pe} 只动态市盈率 < 0 的股票（PE过滤）")
+
+        # 条件2：流通市值 / 总市值 > 90%
+        before_ratio = len(merged_df)
+        # 防止除零或NaN
+        merged_df = merged_df.dropna(subset=['总市值', '流通市值'])
+        merged_df = merged_df[merged_df['总市值'] > 0]  # 避免除零
+        merged_df['流通市值占比'] = merged_df['流通市值'] / merged_df['总市值']
+        merged_df = merged_df[merged_df['流通市值占比'] > 0.9]
+        removed_ratio = before_ratio - len(merged_df)
+        logger.info(f"排除 {removed_ratio} 只流通市值占比 <= 90% 的股票（市值结构过滤）")
+
+        # 6. 清理临时列
+        if '流通市值占比' in merged_df.columns:
+            merged_df = merged_df.drop(columns=['流通市值占比'])
+
+        # 7. 重新整理列顺序（确保与原结构一致）
+        target_columns = [
+            "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", 
+            "动态市盈率", "filter", "next_crawl_index", "质押股数"
+        ]
+        # 补充缺失列（如果有的话）
+        for col in target_columns:
+            if col not in merged_df.columns:
+                if col == "filter":
+                    merged_df[col] = False
+                elif col == "next_crawl_index":
+                    merged_df[col] = 0
+                elif col in ["流通市值", "总市值", "动态市盈率"]:
+                    merged_df[col] = 0.0
+                elif col == "质押股数":
+                    merged_df[col] = 0
+                else:
+                    merged_df[col] = ""
+
+        # 选择目标列并排序
+        merged_df = merged_df[target_columns]
+
+        # 8. 保存最终结果
+        merged_df.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
+        commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（补充流通市值/总市值/动态市盈率并过滤）")
+        logger.info(f"股票列表已成功补充财务指标并完成最终过滤，共 {len(merged_df)} 条记录")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"应用市值和PE过滤失败: {str(e)}", exc_info=True)
+        return False
+       
 def update_stock_list():
     """
     更新股票列表，保存到all_stocks.csv
@@ -650,7 +767,16 @@ def update_stock_list():
             logger.warning("质押过滤后无股票数据，跳过保存")
         
         return True
-    
+
+        # ✅ 新增：调用独立函数处理市值/PE补充与过滤
+        logger.info("开始应用市值与PE过滤...")
+        if not apply_market_value_and_pe_filters():
+            logger.error("市值与PE过滤阶段失败，终止更新流程")
+            return False
+
+        logger.info("股票列表更新流程全部完成 ✅")
+        return True
+
     except Exception as e:
         logger.error(f"更新股票列表失败: {str(e)}", exc_info=True)
         return False

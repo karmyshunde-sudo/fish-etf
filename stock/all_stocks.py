@@ -641,14 +641,10 @@ def update_stock_list():
         logger.info("开始应用质押数据过滤...")
         pledge_filtered_data = apply_pledge_filter(filtered_data)
         
-        # 【新增】保存过滤后的股票列表
+        # 【修复】保存过滤后的股票列表
         if not pledge_filtered_data.empty:
-            # 保留基础过滤后的其他列
-            # 只替换过滤后的数据，保持其他列不变
-            stock_info = filtered_data[filtered_data['代码'].isin(pledge_filtered_data['代码'])]
-            
-            # 保存过滤后的数据 - 此时包含质押股数列
-            save_base_stock_info(stock_info, include_pledge=True)
+            # 直接保存质押过滤后的数据（已经包含质押信息）
+            save_base_stock_info(pledge_filtered_data, include_pledge=True)
             logger.info(f"股票列表已成功应用质押过滤并更新")
         else:
             logger.warning("质押过滤后无股票数据，跳过保存")

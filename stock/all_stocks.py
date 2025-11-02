@@ -388,6 +388,9 @@ def get_pledge_data():
             logger.error("获取股票质押数据失败：返回空数据")
             return pd.DataFrame()
         
+        # 打印实际返回的列名
+        logger.info(f"质押数据实际列名: {', '.join(df.columns)}")
+        
         # 确保列名正确
         required_columns = ['股票代码', '质押股数']
         for col in required_columns:
@@ -409,6 +412,9 @@ def get_pledge_data():
         
         # 选择需要的列
         df = df[['代码', '质押股数']]
+        
+        # 填充缺失值
+        df['质押股数'] = df['质押股数'].fillna(0)
         
         logger.info(f"成功获取 {len(df)} 条股票质押数据")
         return df
@@ -433,16 +439,20 @@ def apply_pledge_filter(stock_data):
         logger.warning("质押数据获取失败，跳过质押过滤")
         return stock_data
     
+    # 确保 stock_data 中没有 "质押股数" 列，避免合并时冲突
+    if '质押股数' in stock_data.columns:
+        logger.warning("基础数据中已存在'质押股数'列，已移除")
+        stock_data = stock_data.drop(columns=['质押股数'])
+    
     # 合并质押数据
     merged_data = pd.merge(stock_data, pledge_data, on='代码', how='left')
     
-    # 确保"质押股数"列存在，如果不存在则添加
-    if '质押股数' not in merged_data.columns:
-        logger.warning("质押数据中没有'质押股数'列，添加默认值为0")
-        merged_data['质押股数'] = 0
-    else:
-        # 填充缺失的质押数据为0
+    # 填充缺失的质押数据为0
+    if '质押股数' in merged_data.columns:
         merged_data['质押股数'] = merged_data['质押股数'].fillna(0)
+    else:
+        logger.warning("合并后数据中没有'质押股数'列，添加默认值0")
+        merged_data['质押股数'] = 0
     
     # 记录过滤前的股票数量
     initial_count = len(merged_data)
@@ -511,6 +521,9 @@ def save_base_stock_info(stock_info):
         if '质押股数' not in stock_info.columns:
             logger.warning("质押股数列不存在，添加默认值0")
             stock_info['质押股数'] = 0
+        else:
+            # 确保"质押股数"是数值类型
+            stock_info['质押股数'] = pd.to_numeric(stock_info['质押股数'], errors='coerce').fillna(0)
         
         # 【关键修复】确保列顺序正确
         final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index", "质押股数"]

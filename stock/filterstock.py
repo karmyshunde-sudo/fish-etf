@@ -54,7 +54,7 @@ FINANCIAL_FILTER_PARAMS = {
 
 def get_stock_quote(code):
     """
-    使用 ak.stock_zh_a_hist_sina 接口获取单只股票的最新行情数据
+    使用 ak.stock_zh_a_daily 接口获取单只股票的最新行情数据
     参数：
     - code: 股票代码（6位字符串）
     返回：
@@ -63,7 +63,7 @@ def get_stock_quote(code):
     """
     try:
         # 构造 akstock 的参数
-        df = ak.stock_zh_a_hist_sina(symbol=code, adjust="qfq")
+        df = ak.stock_zh_a_daily(symbol=code, adjust="qfq")
         
         if df.empty:
             logger.warning(f"股票 {code} 行情数据为空")

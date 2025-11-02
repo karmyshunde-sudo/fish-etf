@@ -52,6 +52,46 @@ FINANCIAL_FILTER_PARAMS = {
     }
 }
 
+def get_stock_quote(code):
+    """
+    使用 ak.stock_zh_a_hist_sina 接口获取单只股票的最新行情数据
+    参数：
+    - code: 股票代码（6位字符串）
+    返回：
+    - dict: 包含流通市值、总市值、动态市盈率的字典
+    - None: 获取失败
+    """
+    try:
+        # 构造 akstock 的参数
+        df = ak.stock_zh_a_hist_sina(symbol=code, adjust="qfq")
+        
+        if df.empty:
+            logger.warning(f"股票 {code} 行情数据为空")
+            return None
+        
+        # 取最新一条数据
+        latest_row = df.iloc[-1]
+        
+        # 提取需要的字段
+        quote_data = {
+            '总市值': latest_row.get('总市值', 0.0),
+            '流通市值': latest_row.get('流通市值', 0.0),
+            '动态市盈率': latest_row.get('市盈率-动态', 0.0)
+        }
+        
+        # 转换为数值型
+        for key in quote_data:
+            try:
+                quote_data[key] = float(quote_data[key])
+            except (ValueError, TypeError):
+                quote_data[key] = 0.0
+        
+        return quote_data
+    
+    except Exception as e:
+        logger.error(f"获取股票 {code} 行情数据失败: {str(e)}")
+        return None
+
 def filter_and_update_stocks():
     """
     主函数：过滤股票并更新all_stocks.csv
@@ -89,40 +129,31 @@ def filter_and_update_stocks():
         process_batch = to_process.head(BATCH_SIZE)
         logger.info(f"本次处理股票数量: {len(process_batch)}")
 
-        # 🚫 删除原财务数据获取逻辑，改为获取实时行情数据
-        logger.info("正在获取实时行情数据（含流通市值、总市值、动态市盈率）...")
-        spot_df = ak.stock_zh_a_spot_em()
-        if spot_df.empty:
-            logger.error("获取实时行情数据失败：返回空数据")
-            return
-
-        # 重命名列以匹配我们的需求
-        spot_df.rename(columns={
-            '代码': '代码',
-            '名称': '名称',
-            '总市值': '总市值',
-            '流通市值': '流通市值',
-            '市盈率-动态': '动态市盈率'
-        }, inplace=True)
-
-        # 只保留我们需要的列
-        required_cols = ['代码', '总市值', '流通市值', '动态市盈率']
-        spot_df = spot_df[required_cols]
-
-        # 转换为数值型（避免字符串导致计算错误）
-        for col in ['总市值', '流通市值', '动态市盈率']:
-            spot_df[col] = pd.to_numeric(spot_df[col], errors='coerce')
-
-        logger.info(f"成功获取 {len(spot_df)} 条实时行情数据（含流通市值/总市值/动态市盈率）")
-
-        # 更新 basic_info_df 中对应的三列
-        # 注意：这里我们只更新已存在的列，不新增列
-        for _, row in spot_df.iterrows():
+        # 🚫 删除原财务数据获取逻辑，改为逐只股票获取实时行情数据
+        for _, row in process_batch.iterrows():
             code = row['代码']
-            if code in basic_info_df['代码'].values:
-                basic_info_df.loc[basic_info_df['代码'] == code, '总市值'] = row['总市值']
-                basic_info_df.loc[basic_info_df['代码'] == code, '流通市值'] = row['流通市值']
-                basic_info_df.loc[basic_info_df['代码'] == code, '动态市盈率'] = row['动态市盈率']
+            logger.info(f"正在处理股票 {code}...")
+
+            try:
+                # 获取单只股票的实时行情数据
+                quote_data = get_stock_quote(code)
+                if quote_data is None:
+                    logger.warning(f"股票 {code} 实时行情数据为空")
+                    continue
+
+                # 更新 basic_info_df 中对应的三列
+                basic_info_df.loc[basic_info_df['代码'] == code, '总市值'] = quote_data['总市值']
+                basic_info_df.loc[basic_info_df['代码'] == code, '流通市值'] = quote_data['流通市值']
+                basic_info_df.loc[basic_info_df['代码'] == code, '动态市盈率'] = quote_data['动态市盈率']
+
+                logger.info(f"✅ 股票 {code} 实时行情数据更新成功")
+
+            except Exception as e:
+                logger.error(f"处理股票 {code} 实时行情数据时出错: {str(e)}")
+                continue  # 跳过当前股票，继续下一个
+
+            # 每处理完一只股票，暂停 0.5 秒，避免系统负载过高
+            time.sleep(0.5)
 
         # 记录补充前状态
         initial_count = len(basic_info_df)

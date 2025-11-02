@@ -392,7 +392,7 @@ def get_pledge_data():
         logger.info(f"质押数据实际列名: {', '.join(df.columns)}")
         
         # 确保列名正确
-        required_columns = ['股票代码', '质押股数']
+        required_columns = ['股票代码', '质押股数', '无限售股质押数']
         for col in required_columns:
             if col not in df.columns:
                 logger.error(f"质押数据缺少必要列: {col}")
@@ -407,14 +407,16 @@ def get_pledge_data():
         # 重命名列，确保与主数据匹配
         df = df.rename(columns={
             '股票代码': '代码',
-            '质押股数': '质押股数'
+            '质押股数': '质押股数',
+            '无限售股质押数': '无限售股质押数'
         })
         
         # 选择需要的列
-        df = df[['代码', '质押股数']]
+        df = df[['代码', '质押股数', '无限售股质押数']]
         
         # 填充缺失值
         df['质押股数'] = df['质押股数'].fillna(0)
+        df['无限售股质押数'] = df['无限售股质押数'].fillna(0)
         
         logger.info(f"成功获取 {len(df)} 条股票质押数据")
         return df
@@ -447,6 +449,11 @@ def apply_pledge_filter(stock_data):
         # 添加质押股数列，初始值为0
         stock_info['质押股数'] = 0
     
+    # 仅在有无限售股质押数据时添加无限售股质押数列
+    if '无限售股质押数' not in stock_info.columns:
+        # 添加无限售股质押数列，初始值为0
+        stock_info['无限售股质押数'] = 0
+    
     # 合并质押数据
     merged_data = pd.merge(stock_info, pledge_data, on='代码', how='left', suffixes=('', '_new'))
     
@@ -461,9 +468,36 @@ def apply_pledge_filter(stock_data):
         logger.warning("质押数据中没有'质押股数'列，使用默认值0")
         merged_data['质押股数'] = 0
     
+    # 更新无限售股质押数列
+    if '无限售股质押数_new' in merged_data.columns:
+        # 用新数据替换旧数据
+        merged_data['无限售股质押数'] = merged_data['无限售股质押数_new'].fillna(0)
+        # 移除临时列
+        merged_data = merged_data.drop(columns=['无限售股质押数_new'])
+    else:
+        # 如果新数据中没有无限售股质押数列，保持原值
+        logger.warning("质押数据中没有'无限售股质押数'列，使用默认值0")
+        merged_data['无限售股质押数'] = 0
+    
     # 记录过滤前的股票数量
     initial_count = len(merged_data)
     logger.info(f"开始应用质押过滤，初始股票数量: {initial_count}")
+    
+    # 添加详细的质押数据统计
+    logger.info(f"质押数据统计: 最小值={merged_data['质押股数'].min()}, 最大值={merged_data['质押股数'].max()}, 平均值={merged_data['质押股数'].mean():.2f}")
+    logger.info(f"无限售股质押数统计: 最小值={merged_data['无限售股质押数'].min()}, 最大值={merged_data['无限售股质押数'].max()}, 平均值={merged_data['无限售股质押数'].mean():.2f}")
+    
+    # 按质押股数排序，打印最大的前两行数据
+    top_pledge = merged_data.sort_values('质押股数', ascending=False).head(2)
+    logger.info("质押股数最大的前两行数据:")
+    for i, row in top_pledge.iterrows():
+        logger.info(f"{row['代码']}: {row['名称']} - 质押股数: {row['质押股数']}")
+    
+    # 按无限售股质押数排序，打印最大的前两行数据
+    top_unrestricted = merged_data.sort_values('无限售股质押数', ascending=False).head(2)
+    logger.info("无限售股质押数最大的前两行数据:")
+    for i, row in top_unrestricted.iterrows():
+        logger.info(f"{row['代码']}: {row['名称']} - 无限售股质押数: {row['无限售股质押数']}")
     
     # 应用质押过滤条件
     if PLEDGE_FILTER["enabled"]:

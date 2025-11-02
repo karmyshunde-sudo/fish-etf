@@ -54,7 +54,7 @@ FINANCIAL_FILTER_PARAMS = {
 
 def get_stock_quote(code):
     """
-    使用 ak.stock_zh_a_daily 接口获取单只股票的最新行情数据
+    使用 ak.stock_zh_a_spot_em 接口获取单只股票的最新行情数据
     参数：
     - code: 股票代码（6位字符串）
     返回：
@@ -62,30 +62,43 @@ def get_stock_quote(code):
     - None: 获取失败
     """
     try:
-        # 构造 akstock 的参数
-        df = ak.stock_zh_a_daily(symbol=code, adjust="qfq")
+        # 获取全量数据
+        spot_df = ak.stock_zh_a_spot_em()
         
-        if df.empty:
+        if spot_df.empty:
             logger.warning(f"股票 {code} 行情数据为空")
             return None
         
-        # 取最新一条数据
-        latest_row = df.iloc[-1]
-        
+        # 重命名列以匹配我们的需求
+        spot_df.rename(columns={
+            '代码': '代码',
+            '名称': '名称',
+            '总市值': '总市值',
+            '流通市值': '流通市值',
+            '市盈率-动态': '动态市盈率'
+        }, inplace=True)
+
+        # 只保留我们需要的列
+        required_cols = ['代码', '总市值', '流通市值', '动态市盈率']
+        spot_df = spot_df[required_cols]
+
+        # 转换为数值型（避免字符串导致计算错误）
+        for col in ['总市值', '流通市值', '动态市盈率']:
+            spot_df[col] = pd.to_numeric(spot_df[col], errors='coerce')
+
+        # 筛选出当前股票的数据
+        stock_data = spot_df[spot_df['代码'] == code]
+        if stock_data.empty:
+            logger.warning(f"股票 {code} 在实时行情数据中未找到")
+            return None
+
         # 提取需要的字段
         quote_data = {
-            '总市值': latest_row.get('总市值', 0.0),
-            '流通市值': latest_row.get('流通市值', 0.0),
-            '动态市盈率': latest_row.get('市盈率-动态', 0.0)
+            '总市值': stock_data.iloc[0]['总市值'],
+            '流通市值': stock_data.iloc[0]['流通市值'],
+            '动态市盈率': stock_data.iloc[0]['动态市盈率']
         }
-        
-        # 转换为数值型
-        for key in quote_data:
-            try:
-                quote_data[key] = float(quote_data[key])
-            except (ValueError, TypeError):
-                quote_data[key] = 0.0
-        
+
         return quote_data
     
     except Exception as e:

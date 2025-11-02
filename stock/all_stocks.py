@@ -439,19 +439,26 @@ def apply_pledge_filter(stock_data):
         logger.warning("质押数据获取失败，跳过质押过滤")
         return stock_data
     
-    # 确保 stock_data 中没有 "质押股数" 列，避免合并时冲突
-    if '质押股数' in stock_data.columns:
-        logger.warning("基础数据中已存在'质押股数'列，已移除")
-        stock_data = stock_data.drop(columns=['质押股数'])
+    # 创建副本避免SettingWithCopyWarning
+    stock_info = stock_data.copy()
+    
+    # 仅在有质押数据时添加质押股数列
+    if '质押股数' not in stock_info.columns:
+        # 添加质押股数列，初始值为0
+        stock_info['质押股数'] = 0
     
     # 合并质押数据
-    merged_data = pd.merge(stock_data, pledge_data, on='代码', how='left')
+    merged_data = pd.merge(stock_info, pledge_data, on='代码', how='left', suffixes=('', '_new'))
     
-    # 填充缺失的质押数据为0
-    if '质押股数' in merged_data.columns:
-        merged_data['质押股数'] = merged_data['质押股数'].fillna(0)
+    # 更新质押股数列
+    if '质押股数_new' in merged_data.columns:
+        # 用新数据替换旧数据
+        merged_data['质押股数'] = merged_data['质押股数_new'].fillna(0)
+        # 移除临时列
+        merged_data = merged_data.drop(columns=['质押股数_new'])
     else:
-        logger.warning("合并后数据中没有'质押股数'列，添加默认值0")
+        # 如果新数据中没有质押股数列，保持原值
+        logger.warning("质押数据中没有'质押股数'列，使用默认值0")
         merged_data['质押股数'] = 0
     
     # 记录过滤前的股票数量
@@ -483,18 +490,19 @@ def apply_pledge_filter(stock_data):
     
     return merged_data
 
-def save_base_stock_info(stock_info):
+def save_base_stock_info(stock_info, include_pledge=False):
     """
-    【关键修复】保存基础股票列表到文件
-    确保文件结构: 代码,名称,所属板块,流通市值,总市值,数据状态,动态市盈率,filter,next_crawl_index,质押股数
+    保存基础股票列表到文件
+    确保文件结构: 代码,名称,所属板块,流通市值,总市值,数据状态,动态市盈率,filter,next_crawl_index[,质押股数]
     
     Args:
         stock_info: 基础股票列表DataFrame
+        include_pledge: 是否包含质押股数列
     """
     try:
-       # 创建副本避免SettingWithCopyWarning
+        # 创建副本避免SettingWithCopyWarning
         stock_info = stock_info.copy()
-       
+        
         # 【关键修复】确保列名正确
         # 确保流通市值和总市值是数值类型
         if "流通市值" in stock_info.columns:
@@ -520,16 +528,24 @@ def save_base_stock_info(stock_info):
         stock_info["filter"] = False  # 添加filter列并设置默认值为False
         stock_info["next_crawl_index"] = 0
         
-        # 确保"质押股数"列存在
-        if '质押股数' not in stock_info.columns:
-            logger.warning("质押股数列不存在，添加默认值0")
-            stock_info['质押股数'] = 0
-        else:
-            # 确保"质押股数"是数值类型
-            stock_info['质押股数'] = pd.to_numeric(stock_info['质押股数'], errors='coerce').fillna(0)
+        # 定义基础列（不包含质押股数）
+        basic_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index"]
         
-        # 【关键修复】确保列顺序正确
-        final_columns = ["代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", "动态市盈率", "filter", "next_crawl_index", "质押股数"]
+        # 如果需要包含质押股数列
+        if include_pledge:
+            # 确保"质押股数"列存在
+            if '质押股数' not in stock_info.columns:
+                logger.warning("质押股数列不存在，添加默认值0")
+                stock_info['质押股数'] = 0
+            else:
+                # 确保"质押股数"是数值类型
+                stock_info['质押股数'] = pd.to_numeric(stock_info['质押股数'], errors='coerce').fillna(0)
+            
+            # 定义完整列
+            final_columns = basic_columns + ["质押股数"]
+        else:
+            # 只使用基础列
+            final_columns = basic_columns
         
         # 检查并添加缺失的列
         for col in final_columns:
@@ -584,8 +600,8 @@ def update_stock_list():
             logger.error("基础过滤后股票列表为空")
             return False
         
-        # 【关键修复】保存基础股票列表
-        save_base_stock_info(filtered_data)
+        # 【关键修复】初次保存时，不包含质押股数列
+        save_base_stock_info(filtered_data, include_pledge=False)
         
         # 【新增】应用质押数据过滤
         logger.info("开始应用质押数据过滤...")
@@ -597,8 +613,8 @@ def update_stock_list():
             # 只替换过滤后的数据，保持其他列不变
             stock_info = filtered_data[filtered_data['代码'].isin(pledge_filtered_data['代码'])]
             
-            # 保存过滤后的数据
-            save_base_stock_info(stock_info)
+            # 保存过滤后的数据 - 此时包含质押股数列
+            save_base_stock_info(stock_info, include_pledge=True)
             logger.info(f"股票列表已成功应用质押过滤并更新")
         else:
             logger.warning("质押过滤后无股票数据，跳过保存")

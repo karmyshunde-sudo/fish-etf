@@ -9,9 +9,8 @@
 4. 将过滤后的股票列表保存回all_stocks.csv
 
 财务过滤条件：
-- 仅保留流通市值、总市值、动态市盈率三个指标
+- 仅保留动态市盈率一个指标
 - 动态市盈率 >= 15.0
-- 流通市值/总市值 > 0.8
 
 使用说明：
 1. 该脚本应在每周固定时间运行（例如周末）
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
 BATCH_SIZE = 100  # 每次处理的股票数量
 
-# 财务指标过滤参数配置（仅保留需要的三个指标）
+# 财务指标过滤参数配置（仅保留动态市盈率）
 FINANCIAL_FILTER_PARAMS = {
     "dynamic_pe": {
         "enabled": True,
@@ -44,23 +43,16 @@ FINANCIAL_FILTER_PARAMS = {
         "column": "动态市盈率",
         "category": "估值指标",
         "condition": ">= 15.0（动态市盈率大于等于15）"
-    },
-    "circulating_to_total_ratio": {
-        "enabled": True,
-        "threshold": 0.8,
-        "column": "流通市值/总市值",
-        "category": "流通性",
-        "condition": "> 0.8（流通市值占总市值比例大于80%）"
     }
 }
 
 def get_financial_data(code):
     """
-    使用Baostock的query_stock_basic接口获取单只股票数据（最稳定方式）
+    使用Baostock的query_stock_basic接口获取单只股票动态市盈率
     参数：
     - code: 股票代码（6位字符串）
     返回：
-    - dict: 包含动态市盈率、总市值、流通市值、流通市值/总市值比率
+    - dict: 包含动态市盈率
     - None: 获取失败（但不会删除股票）
     """
     try:
@@ -88,60 +80,20 @@ def get_financial_data(code):
         df = pd.DataFrame(data_list, columns=rs.fields)
         row = df.iloc[0]
         
-        # 提取基本信息
+        # 提取动态市盈率
         peTTM = row.get('peTTM', None)
-        totalShare = row.get('totalShare', None)
-        liquidShare = row.get('liquidShare', None)
         
         # 转换数据类型
         try:
             peTTM = float(peTTM) if peTTM is not None else None
-            totalShare = float(totalShare) if totalShare is not None else None
-            liquidShare = float(liquidShare) if liquidShare is not None else None
         except (ValueError, TypeError):
             peTTM = None
-            totalShare = None
-            liquidShare = None
-        
-        # 计算市值（需要收盘价，但Baostock query_stock_basic不返回收盘价）
-        # 因此我们使用最简单的方案：只获取市盈率，市值不计算，直接使用市盈率和总股本、流通股本
-        # 但实际需要市值数据，所以我们使用查询K线的简单方式
-        # 由于您要求简单，我们只查询最近一天的收盘价
-        rs_k = bs.query_history_k_data(
-            code=bs_code,
-            fields="close",
-            start_date=datetime.now().strftime("%Y-%m-%d"),
-            end_date=datetime.now().strftime("%Y-%m-%d")
-        )
-        if rs_k.error_code != '0':
-            logger.error(f"获取股票 {code} K线数据失败: {rs_k.error_msg}")
-            return None
-        
-        k_data = []
-        while rs_k.next():
-            k_data.append(rs_k.get_row_data())
-        
-        if not k_data:
-            logger.warning(f"获取股票 {code} K线数据成功，但无数据返回")
-            return None
-        
-        close_price = float(k_data[0][1])
-        
-        # 计算市值
-        total_market_value = totalShare * close_price if totalShare is not None else None
-        circulating_market_value = liquidShare * close_price if liquidShare is not None else None
-        circulating_to_total_ratio = None
-        if total_market_value and total_market_value > 0 and circulating_market_value:
-            circulating_to_total_ratio = circulating_market_value / total_market_value
         
         result = {
-            "dynamic_pe": peTTM,
-            "total_market_value": total_market_value,
-            "circulating_market_value": circulating_market_value,
-            "circulating_to_total_ratio": circulating_to_total_ratio
+            "dynamic_pe": peTTM
         }
         
-        logger.info(f"股票 {code} 通过Baostock获取的基本信息: {result}")
+        logger.info(f"股票 {code} 通过Baostock获取的动态市盈率: {peTTM}")
         return result
     except Exception as e:
         logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
@@ -149,10 +101,10 @@ def get_financial_data(code):
 
 def apply_financial_filters(stock_code, financial_data):
     """
-    应用财务过滤条件（仅检查动态市盈率和流通市值/总市值比率）
+    应用财务过滤条件（仅检查动态市盈率）
     参数：
     - stock_code: 股票代码
-    - financial_ 股票财务数据
+    - financial_data: 股票财务数据
     返回：
     - bool: 是否通过所有财务条件
     """
@@ -173,10 +125,6 @@ def apply_financial_filters(stock_code, financial_data):
         if param_config["condition"].startswith(">= "):
             if value < param_config["threshold"]:
                 logger.debug(f"股票 {stock_code} {param_name} 不满足条件: {value} < {param_config['threshold']}")
-                return False
-        elif param_config["condition"].startswith("> "):
-            if value <= param_config["threshold"]:
-                logger.debug(f"股票 {stock_code} {param_name} 不满足条件: {value} <= {param_config['threshold']}")
                 return False
     
     return True

@@ -154,15 +154,15 @@ def get_net_profit(code):
                 continue
             
             # 直接按位置取值，不关心列名
-            first_col_value = str(row[0]).strip()
-            second_col_value = str(row[1]).strip()
+            first_col_value = str(row.iloc[0]).strip()
+            second_col_value = str(row.iloc[1]).strip()
             
             logger.debug(f"检查行数据: 第一列='{first_col_value}', 第二列='{second_col_value}'")
             
             # 检查是否符合"常用指标"和"净利润"条件
             if first_col_value == "常用指标" and second_col_value == "净利润":
                 # 直接取第三列的值（索引2）
-                third_col_value = row[2]
+                third_col_value = row.iloc[2]
                 logger.debug(f"股票 {code} 找到匹配行，第三列值: {third_col_value}")
                 
                 # 尝试转换为浮点数

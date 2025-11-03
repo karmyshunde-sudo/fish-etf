@@ -631,9 +631,12 @@ def apply_market_value_and_pe_filters():
             logger.error("读取的股票数据为空，无法补充指标")
             return False
 
-        # 2. 获取净利润数据 - 分批次处理
+        # 2. 确保股票代码为6位字符串格式
+        latest_stock_df['代码'] = latest_stock_df['代码'].astype(str).str.zfill(6)
+        
+        # 3. 获取净利润数据 - 分批次处理
         stock_codes = latest_stock_df['代码'].tolist()
-        batch_size = 30  # 降低批次大小，避免请求过多
+        batch_size = 30
         net_profit_data = {}  # 存储股票代码到净利润的映射
 
         for i in range(0, len(stock_codes), batch_size):
@@ -643,21 +646,21 @@ def apply_market_value_and_pe_filters():
             # 处理本批次的股票
             for code in batch_codes:
                 try:
-                    # 构造完整股票代码格式（akshare需要sh或sz前缀）
-                    if code.startswith('6'):
-                        full_code = f"sh{code}"
-                    elif code.startswith(('0', '3')):
-                        full_code = f"sz{code}"
-                    else:
-                        full_code = code  # 保持原样
+                    # 确保代码是6位字符串
+                    code = str(code).zfill(6)
                     
-                    # 获取财务摘要数据
-                    df = ak.stock_financial_abstract(symbol=full_code, indicator="常用指标")
+                    # 【关键修正】ak.stock_financial_abstract接口不接受indicator参数
+                    # 应该先获取所有财务数据，然后筛选
+                    df = ak.stock_financial_abstract(symbol=code)
                     
                     # 检查数据是否有效
                     if not df.empty and '指标' in df.columns and '值' in df.columns:
-                        # 筛选净利润指标
-                        net_profit_rows = df[df['指标'] == '净利润']
+                        # 筛选"常用指标"中的"净利润"
+                        net_profit_rows = df[(df['指标'] == '净利润') & (df['类型'] == '常用指标')]
+                        
+                        # 如果没有找到"常用指标"的净利润，尝试查找所有类型的净利润
+                        if net_profit_rows.empty:
+                            net_profit_rows = df[df['指标'] == '净利润']
                         
                         if not net_profit_rows.empty:
                             # 按日期排序（如果有日期列），取最近一期
@@ -685,17 +688,17 @@ def apply_market_value_and_pe_filters():
             # 每批之间加延时（避免被封）
             time.sleep(random.uniform(3.0, 6.0))
 
-        # 3. 添加净利润列
+        # 4. 添加净利润列
         latest_stock_df['净利润'] = latest_stock_df['代码'].map(net_profit_data).fillna(float('nan'))
 
-        # 4. 过滤净利润为负的股票
+        # 5. 过滤净利润为负的股票
         initial_count = len(latest_stock_df)
         filtered_df = latest_stock_df.dropna(subset=['净利润'])
         filtered_df = filtered_df[filtered_df['净利润'] > 0]
         removed_count = initial_count - len(filtered_df)
         logger.info(f"排除 {removed_count} 只净利润 <= 0 的股票（净利润过滤）")
 
-        # 5. 确保所有列存在（包括之前可能不存在的）
+        # 6. 确保所有列存在（包括之前可能不存在的）
         required_columns = [
             "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态",
             "动态市盈率", "filter", "next_crawl_index", "质押股数", "净利润"
@@ -714,10 +717,10 @@ def apply_market_value_and_pe_filters():
                 else:
                     filtered_df[col] = ""
         
-        # 6. 重新排序列
+        # 7. 重新排序列
         filtered_df = filtered_df[required_columns]
 
-        # 7. 保存最终结果
+        # 8. 保存最终结果
         filtered_df.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
         commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（补充净利润并过滤）")
         logger.info(f"股票列表已成功补充净利润并完成过滤，共 {len(filtered_df)} 条记录")

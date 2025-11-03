@@ -130,59 +130,60 @@ def get_net_profit(code):
     try:
         # 确保代码是6位字符串
         code = str(code).zfill(6)
-        
-        # 转换为akshare格式的代码
-        ak_code = code
-        logger.debug(f"使用akshare格式的股票代码: {ak_code}")
+        logger.debug(f"正在获取股票 {code} 的净利润数据")
         
         # 获取财务摘要数据
-        df = ak.stock_financial_abstract(symbol=ak_code)
+        df = ak.stock_financial_abstract(symbol=code)
         
         if df.empty:
             logger.error(f"股票 {code} 返回空财务数据")
             return None
         
-        # 记录返回的列
-        columns = df.columns.tolist()
-        logger.debug(f"akshare返回的列: {columns}")
-        logger.debug(f"akshare返回的数据预览: {df.head(3).to_dict()}")
+        # 记录返回数据的列名
+        logger.debug(f"akshare返回的列名: {df.columns.tolist()}")
         
-        # 检查必要列是否存在
-        required_columns = ['类型', '指标', '值']
-        missing_columns = [col for col in required_columns if col not in columns]
+        # 记录前3行数据内容，便于调试
+        if not df.empty:
+            logger.debug(f"akshare返回的前3行数据: {df.head(3).to_dict()}")
         
-        if missing_columns:
-            logger.error(f"股票 {code} 返回的数据缺少必要列: {', '.join(missing_columns)}")
-            return None
-        
-        # 【关键修复】使用正确的列名'类型'而不是'选项'
-        net_profit_rows = df[(df['指标'] == '净利润') & (df['类型'] == '常用指标')]
-        
-        if net_profit_rows.empty:
-            # 再尝试查找其他可能的净利润指标
-            net_profit_rows = df[df['指标'] == '净利润']
+        # 按行遍历数据，不依赖列名，直接按位置索引取值
+        for index, row in df.iterrows():
+            # 检查行数据长度是否足够
+            if len(row) < 3:
+                logger.debug(f"股票 {code} 第{index}行数据长度不足，跳过")
+                continue
             
-            if net_profit_rows.empty:
-                logger.warning(f"股票 {code} 未找到'净利润'指标数据")
-                return None
+            # 直接按位置取值，不关心列名
+            first_col_value = str(row[0]).strip()
+            second_col_value = str(row[1]).strip()
             
-            logger.warning(f"股票 {code} 未找到'常用指标'下的净利润，使用其他类别数据")
+            logger.debug(f"检查行数据: 第一列='{first_col_value}', 第二列='{second_col_value}'")
+            
+            # 检查是否符合"常用指标"和"净利润"条件
+            if first_col_value == "常用指标" and second_col_value == "净利润":
+                # 直接取第三列的值（索引2）
+                third_col_value = row[2]
+                logger.debug(f"股票 {code} 找到匹配行，第三列值: {third_col_value}")
+                
+                # 尝试转换为浮点数
+                try:
+                    # 清理数据：去除可能的逗号和空格
+                    cleaned_value = str(third_col_value).replace(',', '').replace(' ', '').strip()
+                    net_profit = float(cleaned_value)
+                    logger.info(f"股票 {code} 获取到的净利润值: {net_profit:.2f}")
+                    return net_profit
+                except (TypeError, ValueError) as e:
+                    logger.error(f"股票 {code} 的第三列值无法转换为浮点数: {third_col_value} (错误: {str(e)})")
+                    return None
         
-        # 获取最新一期的净利润值
-        latest_net_profit = net_profit_rows.iloc[0]['值']
-        
-        # 尝试转换为浮点数
-        try:
-            net_profit = float(latest_net_profit)
-            logger.info(f"股票 {code} 常用指标下的净利润: {net_profit:.2f}")
-            return net_profit
-        except (TypeError, ValueError):
-            logger.error(f"股票 {code} 的净利润值无法转换为浮点数: {latest_net_profit}")
-            return None
-    except Exception as e:
-        logger.exception(f"获取股票 {code} 净利润数据失败")
+        # 如果遍历完所有行都没找到匹配的数据
+        logger.warning(f"股票 {code} 未找到'常用指标'下的'净利润'数据")
         return None
-
+        
+    except Exception as e:
+        logger.exception(f"获取股票 {code} 净利润数据失败: {str(e)}")
+        return None
+        
 def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     """
     应用财务过滤条件

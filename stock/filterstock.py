@@ -68,7 +68,6 @@ def get_dynamic_pe(code):
         
         # 转换为baostock格式的代码
         bs_code = "sh." + code if code.startswith('6') else "sz." + code
-        
         logger.debug(f"使用Baostock格式的股票代码: {bs_code}")
         
         # 获取股票基本信息
@@ -91,6 +90,11 @@ def get_dynamic_pe(code):
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
         logger.debug(f"Baostock返回的数据预览: {df.head(1).to_dict()}")
+        
+        # 检查是否有peTTM字段
+        if 'peTTM' not in df.columns:
+            logger.warning(f"股票 {code} 的数据中没有peTTM字段")
+            return None
         
         row = df.iloc[0]
         
@@ -128,7 +132,7 @@ def get_net_profit(code):
         code = str(code).zfill(6)
         
         # 转换为akshare格式的代码
-        ak_code = "sh" + code if code.startswith('6') else "sz" + code
+        ak_code = code
         logger.debug(f"使用akshare格式的股票代码: {ak_code}")
         
         # 获取财务摘要数据
@@ -138,16 +142,21 @@ def get_net_profit(code):
             logger.error(f"股票 {code} 返回空财务数据")
             return None
         
-        logger.debug(f"akshare返回的数据列: {df.columns.tolist()}")
+        # 记录返回的列
+        columns = df.columns.tolist()
+        logger.debug(f"akshare返回的列: {columns}")
         logger.debug(f"akshare返回的数据预览: {df.head(3).to_dict()}")
         
-        if '选项' not in df.columns or '指标' not in df.columns or '值' not in df.columns:
-            logger.error(f"股票 {code} 返回的数据缺少必要列")
+        # 检查必要列是否存在
+        required_columns = ['类型', '指标', '值']
+        missing_columns = [col for col in required_columns if col not in columns]
+        
+        if missing_columns:
+            logger.error(f"股票 {code} 返回的数据缺少必要列: {', '.join(missing_columns)}")
             return None
         
-        # 【关键修复】筛选"常用指标"下的"净利润"
-        # 因为存在两个"净利润"指标（一个在"常用指标"，一个在"成长能力"）
-        net_profit_rows = df[(df['指标'] == '净利润') & (df['选项'] == '常用指标')]
+        # 【关键修复】使用正确的列名'类型'而不是'选项'
+        net_profit_rows = df[(df['指标'] == '净利润') & (df['类型'] == '常用指标')]
         
         if net_profit_rows.empty:
             # 再尝试查找其他可能的净利润指标

@@ -237,6 +237,13 @@ def filter_and_update_stocks():
             basic_info_df['filter'] = False
             logger.info("添加filter列到all_stocks.csv文件")
         
+        # 添加需要的财务指标列（仅当指标启用时）
+        for param_name, param_config in FINANCIAL_FILTER_PARAMS.items():
+            if param_config["enabled"]:
+                if param_config["column"] not in basic_info_df.columns:
+                    basic_info_df[param_config["column"]] = float('nan')
+                    logger.info(f"添加列 '{param_config['column']}' 到all_stocks.csv文件")
+        
         # 找出需要处理的股票（filter为False）
         to_process = basic_info_df[basic_info_df['filter'] == False]
         logger.info(f"过滤前需要处理的股票数量: {len(to_process)}")
@@ -267,15 +274,23 @@ def filter_and_update_stocks():
                 
                 logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
                 
-                # 【关键修复】只在过滤启用时获取数据
+                # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
                 dynamic_pe = None
                 if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
                     dynamic_pe = get_dynamic_pe(stock_code)
+                    # 保存到DataFrame
+                    if dynamic_pe is not None:
+                        basic_info_df.loc[idx, FINANCIAL_FILTER_PARAMS["dynamic_pe"]["column"]] = dynamic_pe
+                        logger.debug(f"已更新股票 {stock_code} 的{FINANCIAL_FILTER_PARAMS['dynamic_pe']['column']}值: {dynamic_pe:.2f}")
                 
-                # 【关键修复】只在过滤启用时获取数据
+                # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
                 net_profit = None
                 if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
                     net_profit = get_net_profit(stock_code)
+                    # 保存到DataFrame
+                    if net_profit is not None:
+                        basic_info_df.loc[idx, FINANCIAL_FILTER_PARAMS["net_profit"]["column"]] = net_profit
+                        logger.debug(f"已更新股票 {stock_code} 的{FINANCIAL_FILTER_PARAMS['net_profit']['column']}值: {net_profit:.2f}")
                 
                 # 记录获取结果
                 logger.debug(f"股票 {stock_code} 获取结果: 动态市盈率={dynamic_pe}, 净利润={net_profit}")

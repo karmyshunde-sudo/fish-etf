@@ -22,7 +22,7 @@ from datetime import datetime
 import logging
 import sys
 from config import Config
-from utils.date_utils import is_file_outdated
+from utils.date_utils import is_file_outdated, get_beijing_time
 from wechat_push.push import send_wechat_message  # 确保正确导入推送模块
 # 【关键修复】导入Git工具函数
 from utils.git_utils import commit_files_in_batches

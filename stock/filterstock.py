@@ -40,7 +40,7 @@ BATCH_SIZE = 10  # 每次处理的股票数量
 # 财务指标过滤参数配置（保留动态市盈率大于等于0.1的股票）（保留净利润正的股票）
 FINANCIAL_FILTER_PARAMS = {
     "dynamic_pe": {
-        "enabled": True,
+        "enabled": False,
         "threshold": 0.1,
         "column": "动态市盈率",
         "category": "估值指标"

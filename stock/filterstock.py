@@ -35,16 +35,16 @@ from utils.git_utils import commit_files_in_batches
 logger = logging.getLogger(__name__)
 
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
-BATCH_SIZE = 10  # 每次处理的股票数量
+BATCH_SIZE = 100  # 每次处理的股票数量
 
 # 财务指标过滤参数配置
 FINANCIAL_FILTER_PARAMS = {
     "dynamic_pe": {
         "enabled": True,
-        "threshold": 0.1,
+        "threshold": 15.0,
         "column": "动态市盈率",
         "category": "估值指标",
-        "condition": ">= 0.0（动态市盈率大于等于15）"
+        "condition": ">= 15.0（动态市盈率大于等于15）"
     },
     "net_profit": {
         "enabled": True,
@@ -163,13 +163,11 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     返回：
     - bool: 是否通过所有财务条件
     """
-    # 两个指标都必须有有效数据才能通过过滤
-    if dynamic_pe is None or net_profit is None:
-        logger.debug(f"股票 {stock_code} 缺少财务数据，跳过过滤")
-        return False
-    
     # 检查动态市盈率
     if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
+        if dynamic_pe is None:
+            logger.debug(f"股票 {stock_code} 动态市盈率数据缺失")
+            return False
         threshold = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["threshold"]
         if dynamic_pe < threshold:
             logger.debug(f"股票 {stock_code} 动态市盈率不满足条件: {dynamic_pe:.2f} < {threshold}")
@@ -177,6 +175,9 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     
     # 检查净利润
     if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
+        if net_profit is None:
+            logger.debug(f"股票 {stock_code} 净利润数据缺失")
+            return False
         threshold = FINANCIAL_FILTER_PARAMS["net_profit"]["threshold"]
         if net_profit <= threshold:
             logger.debug(f"股票 {stock_code} 净利润不满足条件: {net_profit:.2f} <= {threshold}")
@@ -241,9 +242,13 @@ def filter_and_update_stocks():
                 # 获取净利润
                 net_profit = get_net_profit(stock_code)
                 
-                # 如果两个指标都获取失败，跳过本次处理（保留股票）
+                # 记录获取结果
+                logger.debug(f"股票 {stock_code} 获取结果: 动态市盈率={dynamic_pe}, 净利润={net_profit}")
+                
+                # 无论是否获取成功，都尝试应用过滤条件
+                # 仅当两个指标都获取失败时才跳过
                 if dynamic_pe is None and net_profit is None:
-                    logger.warning(f"股票 {stock_code} 财务数据获取失败，跳过本次处理（保留股票）")
+                    logger.warning(f"股票 {stock_code} 两个财务指标均获取失败，跳过本次处理（保留股票）")
                     continue
                 
                 # 应用财务过滤

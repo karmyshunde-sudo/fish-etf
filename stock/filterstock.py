@@ -35,16 +35,16 @@ from utils.git_utils import commit_files_in_batches
 logger = logging.getLogger(__name__)
 
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
-BATCH_SIZE = 100  # 每次处理的股票数量
+BATCH_SIZE = 10  # 每次处理的股票数量
 
 # 财务指标过滤参数配置
 FINANCIAL_FILTER_PARAMS = {
     "dynamic_pe": {
         "enabled": True,
-        "threshold": 15.0,
+        "threshold": 0.1,
         "column": "动态市盈率",
         "category": "估值指标",
-        "condition": ">= 15.0（动态市盈率大于等于15）"
+        "condition": ">= 0.0（动态市盈率大于等于15）"
     },
     "net_profit": {
         "enabled": True,

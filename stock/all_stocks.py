@@ -11,6 +11,7 @@
    - 移除指数股票（在数据获取阶段完成）
 2. 质押数据过滤：
    - 移除质押股数超过阈值的股票
+   - 增加净利润，并删掉为负的股票
 
 注意：不再包含市盈率过滤，因为新CSV结构已移除该字段
 """
@@ -612,6 +613,7 @@ def save_base_stock_info(stock_info, include_pledge=False):
         logger.info(f"基础股票列表已成功更新，共 {len(stock_info)} 条记录")
     except Exception as e:
         logger.error(f"保存基础股票列表失败: {str(e)}", exc_info=True)
+
 def apply_market_value_and_pe_filters():
     """
     读取最新的 all_stocks.csv，补充【净利润】，
@@ -763,10 +765,10 @@ def update_stock_list():
             logger.warning("质押过滤后无股票数据，跳过保存")
             return False
         
-        # ✅ 新增：调用独立函数处理市值/PE补充与过滤
-        logger.info("开始应用市值与PE过滤...")
+        # ✅ 新增：调用独立函数处理市值/PE补充与过滤（改为净利润过滤）
+        logger.info("开始应用净利润过滤...")
         if not apply_market_value_and_pe_filters():
-            logger.error("市值与PE过滤阶段失败，终止更新流程")
+            logger.error("净利润过滤阶段失败，终止更新流程")
             return False
 
         logger.info("股票列表更新流程全部完成 ✅")

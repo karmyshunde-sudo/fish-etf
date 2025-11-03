@@ -56,7 +56,7 @@ FINANCIAL_FILTER_PARAMS = {
 
 def get_financial_data(code):
     """
-    使用AkShare单只股票实时行情接口获取数据
+    使用AkShare单只股票实时行情接口获取数据（正确参数为symbol_list）
     参数：
     - code: 股票代码（6位字符串）
     返回：
@@ -64,9 +64,8 @@ def get_financial_data(code):
     - None: 获取失败（但不会删除股票）
     """
     try:
-        # AkShare的stock_zh_a_spot接口支持单只股票查询
-        # 代码格式：直接使用"600000"或"000001"（不需要sh/sz前缀）
-        df = ak.stock_zh_a_spot(symbol=code)
+        # 正确调用方式：使用symbol_list参数传入单个股票代码的列表
+        df = ak.stock_zh_a_spot(symbol_list=[code])
         
         # 检查是否成功获取数据
         if df.empty:

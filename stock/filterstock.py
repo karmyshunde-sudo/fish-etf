@@ -267,11 +267,15 @@ def filter_and_update_stocks():
                 
                 logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
                 
-                # 获取动态市盈率
-                dynamic_pe = get_dynamic_pe(stock_code)
+                # 【关键修复】只在过滤启用时获取数据
+                dynamic_pe = None
+                if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
+                    dynamic_pe = get_dynamic_pe(stock_code)
                 
-                # 获取净利润
-                net_profit = get_net_profit(stock_code)
+                # 【关键修复】只在过滤启用时获取数据
+                net_profit = None
+                if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
+                    net_profit = get_net_profit(stock_code)
                 
                 # 记录获取结果
                 logger.debug(f"股票 {stock_code} 获取结果: 动态市盈率={dynamic_pe}, 净利润={net_profit}")

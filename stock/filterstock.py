@@ -97,19 +97,31 @@ def get_financial_data(code):
         # 获取K线数据（取最近一天收盘价）
         start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = datetime.now().strftime("%Y-%m-%d")
-        # 使用query_k_data替代query_history_k_data（修复接口问题）
-        rs_k = bs.query_k_data(
-            code=bs_code,
-            fields="date,close",
-            start_date=start_date,
-            end_date=end_date
-        )
-        if rs_k.error_code != '0':
-            logger.error(f"获取股票 {code} K线数据失败: {rs_k.error_msg}")
-            return None
+        
+        # 检查Baostock版本兼容性
+        try:
+            # 尝试使用新接口（最新版）
+            rs_k = bs.query_k_data(
+                code=bs_code,
+                fields="date,close",
+                start_date=start_date,
+                end_date=end_date
+            )
+        except AttributeError:
+            # 如果新接口不存在，尝试使用旧接口
+            try:
+                rs_k = bs.query_history_k_data(
+                    code=bs_code,
+                    fields="date,close",
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            except AttributeError:
+                logger.error(f"Baostock接口不可用，请升级到最新版: pip install baostock --upgrade")
+                return None
         
         # 记录K线返回字段
-        logger.info(f"Baostock query_k_data 返回的字段: {', '.join(rs_k.fields)}")
+        logger.info(f"Baostock K线数据接口返回的字段: {', '.join(rs_k.fields)}")
         
         k_data = []
         while rs_k.next():

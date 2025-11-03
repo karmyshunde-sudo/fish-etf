@@ -121,31 +121,30 @@ def get_net_profit(code):
         # 获取财务摘要数据
         df = ak.stock_financial_abstract(symbol=code)
         
-        if df.empty or '指标' not in df.columns or '值' not in df.columns:
+        if df.empty or '选项' not in df.columns or '指标' not in df.columns or '值' not in df.columns:
             logger.debug(f"股票 {code} 返回空财务数据或缺少必要列")
             return None
         
-        # 筛选净利润指标
-        net_profit_rows = df[df['指标'] == '净利润']
+        # 【关键修复】筛选"常用指标"下的"净利润"
+        # 因为存在两个"净利润"指标（一个在"常用指标"，一个在"成长能力"）
+        net_profit_rows = df[(df['指标'] == '净利润') & (df['选项'] == '常用指标')]
         
         if not net_profit_rows.empty:
-            # 按日期排序（如果有日期列），取最近一期
-            if '日期' in net_profit_rows.columns:
-                net_profit_rows = net_profit_rows.sort_values('日期', ascending=False)
-            
-            # 获取最新一期的净利润值
+            # akshare的stock_financial_abstract接口不包含日期列
+            # 根据文档，返回的数据中第三列就是最新数据
+            # 因此直接取第一行作为最新数据
             latest_net_profit = net_profit_rows.iloc[0]['值']
             
             # 尝试转换为浮点数
             try:
                 net_profit = float(latest_net_profit)
-                logger.debug(f"股票 {code} 净利润: {net_profit:.2f}")
+                logger.debug(f"股票 {code} 常用指标下的净利润: {net_profit:.2f}")
                 return net_profit
             except (TypeError, ValueError):
                 logger.warning(f"股票 {code} 的净利润值无法转换为浮点数: {latest_net_profit}")
                 return None
         else:
-            logger.debug(f"股票 {code} 未找到净利润数据")
+            logger.debug(f"股票 {code} 未找到'常用指标'下的净利润数据")
             return None
     except Exception as e:
         logger.warning(f"获取股票 {code} 净利润数据失败: {str(e)}")

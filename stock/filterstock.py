@@ -61,7 +61,7 @@ def get_financial_data(code):
     - code: 股票代码（6位字符串）
     返回：
     - dict: 包含动态市盈率、总市值、流通市值、流通市值/总市值比率
-    - None: 获取失败
+    - None: 获取失败（但不会删除股票）
     """
     try:
         # 转换为baostock格式的代码
@@ -88,10 +88,17 @@ def get_financial_data(code):
         df_basic = pd.DataFrame(data_list, columns=rs_basic.fields)
         row = df_basic.iloc[0]
         
+        # 检查是否为股票类型（type='1'）
+        stock_type = row.get('type', '')
+        if stock_type != '1':
+            logger.info(f"股票 {code} 类型为 {stock_type}（非股票），跳过处理")
+            return None
+        
         # 获取K线数据（取最近一天收盘价）
         start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = datetime.now().strftime("%Y-%m-%d")
-        rs_k = bs.query_history_k_data(
+        # 使用query_k_data替代query_history_k_data（修复接口问题）
+        rs_k = bs.query_k_data(
             code=bs_code,
             fields="date,close",
             start_date=start_date,
@@ -102,7 +109,7 @@ def get_financial_data(code):
             return None
         
         # 记录K线返回字段
-        logger.info(f"Baostock query_history_k_data 返回的字段: {', '.join(rs_k.fields)}")
+        logger.info(f"Baostock query_k_data 返回的字段: {', '.join(rs_k.fields)}")
         
         k_data = []
         while rs_k.next():
@@ -234,19 +241,13 @@ def filter_and_update_stocks():
                 stock_code = str(stock["代码"]).zfill(6)
                 stock_name = stock["名称"]
                 
-                # 删除指数股票
-                if "指数" in stock["所属板块"]:
-                    logger.info(f"删除指数股票: {stock_code} {stock_name}")
-                    basic_info_df.drop(idx, inplace=True)
-                    continue
-                
                 logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
                 
                 # 获取财务数据
                 financial_data = get_financial_data(stock_code)
                 if financial_data is None:
-                    logger.warning(f"股票 {stock_code} 财务数据为空，删除该行")
-                    basic_info_df.drop(idx, inplace=True)
+                    logger.warning(f"股票 {stock_code} 财务数据获取失败，跳过本次处理（保留股票）")
+                    # 不删除股票，保持filter=False（下次继续处理）
                     continue
                 
                 # 应用财务过滤

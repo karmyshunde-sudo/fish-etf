@@ -63,13 +63,18 @@ def get_dynamic_pe(code):
     - None: 获取失败（不会删除股票）
     """
     try:
+        # 确保代码是6位字符串
+        code = str(code).zfill(6)
+        
         # 转换为baostock格式的代码
         bs_code = "sh." + code if code.startswith('6') else "sz." + code
+        
+        logger.debug(f"使用Baostock格式的股票代码: {bs_code}")
         
         # 获取股票基本信息
         rs = bs.query_stock_basic(code=bs_code)
         if rs.error_code != '0':
-            logger.warning(f"获取股票 {code} 基本信息失败: {rs.error_msg}")
+            logger.error(f"获取股票 {code} 基本信息失败: {rs.error_msg}")
             return None
         
         # 记录返回字段
@@ -85,6 +90,8 @@ def get_dynamic_pe(code):
         
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
+        logger.debug(f"Baostock返回的数据预览: {df.head(1).to_dict()}")
+        
         row = df.iloc[0]
         
         # 提取动态市盈率
@@ -94,15 +101,17 @@ def get_dynamic_pe(code):
         try:
             peTTM = float(peTTM) if peTTM is not None else None
         except (ValueError, TypeError):
-            logger.warning(f"股票 {code} 的动态市盈率值无法转换为浮点数: {peTTM}")
+            logger.error(f"股票 {code} 的动态市盈率值无法转换为浮点数: {peTTM}")
             peTTM = None
         
         if peTTM is not None:
-            logger.debug(f"股票 {code} 动态市盈率: {peTTM:.2f}")
+            logger.info(f"股票 {code} 动态市盈率: {peTTM:.2f}")
+        else:
+            logger.warning(f"股票 {code} 动态市盈率数据为空")
         
         return peTTM
     except Exception as e:
-        logger.error(f"获取股票 {code} 动态市盈率失败: {str(e)}")
+        logger.exception(f"获取股票 {code} 动态市盈率失败")
         return None
 
 def get_net_profit(code):
@@ -118,36 +127,51 @@ def get_net_profit(code):
         # 确保代码是6位字符串
         code = str(code).zfill(6)
         
-        # 获取财务摘要数据
-        df = ak.stock_financial_abstract(symbol=code)
+        # 转换为akshare格式的代码
+        ak_code = "sh" + code if code.startswith('6') else "sz" + code
+        logger.debug(f"使用akshare格式的股票代码: {ak_code}")
         
-        if df.empty or '选项' not in df.columns or '指标' not in df.columns or '值' not in df.columns:
-            logger.debug(f"股票 {code} 返回空财务数据或缺少必要列")
+        # 获取财务摘要数据
+        df = ak.stock_financial_abstract(symbol=ak_code)
+        
+        if df.empty:
+            logger.error(f"股票 {code} 返回空财务数据")
+            return None
+        
+        logger.debug(f"akshare返回的数据列: {df.columns.tolist()}")
+        logger.debug(f"akshare返回的数据预览: {df.head(3).to_dict()}")
+        
+        if '选项' not in df.columns or '指标' not in df.columns or '值' not in df.columns:
+            logger.error(f"股票 {code} 返回的数据缺少必要列")
             return None
         
         # 【关键修复】筛选"常用指标"下的"净利润"
         # 因为存在两个"净利润"指标（一个在"常用指标"，一个在"成长能力"）
         net_profit_rows = df[(df['指标'] == '净利润') & (df['选项'] == '常用指标')]
         
-        if not net_profit_rows.empty:
-            # akshare的stock_financial_abstract接口不包含日期列
-            # 根据文档，返回的数据中第三列就是最新数据
-            # 因此直接取第一行作为最新数据
-            latest_net_profit = net_profit_rows.iloc[0]['值']
+        if net_profit_rows.empty:
+            # 再尝试查找其他可能的净利润指标
+            net_profit_rows = df[df['指标'] == '净利润']
             
-            # 尝试转换为浮点数
-            try:
-                net_profit = float(latest_net_profit)
-                logger.debug(f"股票 {code} 常用指标下的净利润: {net_profit:.2f}")
-                return net_profit
-            except (TypeError, ValueError):
-                logger.warning(f"股票 {code} 的净利润值无法转换为浮点数: {latest_net_profit}")
+            if net_profit_rows.empty:
+                logger.warning(f"股票 {code} 未找到'净利润'指标数据")
                 return None
-        else:
-            logger.debug(f"股票 {code} 未找到'常用指标'下的净利润数据")
+            
+            logger.warning(f"股票 {code} 未找到'常用指标'下的净利润，使用其他类别数据")
+        
+        # 获取最新一期的净利润值
+        latest_net_profit = net_profit_rows.iloc[0]['值']
+        
+        # 尝试转换为浮点数
+        try:
+            net_profit = float(latest_net_profit)
+            logger.info(f"股票 {code} 常用指标下的净利润: {net_profit:.2f}")
+            return net_profit
+        except (TypeError, ValueError):
+            logger.error(f"股票 {code} 的净利润值无法转换为浮点数: {latest_net_profit}")
             return None
     except Exception as e:
-        logger.warning(f"获取股票 {code} 净利润数据失败: {str(e)}")
+        logger.exception(f"获取股票 {code} 净利润数据失败")
         return None
 
 def apply_financial_filters(stock_code, dynamic_pe, net_profit):
@@ -167,7 +191,7 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
             return False
         threshold = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["threshold"]
         if dynamic_pe < threshold:
-            logger.debug(f"股票 {stock_code} 动态市盈率不满足条件: {dynamic_pe:.2f} < {threshold}")
+            logger.info(f"股票 {stock_code} 动态市盈率不满足条件: {dynamic_pe:.2f} < {threshold}")
             return False
     
     # 检查净利润
@@ -177,7 +201,7 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
             return False
         threshold = FINANCIAL_FILTER_PARAMS["net_profit"]["threshold"]
         if net_profit <= threshold:
-            logger.debug(f"股票 {stock_code} 净利润不满足条件: {net_profit:.2f} <= {threshold}")
+            logger.info(f"股票 {stock_code} 净利润不满足条件: {net_profit:.2f} <= {threshold}")
             return False
     
     return True
@@ -282,7 +306,8 @@ def filter_and_update_stocks():
             logger.error(f"提交到Git仓库失败: {str(e)}")
         
     except Exception as e:
-        logger.error(f"处理股票列表时发生错误: {str(e)}", exc_info=True)
+        logger.exception(f"处理股票列表时发生错误")
+        return False
 
 if __name__ == "__main__":
     start_time = datetime.now()

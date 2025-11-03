@@ -37,21 +37,19 @@ logger = logging.getLogger(__name__)
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
 BATCH_SIZE = 10  # 每次处理的股票数量
 
-# 财务指标过滤参数配置
+# 财务指标过滤参数配置（保留动态市盈率大于等于0.1的股票）（保留净利润正的股票）
 FINANCIAL_FILTER_PARAMS = {
     "dynamic_pe": {
         "enabled": True,
         "threshold": 0.1,
         "column": "动态市盈率",
-        "category": "估值指标",
-        "condition": ">= 0.1（动态市盈率大于等于15）"
+        "category": "估值指标"
     },
     "net_profit": {
         "enabled": True,
         "threshold": 0,
         "column": "净利润",
-        "category": "盈利能力",
-        "condition": "> 0（净利润为正）"
+        "category": "常用指标"
     }
 }
 

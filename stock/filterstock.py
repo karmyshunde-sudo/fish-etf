@@ -4,17 +4,18 @@
 股票列表财务过滤器
 功能：
 1. 读取all_stocks.csv文件
-2. 逐个股票获取实时行情数据（仅更新【流通市值、总市值、动态市盈率】三个字段）
+2. 逐个股票获取财务数据
 3. 应用财务条件过滤
 4. 将过滤后的股票列表保存回all_stocks.csv
 
 财务过滤条件：
-- 动态市盈率 >= 参数值
-- 流通市值 / 总市值 > 参数值
+- 仅保留流通市值、总市值、动态市盈率三个指标
+- 动态市盈率 >= 15.0
+- 流通市值/总市值 > 0.8
 
 使用说明：
 1. 该脚本应在每周固定时间运行（例如周末）
-2. 运行前确保已安装必要依赖：pip install baostock pandas akshare
+2. 运行前确保已安装必要依赖：pip install baostock pandas
 3. 脚本会更新all_stocks.csv文件
 """
 
@@ -24,11 +25,10 @@ import baostock as bs
 import time
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from utils.git_utils import commit_files_in_batches
-import akshare as ak  # 新增：用于获取实时行情数据
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -36,74 +36,154 @@ logger = logging.getLogger(__name__)
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
 BATCH_SIZE = 100  # 每次处理的股票数量
 
-# 🚫 删除所有财务指标配置，只保留两个参数
+# 财务指标过滤参数配置（仅保留需要的三个指标）
 FINANCIAL_FILTER_PARAMS = {
-    "dynamic_pe_ratio": {
+    "dynamic_pe": {
         "enabled": True,
-        "threshold": 0.0,  # 动态市盈率阈值
+        "threshold": 15.0,
         "column": "动态市盈率",
-        "condition": ">= {threshold}（排除动态市盈率低于阈值的股票）"
+        "category": "估值指标",
+        "condition": ">= 15.0（动态市盈率大于等于15）"
     },
-    "circulation_market_cap_ratio": {
+    "circulating_to_total_ratio": {
         "enabled": True,
-        "threshold": 0.9,  # 流通市值/总市值比值阈值
+        "threshold": 0.8,
         "column": "流通市值/总市值",
-        "condition": "> {threshold}（排除流通市值/总市值比值低于阈值的股票）"
+        "category": "流通性",
+        "condition": "> 0.8（流通市值占总市值比例大于80%）"
     }
 }
 
-def get_stock_quote(code):
+def get_financial_data(code):
     """
-    使用 ak.stock_zh_a_spot_em 接口获取单只股票的最新行情数据
+    获取单只股票的财务数据（仅获取流通市值、总市值、动态市盈率）
     参数：
     - code: 股票代码（6位字符串）
     返回：
-    - dict: 包含流通市值、总市值、动态市盈率的字典
+    - dict: 包含动态市盈率、总市值、流通市值、流通市值/总市值比率
     - None: 获取失败
     """
     try:
-        # 获取全量数据
-        spot_df = ak.stock_zh_a_spot_em()
+        # 转换为baostock格式的代码
+        bs_code = "sh." + code if code.startswith('6') else "sz." + code
         
-        if spot_df.empty:
-            logger.warning(f"股票 {code} 行情数据为空")
+        # 获取股票基本信息
+        rs_basic = bs.query_stock_basic(code=bs_code)
+        if rs_basic.error_code != '0':
+            logger.error(f"获取股票 {code} 基本信息失败: {rs_basic.error_msg}")
             return None
         
-        # 重命名列以匹配我们的需求
-        spot_df.rename(columns={
-            '代码': '代码',
-            '名称': '名称',
-            '总市值': '总市值',
-            '流通市值': '流通市值',
-            '市盈率-动态': '动态市盈率'
-        }, inplace=True)
-
-        # 只保留我们需要的列
-        required_cols = ['代码', '总市值', '流通市值', '动态市盈率']
-        spot_df = spot_df[required_cols]
-
-        # 转换为数值型（避免字符串导致计算错误）
-        for col in ['总市值', '流通市值', '动态市盈率']:
-            spot_df[col] = pd.to_numeric(spot_df[col], errors='coerce')
-
-        # 筛选出当前股票的数据
-        stock_data = spot_df[spot_df['代码'] == code]
-        if stock_data.empty:
-            logger.warning(f"股票 {code} 在实时行情数据中未找到")
+        # 记录返回字段
+        logger.info(f"Baostock query_stock_basic 返回的字段: {', '.join(rs_basic.fields)}")
+        
+        data_list = []
+        while rs_basic.next():
+            data_list.append(rs_basic.get_row_data())
+        
+        if not data_list:
+            logger.warning(f"获取股票 {code} 基本信息成功，但无数据返回")
             return None
-
-        # 提取需要的字段
-        quote_data = {
-            '总市值': stock_data.iloc[0]['总市值'],
-            '流通市值': stock_data.iloc[0]['流通市值'],
-            '动态市盈率': stock_data.iloc[0]['动态市盈率']
+        
+        # 创建DataFrame
+        df_basic = pd.DataFrame(data_list, columns=rs_basic.fields)
+        row = df_basic.iloc[0]
+        
+        # 获取K线数据（取最近一天收盘价）
+        start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        rs_k = bs.query_history_k_data(
+            code=bs_code,
+            fields="date,close",
+            start_date=start_date,
+            end_date=end_date
+        )
+        if rs_k.error_code != '0':
+            logger.error(f"获取股票 {code} K线数据失败: {rs_k.error_msg}")
+            return None
+        
+        # 记录K线返回字段
+        logger.info(f"Baostock query_history_k_data 返回的字段: {', '.join(rs_k.fields)}")
+        
+        k_data = []
+        while rs_k.next():
+            k_data.append(rs_k.get_row_data())
+        
+        if not k_data:
+            logger.warning(f"获取股票 {code} K线数据成功，但无数据返回")
+            return None
+        
+        # 取最近一天的收盘价
+        close_price = float(k_data[-1][1])
+        
+        # 提取基本信息
+        peTTM = row.get('peTTM', None)
+        totalShare = row.get('totalShare', None)
+        liquidShare = row.get('liquidShare', None)
+        
+        # 转换数据类型
+        try:
+            peTTM = float(peTTM) if peTTM is not None else None
+            totalShare = float(totalShare) if totalShare is not None else None
+            liquidShare = float(liquidShare) if liquidShare is not None else None
+        except (ValueError, TypeError):
+            peTTM = None
+            totalShare = None
+            liquidShare = None
+        
+        # 计算市值
+        total_market_value = totalShare * close_price if totalShare is not None else None
+        circulating_market_value = liquidShare * close_price if liquidShare is not None else None
+        circulating_to_total_ratio = None
+        if total_market_value and total_market_value > 0 and circulating_market_value:
+            circulating_to_total_ratio = circulating_market_value / total_market_value
+        
+        # 返回所需数据
+        result = {
+            "dynamic_pe": peTTM,
+            "total_market_value": total_market_value,
+            "circulating_market_value": circulating_market_value,
+            "circulating_to_total_ratio": circulating_to_total_ratio
         }
-
-        return quote_data
-    
+        
+        logger.info(f"股票 {code} 获取的基本信息: {result}")
+        return result
     except Exception as e:
-        logger.error(f"获取股票 {code} 行情数据失败: {str(e)}")
+        logger.error(f"获取股票 {code} 财务数据失败: {str(e)}")
         return None
+
+def apply_financial_filters(stock_code, financial_data):
+    """
+    应用财务过滤条件（仅检查动态市盈率和流通市值/总市值比率）
+    参数：
+    - stock_code: 股票代码
+    - financial_data: 股票财务数据
+    返回：
+    - bool: 是否通过所有财务条件
+    """
+    if financial_data is None:
+        return False
+    
+    for param_name, param_config in FINANCIAL_FILTER_PARAMS.items():
+        if not param_config["enabled"]:
+            continue
+        
+        # 检查指标是否存在
+        if param_name not in financial_data or financial_data[param_name] is None:
+            logger.debug(f"股票 {stock_code} 缺少 {param_name} 数据")
+            return False
+        
+        value = financial_data[param_name]
+        # 根据阈值检查
+        if param_config["condition"].startswith(">= "):
+            if value < param_config["threshold"]:
+                logger.debug(f"股票 {stock_code} {param_name} 不满足条件: {value} < {param_config['threshold']}")
+                return False
+        elif param_config["condition"].startswith("> "):
+            if value <= param_config["threshold"]:
+                logger.debug(f"股票 {stock_code} {param_name} 不满足条件: {value} <= {param_config['threshold']}")
+                return False
+    
+    return True
 
 def filter_and_update_stocks():
     """
@@ -128,11 +208,11 @@ def filter_and_update_stocks():
         
         # 找出需要处理的股票（filter为False）
         to_process = basic_info_df[basic_info_df['filter'] == False]
-        logger.info(f"需要处理的股票数量: {len(to_process)}")
+        logger.info(f"过滤前需要处理的股票数量: {len(to_process)}")
         
-        # 如果没有需要处理的股票，重置所有filter为False并退出
+        # 如果没有需要处理的股票（即所有filter都为True），重置filter为False
         if len(to_process) == 0:
-            logger.info("所有股票都已处理，重置filter列")
+            logger.info("所有股票都已处理，重置filter列为False")
             basic_info_df['filter'] = False
             basic_info_df.to_csv(basic_info_file, index=False)
             logger.info("filter列已重置，退出执行")
@@ -141,88 +221,66 @@ def filter_and_update_stocks():
         # 只处理前BATCH_SIZE只股票
         process_batch = to_process.head(BATCH_SIZE)
         logger.info(f"本次处理股票数量: {len(process_batch)}")
-
-        # 🚫 删除原财务数据获取逻辑，改为逐只股票获取实时行情数据
-        for _, row in process_batch.iterrows():
-            code = row['代码']
-            logger.info(f"正在处理股票 {code}...")
-
-            try:
-                # 获取单只股票的实时行情数据
-                quote_data = get_stock_quote(code)
-                if quote_data is None:
-                    logger.warning(f"股票 {code} 实时行情数据为空")
+        
+        # 登录Baostock
+        login_result = bs.login()
+        if login_result.error_code != '0':
+            logger.error(f"Baostock登录失败: {login_result.error_msg}")
+            return
+        
+        try:
+            # 逐个处理股票
+            for idx, stock in process_batch.iterrows():
+                stock_code = str(stock["代码"]).zfill(6)
+                stock_name = stock["名称"]
+                
+                # 删除指数股票
+                if "指数" in stock["所属板块"]:
+                    logger.info(f"删除指数股票: {stock_code} {stock_name}")
+                    basic_info_df.drop(idx, inplace=True)
                     continue
-
-                # 更新 basic_info_df 中对应的三列
-                basic_info_df.loc[basic_info_df['代码'] == code, '总市值'] = quote_data['总市值']
-                basic_info_df.loc[basic_info_df['代码'] == code, '流通市值'] = quote_data['流通市值']
-                basic_info_df.loc[basic_info_df['代码'] == code, '动态市盈率'] = quote_data['动态市盈率']
-
-                logger.info(f"✅ 股票 {code} 实时行情数据更新成功")
-
-            except Exception as e:
-                logger.error(f"处理股票 {code} 实时行情数据时出错: {str(e)}")
-                continue  # 跳过当前股票，继续下一个
-
-            # 每处理完一只股票，暂停 0.5 秒，避免系统负载过高
-            time.sleep(0.5)
-
-        # 记录补充前状态
-        initial_count = len(basic_info_df)
-        logger.info(f"补充指标前股票数量: {initial_count}")
-
-        # 应用新过滤条件
-        # 条件1：动态市盈率 >= 0
-        before_pe = len(basic_info_df)
-        basic_info_df = basic_info_df.dropna(subset=['动态市盈率'])  # 先排除NaN
-        basic_info_df = basic_info_df[basic_info_df['动态市盈率'] >= FINANCIAL_FILTER_PARAMS["dynamic_pe_ratio"]["threshold"]]
-        removed_pe = before_pe - len(basic_info_df)
-        logger.info(f"排除 {removed_pe} 只动态市盈率 < {FINANCIAL_FILTER_PARAMS['dynamic_pe_ratio']['threshold']} 的股票（PE过滤）")
-
-        # 条件2：流通市值 / 总市值 > 90%
-        before_ratio = len(basic_info_df)
-        basic_info_df = basic_info_df.dropna(subset=['总市值', '流通市值'])
-        basic_info_df = basic_info_df[basic_info_df['总市值'] > 0]
-        basic_info_df['流通市值占比'] = basic_info_df['流通市值'] / basic_info_df['总市值']
-        basic_info_df = basic_info_df[basic_info_df['流通市值占比'] > FINANCIAL_FILTER_PARAMS["circulation_market_cap_ratio"]["threshold"]]
-        removed_ratio = before_ratio - len(basic_info_df)
-        logger.info(f"排除 {removed_ratio} 只流通市值占比 <= {FINANCIAL_FILTER_PARAMS['circulation_market_cap_ratio']['threshold']} 的股票（市值结构过滤）")
-
-        # 清理临时列
-        if '流通市值占比' in basic_info_df.columns:
-            basic_info_df = basic_info_df.drop(columns=['流通市值占比'])
-
-        # 更新 filter 列：通过过滤的设置为 True
-        basic_info_df['filter'] = True  # 所有通过过滤的股票标记为 True
-
-        # 重新整理列顺序（确保与原结构一致）
-        target_columns = [
-            "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", 
-            "动态市盈率", "filter", "next_crawl_index", "质押股数"
-        ]
-        # 补充缺失列（如果有的话）
-        for col in target_columns:
-            if col not in basic_info_df.columns:
-                if col == "filter":
-                    basic_info_df[col] = False
-                elif col == "next_crawl_index":
-                    basic_info_df[col] = 0
-                elif col in ["流通市值", "总市值", "动态市盈率"]:
-                    basic_info_df[col] = 0.0
-                elif col == "质押股数":
-                    basic_info_df[col] = 0
+                
+                logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
+                
+                # 获取财务数据
+                financial_data = get_financial_data(stock_code)
+                if financial_data is None:
+                    logger.warning(f"股票 {stock_code} 财务数据为空，删除该行")
+                    basic_info_df.drop(idx, inplace=True)
+                    continue
+                
+                # 应用财务过滤
+                if apply_financial_filters(stock_code, financial_data):
+                    basic_info_df.loc[idx, 'filter'] = True
+                    logger.info(f"股票 {stock_code} 通过所有过滤条件")
                 else:
-                    basic_info_df[col] = ""
-
-        # 选择目标列并排序
-        basic_info_df = basic_info_df[target_columns]
-
-        # 保存最终结果
-        basic_info_df.to_csv(basic_info_file, index=False, float_format='%.2f')
-        commit_files_in_batches(basic_info_file, "更新股票列表（补充流通市值/总市值/动态市盈率并过滤）")
-        logger.info(f"✅ 股票列表已成功补充财务指标并完成最终过滤，共 {len(basic_info_df)} 条记录")
-
+                    logger.info(f"股票 {stock_code} 未通过过滤条件，删除该行")
+                    basic_info_df.drop(idx, inplace=True)
+                
+                # API调用频率限制
+                time.sleep(0.5)
+        
+        finally:
+            # 确保登出
+            bs.logout()
+        
+        # 保存更新后的股票列表
+        basic_info_df.to_csv(basic_info_file, index=False)
+        logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(basic_info_df)} 只股票")
+        
+        # 检查是否所有股票的filter都为True（即全部通过过滤）
+        if basic_info_df['filter'].all():
+            logger.info("所有股票都通过过滤，重置filter列为False")
+            basic_info_df['filter'] = False
+            basic_info_df.to_csv(basic_info_file, index=False)
+        
+        # 提交到Git仓库
+        try:
+            commit_files_in_batches(Config.DATA_DIR, "LAST_FILE")
+            logger.info("已提交过滤后的股票列表到Git仓库")
+        except Exception as e:
+            logger.error(f"提交到Git仓库失败: {str(e)}")
+        
     except Exception as e:
         logger.error(f"处理股票列表时发生错误: {str(e)}", exc_info=True)
 

@@ -25,6 +25,7 @@ import akshare as ak
 import time
 import logging
 import sys
+import requests
 from datetime import datetime
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -54,49 +55,70 @@ FINANCIAL_FILTER_PARAMS = {
     }
 }
 
-def get_financial_data(code):
+def get_financial_data(code, max_retries=5):
     """
-    使用AkShare单只股票实时行情接口获取数据（正确参数为symbol_list）
+    使用AkShare单只股票实时行情接口获取数据（智能重试+网络容错）
     参数：
     - code: 股票代码（6位字符串）
+    - max_retries: 最大重试次数
     返回：
     - dict: 包含动态市盈率、总市值、流通市值、流通市值/总市值比率
     - None: 获取失败（但不会删除股票）
     """
-    try:
-        # 正确调用方式：使用symbol_list参数传入单个股票代码的列表
-        df = ak.stock_zh_a_spot(symbol_list=[code])
-        
-        # 检查是否成功获取数据
-        if df.empty:
-            logger.warning(f"股票 {code} 无实时行情数据")
-            return None
-        
-        # 提取所需字段（列名严格匹配AkShare返回）
-        peTTM = df['市盈率-动态'].values[0]
-        total_market_value = df['总市值'].values[0]
-        circulating_market_value = df['流通市值'].values[0]
-        
-        # 验证数据有效性
-        if pd.isna(peTTM) or pd.isna(total_market_value) or pd.isna(circulating_market_value):
-            logger.warning(f"股票 {code} 数据缺失: PE={peTTM}, 总市值={total_market_value}, 流通市值={circulating_market_value}")
-            return None
-        
-        # 计算流通市值/总市值比率
-        circulating_to_total_ratio = circulating_market_value / total_market_value if total_market_value > 0 else None
-        
-        result = {
-            "dynamic_pe": peTTM,
-            "total_market_value": total_market_value,
-            "circulating_market_value": circulating_market_value,
-            "circulating_to_total_ratio": circulating_to_total_ratio
-        }
-        
-        logger.info(f"股票 {code} 通过单只股票接口获取的基本信息: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"通过AkShare单只股票接口获取 {code} 数据失败: {str(e)}")
-        return None
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "application/json",
+        "Connection": "keep-alive"
+    })
+    
+    for attempt in range(max_retries):
+        try:
+            # 使用单只股票查询模式
+            df = ak.stock_zh_a_spot(symbol=code, session=session)
+            
+            if df.empty:
+                logger.warning(f"股票 {code} 无实时行情数据")
+                return None
+            
+            # 提取所需字段（严格匹配列名）
+            peTTM = df['市盈率-动态'].values[0]
+            total_market_value = df['总市值'].values[0]
+            circulating_market_value = df['流通市值'].values[0]
+            
+            # 验证数据有效性
+            if pd.isna(peTTM) or pd.isna(total_market_value) or pd.isna(circulating_market_value):
+                logger.warning(f"股票 {code} 数据缺失: PE={peTTM}, 总市值={total_market_value}, 流通市值={circulating_market_value}")
+                return None
+            
+            # 计算流通市值/总市值比率
+            circulating_to_total_ratio = circulating_market_value / total_market_value if total_market_value > 0 else None
+            
+            result = {
+                "dynamic_pe": peTTM,
+                "total_market_value": total_market_value,
+                "circulating_market_value": circulating_market_value,
+                "circulating_to_total_ratio": circulating_to_total_ratio
+            }
+            
+            logger.info(f"股票 {code} 通过单只股票接口获取的基本信息: {result}")
+            return result
+            
+        except Exception as e:
+            error_msg = str(e)
+            # 特殊处理常见错误
+            if "Remote end closed connection" in error_msg or "Connection aborted" in error_msg:
+                logger.warning(f"股票 {code} 网络连接中断 (尝试 {attempt+1}/{max_retries})")
+            elif "429" in error_msg:
+                logger.warning(f"股票 {code} 请求过快被限流 (尝试 {attempt+1}/{max_retries})")
+            else:
+                logger.error(f"股票 {code} 数据获取失败 (尝试 {attempt+1}/{max_retries}): {error_msg}")
+            
+            # 重试前等待（指数退避策略）
+            wait_time = 2 ** attempt + 0.5 * attempt
+            time.sleep(wait_time)
+    
+    return None
 
 def apply_financial_filters(stock_code, financial_data):
     """
@@ -176,7 +198,7 @@ def filter_and_update_stocks():
             
             logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
             
-            # 获取财务数据（单只股票接口）
+            # 获取财务数据（单只股票接口+智能重试）
             financial_data = get_financial_data(stock_code)
             if financial_data is None:
                 logger.warning(f"股票 {stock_code} 财务数据获取失败，跳过本次处理（保留股票）")
@@ -190,8 +212,8 @@ def filter_and_update_stocks():
                 logger.info(f"股票 {stock_code} 未通过过滤条件，删除该行")
                 basic_info_df.drop(idx, inplace=True)
             
-            # 严格控制API调用频率（1秒/次）
-            time.sleep(1.0)
+            # 动态调整等待时间（避免被限流）
+            time.sleep(1.5)
         
         # 保存更新后的股票列表
         basic_info_df.to_csv(basic_info_file, index=False)

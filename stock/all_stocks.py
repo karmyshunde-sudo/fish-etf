@@ -612,18 +612,14 @@ def save_base_stock_info(stock_info, include_pledge=False):
         logger.info(f"基础股票列表已成功更新，共 {len(stock_info)} 条记录")
     except Exception as e:
         logger.error(f"保存基础股票列表失败: {str(e)}", exc_info=True)
-
 def apply_market_value_and_pe_filters():
     """
-    读取最新的 all_stocks.csv，补充【流通市值、总市值、动态市盈率】，
-    并应用以下两个过滤条件：
-        1. 动态市盈率 >= 0
-        2. 流通市值 / 总市值 > 90%
-    
+    读取最新的 all_stocks.csv，补充【净利润】，
+    并过滤掉净利润为负的股票，
     最后将结果保存回 all_stocks.csv。
     """
     try:
-        logger.info("开始补充流通市值、总市值、动态市盈率并应用新过滤条件...")
+        logger.info("开始补充净利润并应用过滤条件...")
 
         # 1. 读取刚刚保存的 all_stocks.csv
         latest_stock_df = pd.read_csv(BASIC_INFO_FILE)
@@ -633,131 +629,101 @@ def apply_market_value_and_pe_filters():
             logger.error("读取的股票数据为空，无法补充指标")
             return False
 
-        # 2. 获取实时行情数据（含流通市值、总市值、动态市盈率）—— 分批次处理
-        try:
-            # 🔥 第一步：先获取全量数据（这是 ak 的限制，我们只能这么干）
-            logger.info("正在获取全量实时行情数据...")
-            spot_all_df = ak.stock_zh_a_spot_em()
-            if spot_all_df.empty:
-                logger.error("获取实时行情数据失败：返回空数据")
-                return False
-
-            # 重命名列以匹配我们的需求
-            spot_all_df.rename(columns={
-                '代码': '代码',
-                '名称': '名称',
-                '总市值': '总市值',
-                '流通市值': '流通市值',
-                '市盈率-动态': '动态市盈率'
-            }, inplace=True)
-
-            # 只保留我们需要的列
-            required_cols = ['代码', '名称', '总市值', '流通市值', '动态市盈率']
-            spot_all_df = spot_all_df[required_cols]
-
-            # 转换为数值型（避免字符串导致计算错误）
-            for col in ['总市值', '流通市值', '动态市盈率']:
-                spot_all_df[col] = pd.to_numeric(spot_all_df[col], errors='coerce')
-
-            logger.info(f"成功获取 {len(spot_all_df)} 条实时行情数据（含流通市值/总市值/动态市盈率）")
-
-        except Exception as e:
-            logger.error(f"获取实时行情数据失败: {str(e)}", exc_info=True)
-            return False
-
-        # 3. 分批次处理：把股票代码分成小批次，每次处理 50 只
+        # 2. 获取净利润数据 - 分批次处理
         stock_codes = latest_stock_df['代码'].tolist()
-        batch_size = 50
-        all_batch_data = []
+        batch_size = 30  # 降低批次大小，避免请求过多
+        net_profit_data = {}  # 存储股票代码到净利润的映射
 
         for i in range(0, len(stock_codes), batch_size):
             batch_codes = stock_codes[i:i+batch_size]
             logger.info(f"正在处理第 {i//batch_size + 1} 批次（{len(batch_codes)} 只股票）...")
 
-            # 从全量数据中筛选出本批次的股票
-            batch_df = spot_all_df[spot_all_df['代码'].isin(batch_codes)]
-
-            # 如果本批次没有数据，记录日志
-            if batch_df.empty:
-                logger.warning(f"第 {i//batch_size + 1} 批次无对应行情数据")
-            else:
-                logger.info(f"✅ 第 {i//batch_size + 1} 批次获取到 {len(batch_df)} 条数据")
-
-            all_batch_data.append(batch_df)
-
+            # 处理本批次的股票
+            for code in batch_codes:
+                try:
+                    # 构造完整股票代码格式（akshare需要sh或sz前缀）
+                    if code.startswith('6'):
+                        full_code = f"sh{code}"
+                    elif code.startswith(('0', '3')):
+                        full_code = f"sz{code}"
+                    else:
+                        full_code = code  # 保持原样
+                    
+                    # 获取财务摘要数据
+                    df = ak.stock_financial_abstract(symbol=full_code, indicator="常用指标")
+                    
+                    # 检查数据是否有效
+                    if not df.empty and '指标' in df.columns and '值' in df.columns:
+                        # 筛选净利润指标
+                        net_profit_rows = df[df['指标'] == '净利润']
+                        
+                        if not net_profit_rows.empty:
+                            # 按日期排序（如果有日期列），取最近一期
+                            if '日期' in net_profit_rows.columns:
+                                net_profit_rows = net_profit_rows.sort_values('日期', ascending=False)
+                            
+                            # 获取最新一期的净利润值
+                            latest_net_profit = net_profit_rows.iloc[0]['值']
+                            
+                            # 尝试转换为浮点数
+                            try:
+                                net_profit = float(latest_net_profit)
+                                net_profit_data[code] = net_profit
+                                logger.debug(f"股票 {code} 最新净利润: {net_profit:.2f}")
+                            except (TypeError, ValueError):
+                                logger.debug(f"股票 {code} 的净利润值无法转换为浮点数: {latest_net_profit}")
+                        else:
+                            logger.debug(f"股票 {code} 未找到净利润数据")
+                    else:
+                        logger.debug(f"股票 {code} 返回空财务数据或缺少必要列")
+                    
+                except Exception as e:
+                    logger.warning(f"获取股票 {code} 的净利润数据失败: {str(e)}")
+            
             # 每批之间加延时（避免被封）
-            time.sleep(random.uniform(1.0, 3.0))
+            time.sleep(random.uniform(3.0, 6.0))
 
-        # 4. 合并所有批次的数据
-        if all_batch_data:
-            spot_df = pd.concat(all_batch_data, ignore_index=True)
-        else:
-            spot_df = pd.DataFrame()
+        # 3. 添加净利润列
+        latest_stock_df['净利润'] = latest_stock_df['代码'].map(net_profit_data).fillna(float('nan'))
 
-        # 5. 合并数据：基于“代码”左连接，保留所有原始股票，缺失值设为 NaN
-        merged_df = latest_stock_df.merge(
-            spot_df[['代码', '总市值', '流通市值', '动态市盈率']],
-            on='代码',
-            how='left',
-            suffixes=('', '_new')
-        )
+        # 4. 过滤净利润为负的股票
+        initial_count = len(latest_stock_df)
+        filtered_df = latest_stock_df.dropna(subset=['净利润'])
+        filtered_df = filtered_df[filtered_df['净利润'] > 0]
+        removed_count = initial_count - len(filtered_df)
+        logger.info(f"排除 {removed_count} 只净利润 <= 0 的股票（净利润过滤）")
 
-        # 6. 记录补充前状态
-        initial_count = len(merged_df)
-        logger.info(f"补充指标前股票数量: {initial_count}")
-
-        # 7. 应用新过滤条件
-        # 条件1：动态市盈率 >= 0
-        before_pe = len(merged_df)
-        merged_df = merged_df.dropna(subset=['动态市盈率'])  # 先排除NaN
-        merged_df = merged_df[merged_df['动态市盈率'] >= 0]
-        removed_pe = before_pe - len(merged_df)
-        logger.info(f"排除 {removed_pe} 只动态市盈率 < 0 的股票（PE过滤）")
-
-        # 条件2：流通市值 / 总市值 > 90%
-        before_ratio = len(merged_df)
-        merged_df = merged_df.dropna(subset=['总市值', '流通市值'])
-        merged_df = merged_df[merged_df['总市值'] > 0]
-        merged_df['流通市值占比'] = merged_df['流通市值'] / merged_df['总市值']
-        merged_df = merged_df[merged_df['流通市值占比'] > 0.9]
-        removed_ratio = before_ratio - len(merged_df)
-        logger.info(f"排除 {removed_ratio} 只流通市值占比 <= 90% 的股票（市值结构过滤）")
-
-        # 8. 清理临时列
-        if '流通市值占比' in merged_df.columns:
-            merged_df = merged_df.drop(columns=['流通市值占比'])
-
-        # 9. 重新整理列顺序（确保与原结构一致）
-        target_columns = [
-            "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态", 
-            "动态市盈率", "filter", "next_crawl_index", "质押股数"
+        # 5. 确保所有列存在（包括之前可能不存在的）
+        required_columns = [
+            "代码", "名称", "所属板块", "流通市值", "总市值", "数据状态",
+            "动态市盈率", "filter", "next_crawl_index", "质押股数", "净利润"
         ]
-        # 补充缺失列（如果有的话）
-        for col in target_columns:
-            if col not in merged_df.columns:
+        
+        for col in required_columns:
+            if col not in filtered_df.columns:
                 if col == "filter":
-                    merged_df[col] = False
+                    filtered_df[col] = False
                 elif col == "next_crawl_index":
-                    merged_df[col] = 0
-                elif col in ["流通市值", "总市值", "动态市盈率"]:
-                    merged_df[col] = 0.0
+                    filtered_df[col] = 0
+                elif col in ["流通市值", "总市值", "动态市盈率", "净利润"]:
+                    filtered_df[col] = 0.0
                 elif col == "质押股数":
-                    merged_df[col] = 0
+                    filtered_df[col] = 0
                 else:
-                    merged_df[col] = ""
+                    filtered_df[col] = ""
+        
+        # 6. 重新排序列
+        filtered_df = filtered_df[required_columns]
 
-        # 选择目标列并排序
-        merged_df = merged_df[target_columns]
-
-        # 10. 保存最终结果
-        merged_df.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
-        commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（补充流通市值/总市值/动态市盈率并过滤）")
-        logger.info(f"股票列表已成功补充财务指标并完成最终过滤，共 {len(merged_df)} 条记录")
+        # 7. 保存最终结果
+        filtered_df.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
+        commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（补充净利润并过滤）")
+        logger.info(f"股票列表已成功补充净利润并完成过滤，共 {len(filtered_df)} 条记录")
 
         return True
 
     except Exception as e:
-        logger.error(f"应用市值和PE过滤失败: {str(e)}", exc_info=True)
+        logger.error(f"应用净利润过滤失败: {str(e)}", exc_info=True)
         return False
        
 def update_stock_list():

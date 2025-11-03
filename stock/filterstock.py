@@ -56,7 +56,7 @@ FINANCIAL_FILTER_PARAMS = {
 
 def get_financial_data(code):
     """
-    使用AkShare获取单只股票的财务数据（仅获取流通市值、总市值、动态市盈率）
+    使用AkShare单只股票实时行情接口获取数据
     参数：
     - code: 股票代码（6位字符串）
     返回：
@@ -64,25 +64,27 @@ def get_financial_data(code):
     - None: 获取失败（但不会删除股票）
     """
     try:
-        # 获取A股实时行情数据（东方财富网）
-        df_spot = ak.stock_zh_a_spot_em()
+        # AkShare的stock_zh_a_spot接口支持单只股票查询
+        # 代码格式：直接使用"600000"或"000001"（不需要sh/sz前缀）
+        df = ak.stock_zh_a_spot(symbol=code)
         
-        # 筛选当前股票
-        stock_info = df_spot[df_spot['代码'] == code]
-        if stock_info.empty:
-            logger.warning(f"股票 {code} 在实时行情中未找到")
+        # 检查是否成功获取数据
+        if df.empty:
+            logger.warning(f"股票 {code} 无实时行情数据")
             return None
         
-        # 提取所需字段
-        peTTM = stock_info['市盈率-动态'].values[0]
-        total_market_value = stock_info['总市值'].values[0]  # 单位：亿元
-        circulating_market_value = stock_info['流通市值'].values[0]  # 单位：亿元
-        circulating_to_total_ratio = circulating_market_value / total_market_value if total_market_value > 0 else None
+        # 提取所需字段（列名严格匹配AkShare返回）
+        peTTM = df['市盈率-动态'].values[0]
+        total_market_value = df['总市值'].values[0]
+        circulating_market_value = df['流通市值'].values[0]
         
         # 验证数据有效性
         if pd.isna(peTTM) or pd.isna(total_market_value) or pd.isna(circulating_market_value):
-            logger.warning(f"股票 {code} 数据不完整: PE={peTTM}, 总市值={total_market_value}, 流通市值={circulating_market_value}")
+            logger.warning(f"股票 {code} 数据缺失: PE={peTTM}, 总市值={total_market_value}, 流通市值={circulating_market_value}")
             return None
+        
+        # 计算流通市值/总市值比率
+        circulating_to_total_ratio = circulating_market_value / total_market_value if total_market_value > 0 else None
         
         result = {
             "dynamic_pe": peTTM,
@@ -91,10 +93,10 @@ def get_financial_data(code):
             "circulating_to_total_ratio": circulating_to_total_ratio
         }
         
-        logger.info(f"股票 {code} 通过AkShare获取的基本信息: {result}")
+        logger.info(f"股票 {code} 通过单只股票接口获取的基本信息: {result}")
         return result
     except Exception as e:
-        logger.error(f"通过AkShare获取股票 {code} 财务数据失败: {str(e)}")
+        logger.error(f"通过AkShare单只股票接口获取 {code} 数据失败: {str(e)}")
         return None
 
 def apply_financial_filters(stock_code, financial_data):
@@ -175,11 +177,10 @@ def filter_and_update_stocks():
             
             logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
             
-            # 获取财务数据
+            # 获取财务数据（单只股票接口）
             financial_data = get_financial_data(stock_code)
             if financial_data is None:
                 logger.warning(f"股票 {stock_code} 财务数据获取失败，跳过本次处理（保留股票）")
-                # 不删除股票，保持filter=False（下次继续处理）
                 continue
             
             # 应用财务过滤
@@ -190,8 +191,8 @@ def filter_and_update_stocks():
                 logger.info(f"股票 {stock_code} 未通过过滤条件，删除该行")
                 basic_info_df.drop(idx, inplace=True)
             
-            # API调用频率限制
-            time.sleep(0.5)
+            # 严格控制API调用频率（1秒/次）
+            time.sleep(1.0)
         
         # 保存更新后的股票列表
         basic_info_df.to_csv(basic_info_file, index=False)

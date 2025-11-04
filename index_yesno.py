@@ -26,7 +26,7 @@ import baostock as bs  # 用于A股指数数据
 import time
 import numpy as np
 import random
-import yfinance as yf  # 用于黄金、恒生指数和美股指数
+import yfinance as yf  # 用于国际/港股/美股指数
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -42,30 +42,30 @@ logger.addHandler(handler)
 
 # 按照指定顺序排列指数列表，明确指定每个指数的数据源
 INDICES = [
-    # 1. 伦敦金现 (GC=F) - 保留yfinance
+    # 1. 伦敦金现 (GC=F) - 使用yfinance
     {
         "code": "GC=F",
-        "name": "伦敦金现",
+        "name": "伦敦金现(XAU)",
         "description": "国际黄金价格",
         "source": "yfinance",
         "etfs": [
             {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
         ]
     },
-    # 2. 恒生科技 (HSI) - 改为baostock
+    # 2. 恒生科技指数 (HSTECH) - 使用yfinance
     {
-        "code": "hk.HSTECH",
-        "name": "恒生科技",
-        "description": "港股科技龙头",
-        "source": "baostock",
+        "code": "^HSTECH",
+        "name": "恒生科技指数(HSTECH)",
+        "description": "港股科技龙头企业指数",
+        "source": "yfinance",
         "etfs": [
             {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
         ]
     },
-    # 3. 纳斯达克100 (^NDX) - 保留yfinance
+    # 3. 纳斯达克100 (^NDX) - 使用yfinance
     {
         "code": "^NDX",
-        "name": "纳斯达克100",
+        "name": "纳斯达克100(NDX)",
         "description": "美国科技股代表指数",
         "source": "yfinance",
         "etfs": [
@@ -76,7 +76,7 @@ INDICES = [
     # 4. 上证50 (000016) - 仅用baostock
     {
         "code": "sh.000016",
-        "name": "上证50",
+        "name": "上证50(SH000016)",
         "description": "上证50蓝筹股指数",
         "source": "baostock",
         "etfs": [
@@ -86,17 +86,17 @@ INDICES = [
     # 5. 沪深300 (000300) - 仅用baostock
     {
         "code": "sh.000300",
-        "name": "沪深300",
+        "name": "沪深300(SH000300)",
         "description": "A股大盘蓝筹股指数",
         "source": "baostock",
         "etfs": [
             {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
         ]
     },
-    # 6. 微盘股 (883418) - 改为baostock
+    # 6. 微盘股 (883418) - 使用baostock
     {
         "code": "sh.883418",
-        "name": "微盘股",
+        "name": "微盘股(SH883418)",
         "description": "小微盘股票指数",
         "source": "baostock",
         "etfs": [
@@ -106,27 +106,27 @@ INDICES = [
     # 7. 创业板指数 (399006) - 仅用baostock
     {
         "code": "sz.399006",
-        "name": "创业板指数",
+        "name": "创业板指(SZ399006)",
         "description": "创业板龙头公司",
         "source": "baostock",
         "etfs": [
             {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
         ]
     },
-    # 8. 科创50 (000688) - 改为baostock
+    # 8. 科创50 (000688) - 使用baostock
     {
         "code": "sh.000688",
-        "name": "科创50",
+        "name": "科创50(SH000688)",
         "description": "科创板龙头公司",
         "source": "baostock",
         "etfs": [
             {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
         ]
     },
-    # 9. 北证50 (899050) - 改为baostock
+    # 9. 北证50 (899050) - 使用baostock
     {
         "code": "bj.899050",
-        "name": "北证50",
+        "name": "北证50(BJ899050)",
         "description": "北交所龙头公司",
         "source": "baostock",
         "etfs": [
@@ -136,27 +136,27 @@ INDICES = [
     # 10. 中证500 (000905) - 仅用baostock
     {
         "code": "sh.000905",
-        "name": "中证500",
+        "name": "中证500(SH000905)",
         "description": "A股中小盘股指数",
         "source": "baostock",
         "etfs": [
             {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
         ]
     },
-    # 11. 国企指数 (HSCEI) - 改为baostock
+    # 11. 恒生国企指数 (HSCEI) - 使用yfinance
     {
-        "code": "hk.HSCEI",
-        "name": "国企指数",
+        "code": "^HSCEI",
+        "name": "恒生国企指数(HSCEI)",
         "description": "港股国企指数",
-        "source": "baostock",
+        "source": "yfinance",
         "etfs": [
             {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
-    # 12. 中证2000 (932000) - 改为baostock
+    # 12. 中证2000 (932000) - 使用baostock
     {
         "code": "sh.932000",
-        "name": "中证2000",
+        "name": "中证2000(SH932000)",
         "description": "中盘股指数",
         "source": "baostock",
         "etfs": [
@@ -166,28 +166,28 @@ INDICES = [
     # 13. 中证1000 (000852) - 仅用baostock
     {
         "code": "sh.000852",
-        "name": "中证1000",
+        "name": "中证1000(SH000852)",
         "description": "中盘股指数",
         "source": "baostock",
         "etfs": [
             {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
         ]
     },
-    # 14. 中证海外中国互联网 (H30533.CSI) - 改为baostock
+    # 14. 中概互联指数 (HXC) - 使用yfinance
     {
-        "code": "us.HX",
-        "name": "中证海外中国互联网",
+        "code": "^HXC",
+        "name": "中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
-        "source": "baostock",
+        "source": "yfinance",
         "etfs": [
             {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
         ]
     },
-    # 15. 恒生指数 (^HSI) - 保留yfinance
+    # 15. 恒生综合指数 (HSI) - 使用yfinance
     {
         "code": "^HSI",
-        "name": "恒生指数",
-        "description": "港股蓝筹股指数",
+        "name": "恒生综合指数(HSI)",
+        "description": "香港股市综合蓝筹指数",
         "source": "yfinance",
         "etfs": [
             {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
@@ -202,7 +202,7 @@ PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
 
 def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从baostock获取指数历史数据
+    从baostock获取A股指数历史数据
     
     Args:
         index_code: 指数代码
@@ -305,7 +305,7 @@ def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
 
 def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从yfinance获取指数历史数据
+    从yfinance获取国际/港股/美股指数历史数据
     
     Args:
         index_code: 指数代码
@@ -329,62 +329,66 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
         logger.info(f"使用yfinance获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
         # 获取数据
-        df = yf.download(index_code, start=start_date, end=end_date)
+        try:
+            df = yf.download(index_code, start=start_date, end=end_date)
+            
+            # 处理yfinance返回的MultiIndex列名
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+            
+            if df.empty:
+                logger.warning(f"yfinance获取指数 {index_code} 数据为空")
+                return pd.DataFrame()
+            
+            # 标准化列名
+            df = df.reset_index()
+            df = df.rename(columns={
+                'Date': '日期',
+                'Open': '开盘',
+                'High': '最高',
+                'Low': '最低',
+                'Close': '收盘',
+                'Volume': '成交量'
+            })
+            
+            # 确保日期列为datetime类型
+            df['日期'] = pd.to_datetime(df['日期'])
+            
+            # 确保价格列是数值类型
+            price_columns = ['开盘', '最高', '最低', '收盘']
+            for col in price_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 确保成交量是数值类型
+            if '成交量' in df.columns:
+                df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
+            
+            # 添加成交额列（如果不存在）
+            if '成交额' not in df.columns:
+                df['成交额'] = np.nan
+            
+            # 删除包含NaN的行
+            if '收盘' in df.columns:
+                df = df.dropna(subset=['收盘'])
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
+            return df
         
-        # 处理yfinance返回的MultiIndex列名
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-        
-        if df.empty:
-            logger.warning(f"通过yfinance获取指数 {index_code} 数据为空")
+        except Exception as e:
+            logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
             return pd.DataFrame()
-        
-        # 标准化列名
-        df = df.reset_index()
-        df = df.rename(columns={
-            'Date': '日期',
-            'Open': '开盘',
-            'High': '最高',
-            'Low': '最低',
-            'Close': '收盘',
-            'Volume': '成交量',
-            'Adj Close': '复权收盘'
-        })
-        
-        # 确保日期列为datetime类型
-        df['日期'] = pd.to_datetime(df['日期'])
-        
-        # 确保价格列是数值类型
-        price_columns = ['开盘', '最高', '最低', '收盘']
-        for col in price_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 确保成交量是数值类型
-        if '成交量' in df.columns:
-            df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
-        
-        # 添加成交额列（如果不存在）
-        if '成交额' not in df.columns:
-            df['成交额'] = np.nan
-        
-        # 删除包含NaN的行
-        if '收盘' in df.columns:
-            df = df.dropna(subset=['收盘'])
-        
-        # 排序
-        df = df.sort_values('日期').reset_index(drop=True)
-        
-        # 检查数据量
-        if len(df) <= 1:
-            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-            return pd.DataFrame()
-        
-        logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
-        return df
     
     except Exception as e:
-        logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:
@@ -1072,6 +1076,7 @@ def generate_report():
             
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
+            index_short_name = name.split('(')[0].strip()
             summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             

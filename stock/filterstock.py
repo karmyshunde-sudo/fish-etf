@@ -1,6 +1,4 @@
-2025-11-03 23:26:37,714 - __main__ - INFO - 股票 600055 获取到的净利润值: -27546471.83
-2025-11-03 23:26:37,714 - __main__ - INFO - 股票 600055 净利润不满足条件: -27546471.83 <= 0
-2025-11-03 23:26:37,714 - __main__ - INFO - 股票 600055 未通过过滤条件             未通过。。。你要删除all_stocks.csv里对应的股票啊，居然是保存负数在”净利润“列就算了？？？这是什么逻辑？？以这份最新的stock/filterstock.py代码为基础去修改这个非常严重的错误——启用过滤的指标有任何一个不符合的，这个股票 都必须从股票列表文件当中删除！！#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 股票列表财务过滤器
@@ -323,11 +321,21 @@ def filter_and_update_stocks():
         basic_info_df.to_csv(basic_info_file, index=False)
         logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(basic_info_df)} 只股票")
         
-        # 检查是否所有股票的filter都为True（即全部通过过滤）
-        if basic_info_df['filter'].all():
-            logger.info("所有股票都通过过滤，重置filter列为False")
-            basic_info_df['filter'] = False
-            basic_info_df.to_csv(basic_info_file, index=False)
+        # 【关键修复】只有当所有股票都通过过滤时才重置filter列
+        # 保存通过过滤条件的股票
+        filtered_df = basic_info_df[basic_info_df['filter'] == True].copy()
+        
+        # 检查是否所有原始股票都通过了过滤
+        if len(filtered_df) == len(basic_info_df):
+            # 所有原始股票都通过了过滤，重置filter列为False
+            filtered_df['filter'] = False
+            logger.info("所有原始股票都通过过滤，重置filter列为False")
+        else:
+            logger.info(f"仍有 {len(basic_info_df) - len(filtered_df)} 只原始股票未通过过滤")
+        
+        # 保存更新后的股票列表
+        filtered_df.to_csv(basic_info_file, index=False)
+        logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(filtered_df)} 只股票")
         
         # 提交到Git仓库
         try:

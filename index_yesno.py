@@ -10,7 +10,7 @@ import pandas as pd
 import baostock as bs  # 使用baostock数据源
 import time
 import numpy as np
-import random  # 添加随机延时模块导入
+import random
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -189,8 +189,8 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         start_date_dt = end_date_dt - timedelta(days=days)
         
         # 转换为字符串格式
-        end_date = end_date_dt.strftime("%Y-%m-%d")
-        start_date = start_date_dt.strftime("%Y-%m-%d")
+        end_date = start_date_dt.strftime("%Y-%m-%d")
+        start_date = end_date_dt.strftime("%Y-%m-%d")
         
         logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
@@ -201,21 +201,23 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             return pd.DataFrame()
         
         try:
-            # 使用baostock获取数据 - 使用正确的接口
+            # 使用baostock获取数据 - 使用正确的API接口
+            # 根据baostock官方文档，使用query_history_k_data
             rs = bs.query_history_k_data(index_code,
-                                        fields="date,open,high,low,close,volume,amount",
+                                        "date,open,high,low,close,volume,amount",
                                         start_date=start_date,
                                         end_date=end_date,
                                         frequency="d",
                                         adjustflag="3")
             
+            # 检查返回结果
             if rs.error_code != '0':
                 logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
                 return pd.DataFrame()
             
             # 将数据转换为DataFrame
             data_list = []
-            while rs.next():
+            while (rs.error_code == '0') and rs.next():
                 data_list.append(rs.get_row_data())
             
             if not data_list:

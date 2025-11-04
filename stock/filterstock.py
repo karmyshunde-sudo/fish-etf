@@ -260,6 +260,13 @@ def filter_and_update_stocks():
         process_batch = to_process.head(BATCH_SIZE)
         logger.info(f"本次处理股票数量: {len(process_batch)}")
         
+        # 从原始dataframe中删除这BATCH_SIZE只股票
+        basic_info_df = basic_info_df[~basic_info_df.index.isin(process_batch.index)]
+        logger.info(f"已从原始数据中移除 {len(process_batch)} 只待处理股票，剩余 {len(basic_info_df)} 只")
+        
+        # 创建临时dataframe用于财务处理
+        temp_df = process_batch.copy()
+        
         # 登录Baostock
         login_result = bs.login()
         if login_result.error_code != '0':
@@ -267,29 +274,29 @@ def filter_and_update_stocks():
             return
         
         try:
-            # 逐个处理股票
-            for idx, stock in process_batch.iterrows():
+            # 逐个处理股票（操作临时dataframe）
+            for idx, stock in temp_df.iterrows():
                 stock_code = str(stock["代码"]).zfill(6)
                 stock_name = stock["名称"]
                 
-                logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(process_batch)})")
+                logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(temp_df)})")
                 
                 # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
                 dynamic_pe = None
                 if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
                     dynamic_pe = get_dynamic_pe(stock_code)
-                    # 保存到DataFrame
+                    # 保存到临时DataFrame
                     if dynamic_pe is not None:
-                        basic_info_df.loc[idx, FINANCIAL_FILTER_PARAMS["dynamic_pe"]["column"]] = dynamic_pe
+                        temp_df.loc[idx, FINANCIAL_FILTER_PARAMS["dynamic_pe"]["column"]] = dynamic_pe
                         logger.debug(f"已更新股票 {stock_code} 的{FINANCIAL_FILTER_PARAMS['dynamic_pe']['column']}值: {dynamic_pe:.2f}")
                 
                 # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
                 net_profit = None
                 if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
                     net_profit = get_net_profit(stock_code)
-                    # 保存到DataFrame
+                    # 保存到临时DataFrame
                     if net_profit is not None:
-                        basic_info_df.loc[idx, FINANCIAL_FILTER_PARAMS["net_profit"]["column"]] = net_profit
+                        temp_df.loc[idx, FINANCIAL_FILTER_PARAMS["net_profit"]["column"]] = net_profit
                         logger.debug(f"已更新股票 {stock_code} 的{FINANCIAL_FILTER_PARAMS['net_profit']['column']}值: {net_profit:.2f}")
                 
                 # 记录获取结果
@@ -303,12 +310,12 @@ def filter_and_update_stocks():
                 
                 # 应用财务过滤
                 if apply_financial_filters(stock_code, dynamic_pe, net_profit):
-                    basic_info_df.loc[idx, 'filter'] = True
+                    temp_df.loc[idx, 'filter'] = True
                     logger.info(f"股票 {stock_code} 通过所有过滤条件")
                 else:
                     # 保留股票，但不设置filter为True
                     logger.info(f"股票 {stock_code} 未通过过滤条件")
-                    basic_info_df.loc[idx, 'filter'] = False
+                    temp_df.loc[idx, 'filter'] = False
                 
                 # API调用频率限制
                 time.sleep(random.uniform(2.0, 5.0))
@@ -317,25 +324,24 @@ def filter_and_update_stocks():
             # 确保登出
             bs.logout()
         
+        # 从临时dataframe中筛选出通过过滤的股票
+        passed_stocks = temp_df[temp_df['filter'] == True]
+        logger.info(f"本次处理中通过过滤的股票数量: {len(passed_stocks)}")
+        
+        # 将通过的股票增量合并回原始dataframe
+        basic_info_df = pd.concat([basic_info_df, passed_stocks], ignore_index=True)
+        logger.info(f"追加通过的股票后，总股票数量: {len(basic_info_df)}")
+        
         # 保存更新后的股票列表
         basic_info_df.to_csv(basic_info_file, index=False)
         logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(basic_info_df)} 只股票")
         
-        # 【关键修复】只有当所有股票都通过过滤时才重置filter列
-        # 保存通过过滤条件的股票
-        filtered_df = basic_info_df[basic_info_df['filter'] == True].copy()
-        
-        # 检查是否所有原始股票都通过了过滤
-        if len(filtered_df) == len(basic_info_df):
-            # 所有原始股票都通过了过滤，重置filter列为False
-            filtered_df['filter'] = False
-            logger.info("所有原始股票都通过过滤，重置filter列为False")
-        else:
-            logger.info(f"仍有 {len(basic_info_df) - len(filtered_df)} 只原始股票未通过过滤")
-        
-        # 保存更新后的股票列表
-        filtered_df.to_csv(basic_info_file, index=False)
-        logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(filtered_df)} 只股票")
+        # 检查是否所有股票都通过过滤
+        if basic_info_df['filter'].all():
+            logger.info("所有股票都通过过滤，重置filter列为False")
+            basic_info_df['filter'] = False
+            basic_info_df.to_csv(basic_info_file, index=False)
+            logger.info("filter列已重置，为下一次处理做准备")
         
         # 提交到Git仓库
         try:

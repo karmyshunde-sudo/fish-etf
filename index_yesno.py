@@ -7,15 +7,14 @@
 import os
 import logging
 import pandas as pd
-import akshare as ak
+import baostock as bs  # 替换为baostock数据源
 import time
 import numpy as np
-import yfinance as yf
+import random  # 【关键修改】添加随机延时模块导入
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-import random  # 【关键修改】添加随机延时模块导入
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ logger.addHandler(handler)
 INDICES = [
     # 1. 伦敦金现 (GC=F)
     {
-        "code": "GC=F",
+        "code": "us.gc",
         "name": "伦敦金现",
         "description": "国际黄金价格",
         "etfs": [
@@ -38,7 +37,7 @@ INDICES = [
     },
     # 2. 恒生科技 (HSI)
     {
-        "code": "HSI",
+        "code": "hu.sh.000002",
         "name": "恒生科技",
         "description": "港股科技龙头",
         "etfs": [
@@ -47,7 +46,7 @@ INDICES = [
     },
     # 3. 纳斯达克100 (^NDX)
     {
-        "code": "^NDX",
+        "code": "us.nq",
         "name": "纳斯达克100",
         "description": "美国科技股代表指数",
         "etfs": [
@@ -57,7 +56,7 @@ INDICES = [
     },
     # 4. 上证50 (000016)
     {
-        "code": "000016",
+        "code": "sh.000016",
         "name": "上证50",
         "description": "上证50蓝筹股指数",
         "etfs": [
@@ -66,7 +65,7 @@ INDICES = [
     },
     # 5. 沪深300 (000300)
     {
-        "code": "000300",
+        "code": "sh.000300",
         "name": "沪深300",
         "description": "A股大盘蓝筹股指数",
         "etfs": [
@@ -75,7 +74,7 @@ INDICES = [
     },
     # 6. 微盘股 (883418)
     {
-        "code": "883418",
+        "code": "sh.883418",
         "name": "微盘股",
         "description": "小微盘股票指数",
         "etfs": [
@@ -84,7 +83,7 @@ INDICES = [
     },
     # 7. 创业板指数 (399006)
     {
-        "code": "399006",
+        "code": "sz.399006",
         "name": "创业板指数",
         "description": "创业板龙头公司",
         "etfs": [
@@ -93,7 +92,7 @@ INDICES = [
     },
     # 8. 科创50 (000688)
     {
-        "code": "000688",
+        "code": "sh.000688",
         "name": "科创50",
         "description": "科创板龙头公司",
         "etfs": [
@@ -102,7 +101,7 @@ INDICES = [
     },
     # 9. 北证50 (899050)
     {
-        "code": "899050",
+        "code": "bj.899050",
         "name": "北证50",
         "description": "北交所龙头公司",
         "etfs": [
@@ -111,7 +110,7 @@ INDICES = [
     },
     # 10. 中证500 (000905)
     {
-        "code": "000905",
+        "code": "sh.000905",
         "name": "中证500",
         "description": "A股中小盘股指数",
         "etfs": [
@@ -120,7 +119,7 @@ INDICES = [
     },
     # 11. 国企指数 (HSCEI)
     {
-        "code": "HSCEI",
+        "code": "hu.sh.000001",
         "name": "国企指数",
         "description": "港股国企指数",
         "etfs": [
@@ -129,7 +128,7 @@ INDICES = [
     },
     # 12. 中证2000 (932000)
     {
-        "code": "932000",
+        "code": "sh.932000",
         "name": "中证2000",
         "description": "中盘股指数",
         "etfs": [
@@ -138,7 +137,7 @@ INDICES = [
     },
     # 13. 中证1000
     {
-        "code": "000852",
+        "code": "sh.000852",
         "name": "中证1000",
         "description": "中盘股指数",
         "etfs": [
@@ -147,7 +146,7 @@ INDICES = [
     },
     # 14. 中证海外中国互联网 (H30533.CSI)
     {
-        "code": "H30533.CSI",
+        "code": "cs.H30533",
         "name": "中证海外中国互联网",
         "description": "海外上市中国互联网公司",
         "etfs": [
@@ -156,7 +155,7 @@ INDICES = [
     },
     # 15. 恒生指数 (^HSI)
     {
-        "code": "^HSI",
+        "code": "hu.sh.000001",
         "name": "恒生指数",
         "description": "港股蓝筹股指数",
         "etfs": [
@@ -174,14 +173,14 @@ def check_network_connection():
     """检查网络连接是否正常"""
     try:
         import requests
-        response = requests.get('https://www.baidu.com', timeout=5)
+        response = requests.get('https://www.baidu.com    ', timeout=5)
         return response.status_code == 200
     except Exception:
         return False
 
 def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从可靠数据源获取指数历史数据
+    从baostock获取指数历史数据
     
     Args:
         index_code: 指数代码
@@ -204,252 +203,65 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
-        # 特殊处理黄金价格
-        if index_code == "GC=F":
-            logger.info("特殊处理黄金价格: GC=F")
-            logger.info("使用 yfinance 获取黄金价格 (GC=F) 数据")
+        # 登录baostock
+        login_result = bs.login()
+        if login_result.error_code != '0':
+            logger.error(f"baostock登录失败: {login_result.error_msg}")
+            return pd.DataFrame()
+        
+        try:
+            # 使用baostock获取数据
+            rs = bs.query_index_kline(code=index_code, 
+                                     start_date=start_date,
+                                     end_date=end_date,
+                                     frequency="d")
             
-            try:
-                # 获取数据
-                start_dt = start_date_dt.strftime("%Y-%m-%d")
-                end_dt = end_date_dt.strftime("%Y-%m-%d")
-                
-                # 获取黄金价格数据
-                df = yf.download('GC=F', start=start_dt, end=end_dt)
-                
-                # 【关键修复】处理yfinance返回的MultiIndex列名
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-                
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    logger.info(f"✅ 成功获取到 {len(df)} 条黄金价格数据")
-                    # 【关键修复】正确显示列名，即使包含元组
-                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
-                    
-                    # 标准化列名
-                    df = df.reset_index()
-                    df = df.rename(columns={
-                        'Date': '日期',
-                        'Open': '开盘',
-                        'High': '最高',
-                        'Low': '最低',
-                        'Close': '收盘',
-                        'Volume': '成交量',
-                        'Adj Close': '复权收盘'
-                    })
-                    
-                    # 【日期datetime类型规则】确保日期列为datetime类型
-                    df['日期'] = pd.to_datetime(df['日期'])
-                    
-                    # 排序
-                    df = df.sort_values('日期').reset_index(drop=True)
-                    
-                    # 检查数据量
-                    if len(df) <= 1:
-                        logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                        return pd.DataFrame()
-                    
-                    logger.info(f"✅ 获取到黄金价格历史数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}，共{len(df)}条记录")
-                    return df
-                else:
-                    logger.warning("⚠️ yfinance 返回空数据")
-                    return pd.DataFrame()
-            except Exception as e:
-                logger.error(f"❌ yfinance.download 方法获取黄金价格历史数据失败: {str(e)}")
+            if rs.error_code != '0':
+                logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
                 return pd.DataFrame()
-        
-        # 特殊处理恒生指数
-        if index_code == "^HSI":
-            logger.info("特殊处理恒生指数: ^HSI")
-            logger.info("使用 yfinance 获取恒生指数 (^HSI) 数据")
             
-            try:
-                start_dt = start_date_dt.strftime("%Y-%m-%d")
-                end_dt = end_date_dt.strftime("%Y-%m-%d")
-                
-                # 获取数据
-                df = yf.download('^HSI', start=start_dt, end=end_dt)
-                
-                # 【关键修复】处理yfinance返回的MultiIndex列名
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-                
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
-                    # 【关键修复】正确显示列名，即使包含元组
-                    logger.info(f"数据列名: {', '.join(str(col) for col in df.columns)}")
-                    
-                    # 标准化列名
-                    df = df.reset_index()
-                    df = df.rename(columns={
-                        'Date': '日期',
-                        'Open': '开盘',
-                        'High': '最高',
-                        'Low': '最低',
-                        'Close': '收盘',
-                        'Volume': '成交量',
-                        'Adj Close': '复权收盘'
-                    })
-                    
-                    # 【日期datetime类型规则】确保日期列为datetime类型
-                    df['日期'] = pd.to_datetime(df['日期'])
-                    
-                    # 排序
-                    df = df.sort_values('日期').reset_index(drop=True)
-                    
-                    # 检查数据量
-                    if len(df) <= 1:
-                        logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                        return pd.DataFrame()
-                    
-                    logger.info(f"✅ 获取到恒生指数历史数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}，共{len(df)}条记录")
-                    return df
-                else:
-                    logger.warning("⚠️ yfinance 返回空数据")
-                    return pd.DataFrame()
-            except Exception as e:
-                logger.error(f"❌ yfinance.download 方法获取恒生指数历史数据失败: {str(e)}")
+            # 将数据转换为DataFrame
+            data_list = []
+            while rs.next():
+                data_list.append(rs.get_row_data())
+            
+            if not data_list:
+                logger.warning(f"获取指数 {index_code} 数据为空")
                 return pd.DataFrame()
+            
+            df = pd.DataFrame(data_list, columns=rs.fields)
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量',
+                'amount': '成交额'
+            })
+            
+            # 【日期datetime类型规则】确保日期列为datetime类型
+            df['日期'] = pd.to_datetime(df['日期'])
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            logger.info(f"✅ 成功获取到 {len(df)} 条指数数据")
+            return df
         
-        # 根据指数类型使用不同的数据接口
-        if index_code.startswith('^'):
-            # 美股指数处理 - 使用YFinance
-            return fetch_us_index_from_yfinance(index_code, start_date_dt, end_date_dt)
-        
-        elif index_code.endswith('.CSI'):
-            # 中证系列指数
-            index_name = index_code.replace('.CSI', '')
-            # 传递datetime对象
-            return ak.index_zh_a_hist(
-                symbol=index_name,
-                period="daily",
-                start_date=start_date,
-                end_date=end_date
-            )
-        
-        elif index_code.endswith('.HI'):
-            # 恒生系列指数 - 使用专门的函数处理
-            return fetch_hang_seng_index_data(index_code, start_date_dt, end_date_dt)
-        
-        else:
-            # A股指数
-            return ak.index_zh_a_hist(
-                symbol=index_code,
-                period="daily",
-                start_date=start_date,
-                end_date=end_date
-            )
+        finally:
+            # 确保登出
+            bs.logout()
     
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
-
-def fetch_hang_seng_index_data(index_code: str, start_date_dt: datetime, end_date_dt: datetime) -> pd.DataFrame:
-    """
-    专门处理恒生指数数据获取
-    
-    Args:
-        index_code: 指数代码
-        start_date_dt: 开始日期
-        end_date_dt: 结束日期
-        
-    Returns:
-        pd.DataFrame: 指数日线数据
-    """
-    try:
-        logger.info(f"获取恒生指数数据: {index_code}")
-        logger.info("使用 ak.stock_hk_index_daily_em 获取恒生指数数据")
-        
-        # 转换为字符串格式
-        start_date = start_date_dt.strftime("%Y%m%d")
-        end_date = end_date_dt.strftime("%Y%m%d")
-        
-        # 使用akshare获取恒生指数数据
-        df = ak.stock_hk_index_daily_em(
-            symbol=index_code,
-            start_date=start_date,
-            end_date=end_date
-        )
-        
-        if df.empty:
-            logger.warning(f"⚠️ ak.stock_hk_index_daily_em 返回空数据")
-            return pd.DataFrame()
-        
-        # 标准化列名
-        df = df.rename(columns={
-            'date': '日期',
-            'open': '开盘',
-            'high': '最高',
-            'low': '最低',
-            'close': '收盘',
-            'volume': '成交量'
-        })
-        
-        # 【日期datetime类型规则】确保日期列为datetime类型
-        df['日期'] = pd.to_datetime(df['日期'])
-        
-        # 排序
-        df = df.sort_values('日期').reset_index(drop=True)
-        
-        # 检查数据量
-        if len(df) <= 1:
-            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-            return pd.DataFrame()
-        
-        logger.info(f"✅ 成功获取到 {len(df)} 条恒生指数数据")
-        return df
-    
-    except Exception as e:
-        logger.error(f"❌ ak.stock_hk_index_daily_em 方法获取恒生指数历史数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
-
-def fetch_us_index_from_yfinance(index_code: str, start_date_dt: datetime, end_date_dt: datetime) -> pd.DataFrame:
-    """
-    使用YFinance获取美股指数数据
-    
-    Args:
-        index_code: 指数代码
-        start_date_dt: 开始日期
-        end_date_dt: 结束日期
-        
-    Returns:
-        pd.DataFrame: 指数日线数据
-    """
-    try:
-        # 【关键修改】添加随机延时避免被封（5.0-8.0秒）
-        time.sleep(random.uniform(5.0, 8.0))
-        
-        # 转换日期格式
-        start_dt = start_date_dt.strftime("%Y-%m-%d")
-        end_dt = end_date_dt.strftime("%Y-%m-%d")
-        
-        # 获取数据
-        df = yf.download(index_code, start=start_dt, end=end_dt)
-        
-        if df.empty:
-            logger.warning(f"通过yfinance获取{index_code}数据为空")
-            return pd.DataFrame()
-        
-        # 标准化列名
-        df = df.reset_index()
-        df = df.rename(columns={
-            'Date': '日期',
-            'Open': '开盘',
-            'High': '最高',
-            'Low': '最低',
-            'Close': '收盘',
-            'Volume': '成交量',
-            'Adj Close': '复权收盘'
-        })
-        
-        # 【关键修复】确保日期列为datetime类型
-        df['日期'] = pd.to_datetime(df['日期'])
-        
-        logger.info(f"成功通过yfinance获取{index_code}数据，共{len(df)}条记录")
-        return df
-    
-    except Exception as e:
-        logger.error(f"通过yfinance获取{index_code}失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def calculate_critical_value(df: pd.DataFrame) -> float:
@@ -925,7 +737,7 @@ def generate_report():
             code = idx["code"]
             name = idx["name"]
             
-            # 直接从AkShare获取指数数据
+            # 直接从baostock获取指数数据
             df = fetch_index_data(code)
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
@@ -943,7 +755,7 @@ def generate_report():
                 message_lines.append("⚠️ 获取指数数据失败，请检查数据源")
                 message_lines.append("──────────────────")
                 message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message_lines.append("📊 数据来源：baostock")
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据获取失败）")
                 send_wechat_message(message)
@@ -967,7 +779,7 @@ def generate_report():
                 message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天")
                 message_lines.append("──────────────────")
                 message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append("📊 数据来源：GIT：fish-etf")
+                message_lines.append("📊 数据来源：baostock")
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据不足）")
                 send_wechat_message(message)

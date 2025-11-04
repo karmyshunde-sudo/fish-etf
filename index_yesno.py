@@ -239,6 +239,20 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
             
+            # 确保价格列是数值类型
+            price_columns = ['开盘', '最高', '最低', '收盘']
+            for col in price_columns:
+                # 将非数值数据转换为NaN
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 确保成交量和成交额是数值类型
+            volume_columns = ['成交量', '成交额']
+            for col in volume_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 删除包含NaN的行
+            df = df.dropna(subset=price_columns)
+            
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
             
@@ -262,9 +276,19 @@ def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
     if len(df) < CRITICAL_VALUE_DAYS:
         logger.warning(f"数据不足{CRITICAL_VALUE_DAYS}天，无法准确计算临界值")
-        return df["收盘"].mean() if not df.empty else 0.0
+        # 只计算非NaN值的均值
+        valid_data = df["收盘"].dropna()
+        return valid_data.mean() if not valid_data.empty else 0.0
     
-    return df['收盘'].rolling(window=CRITICAL_VALUE_DAYS).mean().iloc[-1]
+    # 计算滚动均值，忽略NaN值
+    ma = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean()
+    
+    # 返回最后一个有效值
+    for i in range(len(ma)-1, -1, -1):
+        if not np.isnan(ma.iloc[i]):
+            return ma.iloc[i]
+    
+    return df["收盘"].dropna().mean()
 
 def calculate_deviation(current: float, critical: float) -> float:
     """计算偏离率"""
@@ -277,18 +301,26 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) ->
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    # 计算均线（使用与主计算相同的逻辑）
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
     
     # 从最新日期开始向前检查
     consecutive_days = 0
     for i in range(len(close_prices)-1, -1, -1):
+        # 确保有足够的数据计算均线
         if i < CRITICAL_VALUE_DAYS - 1:
-            break
-            
-        if close_prices[i] >= ma_values[i]:
-            consecutive_days += 1
+            # 使用当前计算的均线值
+            if i < len(ma_values) and not np.isnan(ma_values[i]):
+                if close_prices[i] >= ma_values[i]:
+                    consecutive_days += 1
+                else:
+                    break
         else:
-            break
+            # 使用计算出的均线值
+            if not np.isnan(close_prices[i]) and not np.isnan(ma_values[i]) and close_prices[i] >= ma_values[i]:
+                consecutive_days += 1
+            else:
+                break
     
     return consecutive_days
 
@@ -299,18 +331,26 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    # 计算均线（使用与主计算相同的逻辑）
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
     
     # 从最新日期开始向前检查
     consecutive_days = 0
     for i in range(len(close_prices)-1, -1, -1):
+        # 确保有足够的数据计算均线
         if i < CRITICAL_VALUE_DAYS - 1:
-            break
-            
-        if close_prices[i] < ma_values[i]:
-            consecutive_days += 1
+            # 使用当前计算的均线值
+            if i < len(ma_values) and not np.isnan(ma_values[i]):
+                if close_prices[i] < ma_values[i]:
+                    consecutive_days += 1
+                else:
+                    break
         else:
-            break
+            # 使用计算出的均线值
+            if not np.isnan(close_prices[i]) and not np.isnan(ma_values[i]) and close_prices[i] < ma_values[i]:
+                consecutive_days += 1
+            else:
+                break
     
     return consecutive_days
 
@@ -342,12 +382,13 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
                 logger.warning("成交量数据无法转换为数值类型")
                 return 0.0
         
-        # 计算变化率
-        if previous_volume > 0:
-            volume_change = (current_volume - previous_volume) / previous_volume
-            return volume_change
-        else:
+        # 检查NaN
+        if np.isnan(current_volume) or np.isnan(previous_volume) or previous_volume <= 0:
             return 0.0
+        
+        # 计算变化率
+        volume_change = (current_volume - previous_volume) / previous_volume
+        return volume_change
     
     except Exception as e:
         logger.error(f"计算成交量变化失败: {str(e)}", exc_info=True)
@@ -360,17 +401,23 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    # 计算均线（使用与主计算相同的逻辑）
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
     
     # 从最新日期开始向前检查，找到最近一次站上均线的点
     buy_index = -1
     for i in range(len(close_prices)-1, -1, -1):
+        # 确保有足够的数据计算均线
         if i < CRITICAL_VALUE_DAYS - 1:
-            continue
-            
-        if close_prices[i] >= ma_values[i]:
-            buy_index = i
-            break
+            # 使用当前计算的均线值
+            if i < len(ma_values) and not np.isnan(ma_values[i]) and close_prices[i] >= ma_values[i]:
+                buy_index = i
+                break
+        else:
+            # 使用计算出的均线值
+            if not np.isnan(close_prices[i]) and not np.isnan(ma_values[i]) and close_prices[i] >= ma_values[i]:
+                buy_index = i
+                break
     
     # 如果找不到买入点，使用30天前作为参考
     if buy_index == -1:
@@ -378,6 +425,10 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
     
     current_price = close_prices[-1]
     buy_price = close_prices[buy_index]
+    
+    # 确保是有效数值
+    if np.isnan(current_price) or np.isnan(buy_price) or buy_price <= 0:
+        return 0.0
     
     loss_percentage = (current_price - buy_price) / buy_price * 100
     return loss_percentage
@@ -389,32 +440,52 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
-    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS).mean().values
+    # 计算均线（使用与主计算相同的逻辑）
+    ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
     
     # 检查是否连续10天在均线附近波动（-5%~+5%）
     last_10_days = df.tail(10)
     deviations = []
     for i in range(len(last_10_days)):
         # 确保有足够的数据计算均线
-        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[i]):
-            continue
-            
-        # 检查中间是否有明显低点
-        deviation = (close_prices[i] - ma_values[i]) / ma_values[i] * 100
-        if abs(deviation) > 5.0:
-            return False, 0, (0, 0)
-        deviations.append(deviation)
+        if i < CRITICAL_VALUE_DAYS - 1:
+            # 使用当前计算的均线值
+            if i < len(ma_values) and not np.isnan(ma_values[i]):
+                deviation = (close_prices[i] - ma_values[i]) / ma_values[i] * 100
+                if not np.isnan(deviation) and abs(deviation) <= 5.0:
+                    deviations.append(deviation)
+                else:
+                    return False, 0, (0, 0)
+        else:
+            # 使用计算出的均线值
+            if not np.isnan(close_prices[i]) and not np.isnan(ma_values[i]):
+                deviation = (close_prices[i] - ma_values[i]) / ma_values[i] * 100
+                if not np.isnan(deviation) and abs(deviation) <= 5.0:
+                    deviations.append(deviation)
+                else:
+                    return False, 0, (0, 0)
     
     # 检查价格是否反复穿越均线
     cross_count = 0
     for i in range(len(close_prices)-10, len(close_prices)-1):
         # 确保有足够的数据计算均线
-        if i < CRITICAL_VALUE_DAYS - 1 or np.isnan(ma_values[i]) or np.isnan(ma_values[i+1]):
-            continue
-            
-        if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
-           (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
-            cross_count += 1
+        if i < CRITICAL_VALUE_DAYS - 1:
+            # 使用当前计算的均线值
+            if i < len(ma_values) and i+1 < len(ma_values) and not np.isnan(ma_values[i]) and not np.isnan(ma_values[i+1]):
+                if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
+                   (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
+                    cross_count += 1
+            else:
+                continue
+        else:
+            # 使用计算出的均线值
+            if not np.isnan(close_prices[i]) and not np.isnan(close_prices[i+1]) and \
+               not np.isnan(ma_values[i]) and not np.isnan(ma_values[i+1]):
+                if (close_prices[i] >= ma_values[i] and close_prices[i+1] < ma_values[i+1]) or \
+                   (close_prices[i] < ma_values[i] and close_prices[i+1] >= ma_values[i+1]):
+                    cross_count += 1
+            else:
+                continue
     
     # 至少需要5次穿越才认定为震荡市
     min_cross_count = 5
@@ -441,7 +512,28 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     # 寻找局部高点
     peaks = []
     for i in range(5, len(close_prices)-5):
-        if close_prices[i] > max(close_prices[i-5:i]) and close_prices[i] > max(close_prices[i+1:i+6]):
+        # 确保是有效数值
+        if np.isnan(close_prices[i]) or i - 5 < 0 or i + 6 > len(close_prices):
+            continue
+            
+        # 检查是否为局部高点
+        is_peak = True
+        for j in range(i-5, i):
+            if j < 0 or np.isnan(close_prices[j]):
+                continue
+            if close_prices[i] <= close_prices[j]:
+                is_peak = False
+                break
+        if not is_peak:
+            continue
+            
+        for j in range(i+1, i+6):
+            if j >= len(close_prices) or np.isnan(close_prices[j]):
+                continue
+            if close_prices[i] <= close_prices[j]:
+                is_peak = False
+                break
+        if is_peak:
             peaks.append((i, close_prices[i]))
     
     # 如果找到的高点少于3个，无法形成头肩顶
@@ -459,7 +551,13 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
         # 检查第二个高点是否低于第一个
         if peak2_price < peak1_price and peak2_price > peak1_price * 0.95:
             # 检查中间是否有明显低点
+            if peak1_idx >= len(close_prices) or peak2_idx >= len(close_prices):
+                return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
+                
             trough_idx = peak1_idx + np.argmin(close_prices[peak1_idx:peak2_idx])
+            if trough_idx >= len(close_prices):
+                return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
+                
             trough_price = close_prices[trough_idx]
             
             # 检查低点是否明显
@@ -486,8 +584,15 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
             shoulder_similarity = min(shoulder1_price, shoulder2_price) / max(shoulder1_price, shoulder2_price)
             
             # 检查中间低点
+            if shoulder1_idx >= len(close_prices) or head_idx >= len(close_prices) or shoulder2_idx >= len(close_prices):
+                return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
+                
             trough1_idx = shoulder1_idx + np.argmin(close_prices[shoulder1_idx:head_idx])
             trough2_idx = head_idx + np.argmin(close_prices[head_idx:shoulder2_idx])
+            
+            if trough1_idx >= len(close_prices) or trough2_idx >= len(close_prices):
+                return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
+                
             neckline_price = (close_prices[trough1_idx] + close_prices[trough2_idx]) / 2
             
             # 检查头肩比例是否合理

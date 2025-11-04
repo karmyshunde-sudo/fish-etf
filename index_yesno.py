@@ -188,11 +188,20 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
         
-        # 转换为字符串格式
-        end_date = start_date_dt.strftime("%Y-%m-%d")
-        start_date = end_date_dt.strftime("%Y-%m-%d")
+        # 转换为字符串格式 - 确保开始日期 < 结束日期
+        start_date = start_date_dt.strftime("%Y-%m-%d")
+        end_date = end_date_dt.strftime("%Y-%m-%d")
         
         logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
+        
+        # 打印baostock模块的所有属性，用于调试
+        logger.debug(f"baostock模块属性: {dir(bs)}")
+        
+        # 检查是否存在query_history_k_data函数
+        if not hasattr(bs, 'query_history_k_data'):
+            logger.error(f"baostock模块没有query_history_k_data函数，可用函数: {dir(bs)}")
+            # 尝试使用query_stock_basic或其他替代方法
+            return pd.DataFrame()
         
         # 登录baostock
         login_result = bs.login()
@@ -201,8 +210,12 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             return pd.DataFrame()
         
         try:
-            # 使用baostock获取数据 - 使用正确的API接口
-            # 根据baostock官方文档，使用query_history_k_data
+            # 使用baostock获取数据
+            # 根据baostock文档，正确的函数是query_history_k_data
+            # 但是我们需要确认参数顺序
+            logger.debug(f"正在使用query_history_k_data获取数据: {index_code}")
+            
+            # 检查参数顺序 - 正确的应该是: code, columns, start_date, end_date, frequency, adjustflag
             rs = bs.query_history_k_data(index_code,
                                         "date,open,high,low,close,volume,amount",
                                         start_date=start_date,
@@ -217,7 +230,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             
             # 将数据转换为DataFrame
             data_list = []
-            while (rs.error_code == '0') and rs.next():
+            while rs.next():
                 data_list.append(rs.get_row_data())
             
             if not data_list:

@@ -34,11 +34,11 @@ from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+#logger.setLevel(logging.INFO)
+#handler = logging.StreamHandler()
+#formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+#handler.setFormatter(formatter)
+#logger.addHandler(handler)
 
 # 按照指定顺序排列指数列表，明确指定每个指数的数据源
 INDICES = [

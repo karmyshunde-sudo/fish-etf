@@ -7,10 +7,10 @@
 import os
 import logging
 import pandas as pd
-import baostock as bs  # 替换为baostock数据源
+import baostock as bs  # 使用baostock数据源
 import time
 import numpy as np
-import random  # 【关键修改】添加随机延时模块导入
+import random  # 添加随机延时模块导入
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -24,11 +24,11 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# 【关键修改】严格按照指定顺序排列指数列表
+# 按照指定顺序排列指数列表
 INDICES = [
     # 1. 伦敦金现 (GC=F)
     {
-        "code": "us.gc",
+        "code": "us.GC",
         "name": "伦敦金现",
         "description": "国际黄金价格",
         "etfs": [
@@ -37,7 +37,7 @@ INDICES = [
     },
     # 2. 恒生科技 (HSI)
     {
-        "code": "hu.sh.000002",
+        "code": "hk.HSTECH",
         "name": "恒生科技",
         "description": "港股科技龙头",
         "etfs": [
@@ -46,7 +46,7 @@ INDICES = [
     },
     # 3. 纳斯达克100 (^NDX)
     {
-        "code": "us.nq",
+        "code": "us.NDX",
         "name": "纳斯达克100",
         "description": "美国科技股代表指数",
         "etfs": [
@@ -119,7 +119,7 @@ INDICES = [
     },
     # 11. 国企指数 (HSCEI)
     {
-        "code": "hu.sh.000001",
+        "code": "hk.HSCEI",
         "name": "国企指数",
         "description": "港股国企指数",
         "etfs": [
@@ -146,7 +146,7 @@ INDICES = [
     },
     # 14. 中证海外中国互联网 (H30533.CSI)
     {
-        "code": "cs.H30533",
+        "code": "us.HX",
         "name": "中证海外中国互联网",
         "description": "海外上市中国互联网公司",
         "etfs": [
@@ -155,7 +155,7 @@ INDICES = [
     },
     # 15. 恒生指数 (^HSI)
     {
-        "code": "hu.sh.000001",
+        "code": "hk.HSI",
         "name": "恒生指数",
         "description": "港股蓝筹股指数",
         "etfs": [
@@ -169,15 +169,6 @@ CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
 
-def check_network_connection():
-    """检查网络连接是否正常"""
-    try:
-        import requests
-        response = requests.get('https://www.baidu.com    ', timeout=5)
-        return response.status_code == 200
-    except Exception:
-        return False
-
 def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从baostock获取指数历史数据
@@ -190,16 +181,16 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 【关键修改】添加随机延时避免被封（5.0-8.0秒）
+        # 添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
         
-        # 计算日期范围 - 保持为datetime对象
+        # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
         
-        # 仅在需要字符串时转换
-        end_date = end_date_dt.strftime("%Y%m%d")
-        start_date = start_date_dt.strftime("%Y%m%d")
+        # 转换为字符串格式
+        end_date = end_date_dt.strftime("%Y-%m-%d")
+        start_date = start_date_dt.strftime("%Y-%m-%d")
         
         logger.info(f"获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
@@ -210,11 +201,13 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
             return pd.DataFrame()
         
         try:
-            # 使用baostock获取数据
-            rs = bs.query_index_kline(code=index_code, 
-                                     start_date=start_date,
-                                     end_date=end_date,
-                                     frequency="d")
+            # 使用baostock获取数据 - 使用正确的接口
+            rs = bs.query_history_k_data(index_code,
+                                        fields="date,open,high,low,close,volume,amount",
+                                        start_date=start_date,
+                                        end_date=end_date,
+                                        frequency="d",
+                                        adjustflag="3")
             
             if rs.error_code != '0':
                 logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
@@ -242,7 +235,7 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 'amount': '成交额'
             })
             
-            # 【日期datetime类型规则】确保日期列为datetime类型
+            # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
             
             # 排序
@@ -732,18 +725,18 @@ def generate_report():
         summary_lines = []
         valid_indices_count = 0
         
-        # 【关键修改】按指定顺序处理
+        # 按指定顺序处理
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
             
-            # 直接从baostock获取指数数据
+            # 从baostock获取指数数据
             df = fetch_index_data(code)
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
                 # 即使没有数据，也发送一条消息通知
                 message_lines = []
-                # 【关键修改】整合所有ETF到一条消息
+                # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 
@@ -767,7 +760,7 @@ def generate_report():
                 logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
                 # 发送数据不足的消息
                 message_lines = []
-                # 【关键修改】整合所有ETF到一条消息
+                # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 
@@ -817,7 +810,7 @@ def generate_report():
             
             # 构建消息
             message_lines = []
-            # 【关键修改】整合所有ETF到一条消息
+            # 整合所有ETF到一条消息
             etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
             etf_str = "，".join(etf_list)
             
@@ -863,7 +856,7 @@ def generate_report():
 if __name__ == "__main__":
     logger.info("===== 开始执行 指数Yes/No策略 =====")
     
-    # 添加延时，避免在每天23:00整点时AkShare接口可能还未更新当日数据
+    # 添加延时
     time.sleep(30)
     
     generate_report()

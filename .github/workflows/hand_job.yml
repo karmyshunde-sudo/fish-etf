@@ -9,7 +9,7 @@ on:
         options:
           - 'index_yesno'
           - 'update_stock_list'     #新增的股票列表强制更新任务代码文件名stock/all_stocks.py
-          - 'stock_filtlist'     #新增的财务过滤股票列表任务代码文件名stock/filterstock.py
+          - 'stock_ListFilt'     #新增的财务过滤股票列表任务代码文件名stock/filterstock.py
           - 'stock_tickten'         #就是原来的stock_fourty任务
           - 'crawl_stock_daily'     #就是原来的stock_crawler任务
           - 'stock_threema'         #新增的股票筛选任务代码文件名stock/macd_ma_strategy.py
@@ -1028,10 +1028,10 @@ jobs:
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
   # 股票财务过滤（手动）
-  stock-filterstock-manual:
+  stock-ListFilt-manual:
     name: 股票财务过滤（手动）
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_filtlist'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_ListFilt'
     permissions:
       contents: write
     steps:
@@ -1089,7 +1089,7 @@ jobs:
           TZ: Asia/Shanghai
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
-          LOG_FILE="data/logs/stock_filtlist_${BEIJING_TIME}.log"
+          LOG_FILE="data/logs/stock_ListFilt_${BEIJING_TIME}.log"
           echo "正在执行: 股票财务过滤（手动）"
           echo "日志文件: $LOG_FILE"
           

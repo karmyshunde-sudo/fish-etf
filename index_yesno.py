@@ -54,7 +54,7 @@ INDICES = [
     },
     # 2. 恒生科技指数 (HSTECH) - 使用yfinance
     {
-        "code": "^HSTECH",
+        "code": "HSTECH.HK",
         "name": "恒生科技指数(HSTECH)",
         "description": "港股科技龙头企业指数",
         "source": "yfinance",

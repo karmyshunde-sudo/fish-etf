@@ -93,12 +93,12 @@ INDICES = [
             {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
         ]
     },
-    # 6. 微盘股 (883418) - 使用baostock
+    # 6. 微盘股 (883418) - 使用akshare
     {
-        "code": "sh.883418",
+        "code": "883418",
         "name": "微盘股(SH883418)",
         "description": "小微盘股票指数",
-        "source": "baostock",
+        "source": "akshare",
         "etfs": [
             {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
         ]

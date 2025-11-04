@@ -305,7 +305,7 @@ def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
 
 def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从yfinance获取国际/美股指数历史数据
+    从yfinance获取指数历史数据
     
     Args:
         index_code: 指数代码
@@ -329,62 +329,62 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
         logger.info(f"使用yfinance获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         
         # 获取数据
-        try:
-            df = yf.download(index_code, start=start_date, end=end_date)
-            
-            if df.empty:
-                logger.warning(f"通过yfinance获取指数 {index_code} 数据为空")
-                return pd.DataFrame()
-            
-            # 标准化列名
-            df = df.reset_index()
-            df = df.rename(columns={
-                'Date': '日期',
-                'Open': '开盘',
-                'High': '最高',
-                'Low': '最低',
-                'Close': '收盘',
-                'Volume': '成交量'
-            })
-            
-            # 确保日期列为datetime类型
-            df['日期'] = pd.to_datetime(df['日期'])
-            
-            # 添加成交额列（如果不存在）
-            if 'amount' not in df.columns:
-                df['成交额'] = np.nan
-                
-            # 确保价格列是数值类型
-            price_columns = ['开盘', '最高', '最低', '收盘']
-            for col in price_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 确保成交量是数值类型
-            if '成交量' in df.columns:
-                df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
-            
-            # 删除包含NaN的行
-            if '收盘' in df.columns:
-                df = df.dropna(subset=['收盘'])
-            
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            
-            logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据")
-            return df
+        df = yf.download(index_code, start=start_date, end=end_date)
         
-        except Exception as e:
-            logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        # 处理yfinance返回的MultiIndex列名
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+        
+        if df.empty:
+            logger.warning(f"通过yfinance获取指数 {index_code} 数据为空")
             return pd.DataFrame()
+        
+        # 标准化列名
+        df = df.reset_index()
+        df = df.rename(columns={
+            'Date': '日期',
+            'Open': '开盘',
+            'High': '最高',
+            'Low': '最低',
+            'Close': '收盘',
+            'Volume': '成交量',
+            'Adj Close': '复权收盘'
+        })
+        
+        # 确保日期列为datetime类型
+        df['日期'] = pd.to_datetime(df['日期'])
+        
+        # 确保价格列是数值类型
+        price_columns = ['开盘', '最高', '最低', '收盘']
+        for col in price_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 确保成交量是数值类型
+        if '成交量' in df.columns:
+            df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
+        
+        # 添加成交额列（如果不存在）
+        if '成交额' not in df.columns:
+            df['成交额'] = np.nan
+        
+        # 删除包含NaN的行
+        if '收盘' in df.columns:
+            df = df.dropna(subset=['收盘'])
+        
+        # 排序
+        df = df.sort_values('日期').reset_index(drop=True)
+        
+        # 检查数据量
+        if len(df) <= 1:
+            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+            return pd.DataFrame()
+        
+        logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
+        return df
     
     except Exception as e:
-        logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:

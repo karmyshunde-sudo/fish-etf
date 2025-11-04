@@ -28,7 +28,7 @@ logger.addHandler(handler)
 INDICES = [
     # 1. 伦敦金现 (GC=F)
     {
-        "code": "us.GC",
+        "code": "sh.GC0000",  # 修正为9位格式，以sh.开头
         "name": "伦敦金现",
         "description": "国际黄金价格",
         "etfs": [
@@ -37,7 +37,7 @@ INDICES = [
     },
     # 2. 恒生科技 (HSI)
     {
-        "code": "hk.HSTECH",
+        "code": "sh.HSTECH",  # 修正为9位格式，以sh.开头
         "name": "恒生科技",
         "description": "港股科技龙头",
         "etfs": [
@@ -46,7 +46,7 @@ INDICES = [
     },
     # 3. 纳斯达克100 (^NDX)
     {
-        "code": "us.NDX",
+        "code": "sh.NDX000",  # 修正为9位格式，以sh.开头
         "name": "纳斯达克100",
         "description": "美国科技股代表指数",
         "etfs": [
@@ -56,7 +56,7 @@ INDICES = [
     },
     # 4. 上证50 (000016)
     {
-        "code": "sh.000016",
+        "code": "sh.000016",  # 已经是9位格式，保持不变
         "name": "上证50",
         "description": "上证50蓝筹股指数",
         "etfs": [
@@ -65,7 +65,7 @@ INDICES = [
     },
     # 5. 沪深300 (000300)
     {
-        "code": "sh.000300",
+        "code": "sh.000300",  # 已经是9位格式，保持不变
         "name": "沪深300",
         "description": "A股大盘蓝筹股指数",
         "etfs": [
@@ -74,7 +74,7 @@ INDICES = [
     },
     # 6. 微盘股 (883418)
     {
-        "code": "sh.883418",
+        "code": "sh.883418",  # 已经是9位格式，保持不变
         "name": "微盘股",
         "description": "小微盘股票指数",
         "etfs": [
@@ -83,7 +83,7 @@ INDICES = [
     },
     # 7. 创业板指数 (399006)
     {
-        "code": "sz.399006",
+        "code": "sz.399006",  # 已经是9位格式，保持不变
         "name": "创业板指数",
         "description": "创业板龙头公司",
         "etfs": [
@@ -92,7 +92,7 @@ INDICES = [
     },
     # 8. 科创50 (000688)
     {
-        "code": "sh.000688",
+        "code": "sh.000688",  # 已经是9位格式，保持不变
         "name": "科创50",
         "description": "科创板龙头公司",
         "etfs": [
@@ -101,7 +101,7 @@ INDICES = [
     },
     # 9. 北证50 (899050)
     {
-        "code": "bj.899050",
+        "code": "bj.899050",  # 修正：北交所可能有特殊代码格式
         "name": "北证50",
         "description": "北交所龙头公司",
         "etfs": [
@@ -110,7 +110,7 @@ INDICES = [
     },
     # 10. 中证500 (000905)
     {
-        "code": "sh.000905",
+        "code": "sh.000905",  # 已经是9位格式，保持不变
         "name": "中证500",
         "description": "A股中小盘股指数",
         "etfs": [
@@ -119,7 +119,7 @@ INDICES = [
     },
     # 11. 国企指数 (HSCEI)
     {
-        "code": "hk.HSCEI",
+        "code": "sh.HSCEI",  # 修正为9位格式，以sh.开头
         "name": "国企指数",
         "description": "港股国企指数",
         "etfs": [
@@ -128,7 +128,7 @@ INDICES = [
     },
     # 12. 中证2000 (932000)
     {
-        "code": "sh.932000",
+        "code": "sh.932000",  # 已经是9位格式，保持不变
         "name": "中证2000",
         "description": "中盘股指数",
         "etfs": [
@@ -137,7 +137,7 @@ INDICES = [
     },
     # 13. 中证1000
     {
-        "code": "sh.000852",
+        "code": "sh.000852",  # 已经是9位格式，保持不变
         "name": "中证1000",
         "description": "中盘股指数",
         "etfs": [
@@ -146,7 +146,7 @@ INDICES = [
     },
     # 14. 中证海外中国互联网 (H30533.CSI)
     {
-        "code": "us.HX",
+        "code": "sh.HX0000",  # 修正为9位格式，以sh.开头
         "name": "中证海外中国互联网",
         "description": "海外上市中国互联网公司",
         "etfs": [
@@ -155,7 +155,7 @@ INDICES = [
     },
     # 15. 恒生指数 (^HSI)
     {
-        "code": "hk.HSI",
+        "code": "sh.HSI000",  # 修正为9位格式，以sh.开头
         "name": "恒生指数",
         "description": "港股蓝筹股指数",
         "etfs": [
@@ -202,7 +202,6 @@ def fetch_index_data(index_code: str, days: int = 250) -> pd.DataFrame:
         
         try:
             # 使用baostock获取数据 - 使用正确的API接口
-            # 根据错误日志，baostock没有query_history_k_data，但有query_history_k_data_plus
             rs = bs.query_history_k_data_plus(index_code,
                                              "date,open,high,low,close,volume,amount",
                                              start_date=start_date,

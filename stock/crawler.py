@@ -320,11 +320,26 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             start_date_naive = to_naive_datetime(start_date)
             end_date_naive = to_naive_datetime(end_date)
             
-            # 严格检查日期
-            # 开始日期 >= 结束日期，代表数据已最新
-            if start_date_naive >= end_date_naive:
-                logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} >= 结束日期: {end_date.strftime('%Y%m%d')}）")
+            # 严格检查日期 - 将 >= 条件拆分为 > 和 == 两种情况
+            if start_date_naive > end_date_naive:
+                logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} > 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
+            
+            # 处理开始日期等于结束日期的情况（即需要爬取当天数据）
+            if start_date_naive == end_date_naive:
+                beijing_time = get_beijing_time()
+                # A股收市时间为15:00，为保险起见，15:30后认为当天数据已更新
+                market_close_time = start_date_naive.replace(hour=15, minute=30, second=0, microsecond=0)
+                
+                # 确保比较的两个时间都是naive类型
+                beijing_time_naive = to_naive_datetime(beijing_time)
+                
+                if beijing_time_naive < market_close_time:
+                    logger.info(f"股票 {stock_code} 当前时间({beijing_time_naive.strftime('%H:%M')})未过A股收市时间(15:30)，跳过当天数据爬取")
+                    return pd.DataFrame()
+                else:
+                    logger.info(f"股票 {stock_code} 当前时间({beijing_time_naive.strftime('%H:%M')})已过A股收市时间(15:30)，需要爬取当天({start_date_naive.strftime('%Y-%m-%d')})数据")
+                    # 继续执行爬取逻辑，不返回
             
             logger.info(f"股票 {stock_code} 增量爬取，从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
         else:
@@ -461,7 +476,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
         logger.error(f"akshare 版本: {ak.__version__}")
         logger.error(f"akshare 模块路径: {ak.__file__}")
         return pd.DataFrame()
-
+        
 def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
     """保存股票日线数据到CSV文件，使用中文列名"""
     if df.empty:

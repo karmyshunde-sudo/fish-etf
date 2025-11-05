@@ -11,12 +11,29 @@
 #    - bs.query_history_k_data_plus() - 获取历史K线数据
 # 2. yfinance:
 #    - yf.download() - 下载历史数据
-# 3. pandas:
+# 3. akshare:
+#    - ak.index_zh_a_hist() - 获取A股指数历史行情数据，参数包括:
+#        * symbol: 指数代码
+#        * period: 数据周期("daily"表示日线)
+#        * start_date: 开始日期(格式YYYYMMDD)
+#        * end_date: 结束日期(格式YYYYMMDD)
+#        * adjust: 复权方式("qfq"表示前复权)
+#    - ak.index_hk_hist() - 获取港股指数历史行情数据，参数包括:
+#        * symbol: 指数代码
+#        * period: 数据周期("daily"表示日线)
+#        * start_date: 开始日期(格式YYYYMMDD)
+#        * end_date: 结束日期(格式YYYYMMDD)
+#    - ak.stock_hk_index_daily_em() - 获取东方财富港股指数行情数据，参数包括:
+#        * symbol: 指数代码
+#        * start_date: 开始日期(格式YYYYMMDD)
+#        * end_date: 结束日期(格式YYYYMMDD)
+# 4. pandas:
 #    - pd.to_datetime() - 转换日期格式
 #    - pd.to_numeric() - 转换数值类型
 #    - pd.DataFrame() - 创建数据框
-# 4. numpy:
+# 5. numpy:
 #    - np.isnan() - 检查NaN值
+
 import os
 import logging
 import pandas as pd

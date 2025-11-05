@@ -11,27 +11,11 @@
 #    - bs.query_history_k_data_plus() - 获取历史K线数据
 # 2. yfinance:
 #    - yf.download() - 下载历史数据
-# 3. akshare:
-#    - ak.index_zh_a_hist() - 获取A股指数历史行情数据，参数包括:
-#        * symbol: 指数代码
-#        * period: 数据周期("daily"表示日线)
-#        * start_date: 开始日期(格式YYYYMMDD)
-#        * end_date: 结束日期(格式YYYYMMDD)
-#        * adjust: 复权方式("qfq"表示前复权)
-#    - ak.index_hk_hist() - 获取港股指数历史行情数据，参数包括:
-#        * symbol: 指数代码
-#        * period: 数据周期("daily"表示日线)
-#        * start_date: 开始日期(格式YYYYMMDD)
-#        * end_date: 结束日期(格式YYYYMMDD)
-#    - ak.stock_hk_index_daily_em() - 获取东方财富港股指数行情数据，参数包括:
-#        * symbol: 指数代码
-#        * start_date: 开始日期(格式YYYYMMDD)
-#        * end_date: 结束日期(格式YYYYMMDD)
-# 4. pandas:
+# 3. pandas:
 #    - pd.to_datetime() - 转换日期格式
 #    - pd.to_numeric() - 转换数值类型
 #    - pd.DataFrame() - 创建数据框
-# 5. numpy:
+# 4. numpy:
 #    - np.isnan() - 检查NaN值
 import os
 import logging
@@ -156,7 +140,7 @@ INDICES = [
     {
         "order": 2,
         "switch": 1,
-        "code": "^HSTECH",
+        "code": "HSTECH.HK",
         "name": "2、恒生科技指数(HSTECH)",
         "description": "港股科技龙头企业指数",
         "source": "yfinance",
@@ -188,14 +172,14 @@ INDICES = [
             {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
         ]
     },
-    # 9. 北证50 (899050) - 使用akshare
+    # 9. 北证50 (899050) - 使用baostock
     {
         "order": 9,
         "switch": 1,
-        "code": "899050",
+        "code": "bj.899050",
         "name": "9、北证50(BJ899050)",
         "description": "北交所龙头公司",
-        "source": "akshare",
+        "source": "baostock",
         "etfs": [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
         ]
@@ -204,7 +188,7 @@ INDICES = [
     {
         "order": 11,
         "switch": 1,
-        "code": "HSCEI.HK",
+        "code": "^HSCEI",
         "name": "11、恒生国企指数(HSCEI)",
         "description": "港股国企指数",
         "source": "yfinance",
@@ -212,14 +196,14 @@ INDICES = [
             {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
-    # 12. 中证2000 (932000) - 使用akshare
+    # 12. 中证2000 (932000) - 使用baostock
     {
         "order": 12,
         "switch": 1,
-        "code": "932000",
+        "code": "sh.932000",
         "name": "12、中证2000(SH932000)",
         "description": "中盘股指数",
-        "source": "akshare",
+        "source": "baostock",
         "etfs": [
             {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
         ]
@@ -228,7 +212,7 @@ INDICES = [
     {
         "order": 14,
         "switch": 1,
-        "code": "KWEB",
+        "code": "^HXC",
         "name": "14、中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
         "source": "yfinance",
@@ -435,7 +419,8 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date
+                    end_date=end_date,
+                    adjust="qfq"
                 )
             elif index_code.startswith('H'):  # 港股指数
                 # 尝试恒生系列指数
@@ -458,7 +443,8 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date
+                    end_date=end_date,
+                    adjust="qfq"
                 )
             else:
                 # 默认处理
@@ -466,7 +452,8 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date
+                    end_date=end_date,
+                    adjust="qfq"
                 )
             if df.empty:
                 logger.warning(f"通过akshare获取指数 {index_code} 数据为空")
@@ -827,37 +814,37 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
         # 计算上轨和下轨价格
         upper_band = critical * (1 + max_dev/100)
         lower_band = critical * (1 + min_dev/100)
-        message = f"""
-【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]
-✅ 操作建议：
-  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%
-  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%
-  • 总仓位严格控制在≤50%
-⚠️ 避免频繁交易，等待趋势明朗
-"""
+        message = (
+            f"【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
+            f"✅ 操作建议：\n"
+            f"  • 上沿操作（价格≈{upper_band:.2f}）：小幅减仓10%-20%\n"
+            f"  • 下沿操作（价格≈{lower_band:.2f}）：小幅加仓10%-20%\n"
+            f"  • 总仓位严格控制在≤50%\n"
+            f"⚠️ 避免频繁交易，等待趋势明朗\n"
+        )
         return message
     # 1. YES信号：当前价格 ≥ 20日均线
     if current >= critical:
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
         if consecutive_above == 1 and volume_change > 0.2:
-            message = f"""
-【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即建仓30%
-  • 卫星行业ETF立即建仓20%
-  • 回调至5日均线（约{current * 0.99:.2f}）可加仓20%
-⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）
-"""
+            message = (
+                f"【首次突破】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
+                f"✅ 操作建议：\n"
+                f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即建仓30%\n"
+                f"  • 卫星行业ETF立即建仓20%\n"
+                f"  • 回调至5日均线（约{current * 0.99:.2f}）可加仓20%\n"
+                f"⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）\n"
+            )
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
         elif 2 <= consecutive_above <= 3 and volume_change > 0.2:
-            message = f"""
-【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）可加仓至50%
-  • 卫星行业ETF可加仓至35%
-  • 严格跟踪5日均线作为止损位（约{current * 0.99:.2f}）
-⚠️ 注意：若收盘跌破5日均线，立即减仓50%
-"""
+            message = (
+                f"【首次突破确认】连续{consecutive_above}天站上20日均线，成交量放大{volume_change*100:.1f}%\n"
+                f"✅ 操作建议：\n"
+                f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）可加仓至50%\n"
+                f"  • 卫星行业ETF可加仓至35%\n"
+                f"  • 严格跟踪5日均线作为止损位（约{current * 0.99:.2f}）\n"
+                f"⚠️ 注意：若收盘跌破5日均线，立即减仓50%\n"
+            )
         # 子条件2：持续站稳（价格维持在均线上）
         else:
             # 场景A：偏离率≤+5%（趋势稳健）
@@ -873,14 +860,14 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                message = f"""
-【趋势稳健】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 持仓不动，不新增仓位
-  • 跟踪止损上移至5日均线（约{current * 0.99:.2f}）
-  • 若收盘跌破5日均线，减仓50%
-{pattern_msg}
-"""
+                message = (
+                    f"【趋势稳健】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 持仓不动，不新增仓位\n"
+                    f"  • 跟踪止损上移至5日均线（约{current * 0.99:.2f}）\n"
+                    f"  • 若收盘跌破5日均线，减仓50%\n"
+                    f"{pattern_msg}\n"
+                )
             # 场景B：+5%＜偏离率≤+10%（趋势较强）
             elif 5.0 < deviation <= 10.0:
                 # 添加M头/头肩顶形态检测
@@ -894,14 +881,14 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                message = f"""
-【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 观望，不新增仓位
-  • 逢高减仓10%-15%（{index_info['etfs'][0]['code']}）
-  • 若收盘跌破10日均线，减仓30%
-{pattern_msg}
-"""
+                message = (
+                    f"【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 观望，不新增仓位\n"
+                    f"  • 逢高减仓10%-15%（{index_info['etfs'][0]['code']}）\n"
+                    f"  • 若收盘跌破10日均线，减仓30%\n"
+                    f"{pattern_msg}\n"
+                )
             # 场景C：偏离率＞+10%（超买风险）
             else:
                 # 添加M头/头肩顶形态检测
@@ -915,14 +902,14 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓15%-25%"
-                message = f"""
-【超买风险】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 逢高减仓20%-30%（仅卫星ETF）
-  • 当前价格已处高位，避免新增仓位
-  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回
-{pattern_msg}
-"""
+                message = (
+                    f"【超买风险】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 逢高减仓20%-30%（仅卫星ETF）\n"
+                    f"  • 当前价格已处高位，避免新增仓位\n"
+                    f"  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回\n"
+                    f"{pattern_msg}\n"
+                )
     # 2. NO信号：当前价格 ＜ 20日均线
     else:
         # 计算亏损比例
@@ -930,65 +917,65 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
         if consecutive_below == 1 and volume_change > 0.2:
             if loss_percentage > -15.0:  # 亏损<15%
-                message = f"""
-【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即减仓50%
-  • 卫星行业ETF立即减仓70%-80%
-  • 止损位：20日均线上方5%（约{critical * 1.05:.2f}）
-⚠️ 若收盘未收回均线，明日继续减仓至20%
-"""
+                message = (
+                    f"【首次跌破】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即减仓50%\n"
+                    f"  • 卫星行业ETF立即减仓70%-80%\n"
+                    f"  • 止损位：20日均线上方5%（约{critical * 1.05:.2f}）\n"
+                    f"⚠️ 若收盘未收回均线，明日继续减仓至20%\n"
+                )
             else:  # 亏损≥15%
-                message = f"""
-【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%，亏损{loss_percentage:.2f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即清仓
-  • 卫星行业ETF保留20%-30%底仓观察
-  • 严格止损：收盘价站上20日均线才考虑回补
-⚠️ 重大亏损信号，避免盲目抄底
-"""
+                message = (
+                    f"【首次跌破-严重亏损】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%，亏损{loss_percentage:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）立即清仓\n"
+                    f"  • 卫星行业ETF保留20%-30%底仓观察\n"
+                    f"  • 严格止损：收盘价站上20日均线才考虑回补\n"
+                    f"⚠️ 重大亏损信号，避免盲目抄底\n"
+                )
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
         elif consecutive_below == 2 and volume_change > 0.2:
-            message = f"""
-【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）严格止损清仓
-  • 卫星行业ETF仅保留20%-30%底仓
-  • 严格止损：20日均线下方5%（约{critical * 0.95:.2f}）
-⚠️ 信号确认，避免侥幸心理
-"""
+            message = (
+                f"【首次跌破确认】连续{consecutive_below}天跌破20日均线，成交量放大{volume_change*100:.1f}%\n"
+                f"✅ 操作建议：\n"
+                f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）严格止损清仓\n"
+                f"  • 卫星行业ETF仅保留20%-30%底仓\n"
+                f"  • 严格止损：20日均线下方5%（约{critical * 0.95:.2f}）\n"
+                f"⚠️ 信号确认，避免侥幸心理\n"
+            )
         # 子条件2：持续跌破（价格维持在均线下）
         else:
             # 场景A：偏离率≥-5%（下跌初期）
             if deviation >= -5.0:
-                message = f"""
-【下跌初期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 轻仓观望（仓位≤20%）
-  • 反弹至均线附近（约{critical:.2f}）减仓剩余仓位
-  • 暂不考虑新增仓位
-⚠️ 重点观察：收盘站上5日均线，可轻仓试多
-"""
+                message = (
+                    f"【下跌初期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 轻仓观望（仓位≤20%）\n"
+                    f"  • 反弹至均线附近（约{critical:.2f}）减仓剩余仓位\n"
+                    f"  • 暂不考虑新增仓位\n"
+                    f"⚠️ 重点观察：收盘站上5日均线，可轻仓试多\n"
+                )
             # 场景B：-10%≤偏离率＜-5%（下跌中期）
             elif -10.0 <= deviation < -5.0:
-                message = f"""
-【下跌中期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 空仓为主，避免抄底
-  • 仅核心宽基ETF（{index_info['etfs'][0]['code']}）可试仓5%-10%
-  • 严格止损：收盘跌破前低即离场
-⚠️ 重点观察：行业基本面是否有利空，有利空则清仓
-"""
+                message = (
+                    f"【下跌中期】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 空仓为主，避免抄底\n"
+                    f"  • 仅核心宽基ETF（{index_info['etfs'][0]['code']}）可试仓5%-10%\n"
+                    f"  • 严格止损：收盘跌破前低即离场\n"
+                    f"⚠️ 重点观察：行业基本面是否有利空，有利空则清仓\n"
+                )
             # 场景C：偏离率＜-10%（超卖机会）
             else:
-                message = f"""
-【超卖机会】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%
-✅ 操作建议：
-  • 核心宽基ETF（{index_info['etfs'][0]['code']}）小幅加仓10%-15%
-  • 目标价：偏离率≥-5%（约{critical * 0.95:.2f}）
-  • 达到目标即卖出加仓部分
-⚠️ 重点观察：若跌破前低，立即止损
-"""
+                message = (
+                    f"【超卖机会】连续{consecutive_below}天跌破20日均线，偏离率{deviation:.2f}%\n"
+                    f"✅ 操作建议：\n"
+                    f"  • 核心宽基ETF（{index_info['etfs'][0]['code']}）小幅加仓10%-15%\n"
+                    f"  • 目标价：偏离率≥-5%（约{critical * 0.95:.2f}）\n"
+                    f"  • 达到目标即卖出加仓部分\n"
+                    f"⚠️ 重点观察：若跌破前低，立即止损\n"
+                )
     return message
 def generate_report():
     """生成策略报告并推送微信"""
@@ -1096,8 +1083,7 @@ def generate_report():
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             index_short_name = name.split('(')[0].strip()
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%
-"
+            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)

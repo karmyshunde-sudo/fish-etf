@@ -138,6 +138,18 @@ INDICES = [
             {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
         ]
     },
+    # 14. 中概互联指数 (HXC) - 使用yfinance
+    {
+        "order": 14,
+        "switch": 2,
+        "code": "KWEB",
+        "name": "14、中概互联指数(HXC)",
+        "description": "海外上市中国互联网公司",
+        "source": "yfinance",
+        "etfs": [
+            {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
+        ]
+    },
     # 2. 恒生科技指数 (HSTECH) - 使用yfinance
     {
         "order": 2,
@@ -208,18 +220,6 @@ INDICES = [
         "source": "akshare",
         "etfs": [
             {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
-        ]
-    },
-    # 14. 中概互联指数 (HXC) - 使用yfinance
-    {
-        "order": 14,
-        "switch": 1,
-        "code": "KWEB",
-        "name": "14、中概互联指数(HXC)",
-        "description": "海外上市中国互联网公司",
-        "source": "yfinance",
-        "etfs": [
-            {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
         ]
     }
 ]

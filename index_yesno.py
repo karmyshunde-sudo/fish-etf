@@ -51,18 +51,6 @@ INDICES = [
             {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
         ]
     },
-    # 2. 恒生科技指数 (HSTECH) - 使用yfinance
-    {
-        "order": 2,
-        "switch": 1,
-        "code": "HSTECH.HK",
-        "name": "2、恒生科技指数(HSTECH)",
-        "description": "港股科技龙头企业指数",
-        "source": "yfinance",
-        "etfs": [
-            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
-        ]
-    },
     # 3. 纳斯达克100 (^NDX) - 使用yfinance
     {
         "order": 3,
@@ -100,18 +88,6 @@ INDICES = [
             {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
         ]
     },
-    # 6. 微盘股 (883418) - 使用akshare
-    {
-        "order": 6,
-        "switch": 1,
-        "code": "883418",
-        "name": "6、微盘股(SH883418)",
-        "description": "小微盘股票指数",
-        "source": "akshare",
-        "etfs": [
-            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
-        ]
-    },
     # 7. 创业板指数 (399006) - 仅用baostock
     {
         "order": 7,
@@ -122,6 +98,66 @@ INDICES = [
         "source": "baostock",
         "etfs": [
             {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
+        ]
+    },
+    # 10. 中证500 (000905) - 仅用baostock
+    {
+        "order": 10,
+        "switch": 2,
+        "code": "sh.000905",
+        "name": "10、中证500(SH000905)",
+        "description": "A股中小盘股指数",
+        "source": "baostock",
+        "etfs": [
+            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
+        ]
+    },
+    # 13. 中证1000 (000852) - 仅用baostock
+    {
+        "order": 13,
+        "switch": 2,
+        "code": "sh.000852",
+        "name": "13、中证1000(SH000852)",
+        "description": "中盘股指数",
+        "source": "baostock",
+        "etfs": [
+            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
+        ]
+    },
+    # 15. 恒生综合指数 (HSI) - 使用yfinance
+    {
+        "order": 15,
+        "switch": 2,
+        "code": "^HSI",
+        "name": "15、恒生综合指数(HSI)",
+        "description": "香港股市综合蓝筹指数",
+        "source": "yfinance",
+        "etfs": [
+            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
+        ]
+    },
+    # 2. 恒生科技指数 (HSTECH) - 使用yfinance
+    {
+        "order": 2,
+        "switch": 1,
+        "code": "HSTECH.HK",
+        "name": "2、恒生科技指数(HSTECH)",
+        "description": "港股科技龙头企业指数",
+        "source": "yfinance",
+        "etfs": [
+            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
+        ]
+    },
+    # 6. 微盘股 (883418) - 使用akshare
+    {
+        "order": 6,
+        "switch": 1,
+        "code": "883418",
+        "name": "6、微盘股(SH883418)",
+        "description": "小微盘股票指数",
+        "source": "akshare",
+        "etfs": [
+            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
         ]
     },
     # 8. 科创50 (000688) - 使用akshare
@@ -148,18 +184,6 @@ INDICES = [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
         ]
     },
-    # 10. 中证500 (000905) - 仅用baostock
-    {
-        "order": 10,
-        "switch": 2,
-        "code": "sh.000905",
-        "name": "10、中证500(SH000905)",
-        "description": "A股中小盘股指数",
-        "source": "baostock",
-        "etfs": [
-            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
-        ]
-    },
     # 11. 恒生国企指数 (HSCEI) - 使用yfinance
     {
         "order": 11,
@@ -184,18 +208,6 @@ INDICES = [
             {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
         ]
     },
-    # 13. 中证1000 (000852) - 仅用baostock
-    {
-        "order": 13,
-        "switch": 2,
-        "code": "sh.000852",
-        "name": "13、中证1000(SH000852)",
-        "description": "中盘股指数",
-        "source": "baostock",
-        "etfs": [
-            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
-        ]
-    },
     # 14. 中概互联指数 (HXC) - 使用yfinance
     {
         "order": 14,
@@ -206,18 +218,6 @@ INDICES = [
         "source": "yfinance",
         "etfs": [
             {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
-        ]
-    },
-    # 15. 恒生综合指数 (HSI) - 使用yfinance
-    {
-        "order": 15,
-        "switch": 2,
-        "code": "^HSI",
-        "name": "15、恒生综合指数(HSI)",
-        "description": "香港股市综合蓝筹指数",
-        "source": "yfinance",
-        "etfs": [
-            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
         ]
     }
 ]

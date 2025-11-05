@@ -4,7 +4,6 @@
 指数 Yes/No 策略执行器
 每天计算指定指数的策略信号并推送微信通知
 """
-
 # 使用的API接口:
 # 1. baostock:
 #    - bs.login() - 登录baostock
@@ -18,7 +17,6 @@
 #    - pd.DataFrame() - 创建数据框
 # 4. numpy:
 #    - np.isnan() - 检查NaN值
-
 import os
 import logging
 import pandas as pd
@@ -32,7 +30,6 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
-
 # 初始化日志
 logger = logging.getLogger(__name__)
 #logger.setLevel(logging.INFO)
@@ -40,11 +37,12 @@ logger = logging.getLogger(__name__)
 #formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 #handler.setFormatter(formatter)
 #logger.addHandler(handler)
-
 # 按照指定顺序排列指数列表，明确指定每个指数的数据源
 INDICES = [
     # 1. 伦敦金现 (GC=F) - 使用yfinance
     {
+        "order": 1,
+        "switch": 1,
         "code": "GC=F",
         "name": "伦敦金现(XAU)",
         "description": "国际黄金价格",
@@ -55,6 +53,8 @@ INDICES = [
     },
     # 2. 恒生科技指数 (HSTECH) - 使用yfinance
     {
+        "order": 2,
+        "switch": 1,
         "code": "HSTECH.HK",
         "name": "恒生科技指数(HSTECH)",
         "description": "港股科技龙头企业指数",
@@ -65,6 +65,8 @@ INDICES = [
     },
     # 3. 纳斯达克100 (^NDX) - 使用yfinance
     {
+        "order": 3,
+        "switch": 1,
         "code": "^NDX",
         "name": "纳斯达克100(NDX)",
         "description": "美国科技股代表指数",
@@ -76,6 +78,8 @@ INDICES = [
     },
     # 4. 上证50 (000016) - 仅用baostock
     {
+        "order": 4,
+        "switch": 1,
         "code": "sh.000016",
         "name": "上证50(SH000016)",
         "description": "上证50蓝筹股指数",
@@ -86,6 +90,8 @@ INDICES = [
     },
     # 5. 沪深300 (000300) - 仅用baostock
     {
+        "order": 5,
+        "switch": 1,
         "code": "sh.000300",
         "name": "沪深300(SH000300)",
         "description": "A股大盘蓝筹股指数",
@@ -96,6 +102,8 @@ INDICES = [
     },
     # 6. 微盘股 (883418) - 使用akshare
     {
+        "order": 6,
+        "switch": 1,
         "code": "883418",
         "name": "微盘股(SH883418)",
         "description": "小微盘股票指数",
@@ -106,6 +114,8 @@ INDICES = [
     },
     # 7. 创业板指数 (399006) - 仅用baostock
     {
+        "order": 7,
+        "switch": 1,
         "code": "sz.399006",
         "name": "创业板指(SZ399006)",
         "description": "创业板龙头公司",
@@ -116,6 +126,8 @@ INDICES = [
     },
     # 8. 科创50 (000688) - 使用akshare
     {
+        "order": 8,
+        "switch": 1,
         "code": "000688",
         "name": "科创50(SH000688)",
         "description": "科创板龙头公司",
@@ -126,6 +138,8 @@ INDICES = [
     },
     # 9. 北证50 (899050) - 使用baostock
     {
+        "order": 9,
+        "switch": 1,
         "code": "bj.899050",
         "name": "北证50(BJ899050)",
         "description": "北交所龙头公司",
@@ -136,6 +150,8 @@ INDICES = [
     },
     # 10. 中证500 (000905) - 仅用baostock
     {
+        "order": 10,
+        "switch": 1,
         "code": "sh.000905",
         "name": "中证500(SH000905)",
         "description": "A股中小盘股指数",
@@ -146,6 +162,8 @@ INDICES = [
     },
     # 11. 恒生国企指数 (HSCEI) - 使用yfinance
     {
+        "order": 11,
+        "switch": 1,
         "code": "^HSCEI",
         "name": "恒生国企指数(HSCEI)",
         "description": "港股国企指数",
@@ -156,6 +174,8 @@ INDICES = [
     },
     # 12. 中证2000 (932000) - 使用baostock
     {
+        "order": 12,
+        "switch": 1,
         "code": "sh.932000",
         "name": "中证2000(SH932000)",
         "description": "中盘股指数",
@@ -166,6 +186,8 @@ INDICES = [
     },
     # 13. 中证1000 (000852) - 仅用baostock
     {
+        "order": 13,
+        "switch": 1,
         "code": "sh.000852",
         "name": "中证1000(SH000852)",
         "description": "中盘股指数",
@@ -176,6 +198,8 @@ INDICES = [
     },
     # 14. 中概互联指数 (HXC) - 使用yfinance
     {
+        "order": 14,
+        "switch": 1,
         "code": "^HXC",
         "name": "中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
@@ -186,6 +210,8 @@ INDICES = [
     },
     # 15. 恒生综合指数 (HSI) - 使用yfinance
     {
+        "order": 15,
+        "switch": 1,
         "code": "^HSI",
         "name": "恒生综合指数(HSI)",
         "description": "香港股市综合蓝筹指数",
@@ -195,43 +221,34 @@ INDICES = [
         ]
     }
 ]
-
 # 策略参数
 CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
-
 def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从baostock获取A股指数历史数据
-    
     Args:
         index_code: 指数代码
         days: 获取最近多少天的数据
-        
     Returns:
         pd.DataFrame: 指数日线数据
     """
     try:
         # 添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
-        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        
         # 转换为字符串格式
         start_date = start_date_dt.strftime("%Y-%m-%d")
         end_date = end_date_dt.strftime("%Y-%m-%d")
-        
         logger.info(f"使用baostock获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        
         # 登录baostock
         login_result = bs.login()
         if login_result.error_code != '0':
             logger.error(f"baostock登录失败: {login_result.error_msg}")
             return pd.DataFrame()
-        
         try:
             # 使用baostock获取数据
             rs = bs.query_history_k_data_plus(index_code,
@@ -240,23 +257,18 @@ def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
                                              end_date=end_date,
                                              frequency="d",
                                              adjustflag="3")
-            
             # 检查返回结果
             if rs.error_code != '0':
                 logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
                 return pd.DataFrame()
-            
             # 将数据转换为DataFrame
             data_list = []
             while rs.next():
                 data_list.append(rs.get_row_data())
-            
             if not data_list:
                 logger.warning(f"获取指数 {index_code} 数据为空")
                 return pd.DataFrame()
-            
             df = pd.DataFrame(data_list, columns=rs.fields)
-            
             # 标准化列名
             df = df.rename(columns={
                 'date': '日期',
@@ -267,80 +279,61 @@ def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 'volume': '成交量',
                 'amount': '成交额'
             })
-            
             # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
-            
             # 确保价格列是数值类型
             price_columns = ['开盘', '最高', '最低', '收盘']
             for col in price_columns:
                 # 将非数值数据转换为NaN
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            
             # 确保成交量和成交额是数值类型
             volume_columns = ['成交量', '成交额']
             for col in volume_columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            
             # 删除包含NaN的行
             df = df.dropna(subset=price_columns)
-            
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
-            
             # 检查数据量
             if len(df) <= 1:
                 logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
                 return pd.DataFrame()
-            
             logger.info(f"✅ 通过baostock成功获取到 {len(df)} 条指数数据")
             return df
-        
         finally:
             # 确保登出
             bs.logout()
-    
     except Exception as e:
         logger.error(f"通过baostock获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从yfinance获取国际/港股/美股指数历史数据
-    
     Args:
         index_code: 指数代码
         days: 获取最近多少天的数据
-        
     Returns:
         pd.DataFrame: 指数日线数据
     """
     try:
         # 添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
-        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        
         # 转换为字符串格式
         end_date = end_date_dt.strftime("%Y-%m-%d")
         start_date = start_date_dt.strftime("%Y-%m-%d")
-        
         logger.info(f"使用yfinance获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        
         # 获取数据
         try:
             df = yf.download(index_code, start=start_date, end=end_date)
-            
             # 处理yfinance返回的MultiIndex列名
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-            
             if df.empty:
                 logger.warning(f"yfinance获取指数 {index_code} 数据为空")
                 return pd.DataFrame()
-            
             # 标准化列名
             df = df.reset_index()
             df = df.rename(columns={
@@ -351,55 +344,42 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 'Close': '收盘',
                 'Volume': '成交量'
             })
-            
             # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
-            
             # 确保价格列是数值类型
             price_columns = ['开盘', '最高', '最低', '收盘']
             for col in price_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            
             # 确保成交量是数值类型
             if '成交量' in df.columns:
                 df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
-            
             # 添加成交额列（如果不存在）
             if '成交额' not in df.columns:
                 df['成交额'] = np.nan
-            
             # 删除包含NaN的行
             if '收盘' in df.columns:
                 df = df.dropna(subset=['收盘'])
-            
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
-            
             # 检查数据量
             if len(df) <= 1:
                 logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
                 return pd.DataFrame()
-            
             logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
             return df
-        
         except Exception as e:
             logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
             return pd.DataFrame()
-    
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:
     """
     根据指数类型使用不同的数据源获取历史数据
-    
     Args:
         index_info: 指数信息字典（包含code, name, source等）
         days: 获取最近多少天的数据
-        
     Returns:
         pd.DataFrame: 指数日线数据
     """
@@ -412,32 +392,25 @@ def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:
     else:
         logger.error(f"未知数据源: {index_info['source']}")
         return pd.DataFrame()
-
 def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从akshare获取指数历史数据
-    
     Args:
         index_code: 指数代码
         days: 获取最近多少天的数据
-        
     Returns:
         pd.DataFrame: 指数日线数据
     """
     try:
         # 添加随机延时避免被封（5.0-8.0秒）
         time.sleep(random.uniform(5.0, 8.0))
-        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        
         # 转换为字符串格式
         end_date = end_date_dt.strftime("%Y%m%d")
         start_date = start_date_dt.strftime("%Y%m%d")
-        
         logger.info(f"使用akshare获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        
         # 尝试获取数据
         try:
             # 根据指数代码类型选择不同的akshare接口
@@ -482,11 +455,9 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     end_date=end_date,
                     adjust="qfq"
                 )
-            
             if df.empty:
                 logger.warning(f"通过akshare获取指数 {index_code} 数据为空")
                 return pd.DataFrame()
-            
             # 标准化列名
             df = df.rename(columns={
                 'date': '日期',
@@ -497,44 +468,34 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                 'volume': '成交量',
                 'amount': '成交额'
             })
-            
             # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
-            
             # 确保价格列是数值类型
             price_columns = ['开盘', '最高', '最低', '收盘']
             for col in price_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            
             # 确保成交量和成交额是数值类型
             volume_columns = ['成交量', '成交额']
             for col in volume_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            
             # 删除包含NaN的行
             df = df.dropna(subset=['收盘'])
-            
             # 排序
             df = df.sort_values('日期').reset_index(drop=True)
-            
             # 检查数据量
             if len(df) <= 1:
                 logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
                 return pd.DataFrame()
-            
             logger.info(f"✅ 通过akshare成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
             return df
-        
         except Exception as e:
             logger.error(f"通过akshare获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
             return pd.DataFrame()
-    
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-
 def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
     if len(df) < CRITICAL_VALUE_DAYS:
@@ -542,31 +503,24 @@ def calculate_critical_value(df: pd.DataFrame) -> float:
         # 只计算非NaN值的均值
         valid_data = df["收盘"].dropna()
         return valid_data.mean() if not valid_data.empty else 0.0
-    
     # 计算滚动均值，忽略NaN值
     ma = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean()
-    
     # 返回最后一个有效值
     for i in range(len(ma)-1, -1, -1):
         if not np.isnan(ma.iloc[i]):
             return ma.iloc[i]
-    
     return df["收盘"].dropna().mean()
-
 def calculate_deviation(current: float, critical: float) -> float:
     """计算偏离率"""
     return (current - critical) / critical * 100
-
 def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续站上均线的天数"""
     if len(df) < 2:
         return 0
-    
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
     # 计算均线（使用与主计算相同的逻辑）
     ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
-    
     # 从最新日期开始向前检查
     consecutive_days = 0
     for i in range(len(close_prices)-1, -1, -1):
@@ -584,19 +538,15 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) ->
                 consecutive_days += 1
             else:
                 break
-    
     return consecutive_days
-
 def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续跌破均线的天数"""
     if len(df) < 2:
         return 0
-    
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
     # 计算均线（使用与主计算相同的逻辑）
     ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
-    
     # 从最新日期开始向前检查
     consecutive_days = 0
     for i in range(len(close_prices)-1, -1, -1):
@@ -614,16 +564,12 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
                 consecutive_days += 1
             else:
                 break
-    
     return consecutive_days
-
 def calculate_volume_change(df: pd.DataFrame) -> float:
     """
     计算成交量变化率
-    
     Args:
         df: ETF日线数据
-    
     Returns:
         float: 成交量变化率
     """
@@ -631,11 +577,9 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
         if len(df) < 2:
             logger.warning("数据量不足，无法计算成交量变化")
             return 0.0
-        
         # 获取最新两个交易日的成交量
         current_volume = df['成交量'].values[-1]
         previous_volume = df['成交量'].values[-2]
-        
         # 确保是数值类型
         if not isinstance(current_volume, (int, float)) or not isinstance(previous_volume, (int, float)):
             try:
@@ -644,29 +588,23 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
             except:
                 logger.warning("成交量数据无法转换为数值类型")
                 return 0.0
-        
         # 检查NaN
         if np.isnan(current_volume) or np.isnan(previous_volume) or previous_volume <= 0:
             return 0.0
-        
         # 计算变化率
         volume_change = (current_volume - previous_volume) / previous_volume
         return volume_change
-    
     except Exception as e:
         logger.error(f"计算成交量变化失败: {str(e)}", exc_info=True)
         return 0.0
-
 def calculate_loss_percentage(df: pd.DataFrame) -> float:
     """计算当前亏损比例（相对于最近一次买入点）"""
     if len(df) < 2:
         return 0.0
-    
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
     # 计算均线（使用与主计算相同的逻辑）
     ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
-    
     # 从最新日期开始向前检查，找到最近一次站上均线的点
     buy_index = -1
     for i in range(len(close_prices)-1, -1, -1):
@@ -681,31 +619,24 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
             if not np.isnan(close_prices[i]) and not np.isnan(ma_values[i]) and close_prices[i] >= ma_values[i]:
                 buy_index = i
                 break
-    
     # 如果找不到买入点，使用30天前作为参考
     if buy_index == -1:
         buy_index = max(0, len(close_prices) - 30)
-    
     current_price = close_prices[-1]
     buy_price = close_prices[buy_index]
-    
     # 确保是有效数值
     if np.isnan(current_price) or np.isnan(buy_price) or buy_price <= 0:
         return 0.0
-    
     loss_percentage = (current_price - buy_price) / buy_price * 100
     return loss_percentage
-
 def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     """判断是否处于震荡市"""
     if len(df) < 10:
         return False, 0, (0, 0)  # 中文名称通常2-4个字
-    
     # 获取收盘价和均线序列
     close_prices = df["收盘"].values
     # 计算均线（使用与主计算相同的逻辑）
     ma_values = df["收盘"].rolling(window=CRITICAL_VALUE_DAYS, min_periods=1).mean().values
-    
     # 检查是否连续10天在均线附近波动（-5%~+5%）
     last_10_days = df.tail(10)
     deviations = []
@@ -727,7 +658,6 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
                     deviations.append(deviation)
                 else:
                     return False, 0, (0, 0)
-    
     # 检查价格是否反复穿越均线
     cross_count = 0
     for i in range(len(close_prices)-10, len(close_prices)-1):
@@ -749,11 +679,9 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
                     cross_count += 1
             else:
                 continue
-    
     # 至少需要5次穿越才认定为震荡市
     min_cross_count = 5
     is_volatile = cross_count >= min_cross_count
-    
     # 计算最近10天偏离率范围
     if deviations:
         min_deviation = min(deviations)
@@ -761,24 +689,19 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     else:
         min_deviation = 0
         max_deviation = 0
-    
     return is_volatile, cross_count, (min_deviation, max_deviation)
-
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     """检测M头和头肩顶形态"""
     if len(df) < 20:  # 需要足够数据
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": []}
-    
     # 获取收盘价
     close_prices = df["收盘"].values
-    
     # 寻找局部高点
     peaks = []
     for i in range(5, len(close_prices)-5):
         # 确保是有效数值
         if np.isnan(close_prices[i]) or i - 5 < 0 or i + 6 > len(close_prices):
             continue
-            
         # 检查是否为局部高点
         is_peak = True
         for j in range(i-5, i):
@@ -789,7 +712,6 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
                 break
         if not is_peak:
             continue
-            
         for j in range(i+1, i+6):
             if j >= len(close_prices) or np.isnan(close_prices[j]):
                 continue
@@ -798,11 +720,9 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
                 break
         if is_peak:
             peaks.append((i, close_prices[i]))
-    
     # 如果找到的高点少于3个，无法形成头肩顶
     if len(peaks) < 3:
         return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-    
     # 检测M头（两个高点）
     m_top_detected = False
     m_top_confidence = 0.0
@@ -810,19 +730,15 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
         # 两个高点，第二个略低于第一个，中间有明显低点
         peak1_idx, peak1_price = peaks[-2]
         peak2_idx, peak2_price = peaks[-1]
-        
         # 检查第二个高点是否低于第一个
         if peak2_price < peak1_price and peak2_price > peak1_price * 0.95:
             # 检查中间是否有明显低点
             if peak1_idx >= len(close_prices) or peak2_idx >= len(close_prices):
                 return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-                
             trough_idx = peak1_idx + np.argmin(close_prices[peak1_idx:peak2_idx])
             if trough_idx >= len(close_prices):
                 return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-                
             trough_price = close_prices[trough_idx]
-            
             # 检查低点是否明显
             if trough_price < peak1_price * 0.97 and trough_price < peak2_price * 0.97:
                 m_top_detected = True
@@ -831,7 +747,6 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
                 trough_depth = (peak1_price - trough_price) / peak1_price
                 m_top_confidence = 0.5 + 0.5 * min(price_diff / 0.05, 1) + 0.5 * min(trough_depth / 0.05, 1)
                 m_top_confidence = min(m_top_confidence, 1.0)
-    
     # 检测头肩顶（三个高点）
     head_and_shoulders_confidence = 0.0
     head_and_shoulders_detected = False
@@ -840,24 +755,18 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
         shoulder1_idx, shoulder1_price = peaks[-3]
         head_idx, head_price = peaks[-2]
         shoulder2_idx, shoulder2_price = peaks[-1]
-        
         # 检查中间是否为最高点
         if head_price > shoulder1_price and head_price > shoulder2_price:
             # 检查两侧肩膀是否大致对称
             shoulder_similarity = min(shoulder1_price, shoulder2_price) / max(shoulder1_price, shoulder2_price)
-            
             # 检查中间低点
             if shoulder1_idx >= len(close_prices) or head_idx >= len(close_prices) or shoulder2_idx >= len(close_prices):
                 return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-                
             trough1_idx = shoulder1_idx + np.argmin(close_prices[shoulder1_idx:head_idx])
             trough2_idx = head_idx + np.argmin(close_prices[head_idx:shoulder2_idx])
-            
             if trough1_idx >= len(close_prices) or trough2_idx >= len(close_prices):
                 return {"pattern_type": "无", "detected": False, "confidence": 0, "peaks": peaks}
-                
             neckline_price = (close_prices[trough1_idx] + close_prices[trough2_idx]) / 2
-            
             # 检查头肩比例是否合理
             if shoulder_similarity > 0.85 and head_price > neckline_price * 1.1:
                 head_and_shoulders_detected = True
@@ -866,7 +775,6 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
                 head_height = (head_price - neckline_price) / neckline_price
                 head_and_shoulders_confidence = 0.5 + 0.3 * min(shoulder_diff / 0.15, 1) + 0.2 * min(head_height / 0.15, 1)
                 head_and_shoulders_confidence = min(head_and_shoulders_confidence, 1.0)
-    
     # 确定主要检测结果
     if head_and_shoulders_detected and head_and_shoulders_confidence > m_top_confidence:
         # 【关键修复】确保confidence是标量值
@@ -891,26 +799,21 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
             "confidence": 0.0,
             "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
-
 def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, critical: float, deviation: float) -> str:
     """生成策略信号消息"""
     # 计算连续站上/跌破均线的天数
     consecutive_above = calculate_consecutive_days_above(df, critical)
     consecutive_below = calculate_consecutive_days_below(df, critical)
-    
     # 计算成交量变化
     volume_change = calculate_volume_change(df)
-    
     # 检测M头/头肩顶形态
     pattern_detection = detect_head_and_shoulders(df)
-    
     # 3. 震荡市判断 - 优先级最高
     is_volatile, cross_count, (min_dev, max_dev) = is_in_volatile_market(df)
     if is_volatile:
         # 计算上轨和下轨价格
         upper_band = critical * (1 + max_dev/100)
         lower_band = critical * (1 + min_dev/100)
-        
         message = (
             f"【震荡市】连续10日价格反复穿均线（穿越{cross_count}次），偏离率范围[{min_dev:.2f}%~{max_dev:.2f}%]\n"
             f"✅ 操作建议：\n"
@@ -920,7 +823,6 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             f"⚠️ 避免频繁交易，等待趋势明朗\n"
         )
         return message
-    
     # 1. YES信号：当前价格 ≥ 20日均线
     if current >= critical:
         # 子条件1：首次突破（价格刚站上均线，连续2-3日站稳+成交量放大20%+）
@@ -954,12 +856,10 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     confidence = pattern_detection["confidence"]
                     # 【关键修复】确保confidence是标量值
                     confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），建议减仓10%-15%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                
                 message = (
                     f"【趋势稳健】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
@@ -977,12 +877,10 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     confidence = pattern_detection["confidence"]
                     # 【关键修复】确保confidence是标量值
                     confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓10%-15%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
-                
                 message = (
                     f"【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
@@ -1000,12 +898,10 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     confidence = pattern_detection["confidence"]
                     # 【关键修复】确保confidence是标量值
                     confidence = float(confidence) if isinstance(confidence, (np.ndarray, np.float32)) else confidence
-                    
                     if confidence >= PATTERN_CONFIDENCE_THRESHOLD:
                         pattern_msg = f"【重要】{pattern_name}形态已确认（置信度{confidence:.0%}），立即减仓20%-30%"
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓15%-25%"
-                
                 message = (
                     f"【超买风险】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：\n"
@@ -1014,12 +910,10 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 等待偏离率回落至≤+5%（约{critical * 1.05:.2f}）时加回\n"
                     f"{pattern_msg}\n"
                 )
-    
     # 2. NO信号：当前价格 ＜ 20日均线
     else:
         # 计算亏损比例
         loss_percentage = calculate_loss_percentage(df)
-        
         # 子条件1：首次跌破（价格刚跌穿均线，连续1-2日未收回+成交量放大）
         if consecutive_below == 1 and volume_change > 0.2:
             if loss_percentage > -15.0:  # 亏损<15%
@@ -1082,23 +976,24 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"  • 达到目标即卖出加仓部分\n"
                     f"⚠️ 重点观察：若跌破前低，立即止损\n"
                 )
-    
     return message
-
 def generate_report():
     """生成策略报告并推送微信"""
     try:
         beijing_time = get_beijing_time()
-        
         # 用于存储所有指数的简要信息，用于总结消息
         summary_lines = []
         valid_indices_count = 0
-        
+        # 按序号排序指数
+        sorted_indices = sorted(INDICES, key=lambda x: x["order"])
         # 按指定顺序处理
-        for idx in INDICES:
+        for idx in sorted_indices:
+            # 跳过开关为2的指数
+            if idx.get("switch", 1) == 2:
+                logger.info(f"跳过指数: {idx['name']}({idx['code']})，开关设置为2")
+                continue
             code = idx["code"]
             name = idx["name"]
-            
             # 从相应的数据源获取指数数据
             df = fetch_index_data(idx)
             if df.empty:
@@ -1108,7 +1003,6 @@ def generate_report():
                 # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
-                
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
                 message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
                 # 修正：错误信号类型显示问题
@@ -1123,7 +1017,6 @@ def generate_report():
                 send_wechat_message(message)
                 time.sleep(1)
                 continue
-            
             # 确保有足够数据
             if len(df) < CRITICAL_VALUE_DAYS:
                 logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
@@ -1132,7 +1025,6 @@ def generate_report():
                 # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
-                
                 message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
                 message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
                 # 修正：错误信号类型显示问题
@@ -1147,10 +1039,8 @@ def generate_report():
                 send_wechat_message(message)
                 time.sleep(2)
                 continue
-            
             # 修复：确保获取标量值而不是Series
             close_price = df['收盘'].values[-1]
-            
             # 修复：确保critical_value是标量值
             critical_value = calculate_critical_value(df)
             # 如果返回的是Series，获取最后一个值
@@ -1159,7 +1049,6 @@ def generate_report():
             # 如果返回的是DataFrame，获取最后一个值
             elif isinstance(critical_value, pd.DataFrame):
                 critical_value = critical_value.iloc[-1, 0]
-            
             # 修复：确保close_price和critical_value都是数值类型
             try:
                 close_price = float(close_price)
@@ -1167,47 +1056,37 @@ def generate_report():
             except (TypeError, ValueError) as e:
                 logger.error(f"转换价格值失败: {str(e)}")
                 continue
-            
             # 计算偏离率
             deviation = calculate_deviation(close_price, critical_value)
-            
             # 状态判断（收盘价在临界值之上为YES，否则为NO）
             status = "YES" if close_price >= critical_value else "NO"
-            
             # 生成详细策略信号
             signal_message = generate_signal_message(idx, df, close_price, critical_value, deviation)
-            
             # 构建消息
             message_lines = []
             # 整合所有ETF到一条消息
             etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
             etf_str = "，".join(etf_list)
-            
             message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
             message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             message_lines.append(f"{signal_symbol} 信号：{status} {signal_message}")            
             message = "".join(message_lines)
-            
             # 发送消息
             logger.info(f"推送 {name} 策略信号")
             send_wechat_message(message)
-            
             # 添加到总结消息
             # 确保名称对齐 - 使用固定宽度
             name_padding = 10 if len(name) <= 4 else 8  # 中文名称通常2-4个字
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             index_short_name = name.split('(')[0].strip()
             summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
-            
             valid_indices_count += 1
             time.sleep(1)
-        
         # 如果有有效的指数数据，发送总结消息
         if valid_indices_count > 0:
             # 构建总结消息
@@ -1215,19 +1094,14 @@ def generate_report():
             logger.info("推送总结消息")
             send_wechat_message(summary_message)
             time.sleep(1)
-        
         logger.info(f"所有指数策略报告已成功发送至企业微信（共{valid_indices_count}个有效指数）")
-    
     except Exception as e:
         logger.error(f"策略执行失败: {str(e)}", exc_info=True)
         # 修正：错误消息与正常信号消息分离
         send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}", message_type="error")
-
 if __name__ == "__main__":
     logger.info("===== 开始执行 指数Yes/No策略 =====")
-    
     # 添加延时
     time.sleep(30)
-    
     generate_report()
     logger.info("=== 指数Yes/No策略执行完成 ===")

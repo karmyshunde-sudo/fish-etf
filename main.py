@@ -502,7 +502,7 @@ def handle_index_yesno() -> Dict[str, Any]:
     try:
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()  # 【日期datetime类型规则】确保日期在内存中是datetime类型
-        logger.info(f"开始执行ETF Yes/No策略 (UTC: {utc_now}, CST: {beijing_now})")
+        logger.info(f"开始执行【指数Yes/No策略】 (UTC: {utc_now}, CST: {beijing_now})")
         
         # 导入index_YesNo模块
         from index_yesno import generate_report

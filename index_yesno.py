@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-指数 Yes/No 策略执行器
-每天计算指定指数的策略信号并推送微信通知
-"""
+
+#指数 Yes/No 策略执行器
+#每天计算指定指数的策略信号并推送微信通知
+
+
 # 使用的API接口:
 # 1. baostock:
 #    - bs.login() - 登录baostock
@@ -21,6 +22,7 @@
 #    - pd.DataFrame() - 创建数据框
 # 5. numpy:
 #    - np.isnan() - 检查NaN值
+
 import os
 import logging
 import pandas as pd
@@ -45,28 +47,22 @@ logger = logging.getLogger(__name__)
 INDICES = [
     # 1. 伦敦金现 (GC=F) - 使用yfinance
     {
+        "order": 1,
+        "switch": 2,
         "code": "GC=F",
-        "name": "伦敦金现(XAU)",
+        "name": "1、伦敦金现(XAU)",
         "description": "国际黄金价格",
         "source": "yfinance",
         "etfs": [
             {"code": "518880", "name": "华安黄金ETF", "description": "黄金基金"}
         ]
     },
-    # 2. 恒生科技指数 (HSTECH) - 使用yfinance
-    {
-        "code": "HSTECH.HK",
-        "name": "恒生科技指数(HSTECH)",
-        "description": "港股科技龙头企业指数",
-        "source": "yfinance",
-        "etfs": [
-            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
-        ]
-    },
     # 3. 纳斯达克100 (^NDX) - 使用yfinance
     {
+        "order": 3,
+        "switch": 2,
         "code": "^NDX",
-        "name": "纳斯达克100(NDX)",
+        "name": "3、纳斯达克100(NDX)",
         "description": "美国科技股代表指数",
         "source": "yfinance",
         "etfs": [
@@ -76,8 +72,10 @@ INDICES = [
     },
     # 4. 上证50 (000016) - 仅用baostock
     {
+        "order": 4,
+        "switch": 2,
         "code": "sh.000016",
-        "name": "上证50(SH000016)",
+        "name": "4、上证50(SH000016)",
         "description": "上证50蓝筹股指数",
         "source": "baostock",
         "etfs": [
@@ -86,38 +84,94 @@ INDICES = [
     },
     # 5. 沪深300 (000300) - 仅用baostock
     {
+        "order": 5,
+        "switch": 2,
         "code": "sh.000300",
-        "name": "沪深300(SH000300)",
+        "name": "5、沪深300(SH000300)",
         "description": "A股大盘蓝筹股指数",
         "source": "baostock",
         "etfs": [
             {"code": "510300", "name": "华泰柏瑞沪深300ETF", "description": "沪深300ETF"}
         ]
     },
-    # 6. 微盘股 (883418) - 使用akshare
-    {
-        "code": "883418",
-        "name": "微盘股(SH883418)",
-        "description": "小微盘股票指数",
-        "source": "akshare",
-        "etfs": [
-            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
-        ]
-    },
     # 7. 创业板指数 (399006) - 仅用baostock
     {
+        "order": 7,
+        "switch": 2,
         "code": "sz.399006",
-        "name": "创业板指(SZ399006)",
+        "name": "7、创业板指(SZ399006)",
         "description": "创业板龙头公司",
         "source": "baostock",
         "etfs": [
             {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
         ]
     },
+    # 10. 中证500 (000905) - 仅用baostock
+    {
+        "order": 10,
+        "switch": 2,
+        "code": "sh.000905",
+        "name": "10、中证500(SH000905)",
+        "description": "A股中小盘股指数",
+        "source": "baostock",
+        "etfs": [
+            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
+        ]
+    },
+    # 13. 中证1000 (000852) - 仅用baostock
+    {
+        "order": 13,
+        "switch": 2,
+        "code": "sh.000852",
+        "name": "13、中证1000(SH000852)",
+        "description": "中盘股指数",
+        "source": "baostock",
+        "etfs": [
+            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
+        ]
+    },
+    # 15. 恒生综合指数 (HSI) - 使用yfinance
+    {
+        "order": 15,
+        "switch": 2,
+        "code": "^HSI",
+        "name": "15、恒生综合指数(HSI)",
+        "description": "香港股市综合蓝筹指数",
+        "source": "yfinance",
+        "etfs": [
+            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
+        ]
+    },
+    # 2. 恒生科技指数 (HSTECH) - 使用yfinance
+    {
+        "order": 2,
+        "switch": 1,
+        "code": "HSTECH.HK",
+        "name": "2、恒生科技指数(HSTECH)",
+        "description": "港股科技龙头企业指数",
+        "source": "yfinance",
+        "etfs": [
+            {"code": "513130", "name": "华夏恒生科技ETF", "description": "恒生科技ETF"}
+        ]
+    },
+    # 6. 微盘股 (883418) - 使用akshare
+    {
+        "order": 6,
+        "switch": 1,
+        "code": "883418",
+        "name": "6、微盘股(SH883418)",
+        "description": "小微盘股票指数",
+        "source": "akshare",
+        "etfs": [
+            {"code": "510530", "name": "华夏中证500ETF", "description": "微盘股ETF"}
+        ]
+    },
     # 8. 科创50 (000688) - 使用akshare
     {
+        "order": 8,
+        "switch": 1,
         "code": "000688",
-        "name": "科创50(SH000688)",
+        "name": "8、科创50(SH000688)",
         "description": "科创板龙头公司",
         "source": "akshare",
         "etfs": [
@@ -126,28 +180,22 @@ INDICES = [
     },
     # 9. 北证50 (899050) - 使用baostock
     {
+        "order": 9,
+        "switch": 1,
         "code": "bj.899050",
-        "name": "北证50(BJ899050)",
+        "name": "9、北证50(BJ899050)",
         "description": "北交所龙头公司",
         "source": "baostock",
         "etfs": [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
         ]
     },
-    # 10. 中证500 (000905) - 仅用baostock
-    {
-        "code": "sh.000905",
-        "name": "中证500(SH000905)",
-        "description": "A股中小盘股指数",
-        "source": "baostock",
-        "etfs": [
-            {"code": "510500", "name": "南方中证500ETF", "description": "中证500ETF"}
-        ]
-    },
     # 11. 恒生国企指数 (HSCEI) - 使用yfinance
     {
+        "order": 11,
+        "switch": 1,
         "code": "^HSCEI",
-        "name": "恒生国企指数(HSCEI)",
+        "name": "11、恒生国企指数(HSCEI)",
         "description": "港股国企指数",
         "source": "yfinance",
         "etfs": [
@@ -156,42 +204,26 @@ INDICES = [
     },
     # 12. 中证2000 (932000) - 使用baostock
     {
+        "order": 12,
+        "switch": 1,
         "code": "sh.932000",
-        "name": "中证2000(SH932000)",
+        "name": "12、中证2000(SH932000)",
         "description": "中盘股指数",
         "source": "baostock",
         "etfs": [
             {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
         ]
     },
-    # 13. 中证1000 (000852) - 仅用baostock
-    {
-        "code": "sh.000852",
-        "name": "中证1000(SH000852)",
-        "description": "中盘股指数",
-        "source": "baostock",
-        "etfs": [
-            {"code": "512100", "name": "南方中证1000ETF", "description": "中证1000ETF"}
-        ]
-    },
     # 14. 中概互联指数 (HXC) - 使用yfinance
     {
+        "order": 14,
+        "switch": 1,
         "code": "^HXC",
-        "name": "中概互联指数(HXC)",
+        "name": "14、中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
         "source": "yfinance",
         "etfs": [
             {"code": "513500", "name": "易方达中概互联网ETF", "description": "中概互联"}
-        ]
-    },
-    # 15. 恒生综合指数 (HSI) - 使用yfinance
-    {
-        "code": "^HSI",
-        "name": "恒生综合指数(HSI)",
-        "description": "香港股市综合蓝筹指数",
-        "source": "yfinance",
-        "etfs": [
-            {"code": "513400", "name": "华夏恒生互联网ETF", "description": "恒生ETF"}
         ]
     }
 ]
@@ -958,8 +990,14 @@ def generate_report():
         # 用于存储所有指数的简要信息，用于总结消息
         summary_lines = []
         valid_indices_count = 0
+        # 按序号排序指数
+        sorted_indices = sorted(INDICES, key=lambda x: x["order"])
         # 按指定顺序处理
-        for idx in INDICES:
+        for idx in sorted_indices:
+            # 跳过开关为2的指数
+            if idx.get("switch", 1) == 2:
+                logger.info(f"跳过指数: {idx['name']}({idx['code']})，开关设置为2")
+                continue
             code = idx["code"]
             name = idx["name"]
             # 从相应的数据源获取指数数据

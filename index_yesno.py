@@ -22,6 +22,7 @@
 import os
 import logging
 import pandas as pd
+import akshare as ak
 import baostock as bs  # 用于A股指数数据
 import time
 import numpy as np
@@ -406,8 +407,132 @@ def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:
         return fetch_baostock_data(index_info["code"], days)
     elif index_info["source"] == "yfinance":
         return fetch_yfinance_data(index_info["code"], days)
+    elif index_info["source"] == "akshare":
+        return fetch_akshare_data(index_info["code"], days)
     else:
         logger.error(f"未知数据源: {index_info['source']}")
+        return pd.DataFrame()
+
+def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
+    """
+    从akshare获取指数历史数据
+    
+    Args:
+        index_code: 指数代码
+        days: 获取最近多少天的数据
+        
+    Returns:
+        pd.DataFrame: 指数日线数据
+    """
+    try:
+        # 添加随机延时避免被封（5.0-8.0秒）
+        time.sleep(random.uniform(5.0, 8.0))
+        
+        # 计算日期范围
+        end_date_dt = datetime.now()
+        start_date_dt = end_date_dt - timedelta(days=days)
+        
+        # 转换为字符串格式
+        end_date = end_date_dt.strftime("%Y%m%d")
+        start_date = start_date_dt.strftime("%Y%m%d")
+        
+        logger.info(f"使用akshare获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
+        
+        # 尝试获取数据
+        try:
+            # 根据指数代码类型选择不同的akshare接口
+            if index_code.startswith(('0', '3', '6')):  # A股指数
+                df = ak.index_zh_a_hist(
+                    symbol=index_code,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust="qfq"
+                )
+            elif index_code.startswith('H'):  # 港股指数
+                # 尝试恒生系列指数
+                if 'HSI' in index_code or 'HSTECH' in index_code or 'HSCEI' in index_code:
+                    df = ak.index_hk_hist(
+                        symbol=index_code,
+                        period="daily",
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                else:
+                    # 其他港股指数
+                    df = ak.stock_hk_index_daily_em(
+                        symbol=index_code,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+            elif index_code.startswith(('8', '9')):  # 其他A股指数
+                df = ak.index_zh_a_hist(
+                    symbol=index_code,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust="qfq"
+                )
+            else:
+                # 默认处理
+                df = ak.index_zh_a_hist(
+                    symbol=index_code,
+                    period="daily",
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust="qfq"
+                )
+            
+            if df.empty:
+                logger.warning(f"通过akshare获取指数 {index_code} 数据为空")
+                return pd.DataFrame()
+            
+            # 标准化列名
+            df = df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量',
+                'amount': '成交额'
+            })
+            
+            # 确保日期列为datetime类型
+            df['日期'] = pd.to_datetime(df['日期'])
+            
+            # 确保价格列是数值类型
+            price_columns = ['开盘', '最高', '最低', '收盘']
+            for col in price_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 确保成交量和成交额是数值类型
+            volume_columns = ['成交量', '成交额']
+            for col in volume_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 删除包含NaN的行
+            df = df.dropna(subset=['收盘'])
+            
+            # 排序
+            df = df.sort_values('日期').reset_index(drop=True)
+            
+            # 检查数据量
+            if len(df) <= 1:
+                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                return pd.DataFrame()
+            
+            logger.info(f"✅ 通过akshare成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
+            return df
+        
+        except Exception as e:
+            logger.error(f"通过akshare获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+            return pd.DataFrame()
+    
+    except Exception as e:
+        logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
 def calculate_critical_value(df: pd.DataFrame) -> float:

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 #指数 Yes/No 策略执行器
 #每天计算指定指数的策略信号并推送微信通知
-
-
 # 使用的API接口:
 # 1. baostock:
 #    - bs.login() - 登录baostock
@@ -22,7 +19,6 @@
 #    - pd.DataFrame() - 创建数据框
 # 5. numpy:
 #    - np.isnan() - 检查NaN值
-
 import os
 import logging
 import pandas as pd
@@ -146,7 +142,7 @@ INDICES = [
     {
         "order": 2,
         "switch": 1,
-        "code": "HSTECH.HK",
+        "code": "^HSTECH",
         "name": "2、恒生科技指数(HSTECH)",
         "description": "港股科技龙头企业指数",
         "source": "yfinance",
@@ -178,14 +174,14 @@ INDICES = [
             {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
         ]
     },
-    # 9. 北证50 (899050) - 使用baostock
+    # 9. 北证50 (899050) - 使用akshare
     {
         "order": 9,
         "switch": 1,
-        "code": "bj.899050",
+        "code": "899050",
         "name": "9、北证50(BJ899050)",
         "description": "北交所龙头公司",
-        "source": "baostock",
+        "source": "akshare",
         "etfs": [
             {"code": "515200", "name": "华夏北证50ETF", "description": "北证50ETF"}
         ]
@@ -194,7 +190,7 @@ INDICES = [
     {
         "order": 11,
         "switch": 1,
-        "code": "^HSCEI",
+        "code": "HSCEI.HK",
         "name": "11、恒生国企指数(HSCEI)",
         "description": "港股国企指数",
         "source": "yfinance",
@@ -202,14 +198,14 @@ INDICES = [
             {"code": "510900", "name": "易方达恒生国企ETF", "description": "H股ETF"}
         ]
     },
-    # 12. 中证2000 (932000) - 使用baostock
+    # 12. 中证2000 (932000) - 使用akshare
     {
         "order": 12,
         "switch": 1,
-        "code": "sh.932000",
+        "code": "932000",
         "name": "12、中证2000(SH932000)",
         "description": "中盘股指数",
-        "source": "baostock",
+        "source": "akshare",
         "etfs": [
             {"code": "561020", "name": "南方中证2000ETF", "description": "中证2000ETF"}
         ]
@@ -218,7 +214,7 @@ INDICES = [
     {
         "order": 14,
         "switch": 1,
-        "code": "^HXC",
+        "code": "KWEB",
         "name": "14、中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
         "source": "yfinance",
@@ -425,8 +421,7 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date,
-                    adjust="qfq"
+                    end_date=end_date
                 )
             elif index_code.startswith('H'):  # 港股指数
                 # 尝试恒生系列指数
@@ -449,8 +444,7 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date,
-                    adjust="qfq"
+                    end_date=end_date
                 )
             else:
                 # 默认处理
@@ -458,8 +452,7 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
-                    end_date=end_date,
-                    adjust="qfq"
+                    end_date=end_date
                 )
             if df.empty:
                 logger.warning(f"通过akshare获取指数 {index_code} 数据为空")

@@ -42,9 +42,9 @@ INDICES = [
     # 1. 伦敦金现 (GC=F) - 使用yfinance
     {
         "order": 1,
-        "switch": 1,
+        "switch": 2,
         "code": "GC=F",
-        "name": "伦敦金现(XAU)",
+        "name": "1、伦敦金现(XAU)",
         "description": "国际黄金价格",
         "source": "yfinance",
         "etfs": [
@@ -56,7 +56,7 @@ INDICES = [
         "order": 2,
         "switch": 1,
         "code": "HSTECH.HK",
-        "name": "恒生科技指数(HSTECH)",
+        "name": "2、恒生科技指数(HSTECH)",
         "description": "港股科技龙头企业指数",
         "source": "yfinance",
         "etfs": [
@@ -66,9 +66,9 @@ INDICES = [
     # 3. 纳斯达克100 (^NDX) - 使用yfinance
     {
         "order": 3,
-        "switch": 1,
+        "switch": 2,
         "code": "^NDX",
-        "name": "纳斯达克100(NDX)",
+        "name": "3、纳斯达克100(NDX)",
         "description": "美国科技股代表指数",
         "source": "yfinance",
         "etfs": [
@@ -79,9 +79,9 @@ INDICES = [
     # 4. 上证50 (000016) - 仅用baostock
     {
         "order": 4,
-        "switch": 1,
+        "switch": 2,
         "code": "sh.000016",
-        "name": "上证50(SH000016)",
+        "name": "4、上证50(SH000016)",
         "description": "上证50蓝筹股指数",
         "source": "baostock",
         "etfs": [
@@ -91,9 +91,9 @@ INDICES = [
     # 5. 沪深300 (000300) - 仅用baostock
     {
         "order": 5,
-        "switch": 1,
+        "switch": 2,
         "code": "sh.000300",
-        "name": "沪深300(SH000300)",
+        "name": "5、沪深300(SH000300)",
         "description": "A股大盘蓝筹股指数",
         "source": "baostock",
         "etfs": [
@@ -105,7 +105,7 @@ INDICES = [
         "order": 6,
         "switch": 1,
         "code": "883418",
-        "name": "微盘股(SH883418)",
+        "name": "6、微盘股(SH883418)",
         "description": "小微盘股票指数",
         "source": "akshare",
         "etfs": [
@@ -115,9 +115,9 @@ INDICES = [
     # 7. 创业板指数 (399006) - 仅用baostock
     {
         "order": 7,
-        "switch": 1,
+        "switch": 2,
         "code": "sz.399006",
-        "name": "创业板指(SZ399006)",
+        "name": "7、创业板指(SZ399006)",
         "description": "创业板龙头公司",
         "source": "baostock",
         "etfs": [
@@ -129,7 +129,7 @@ INDICES = [
         "order": 8,
         "switch": 1,
         "code": "000688",
-        "name": "科创50(SH000688)",
+        "name": "8、科创50(SH000688)",
         "description": "科创板龙头公司",
         "source": "akshare",
         "etfs": [
@@ -141,7 +141,7 @@ INDICES = [
         "order": 9,
         "switch": 1,
         "code": "bj.899050",
-        "name": "北证50(BJ899050)",
+        "name": "9、北证50(BJ899050)",
         "description": "北交所龙头公司",
         "source": "baostock",
         "etfs": [
@@ -151,9 +151,9 @@ INDICES = [
     # 10. 中证500 (000905) - 仅用baostock
     {
         "order": 10,
-        "switch": 1,
+        "switch": 2,
         "code": "sh.000905",
-        "name": "中证500(SH000905)",
+        "name": "10、中证500(SH000905)",
         "description": "A股中小盘股指数",
         "source": "baostock",
         "etfs": [
@@ -165,7 +165,7 @@ INDICES = [
         "order": 11,
         "switch": 1,
         "code": "^HSCEI",
-        "name": "恒生国企指数(HSCEI)",
+        "name": "11、恒生国企指数(HSCEI)",
         "description": "港股国企指数",
         "source": "yfinance",
         "etfs": [
@@ -177,7 +177,7 @@ INDICES = [
         "order": 12,
         "switch": 1,
         "code": "sh.932000",
-        "name": "中证2000(SH932000)",
+        "name": "12、中证2000(SH932000)",
         "description": "中盘股指数",
         "source": "baostock",
         "etfs": [
@@ -187,9 +187,9 @@ INDICES = [
     # 13. 中证1000 (000852) - 仅用baostock
     {
         "order": 13,
-        "switch": 1,
+        "switch": 2,
         "code": "sh.000852",
-        "name": "中证1000(SH000852)",
+        "name": "13、中证1000(SH000852)",
         "description": "中盘股指数",
         "source": "baostock",
         "etfs": [
@@ -201,7 +201,7 @@ INDICES = [
         "order": 14,
         "switch": 1,
         "code": "^HXC",
-        "name": "中概互联指数(HXC)",
+        "name": "14、中概互联指数(HXC)",
         "description": "海外上市中国互联网公司",
         "source": "yfinance",
         "etfs": [
@@ -211,9 +211,9 @@ INDICES = [
     # 15. 恒生综合指数 (HSI) - 使用yfinance
     {
         "order": 15,
-        "switch": 1,
+        "switch": 2,
         "code": "^HSI",
-        "name": "恒生综合指数(HSI)",
+        "name": "15、恒生综合指数(HSI)",
         "description": "香港股市综合蓝筹指数",
         "source": "yfinance",
         "etfs": [

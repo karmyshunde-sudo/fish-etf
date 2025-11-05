@@ -114,12 +114,12 @@ INDICES = [
             {"code": "159915", "name": "易方达创业板ETF", "description": "创业板ETF"}
         ]
     },
-    # 8. 科创50 (000688) - 使用baostock
+    # 8. 科创50 (000688) - 使用akshare
     {
-        "code": "sh.000688",
+        "code": "000688",
         "name": "科创50(SH000688)",
         "description": "科创板龙头公司",
-        "source": "baostock",
+        "source": "akshare",
         "etfs": [
             {"code": "588000", "name": "华夏科创50ETF", "description": "科创50ETF"}
         ]

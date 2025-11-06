@@ -916,10 +916,8 @@ def generate_report():
         # 用于存储所有指数的简要信息，用于总结消息
         summary_lines = []
         valid_indices_count = 0
-        # 按序号排序指数
-        sorted_indices = sorted(INDICES, key=lambda x: x["order"])
-        # 按指定顺序处理
-        for idx in sorted_indices:
+        # 按配置顺序处理（已移除排序逻辑，因为配置已经按顺序排列）
+        for idx in INDICES:
             # 跳过开关为2的指数，不显示任何日志
             if idx.get("switch", 1) == 2:
                 continue

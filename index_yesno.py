@@ -3,11 +3,22 @@
 #指数 Yes/No 策略执行器
 #每天计算指定指数的策略信号并推送微信通知
 # 使用的API接口:
-# 1. baostock:- bs.login() - 登录baostock   - bs.logout() - 退出baostock  - bs.query_history_k_data_plus() - 获取历史K线数据
-# 2. yfinance:- yf.download() - 下载历史数据
-# 3. akshare:- ak.index_zh_a_hist() - A股指数数据    - ak.index_hk_hist() - 港股指数数据      - ak.stock_hk_index_daily_em() - 东方财富港股指数数据
-# 4. pandas:- pd.to_datetime() - 转换日期格式    - pd.to_numeric() - 转换数值类型    - pd.DataFrame() - 创建数据框
-# 5. numpy:- np.isnan() - 检查NaN值
+# 1. baostock:
+#    - bs.login() - 登录baostock
+#    - bs.logout() - 退出baostock
+#    - bs.query_history_k_data_plus() - 获取历史K线数据
+# 2. yfinance:
+#    - yf.download() - 下载历史数据
+# 3. akshare:
+#    - ak.index_zh_a_hist() - 获取A股指数历史行情数据
+#    - ak.index_hk_hist() - 获取港股指数历史行情数据  
+#    - ak.stock_hk_index_daily_em() - 获取东方财富港股指数行情数据
+# 4. pandas:
+#    - pd.to_datetime() - 转换日期格式
+#    - pd.to_numeric() - 转换数值类型
+#    - pd.DataFrame() - 创建数据框
+# 5. numpy:
+#    - np.isnan() - 检查NaN值
 import os
 import logging
 import pandas as pd
@@ -1003,8 +1014,8 @@ def generate_report():
             # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
             index_short_name = name.split('(')[0].strip()
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%
-"
+            # 修复：添加了缺失的引号，确保字符串正确闭合
+            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)
@@ -1019,7 +1030,10 @@ def generate_report():
     except Exception as e:
         logger.error(f"策略执行失败: {str(e)}", exc_info=True)
         # 修正：错误消息与正常信号消息分离
-        send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}", message_type="error")
+        try:
+            send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}")
+        except Exception as wechat_error:
+            logger.error(f"发送微信消息失败: {str(wechat_error)}", exc_info=True)
 if __name__ == "__main__":
     logger.info("===== 开始执行 指数Yes/No策略 =====")
     # 添加延时

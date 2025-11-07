@@ -269,10 +269,30 @@ def get_stock_list_data():
                     df['所属板块'] = "未知板块"
                     logger.warning("代码列不存在，所属板块列已设为'未知板块'")
                 
+                # 【关键修改】获取流通市值数据并合并
+                market_value_data = get_market_value_data()
+                if not market_value_data.empty and "代码" in df.columns:
+                    # 从Baostock格式转换为标准6位代码
+                    df['代码'] = df['代码'].apply(lambda x: str(x).zfill(6))
+                    # 合并流通市值和总市值数据
+                    df = pd.merge(df, market_value_data, on='代码', how='left')
+                    
+                    # 填充缺失值
+                    df['流通市值'] = df['流通市值'].fillna(0.0)
+                    df['总市值'] = df['总市值'].fillna(0.0)
+                    
+                    logger.info("已成功合并流通市值数据")
+                else:
+                    # 如果获取失败，保留原有列但不设为0.0（让后续代码处理）
+                    if '流通市值' not in df.columns:
+                        df['流通市值'] = 0.0
+                        logger.warning("流通市值列不存在，已添加默认值0.0")
+                    if '总市值' not in df.columns:
+                        df['总市值'] = 0.0
+                        logger.warning("总市值列不存在，已添加默认值0.0")
+                
                 # 【关键修改】添加缺失的列（根据要求设为0或默认值）
                 # 注意：这些列在Baostock接口中不存在，根据要求设为0
-                df['流通市值'] = 0.0
-                df['总市值'] = 0.0
                 df['动态市盈率'] = 0.0
                 
                 # 【关键修改】确保有必要的列
@@ -426,6 +446,40 @@ def get_pledge_data():
         logger.error(f"获取股票质押数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def get_market_value_data():
+    """
+    获取股票流通市值和总市值数据
+    Returns:
+        pd.DataFrame: 包含代码、流通市值、总市值的DataFrame
+    """
+    try:
+        logger.info("正在获取流通市值数据...")
+        # 使用akshare获取股票实时行情数据
+        df = ak.stock_zh_a_spot_em()
+        
+        if df.empty:
+            logger.error("获取流通市值数据失败：返回空数据")
+            return pd.DataFrame()
+        
+        # 重命名列以匹配系统需求
+        df = df.rename(columns={
+            '代码': '代码',
+            '流通市值': '流通市值',
+            '总市值': '总市值'
+        })
+        
+        # 选择需要的列
+        df = df[['代码', '流通市值', '总市值']]
+        
+        # 确保股票代码格式正确
+        df['代码'] = df['代码'].apply(lambda x: str(x).zfill(6))
+        
+        logger.info(f"成功获取 {len(df)} 条流通市值数据")
+        return df
+    except Exception as e:
+        logger.error(f"获取流通市值数据失败: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
 def apply_pledge_filter(stock_data):
     """
     应用质押数据过滤条件
@@ -444,6 +498,16 @@ def apply_pledge_filter(stock_data):
     
     # 创建副本避免SettingWithCopyWarning
     stock_info = stock_data.copy()
+    
+    # 确保流通市值列存在
+    if '流通市值' not in stock_info.columns:
+        stock_info['流通市值'] = 0.0
+        logger.warning("流通市值列不存在，添加默认值0.0")
+    
+    # 确保总市值列存在
+    if '总市值' not in stock_info.columns:
+        stock_info['总市值'] = 0.0
+        logger.warning("总市值列不存在，添加默认值0.0")
     
     # 仅在有质押数据时添加质押股数列
     if '质押股数' not in stock_info.columns:

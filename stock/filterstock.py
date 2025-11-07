@@ -385,7 +385,7 @@ def filter_and_update_stocks():
                     temp_df.loc[idx, 'filter'] = False
                 
                 # API调用频率限制
-                # time.sleep(random.uniform(1.0, 3.0))
+                time.sleep(random.uniform(1.0, 3.0))
         
         finally:
             # 确保登出

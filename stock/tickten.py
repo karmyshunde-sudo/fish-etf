@@ -745,6 +745,7 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     
     logger.info(f"筛选完成，共 {len(filtered_df)} 只有效股票")
     return filtered_df
+
 def get_top_stocks_for_strategy() -> dict:
     """获取各板块中适合策略的股票（直接使用本地已有数据）"""
     try:
@@ -783,8 +784,8 @@ def get_top_stocks_for_strategy() -> dict:
             if df.empty or len(df) < 40:
                 logger.debug(f"股票 {stock_code} 数据不完整，跳过")
                 return None
-            # 4. 检查市值数据状态
-            if '数据状态' in stock:
+            # 4. 检查市值数据状态 - 只有当市值过滤开启时才检查
+            if ENABLE_MARKET_VALUE_FILTER and '数据状态' in stock:
                 if '流通市值缺失' in stock['数据状态'] or '总市值缺失' in stock['数据状态']:
                     logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
                     return None
@@ -823,6 +824,7 @@ def get_top_stocks_for_strategy() -> dict:
         logger.error(f"获取优质股票列表失败: {str(e)}", exc_info=True)
         logger.error(traceback.format_exc())
         return {}
+
 def save_and_commit_stock_codes(top_stocks):
     """保存股票代码到文件并提交到Git仓库"""
     try:

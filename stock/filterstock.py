@@ -216,9 +216,58 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     
     return True
 
+def get_market_value(code):
+    """
+    使用akshare的stock_zh_a_daily接口获取单只股票的流通市值
+    参数：
+    - code: 股票代码（6位字符串）
+    返回：
+    - float: 流通市值（单位：元）
+    - None: 获取失败
+    """
+    try:
+        # 确保代码是6位字符串
+        code = str(code).zfill(6)
+        logger.debug(f"正在获取股票 {code} 的流通市值数据")
+        
+        # 使用akshare获取股票日线数据
+        df = ak.stock_zh_a_daily(symbol=f"sh{code}" if code.startswith('6') else f"sz{code}", 
+                               adjust="qfq")
+        
+        if df.empty:
+            logger.error(f"股票 {code} 返回空数据")
+            return None
+        
+        # 检查必要的列
+        required_columns = ['close', 'outstanding_share']
+        for col in required_columns:
+            if col not in df.columns:
+                logger.error(f"股票 {code} 数据缺少必要列: {col}")
+                return None
+        
+        # 获取最新交易日的数据
+        latest_data = df.iloc[-1]
+        
+        # 计算流通市值：收盘价 * 流通股本
+        close_price = latest_data['close']
+        outstanding_share = latest_data['outstanding_share']
+        
+        # 检查数据是否有效
+        if pd.isna(close_price) or pd.isna(outstanding_share) or close_price <= 0 or outstanding_share <= 0:
+            logger.warning(f"股票 {code} 数据无效: 收盘价={close_price}, 流通股本={outstanding_share}")
+            return None
+        
+        market_value = close_price * outstanding_share
+        logger.info(f"股票 {code} 流通市值: {market_value:.2f}元")
+        return market_value
+    except Exception as e:
+        logger.exception(f"获取股票 {code} 流通市值失败")
+        return None
+
 def filter_and_update_stocks():
     """
     主函数：过滤股票并更新all_stocks.csv
+    修改：添加流通市值数据获取和更新功能
     """
     # 获取all_stocks.csv文件路径
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
@@ -243,6 +292,15 @@ def filter_and_update_stocks():
                 if param_config["column"] not in basic_info_df.columns:
                     basic_info_df[param_config["column"]] = float('nan')
                     logger.info(f"添加列 '{param_config['column']}' 到all_stocks.csv文件")
+        
+        # 添加流通市值和总市值列（如果不存在）
+        if "流通市值" not in basic_info_df.columns:
+            basic_info_df["流通市值"] = float('nan')
+            logger.info("添加流通市值列到all_stocks.csv文件")
+        
+        if "总市值" not in basic_info_df.columns:
+            basic_info_df["总市值"] = float('nan')
+            logger.info("添加总市值列到all_stocks.csv文件")
         
         # 找出需要处理的股票（filter为False）
         to_process = basic_info_df[basic_info_df['filter'] == False]
@@ -281,7 +339,16 @@ def filter_and_update_stocks():
                 
                 logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(temp_df)})")
                 
-                # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
+                # 【关键修改】获取并更新流通市值
+                market_value = get_market_value(stock_code)
+                if market_value is not None:
+                    # 更新流通市值列
+                    temp_df.loc[idx, "流通市值"] = market_value
+                    logger.debug(f"已更新股票 {stock_code} 的流通市值: {market_value:.2f}")
+                else:
+                    logger.warning(f"股票 {stock_code} 流通市值获取失败，跳过更新")
+                
+                # 【关键修改】只在过滤启用时获取财务数据，并记录到DataFrame
                 dynamic_pe = None
                 if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
                     dynamic_pe = get_dynamic_pe(stock_code)
@@ -353,7 +420,6 @@ def filter_and_update_stocks():
     except Exception as e:
         logger.exception(f"处理股票列表时发生错误")
         return False
-
 if __name__ == "__main__":
     start_time = datetime.now()
     logger.info("开始执行股票财务过滤器")

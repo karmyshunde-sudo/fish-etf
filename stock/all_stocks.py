@@ -398,7 +398,7 @@ def apply_basic_filters(stock_data):
 def get_pledge_data():
     """
     获取股票质押数据
-    返回:
+    Returns:
         pd.DataFrame: 包含质押数据的DataFrame
     """
     try:
@@ -465,7 +465,10 @@ def get_market_value_data():
         df = df.rename(columns={
             '代码': '代码',
             '流通市值': '流通市值',
-            '总市值': '总市值'
+            '总市值': '总市值',
+            'market_cap': '总市值',  # 新增：添加英文列名映射
+            'total_market_value': '总市值',  # 新增：添加英文列名映射
+            'total_value': '总市值'  # 新增：添加英文列名映射
         })
         
         # 选择需要的列

@@ -606,7 +606,7 @@ def crawl_all_etfs_daily_data() -> None:
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(1.5, 2.5))
+            time.sleep(random.uniform(2.5, 5.5))
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
             

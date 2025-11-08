@@ -406,6 +406,7 @@ def filter_and_update_stocks():
         logger.info(f"追加通过的股票后，总股票数量: {len(basic_info_df)}")
         
         # 保存更新后的股票列表
+        basic_info_df['代码'] = basic_info_df['代码'].apply(lambda x: str(x).strip().zfill(6) if pd.notna(x) else x)
         basic_info_df.to_csv(basic_info_file, index=False)
         logger.info(f"已更新 {basic_info_file} 文件，当前共 {len(basic_info_df)} 只股票")
         

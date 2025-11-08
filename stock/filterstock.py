@@ -336,20 +336,23 @@ def filter_and_update_stocks():
             for idx, stock in temp_df.iterrows():
                 stock_code = str(stock["代码"]).zfill(6)
                 stock_name = stock["名称"]
+                section = stock["所属板块"]
+                # 检查板块是否有效
+                if section not in section_stocks:
+                    section = "其他板块"
                 
-                logger.info(f"处理股票: {stock_code} {stock_name} ({idx+1}/{len(temp_df)})")
+                # 2. 获取日线数据（从本地加载）
+                df = get_stock_daily_data(stock_code)
+                # 3. 检查数据完整性
+                if df.empty or len(df) < 40:
+                    logger.debug(f"股票 {stock_code} 数据不完整，跳过")
+                    continue
                 
-                # 【关键修改】获取并更新流通市值
-                market_value = get_market_value(stock_code)
-                if market_value is not None:
-                    # 更新流通市值列
-                    temp_df.loc[idx, "流通市值"] = market_value
-                    logger.debug(f"已更新股票 {stock_code} 的流通市值: {market_value:.2f}")
-                else:
-                    logger.warning(f"股票 {stock_code} 流通市值获取失败，跳过更新")
-                
-                # 【关键修改】只在过滤启用时获取财务数据，并记录到DataFrame
+                # 4. 获取并处理财务数据
                 dynamic_pe = None
+                net_profit = None
+                
+                # 获取财务指标（如果启用）
                 if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
                     dynamic_pe = get_dynamic_pe(stock_code)
                     # 保存到临时DataFrame
@@ -357,8 +360,6 @@ def filter_and_update_stocks():
                         temp_df.loc[idx, FINANCIAL_FILTER_PARAMS["dynamic_pe"]["column"]] = dynamic_pe
                         logger.debug(f"已更新股票 {stock_code} 的{FINANCIAL_FILTER_PARAMS['dynamic_pe']['column']}值: {dynamic_pe:.2f}")
                 
-                # 【关键修改】只在过滤启用时获取数据，并记录到DataFrame
-                net_profit = None
                 if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
                     net_profit = get_net_profit(stock_code)
                     # 保存到临时DataFrame
@@ -369,23 +370,37 @@ def filter_and_update_stocks():
                 # 记录获取结果
                 logger.debug(f"股票 {stock_code} 获取结果: 动态市盈率={dynamic_pe}, 净利润={net_profit}")
                 
-                # 无论是否获取成功，都尝试应用过滤条件
-                # 仅当两个指标都获取失败时才跳过
+                # 5. 应用财务过滤
                 if dynamic_pe is None and net_profit is None:
-                    logger.warning(f"股票 {stock_code} 两个财务指标均获取失败，跳过本次处理（保留股票）")
-                    continue
-                
-                # 应用财务过滤
-                if apply_financial_filters(stock_code, dynamic_pe, net_profit):
-                    temp_df.loc[idx, 'filter'] = True
-                    logger.info(f"股票 {stock_code} 通过所有过滤条件")
-                else:
+                    logger.warning(f"股票 {stock_code} 两个财务指标均获取失败，保留股票")
+                    # 财务数据获取失败的股票也要获取流通市值
+                    market_value = get_market_value(stock_code)
+                    if market_value is not None:
+                        temp_df.loc[idx, "流通市值"] = market_value
+                        logger.debug(f"已更新股票 {stock_code} 的流通市值: {market_value:.2f}")
+                    else:
+                        logger.warning(f"股票 {stock_code} 流通市值获取失败，跳过更新")
                     # 保留股票，但不设置filter为True
-                    logger.info(f"股票 {stock_code} 未通过过滤条件")
                     temp_df.loc[idx, 'filter'] = False
+                else:
+                    # 财务数据获取成功
+                    if apply_financial_filters(stock_code, dynamic_pe, net_profit):
+                        logger.info(f"股票 {stock_code} 通过所有过滤条件")
+                        # 通过财务过滤的股票获取流通市值
+                        market_value = get_market_value(stock_code)
+                        if market_value is not None:
+                            temp_df.loc[idx, "流通市值"] = market_value
+                            logger.debug(f"已更新股票 {stock_code} 的流通市值: {market_value:.2f}")
+                        else:
+                            logger.warning(f"股票 {stock_code} 流通市值获取失败，跳过更新")
+                        temp_df.loc[idx, 'filter'] = True
+                    else:
+                        logger.info(f"股票 {stock_code} 未通过过滤条件")
+                        # 未通过财务过滤的股票不获取流通市值
+                        temp_df.loc[idx, 'filter'] = False
                 
                 # API调用频率限制
-                time.sleep(random.uniform(1.0, 3.0))
+                time.sleep(random.uniform(2.0, 5.0))
         
         finally:
             # 确保登出
@@ -420,6 +435,8 @@ def filter_and_update_stocks():
     except Exception as e:
         logger.exception(f"处理股票列表时发生错误")
         return False
+
+
 if __name__ == "__main__":
     start_time = datetime.now()
     logger.info("开始执行股票财务过滤器")

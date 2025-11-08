@@ -366,6 +366,9 @@ def apply_basic_filters(stock_data):
     
     # 2. 移除名称以"N"开头的新上市股票
     before = len(stock_info)
+    # 确保名称列是字符串类型并去除前导/尾随空格
+    stock_info["名称"] = stock_info["名称"].astype(str).str.strip()
+    # 现在再检查是否以"N"开头
     stock_info = stock_info[~stock_info["名称"].str.startswith("N")]
     removed = before - len(stock_info)
     if removed > 0:

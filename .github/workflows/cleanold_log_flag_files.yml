@@ -1,9 +1,15 @@
 name: 9-清理旧logflag
 on:
   workflow_dispatch:
+    inputs:
+      task:
+        description: '任务ID（必须是"cleanoldlog"）'
+        required: true
+        default: 'cleanoldlog'
+        type: string
 
 jobs:
-  cleanoldlog:
+  clean-old-flag-log-files:
     name: 清理data/flags和data/logs目录下超过15天的文件
     runs-on: ubuntu-latest
     permissions:
@@ -28,9 +34,22 @@ jobs:
       
       - name: 安装项目依赖
         run: |
-          pip install -r requirements.txt
-          pip install -r requirements-wechat.txt
-      
+          # 检查依赖文件是否存在
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "⚠️ 注意: requirements.txt 不存在，尝试安装常用依赖"
+            pip install pandas numpy akshare requests pytz
+          fi
+          
+          # 检查微信推送依赖
+          if [ -f "requirements-wechat.txt" ]; then
+            pip install -r requirements-wechat.txt
+          else
+            echo "⚠️ 注意: requirements-wechat.txt 不存在，尝试安装微信推送依赖"
+            pip install requests
+          fi
+
       - name: 验证安全路径
         run: |
           echo "验证清理路径安全..."
@@ -50,19 +69,18 @@ jobs:
 
       - name: 运行清理脚本
         run: |
+          # 检查清理脚本是否存在
+          if [ ! -f "data_crawler/cleanup_old_files.py" ]; then
+            echo "❌ 错误: 清理脚本不存在 (data_crawler/cleanup_old_files.py)"
+            exit 1
+          fi
+          
           python data_crawler/cleanup_old_files.py
           
           # 检查脚本退出码
           if [ $? -ne 0 ]; then
             echo "❌ 清理脚本执行失败"
             exit 1
-          fi
-          
-          # 检查Git状态
-          if git status --porcelain | grep -q '^'; then
-            echo "Git仓库有未提交的变更"
-          else
-            echo "Git仓库干净，无需提交"
           fi
 
       - name: 提交清理变更

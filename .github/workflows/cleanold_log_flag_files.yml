@@ -1,4 +1,4 @@
-name: 9-清理旧flag和log文件
+name: 9-清理旧logflag
 on:
   workflow_dispatch:
 

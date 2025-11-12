@@ -12,6 +12,10 @@ jobs:
   clean-old-flag-log-files:
     name: 清理data/flags和data/logs目录下超过15天的文件
     runs-on: ubuntu-latest
+    env:
+      # 关键修复：在jobs级别设置环境变量
+      # 确保整个工作流执行期间环境变量都有效
+      WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     permissions:
       contents: write
     steps:
@@ -40,6 +44,23 @@ jobs:
             echo "⚠️ 注意: requirements.txt 不存在，安装基本依赖"
             pip install pandas numpy akshare requests pytz
           fi
+
+      - name: 验证安全路径
+        run: |
+          echo "验证清理路径安全..."
+          
+          # 确保只有指定目录会被清理
+          if [ ! -d "data/flags" ]; then
+            echo "❌ 错误: data/flags 目录不存在"
+            exit 1
+          fi
+          
+          if [ ! -d "data/logs" ]; then
+            echo "❌ 错误: data/logs 目录不存在"
+            exit 1
+          fi
+          
+          echo "✅ 路径验证通过：仅会清理 data/flags 和 data/logs 目录"
 
       - name: 运行清理脚本
         run: |
@@ -75,3 +96,86 @@ jobs:
             echo "❌ 清理脚本执行失败"
             exit 1
           fi
+
+      - name: 提交清理变更
+        if: always()
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          # 如果有Git变更，提交并推送
+          if git status --porcelain | grep -q '^'; then
+            git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+            
+            # 关键修复：使用 git add -A 暂存所有变更（包括删除）
+            git add -A
+            
+            # 计算删除的文件数量
+            DELETED_COUNT=$(git status --porcelain | grep '^ D' | wc -l)
+            
+            # 创建提交消息
+            commit_message="cleanup: 删除 ${DELETED_COUNT} 个超过15天的文件 [skip ci] - $(date +%Y%m%d%H%M%S)"
+            
+            # 提交并推送
+            git commit -m "$commit_message"
+            git push origin main
+            echo "✅ 清理变更已提交并推送到远程仓库"
+            echo "提交消息: $commit_message"
+          else
+            echo "ℹ️ 无需要提交的清理变更"
+          fi
+
+      - name: 验证清理结果
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          # 检查清理后的文件数量
+          FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
+          LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
+          
+          echo "✅ data/flags 目录剩余 $FLAGS_COUNT 个文件"
+          echo "✅ data/logs 目录剩余 $LOGS_COUNT 个文件"
+          
+          # 检查是否真的有文件被删除
+          if [ $FLAGS_COUNT -eq 0 ] && [ $LOGS_COUNT -eq 0 ]; then
+            echo "⚠️ 注意: 所有文件已被删除，可能需要检查清理逻辑"
+          elif [ $FLAGS_COUNT -eq $(find data/flags -maxdepth 1 -type f -mtime +15 | wc -l) ] && 
+               [ $LOGS_COUNT -eq $(find data/logs -maxdepth 1 -type f -mtime +15 | wc -l) ]; then
+            echo "⚠️ 注意: 未删除任何文件，可能清理逻辑有问题"
+          fi
+
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          # 获取北京时间
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          
+          # 获取清理后的文件数量
+          FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
+          LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
+          
+          # 获取删除的文件数量
+          DELETED_COUNT=$(git log -1 --pretty=format:%s | grep -o '删除 [0-9]\+ 个' | awk '{print $2}')
+          
+          # 确保DELETED_COUNT是数字
+          if ! [[ "$DELETED_COUNT" =~ ^[0-9]+$ ]]; then
+            DELETED_COUNT=0
+          fi
+          
+          # 准备消息内容
+          MESSAGE="✅ 【旧文件清理】任务已完成\n"
+          MESSAGE+="- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\n"
+          MESSAGE+="- data/logs 目录剩余 ${LOGS_COUNT} 个文件\n"
+          MESSAGE+="- 实际删除 ${DELETED_COUNT} 个文件（超过15天）\n"
+          MESSAGE+="- 清理阈值：15天前\n"
+          MESSAGE+="- 北京时间: ${BEIJING_TIME}\n\n"
+          MESSAGE+="详细结果请查看工作流日志"
+          
+          # 发送微信消息
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MESSAGE\"}}"
+          
+          echo "✅ 微信消息已发送"
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}

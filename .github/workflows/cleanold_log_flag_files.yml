@@ -105,16 +105,17 @@ jobs:
           if git status --porcelain | grep -q '^'; then
             git config user.name "GitHub Actions" && git config user.email "actions@github.com"
             
+            # 关键修复：使用 git add -A 暂存所有变更（包括删除）
+            git add -A
+            
             # 计算删除的文件数量
             DELETED_COUNT=$(git status --porcelain | grep '^ D' | wc -l)
             
-            # 创建提交消息，包含删除文件数量
+            # 创建提交消息
             commit_message="cleanup: 删除 ${DELETED_COUNT} 个超过15天的文件 [skip ci] - $(date +%Y%m%d%H%M%S)"
             
-            # 提交清理变更
+            # 提交并推送
             git commit -m "$commit_message"
-            
-            # 推送变更
             git push origin main
             echo "✅ 清理变更已提交并推送到远程仓库"
             echo "提交消息: $commit_message"

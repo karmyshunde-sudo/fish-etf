@@ -283,15 +283,13 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
     commit_message = f"cleanup: 删除 {len(deleted_files)} 个超过{DAYS_THRESHOLD}天的文件 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     try:
-        # 关键修改：使用 git rm --cached 来处理已删除的文件
+        # 使用Git工具函数执行命令
         from utils.git_utils import run_git_command
         
-        # 正确处理已删除文件的方式：使用 --cached 参数
-        # 这会告诉 Git 这些文件已被删除，但不实际删除物理文件（但我们已经删了）
-        # 对于已物理删除的文件，Git 需要这个步骤来记录删除操作
-        run_git_command(['git', 'rm', '--cached'] + file_paths)
+        # 关键修复：使用 git add -A 添加所有变更（包括已删除文件）
+        run_git_command(['git', 'add', '-A'])
         
-        # 现在可以提交了
+        # 提交变更
         run_git_command(['git', 'commit', '-m', commit_message])
         
         logger.info(f"✅ Git提交成功: {commit_message}")
@@ -300,14 +298,12 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
         error_msg = f"Git提交失败: {str(e)}"
         logger.error(error_msg)
         
-        # 添加诊断信息
-        logger.error("Git状态检查:")
+        # 添加详细的Git状态诊断
         try:
-            from utils.git_utils import run_git_command
-            status = run_git_command(['git', 'status', '--short'], capture_output=True)
-            logger.error(f"当前Git状态:\n{status}")
-        except:
-            pass
+            git_status = run_git_command(['git', 'status', '--short'], capture_output=True)
+            logger.error(f"Git状态:\n{git_status}")
+        except Exception as se:
+            logger.error(f"无法获取Git状态: {str(se)}")
             
         return False
 

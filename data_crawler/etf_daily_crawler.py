@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 优化版
-【关键优化】
-- 科学延时策略：增量更新0.8-1.5秒，全量2-3秒
-- 动态延时：根据请求结果自动调整
-- 失败重试机制：避免临时限流导致失败
-- 严格保持数据结构不变
+ETF日线数据爬取模块 - 交易所接口升级版
+【关键修复】
+- 修复交易所接口路径失效问题
+- 扩展ETF代码前缀支持
+- 优化数据解析逻辑
+- 保持原有数据结构
 """
 
 import requests
@@ -18,7 +18,6 @@ import random
 import tempfile
 import shutil
 import io
-import math
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -39,10 +38,9 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # 【关键参数】优化版
-BATCH_SIZE = 80  # 保持原有逻辑不变
-BASE_DELAY = 0.8  # 基础延时（秒）
-DYNAMIC_DELAY = True  # 启用动态延时
-MAX_RETRIES = 3      # 最大重试次数
+BATCH_SIZE = 80
+BASE_DELAY = 0.8
+MAX_RETRIES = 3
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def get_etf_name(etf_code):
@@ -63,7 +61,6 @@ def get_etf_name(etf_code):
 def get_etf_fund_size(etf_code: str) -> float:
     """
     从ETF列表中获取基金规模（只读）
-    返回单位：股（基金规模(亿元) × 100,000,000）
     """
     try:
         if not os.path.exists(BASIC_INFO_FILE):
@@ -71,22 +68,17 @@ def get_etf_fund_size(etf_code: str) -> float:
             return 0.0
         
         basic_info_df = pd.read_csv(BASIC_INFO_FILE, dtype={"ETF代码": str})
-        
-        # 检查必要列
         if "ETF代码" not in basic_info_df.columns or "基金规模" not in basic_info_df.columns:
             logger.warning(f"ETF列表缺少必要列（ETF代码/基金规模）")
             return 0.0
         
-        # 获取对应ETF的基金规模
         etf_row = basic_info_df[basic_info_df["ETF代码"] == str(etf_code).strip()]
         if etf_row.empty:
             logger.warning(f"ETF {etf_code} 在列表中不存在")
             return 0.0
         
         fund_size = float(etf_row["基金规模"].values[0])
-        
-        # 基金规模单位转换：亿元 → 股
-        return fund_size * 100000000
+        return fund_size * 100000000  # 亿元转股
     
     except Exception as e:
         logger.error(f"获取ETF {etf_code} 基金规模失败: {str(e)}", exc_info=True)
@@ -178,7 +170,6 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         if not os.path.exists(file_path):
             return pd.DataFrame()
         
-        # 定义标准列名
         standard_columns = [
             '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
             '振幅', '涨跌幅', '涨跌额', '换手率',
@@ -207,15 +198,11 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             }
         )
         
-        # 确保所有必要列存在
         required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
         if any(col not in df.columns for col in required_columns):
             return pd.DataFrame()
         
-        # 仅保留标准列
         df = df[[col for col in standard_columns if col in df.columns]]
-        
-        # 确保日期列格式
         df["日期"] = df["日期"].astype(str)
         df = df.sort_values("日期").drop_duplicates(subset=["日期"], keep="last")
         today = datetime.now().strftime("%Y-%m-%d")
@@ -225,15 +212,13 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【核心优化】动态延时策略
-# 1. 基础延时：0.8-1.5秒（增量更新）
-# 2. 动态调整：根据请求结果自动优化
-# 3. 失败重试：避免临时限流
+# 【核心修复】交易所接口升级
+# 1. 修复失效接口路径
+# 2. 扩展ETF代码前缀支持
+# 3. 优化请求头配置
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
-    """
-    请求限流器 - 动态调整请求间隔
-    """
+    """请求限流器 - 动态调整请求间隔"""
     def __init__(self, base_delay=0.8, max_delay=3.0):
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -256,7 +241,6 @@ class RequestThrottler:
         self.success_count += 1
         self.failure_count = 0
         
-        # 每10次成功请求尝试减少延时
         if self.success_count % 10 == 0 and self.current_delay > self.base_delay:
             self.current_delay = max(self.base_delay, self.current_delay - 0.1)
     
@@ -265,12 +249,10 @@ class RequestThrottler:
         self.failure_count += 1
         self.success_count = 0
         
-        # 失败3次后增加延时
         if self.failure_count >= 3:
             self.current_delay = min(self.max_delay, self.current_delay + 0.5)
             self.failure_count = 0
 
-# 初始化全局限流器
 throttler = RequestThrottler(base_delay=BASE_DELAY)
 
 def get_etf_iopv(etf_code: str, date: datetime) -> float:
@@ -283,30 +265,34 @@ def get_etf_iopv(etf_code: str, date: datetime) -> float:
         
         # 深交所ETF
         if etf_code.startswith('15'):
-            url = f"http://www.szse.cn/api/marketdata/v1/etf/realtime?etfCode={etf_code}"
+            url = f"http://www.szse.cn/api/marketdata/v1/etf/quotations?etfCode={etf_code}"
             headers = {
                 "User-Agent": "Mozilla/5.0",
                 "Referer": "http://www.szse.cn/market/etf/index.html",
+                "Accept": "application/json"
             }
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
             data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                iopv_str = data[0].get('iopv', '')
+            if "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
+                iopv_str = data["data"][0].get('iopv', '')
                 return float(iopv_str) if iopv_str else None
         
-        # 上交所ETF (51/58开头)
-        elif etf_code.startswith(('51', '58')):
-            url = f"http://www.sse.com.cn/market/etfdata/iopvdata/{etf_code}.csv"
+        # 上交所ETF (51/56/57/58开头)
+        elif etf_code.startswith(('51', '56', '57', '58')):
+            url = f"http://query.sse.com.cn/marketdata/tradedata/queryETFNewDayLine.do?isPagination=false&etfCode={etf_code}"
             headers = {
                 "User-Agent": "Mozilla/5.0",
-                "Referer": "https://www.sse.com.cn/market/etf/iopv/",
+                "Referer": "http://www.sse.com.cn/",
+                "Accept": "application/json",
+                "Host": "query.sse.com.cn"
             }
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
-            df = pd.read_csv(io.StringIO(response.text), encoding='gbk')
-            if not df.empty:
-                iopv_str = df.iloc[-1]['参考净值']
+            data = response.json()
+            if "result" in data and isinstance(data["result"], list) and len(data["result"]) > 0:
+                # 获取最新IOPV (上交所数据是倒序的，取第一条)
+                iopv_str = data["result"][0].get('IOPV', '')
                 return float(iopv_str) if iopv_str else None
         
         logger.warning(f"ETF {etf_code} 不支持获取IOPV")
@@ -320,7 +306,6 @@ def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame
     """
     计算所有必要衍生字段
     """
-    # 确保数据按日期排序
     df = df.sort_values("日期").reset_index(drop=True)
     
     # 1. 振幅 = (最高 - 最低) / 最低 * 100%
@@ -332,14 +317,14 @@ def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame
     # 3. 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
     df['涨跌幅'] = (df['涨跌额'] / df['收盘'].shift(1) * 100).round(2)
     
-    # 4. 换手率 = 成交量 / 基金规模（从ETF列表获取）
+    # 4. 换手率 = 成交量 / 基金规模
     fund_size = get_etf_fund_size(etf_code)
     if fund_size > 0:
         df['换手率'] = (df['成交量'] / fund_size * 100).round(2)
     else:
         df['换手率'] = 0.0
     
-    # 5. 折价率/溢价率（严格区分）
+    # 5. 折价率/溢价率
     df['折价率'] = df.apply(lambda row: 
         round(((row['IOPV'] - row['收盘']) / row['IOPV'] * 100), 2) 
         if row['IOPV'] > row['收盘'] else 0, axis=1)
@@ -354,9 +339,9 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
     """
     使用交易所官方接口爬取ETF日线数据
     优化点：
-      - 动态延时策略
-      - 失败重试机制
-      - 严格保持数据结构
+      - 修复失效接口路径
+      - 扩展ETF代码前缀支持
+      - 优化请求头配置
     """
     try:
         # 确保日期格式正确
@@ -370,32 +355,32 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 1. 判断交易所
-        if etf_code.startswith(('51', '58')):
-            exchange = 'sse'  # 上交所
-            url = f"http://www.sse.com.cn/market/etfdata/dailydata/{etf_code}.csv"
-            logger.info(f"ETF {etf_code} 使用上交所接口: {url}")
+        # 1. 判断交易所（扩展前缀支持）
+        if etf_code.startswith(('51', '56', '57', '58')):
+            exchange = 'sse'  # 上交所 (支持56开头等)
+            url = f"http://query.sse.com.cn/marketdata/tradedata/queryETFNewDayLine.do?isPagination=false&etfCode={etf_code}"
+            logger.info(f"ETF {etf_code} 使用上交所新接口: {url}")
         elif etf_code.startswith('15'):
             exchange = 'szse'  # 深交所
-            url = f"http://www.szse.cn/api/marketdata/v1/etf?etfCode={etf_code}"
-            logger.info(f"ETF {etf_code} 使用深交所接口: {url}")
+            url = f"http://www.szse.cn/api/marketdata/v1/etf/quotations?etfCode={etf_code}"
+            logger.info(f"ETF {etf_code} 使用深交所新接口: {url}")
         else:
-            logger.error(f"ETF {etf_code} 代码格式不支持 (非51/58/15开头)")
+            logger.error(f"ETF {etf_code} 代码格式不支持 (非51/56/57/58/15开头)")
             return pd.DataFrame()
         
-        # 2. 添加必要请求头
+        # 2. 添加必要请求头（针对新接口优化）
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.sse.com.cn/" if exchange == 'sse' else "http://www.szse.cn/",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept": "application/json",
         }
+        if exchange == 'sse':
+            headers["Host"] = "query.sse.com.cn"
         
         # 3. 执行请求（带重试机制）
         max_retries = MAX_RETRIES
         for retry in range(max_retries):
             try:
-                # 动态延时
                 throttler.wait()
                 
                 response = requests.get(
@@ -405,67 +390,63 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                     verify=True
                 )
                 response.raise_for_status()
-                
-                # 记录成功请求
                 throttler.record_success()
                 break
                 
             except requests.exceptions.RequestException as e:
-                # 记录失败请求
                 throttler.record_failure()
-                
-                # 最后一次重试失败
                 if retry == max_retries - 1:
                     logger.error(f"ETF {etf_code} 接口请求失败 (重试 {max_retries} 次): {str(e)}")
                     return pd.DataFrame()
                 
-                # 等待并重试
                 wait_time = BASE_DELAY * (2 ** retry) + random.uniform(0.1, 0.5)
                 logger.warning(f"ETF {etf_code} 请求失败，{wait_time:.1f}秒后重试: {str(e)}")
                 time.sleep(wait_time)
         
         # 4. 处理不同交易所返回格式
-        if exchange == 'sse':
-            try:
-                df = pd.read_csv(
-                    io.StringIO(response.text),
-                    encoding='gbk',
-                    parse_dates=['日期'],
-                    date_parser=lambda x: pd.to_datetime(x, format='%Y-%m-%d')
-                )
-                df.rename(columns={
-                    '开盘价': '开盘',
-                    '最高价': '最高',
-                    '最低价': '最低',
-                    '收盘价': '收盘',
-                    '成交量(股)': '成交量',
-                    '成交金额(元)': '成交额',
-                    '参考净值': 'IOPV'
-                }, inplace=True)
-            except Exception as e:
-                logger.error(f"上交所CSV解析失败: {str(e)}")
-                return pd.DataFrame()
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.error(f"JSON解析失败: {str(e)}")
+            return pd.DataFrame()
         
-        else:  # 深交所
-            try:
-                data = response.json()
-                if not isinstance(data, list) or not data:
-                    return pd.DataFrame()
-                df = pd.DataFrame(data)
-                df.rename(columns={
-                    'date': '日期',
-                    'open': '开盘',
-                    'high': '最高',
-                    'low': '最低',
-                    'close': '收盘',
-                    'volume': '成交量',
-                    'turnover': '成交额',
-                    'iopv': 'IOPV'
-                }, inplace=True)
-                df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d')
-            except Exception as e:
-                logger.error(f"深交所JSON解析失败: {str(e)}")
+        # 上交所新接口处理
+        if exchange == 'sse':
+            if "result" not in data or not isinstance(data["result"], list):
+                logger.error("上交所返回数据格式错误")
                 return pd.DataFrame()
+            
+            # 反转数据（上交所返回倒序，需正序）
+            result_data = data["result"][::-1]
+            df = pd.DataFrame(result_data)
+            df.rename(columns={
+                'TRADE_DATE': '日期',
+                'OPEN_PRICE': '开盘',
+                'HIGH_PRICE': '最高',
+                'LOW_PRICE': '最低',
+                'CLOSE_PRICE': '收盘',
+                'VOLUME': '成交量',
+                'AMOUNT': '成交额',
+                'IOPV': 'IOPV'
+            }, inplace=True)
+        
+        # 深交所新接口处理
+        else:
+            if "data" not in data or not isinstance(data["data"], list):
+                logger.error("深交所返回数据格式错误")
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data["data"])
+            df.rename(columns={
+                'date': '日期',
+                'open': '开盘',
+                'high': '最高',
+                'low': '最低',
+                'close': '收盘',
+                'volume': '成交量',
+                'turnover': '成交额',
+                'iopv': 'IOPV'
+            }, inplace=True)
         
         # 5. 基础数据验证
         required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
@@ -496,7 +477,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         df['ETF名称'] = get_etf_name(etf_code)
         df['爬取时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 9. 【严格保证】字段顺序完全匹配您的要求
+        # 9. 确保字段顺序
         standard_columns = [
             '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
             '振幅', '涨跌幅', '涨跌额', '换手率',
@@ -504,7 +485,6 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             'ETF代码', 'ETF名称', '爬取时间'
         ]
         
-        # 仅保留需要的列（确保顺序一致）
         return df[[col for col in standard_columns if col in df.columns]]
     
     except Exception as e:
@@ -579,7 +559,6 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-            # 确保日期格式正确
             if "日期" in df.columns:
                 df_save = df.copy()
                 df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
@@ -612,8 +591,6 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"待爬取ETF总数：{total_count}只（全市场ETF）")
         next_index = get_next_crawl_index()
         
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-        # 保持原有分批处理逻辑
         start_idx = next_index % total_count
         end_idx = start_idx + BATCH_SIZE
         actual_end_idx = end_idx % total_count
@@ -624,8 +601,7 @@ def crawl_all_etfs_daily_data() -> None:
         else:
             batch_codes = etf_codes[start_idx:total_count] + etf_codes[0:end_idx-total_count]
             logger.info(f"处理本批次 ETF ({BATCH_SIZE}只)，从索引 {start_idx} 开始（循环处理）")
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
+        
         first_stock_idx = start_idx % total_count
         last_stock_idx = (end_idx - 1) % total_count
         first_stock = f"{etf_codes[first_stock_idx]} - {get_etf_name(etf_codes[first_stock_idx])}" if first_stock_idx < len(etf_codes) else "N/A"
@@ -719,7 +695,6 @@ def get_all_etf_codes() -> list:
         
         basic_info_df = pd.read_csv(BASIC_INFO_FILE, dtype={"ETF代码": str})
         
-        # 严格只读 - 确保不修改ETF列表
         if basic_info_df.empty or "ETF代码" not in basic_info_df.columns:
             logger.error("ETF列表文件格式错误")
             return []

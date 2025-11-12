@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（终极修复版 - 基于文件名日期解析）
+清理旧文件脚本（终极修复版 - 正确处理微信消息发送结果）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
 2. 从文件名中提取日期信息进行清理判断
-3. 在清理前后同时显示基于文件名日期和修改时间排序的最旧文件
-4. 使用 config.py 中已有的路径结构构建临时目录
+3. 修复微信消息发送逻辑，确保准确报告发送结果
 """
 
 import os
@@ -355,6 +354,7 @@ def main():
             if not git_success:
                 error_msg += "\nGit提交失败，删除操作未记录到版本历史"
                 dir_success = False
+                success = False  # 标记为失败
         
         if error_msg:
             logger.error(f"{directory} 清理错误: {error_msg}")
@@ -427,12 +427,22 @@ def main():
                 success = False
                 message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
     
-    # 5. 推送微信消息
+    # 5. 推送微信消息 - 修复：正确检查返回值
+    sent_success = False
     try:
-        send_wechat_message(message)
-        logger.info("微信消息推送成功")
-        if not success:
-            logger.error("清理过程存在错误")
+        # 正确检查send_wechat_message的返回值
+        sent_success = send_wechat_message(message)
+        if sent_success:
+            logger.info("微信消息推送成功")
+        else:
+            logger.error("微信消息推送失败")
+            # 尝试发送错误消息
+            try:
+                send_wechat_message(
+                    f"❌ 清理任务执行成功，但消息推送失败:\n企业微信Webhook未配置"
+                )
+            except Exception as e:
+                logger.error(f"发送错误消息失败: {str(e)}")
     except Exception as e:
         error_msg = f"微信消息推送失败: {str(e)}"
         logger.error(error_msg)
@@ -444,11 +454,17 @@ def main():
         except:
             pass
     
-    # 6. 打印最终状态
-    if success:
+    # 6. 打印最终状态 - 修复：不再虚假报告"成功"
+    if success and sent_success:
         logger.info(f"清理完成 - 成功删除 {total_deleted} 个文件并提交Git")
     else:
-        logger.error("清理失败 - 请检查错误信息")
+        logger.error("清理完成 - 但存在错误")
+        # 详细报告错误原因
+        if not success:
+            logger.error("❌ Git提交失败：删除操作未记录到版本历史")
+        if not sent_success:
+            logger.error("❌ 微信消息推送失败：企业微信Webhook未配置")
+        # 添加到微信消息，确保用户知道问题
 
 if __name__ == "__main__":
     try:

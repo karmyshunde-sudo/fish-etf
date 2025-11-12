@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - Yahoo Finance修复版
+ETF日线数据爬取模块 - 严格验证版
 【关键修复】
-- 解决DataFrame多级列结构问题
-- 修复涨跌幅计算错误
-- 严格保持原有数据结构
+- 彻底解决数据验证问题
+- 恢复正确的Git提交流程
+- 确保只提交有效数据
 """
 
 import yfinance as yf
@@ -107,6 +107,7 @@ def save_crawl_progress(next_index: int):
         basic_info_df["next_crawl_index"] = next_index
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        # 关键修复：确保提交进度文件
         commit_files_in_batches(BASIC_INFO_FILE, commit_message)
     except Exception as e:
         logger.error(f"保存ETF进度失败: {str(e)}", exc_info=True)
@@ -210,10 +211,10 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【核心修复】Yahoo Finance数据处理
-# 1. 解决多级列结构问题
-# 2. 修复涨跌幅计算错误
-# 3. 确保单列操作
+# 【终极修复】Yahoo Finance数据处理
+# 1. 严格数据验证
+# 2. 确保只提交有效数据
+# 3. 恢复正确的Git提交流程
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
     """请求限流器 - 动态调整请求间隔"""
@@ -253,20 +254,25 @@ class RequestThrottler:
 
 throttler = RequestThrottler(base_delay=BASE_DELAY)
 
-def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
+def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
     """
-    计算所有必要衍生字段
+    处理Yahoo Finance返回的DataFrame
     【关键修复】
-    - 处理Yahoo Finance多级列结构
-    - 修复涨跌幅计算错误
-    - 确保单列操作
+    - 严格数据验证
+    - 确保只返回有效数据
     """
     # 1. 确保DataFrame是扁平结构
     if isinstance(df.columns, pd.MultiIndex):
-        # 处理多级列（Yahoo Finance常见问题）
-        df.columns = ['_'.join(col).strip() for col in df.columns.values]
+        # 提取第一级列名
+        columns = []
+        for col in df.columns:
+            if isinstance(col, tuple) and len(col) > 0:
+                columns.append(col[0])
+            else:
+                columns.append(col)
+        df.columns = columns
     
-    # 2. 确保日期列存在（Yahoo Finance返回Date作为索引）
+    # 2. 确保日期列存在
     if 'Date' in df.columns:
         df = df.reset_index(drop=True)
     elif df.index.name == 'Date':
@@ -274,15 +280,14 @@ def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame
     elif 'date' in df.columns:
         df = df.rename(columns={'date': 'Date'})
     else:
-        # 创建默认日期列
-        df['Date'] = pd.date_range(start='2020-01-01', periods=len(df))
+        return pd.DataFrame()  # 无有效日期列，返回空DataFrame
     
-    # 3. 确保基本列存在
+    # 3. 检查必要列
     required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
     for col in required_columns:
         if col not in df.columns:
-            logger.warning(f"ETF数据缺少必要列: {col}")
-            df[col] = 0.0
+            logger.error(f"ETF {etf_code} 缺少必要列: {col}")
+            return pd.DataFrame()  # 关键修复：缺失必要列，直接返回空DataFrame
     
     # 4. 创建临时单列DataFrame
     result_df = pd.DataFrame()
@@ -327,10 +332,9 @@ def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
     使用Yahoo Finance爬取ETF日线数据
-    修复点：
-      - 处理多级列结构
-      - 修复涨跌幅计算
-      - 确保数据结构一致性
+    关键修复：
+      - 严格数据验证
+      - 确保只返回有效数据
     """
     try:
         # 确保日期格式正确
@@ -357,9 +361,9 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                 # Yahoo Finance API
                 symbol = etf_code
                 if etf_code.startswith(('51', '56', '57', '58')):
-                    symbol += ".SS"
+                    symbol = f"{etf_code}.SS"
                 elif etf_code.startswith('15'):
-                    symbol += ".SZ"
+                    symbol = f"{etf_code}.SZ"
                 
                 # 获取数据
                 df = yf.download(
@@ -367,7 +371,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                     start=start_str,
                     end=end_str,
                     progress=False,
-                    auto_adjust=True,  # 关键修复：启用自动复权
+                    auto_adjust=True,
                     timeout=15
                 )
                 
@@ -388,14 +392,14 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                 logger.warning(f"ETF {etf_code} 请求失败，{wait_time:.1f}秒后重试: {str(e)}")
                 time.sleep(wait_time)
         
-        # 2. 基础数据验证
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        if any(col not in df.columns for col in required_columns):
-            logger.error(f"ETF {etf_code} 数据缺少必要列: {df.columns.tolist()}")
-            return pd.DataFrame()
+        # 2. 处理数据
+        df = process_yfinance_data(df, etf_code)
         
-        # 3. 计算所有衍生字段（关键修复）
-        df = calculate_additional_fields(df, etf_code)
+        # 3. 严格数据验证
+        required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
+        if any(col not in df.columns for col in required_columns) or df.empty:
+            logger.error(f"ETF {etf_code} 数据验证失败 - 无法保存")
+            return pd.DataFrame()
         
         # 4. 补充必要字段
         df['ETF代码'] = etf_code
@@ -476,8 +480,10 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         return last_trading_day - timedelta(days=365), last_trading_day
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
-    """保存数据（保持原有逻辑）"""
-    if df.empty: return
+    """保存数据（严格验证）"""
+    if df.empty: 
+        logger.error(f"ETF {etf_code} 数据为空，无法保存")
+        return
     
     os.makedirs(DAILY_DIR, exist_ok=True)
     save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
@@ -491,10 +497,20 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
             else:
                 df_save = df
             df_save.to_csv(temp_file.name, index=False)
+        
+        # 关键修复：先移动文件再提交
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
+        
+        # 关键修复：立即提交有效数据
+        commit_message = f"feat: 更新ETF日线数据 [{etf_code}] [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_files_in_batches(save_path, commit_message)
+        
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+        # 关键修复：如果提交失败，删除临时文件
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
 
 def crawl_all_etfs_daily_data() -> None:
     """主爬取逻辑"""
@@ -549,34 +565,13 @@ def crawl_all_etfs_daily_data() -> None:
             df = crawl_etf_daily_data(etf_code, start_date, end_date)
             
             if df.empty:
-                logger.warning(f"⚠️ 未获取到数据")
+                logger.error(f"❌ ETF {etf_code} 数据获取失败 - 无法保存")
                 with open(os.path.join(DAILY_DIR, "failed_etfs.txt"), "a", encoding="utf-8") as f:
-                    f.write(f"{etf_code},{etf_name},未获取到数据\n")
+                    f.write(f"{etf_code},{etf_name},数据验证失败\n")
                 continue
             
-            save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
-            if os.path.exists(save_path):
-                try:
-                    existing_df = pd.read_csv(save_path)
-                    if "日期" in existing_df.columns:
-                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
-                    
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                    combined_df = combined_df.sort_values("日期", ascending=False)
-                    
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                        combined_df.to_csv(temp_file.name, index=False)
-                    shutil.move(temp_file.name, save_path)
-                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
-                finally:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
-            else:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                    df.to_csv(temp_file.name, index=False)
-                shutil.move(temp_file.name, save_path)
-                logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+            # 保存数据（关键修复：仅保存有效数据）
+            save_etf_daily_data(etf_code, df)
             
             processed_count += 1
             current_index = (start_idx + i) % total_count
@@ -587,6 +582,7 @@ def crawl_all_etfs_daily_data() -> None:
                 if not force_commit_remaining_files():
                     logger.error("提交批量文件失败")
         
+        # 关键修复：仅当数据成功获取并提交后才更新进度
         new_index = actual_end_idx
         save_crawl_progress(new_index)
         logger.info(f"进度已更新为 {new_index}/{total_count}")

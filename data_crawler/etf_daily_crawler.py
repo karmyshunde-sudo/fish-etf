@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 严格验证版
+ETF日线数据爬取模块 - 日期格式修复版
 【关键修复】
-- 彻底解决数据验证问题
-- 恢复正确的Git提交流程
-- 确保只提交有效数据
+- 彻底解决日期格式问题
+- 移除重复的日期格式化
+- 确保数据类型一致性
 """
 
 import yfinance as yf
@@ -107,7 +107,6 @@ def save_crawl_progress(next_index: int):
         basic_info_df["next_crawl_index"] = next_index
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        # 关键修复：确保提交进度文件
         commit_files_in_batches(BASIC_INFO_FILE, commit_message)
     except Exception as e:
         logger.error(f"保存ETF进度失败: {str(e)}", exc_info=True)
@@ -211,10 +210,9 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【终极修复】Yahoo Finance数据处理
-# 1. 严格数据验证
-# 2. 确保只提交有效数据
-# 3. 恢复正确的Git提交流程
+# 【终极修复】日期格式问题
+# 1. 移除重复的日期格式化
+# 2. 确保日期列一致性
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
     """请求限流器 - 动态调整请求间隔"""
@@ -258,8 +256,8 @@ def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
     """
     处理Yahoo Finance返回的DataFrame
     【关键修复】
-    - 严格数据验证
-    - 确保只返回有效数据
+    - 确保日期列一致性
+    - 移除重复格式化
     """
     # 1. 确保DataFrame是扁平结构
     if isinstance(df.columns, pd.MultiIndex):
@@ -291,7 +289,19 @@ def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
     
     # 4. 创建临时单列DataFrame
     result_df = pd.DataFrame()
-    result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
+    
+    # 【关键修复】直接创建字符串格式的日期列
+    try:
+        # 确保"Date"列是datetime类型
+        if not pd.api.types.is_datetime64_any_dtype(df['Date']):
+            df['Date'] = pd.to_datetime(df['Date'])
+        
+        # 直接创建字符串格式的日期列
+        result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
+    except Exception as e:
+        logger.error(f"日期格式化失败: {str(e)}")
+        return pd.DataFrame()
+    
     result_df['开盘'] = df['Open'].astype(float)
     result_df['最高'] = df['High'].astype(float)
     result_df['最低'] = df['Low'].astype(float)
@@ -332,9 +342,9 @@ def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
     使用Yahoo Finance爬取ETF日线数据
-    关键修复：
-      - 严格数据验证
-      - 确保只返回有效数据
+    修复点：
+      - 彻底解决日期格式问题
+      - 移除重复的日期格式化
     """
     try:
         # 确保日期格式正确
@@ -480,7 +490,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         return last_trading_day - timedelta(days=365), last_trading_day
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
-    """保存数据（严格验证）"""
+    """保存数据（修复日期格式问题）"""
     if df.empty: 
         logger.error(f"ETF {etf_code} 数据为空，无法保存")
         return
@@ -490,25 +500,23 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-            # 确保日期格式正确
-            if "日期" in df.columns:
-                df_save = df.copy()
-                df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
-            else:
-                df_save = df
+            # 【关键修复】日期列已经是字符串，无需再格式化
+            df_save = df.copy()
+            
+            # 保存数据
             df_save.to_csv(temp_file.name, index=False)
         
-        # 关键修复：先移动文件再提交
+        # 移动文件
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
         
-        # 关键修复：立即提交有效数据
+        # 提交到Git
         commit_message = f"feat: 更新ETF日线数据 [{etf_code}] [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         commit_files_in_batches(save_path, commit_message)
         
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
-        # 关键修复：如果提交失败，删除临时文件
+        # 删除临时文件
         if os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
 
@@ -570,7 +578,7 @@ def crawl_all_etfs_daily_data() -> None:
                     f.write(f"{etf_code},{etf_name},数据验证失败\n")
                 continue
             
-            # 保存数据（关键修复：仅保存有效数据）
+            # 保存数据
             save_etf_daily_data(etf_code, df)
             
             processed_count += 1
@@ -582,7 +590,7 @@ def crawl_all_etfs_daily_data() -> None:
                 if not force_commit_remaining_files():
                     logger.error("提交批量文件失败")
         
-        # 关键修复：仅当数据成功获取并提交后才更新进度
+        # 更新进度
         new_index = actual_end_idx
         save_crawl_progress(new_index)
         logger.info(f"进度已更新为 {new_index}/{total_count}")

@@ -44,7 +44,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # 【关键参数】可在此处修改每次处理的ETF数量
 # 专业修复：批次大小作为可配置参数
-BATCH_SIZE = 80  # 可根据需要调整为100、150、200等
+BATCH_SIZE = 60  # 可根据需要调整为100、150、200等
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def get_etf_name(etf_code):
@@ -606,7 +606,7 @@ def crawl_all_etfs_daily_data() -> None:
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(2.5, 5.5))
+            time.sleep(random.uniform(5, 11))
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
             

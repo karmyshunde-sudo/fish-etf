@@ -46,27 +46,26 @@ jobs:
           if [ ! -f "wechat_push/push.py" ]; then
             echo "⚠️ 注意: 微信推送模块缺失，创建模拟文件"
             mkdir -p wechat_push
-            cat << 'EOF' > wechat_push/push.py
-def send_wechat_message(message, message_type="info"):
-    import os
-    import requests
-    
-    webhook = os.environ.get("WECOM_WEBHOOK")
-    if webhook:
-        data = {
-            "msgtype": "text",
-            "text": {
-                "content": message
-            }
-        }
-        try:
-            requests.post(webhook, json=data)
-            return True
-        except Exception as e:
-            print(f"微信消息发送失败: {str(e)}")
-            return False
-    return False
-EOF
+            
+            echo 'def send_wechat_message(message, message_type="info"):' > wechat_push/push.py
+            echo '    import os' >> wechat_push/push.py
+            echo '    import requests' >> wechat_push/push.py
+            echo '' >> wechat_push/push.py
+            echo '    webhook = os.environ.get("WECOM_WEBHOOK")' >> wechat_push/push.py
+            echo '    if webhook:' >> wechat_push/push.py
+            echo '        data = {' >> wechat_push/push.py
+            echo '            "msgtype": "text",' >> wechat_push/push.py
+            echo '            "text": {' >> wechat_push/push.py
+            echo '                "content": message' >> wechat_push/push.py
+            echo '            }' >> wechat_push/push.py
+            echo '        }' >> wechat_push/push.py
+            echo '        try:' >> wechat_push/push.py
+            echo '            requests.post(webhook, json=data)' >> wechat_push/push.py
+            echo '            return True' >> wechat_push/push.py
+            echo '        except Exception as e:' >> wechat_push/push.py
+            echo '            print(f"微信消息发送失败: {str(e)}")' >> wechat_push/push.py
+            echo '            return False' >> wechat_push/push.py
+            echo '    return False' >> wechat_push/push.py
           fi
 
       - name: 验证安全路径

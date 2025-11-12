@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（专业修复版）
+清理旧文件脚本（最终修正版）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 使用与原始爬虫一致的时间计算逻辑
-3. 使用原始代码中已验证的微信消息发送机制
+2. 添加清理前文件统计和最旧文件日志
+3. 使用与原始爬虫完全一致的微信消息发送机制
 """
 
 import os
@@ -35,6 +35,44 @@ CLEANUP_DIRS = {
     "flags": FLAGS_DIR,
     "logs": LOGS_DIR
 }
+
+def get_file_list(directory: str) -> list:
+    """获取目录中的所有文件列表（只包括文件）"""
+    if not os.path.exists(directory):
+        return []
+    
+    files = []
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if os.path.isfile(file_path):
+            files.append(file_path)
+    return files
+
+def get_oldest_files(directory: str, count: int = 5) -> list:
+    """获取目录中最早的count个文件"""
+    files = get_file_list(directory)
+    # 按修改时间排序（最早在前）
+    files.sort(key=lambda x: os.path.getmtime(x))
+    return files[:count]
+
+def get_file_age(file_path: str) -> int:
+    """获取文件的天数（从最后修改时间到现在）"""
+    file_mtime = os.path.getmtime(file_path)
+    now = time.time()
+    age_seconds = now - file_mtime
+    return int(age_seconds / (24 * 3600))
+
+def get_file_list_by_age(directory: str, days: int) -> list:
+    """获取超过指定天数的文件列表"""
+    cutoff_time = time.time() - (days * 24 * 3600)
+    old_files = []
+    
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if os.path.isfile(file_path) and os.path.getmtime(file_path) < cutoff_time:
+            old_files.append(file_path)
+    
+    return old_files
 
 def cleanup_old_files(directory: str, days: int) -> tuple:
     """
@@ -168,6 +206,19 @@ def send_wechat_message(message: str, message_type: str = "info"):
             logger.error(f"❌ 备用方法发送失败: {str(be)}")
             return False
 
+def get_oldest_files_info(directory: str, count: int = 5) -> str:
+    """获取目录中最旧文件的详细信息"""
+    oldest_files = get_oldest_files(directory, count)
+    info_lines = []
+    
+    for file_path in oldest_files:
+        file_name = os.path.basename(file_path)
+        file_age = get_file_age(file_path)
+        file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime("%Y-%m-%d %H:%M:%S")
+        info_lines.append(f"  - {file_name} ({file_age}天前, 修改时间: {file_mtime})")
+    
+    return "\n".join(info_lines) if info_lines else "  - 无足够旧文件"
+
 def main():
     """主清理程序"""
     # 确保使用北京时间
@@ -177,13 +228,31 @@ def main():
     success = True
     results = {}
     total_deleted = 0
+    pre_cleanup_stats = {}
+    post_cleanup_stats = {}
     
     logger.info(f"=== 开始清理旧文件 ({cleanup_time}) ===")
     logger.info(f"清理阈值: {DAYS_THRESHOLD}天前 ({fifteen_days_ago})")
     logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info(f"服务器时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
-    # 处理每个指定目录
+    # 1. 统计清理前的文件数量
+    for dir_name, directory in CLEANUP_DIRS.items():
+        file_list = get_file_list(directory)
+        old_files = get_file_list_by_age(directory, DAYS_THRESHOLD)
+        
+        pre_cleanup_stats[dir_name] = {
+            "total": len(file_list),
+            "old_files_count": len(old_files),
+            "oldest_files": get_oldest_files_info(directory, 5)
+        }
+        
+        logger.info(f"{directory} 目录清理前状态:")
+        logger.info(f"  - 总文件数: {pre_cleanup_stats[dir_name]['total']}")
+        logger.info(f"  - 超{DAYS_THRESHOLD}天文件数: {pre_cleanup_stats[dir_name]['old_files_count']}")
+        logger.info(f"  - 最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files']}")
+    
+    # 2. 处理每个指定目录
     for dir_name, directory in CLEANUP_DIRS.items():
         logger.info(f"开始清理 {directory} 目录...")
         dir_success, deleted_files, error_msg = cleanup_old_files(directory, DAYS_THRESHOLD)
@@ -206,7 +275,19 @@ def main():
         total_deleted += len(deleted_files)
         success = success and dir_success
     
-    # 构建微信消息
+    # 3. 统计清理后的文件数量
+    for dir_name, directory in CLEANUP_DIRS.items():
+        file_list = get_file_list(directory)
+        post_cleanup_stats[dir_name] = {
+            "total": len(file_list),
+            "oldest_files": get_oldest_files_info(directory, 5)
+        }
+        
+        logger.info(f"{directory} 目录清理后状态:")
+        logger.info(f"  - 剩余文件数: {post_cleanup_stats[dir_name]['total']}")
+        logger.info(f"  - 最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files']}")
+    
+    # 4. 构建微信消息
     if total_deleted > 0:
         message = f"✅ 成功清理 {total_deleted} 个文件（{DAYS_THRESHOLD}天前）\n"
         message += "所有删除操作已提交到Git仓库\n\n"
@@ -214,12 +295,20 @@ def main():
         for dir_name, res in results.items():
             if res["deleted_files"]:
                 message += f"📁 {dir_name} 目录:\n"
+                message += f"  - 初始文件数: {pre_cleanup_stats[dir_name]['total']} → 剩余文件数: {post_cleanup_stats[dir_name]['total']}\n"
                 message += f"  - 已删除 {len(res['deleted_files'])} 个文件\n"
+                
+                # 添加最旧文件信息
+                if pre_cleanup_stats[dir_name]['old_files_count'] > 0:
+                    message += f"  - 清理前最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files']}\n"
+                    message += f"  - 清理后最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files']}\n"
+                
                 # 列出部分文件（最多5个）
                 if len(res["deleted_files"]) > 5:
                     message += "    " + ", ".join(res["deleted_files"][:5]) + " ...\n"
                 else:
                     message += "    " + ", ".join(res["deleted_files"]) + "\n"
+                
                 if res["error"]:
                     message += f"  ⚠️ 错误: {res['error']}\n"
         message += f"\n清理时间: {cleanup_time}"
@@ -228,18 +317,25 @@ def main():
         message += f"清理时间: {cleanup_time}\n"
         message += f"清理阈值: {DAYS_THRESHOLD}天前 ({fifteen_days_ago})"
         
+        # 添加清理前状态信息
+        for dir_name in CLEANUP_DIRS.keys():
+            message += f"\n\n📁 {dir_name} 目录:"
+            message += f"\n  - 初始文件数: {pre_cleanup_stats[dir_name]['total']}"
+            message += f"\n  - 超{DAYS_THRESHOLD}天文件数: {pre_cleanup_stats[dir_name]['old_files_count']}"
+            message += f"\n  - 最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files']}"
+        
         # 检查是否有错误
         for dir_name, res in results.items():
             if not res["success"] and res["error"]:
                 success = False
                 message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
     
-    # 确定消息类型
+    # 5. 确定消息类型
     message_type = "success" if success and total_deleted > 0 else "info"
     if not success:
         message_type = "error"
     
-    # 推送微信消息（使用原始代码相同的机制）
+    # 6. 推送微信消息（使用原始代码相同的机制）
     try:
         send_wechat_message(message, message_type)
         logger.info("微信消息推送成功")
@@ -257,7 +353,7 @@ def main():
         except:
             pass
     
-    # 打印最终状态
+    # 7. 打印最终状态
     if success:
         logger.info(f"清理完成 - 成功删除 {total_deleted} 个文件并提交Git")
     else:

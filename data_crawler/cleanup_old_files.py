@@ -16,7 +16,6 @@ import pytz
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time  # 使用原始代码的时间工具
-from utils.date_utils import get_timezone  # 添加时区获取工具
 
 # 初始化日志
 logger = logging.getLogger(__name__)

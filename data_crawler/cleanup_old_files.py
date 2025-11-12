@@ -264,7 +264,7 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
 
 def commit_deletion(directory: str, deleted_files: list) -> bool:
     """
-    提交文件删除操作到Git仓库（与ETF爬取脚本完全一致）
+    提交文件删除操作到Git仓库（正确处理已删除文件）
     
     Args:
         directory: 被清理的目录
@@ -283,14 +283,32 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
     commit_message = f"cleanup: 删除 {len(deleted_files)} 个超过{DAYS_THRESHOLD}天的文件 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     try:
-        # 直接调用commit_files_in_batches（与ETF爬取脚本完全一致）
-        from utils.git_utils import commit_files_in_batches
-        commit_files_in_batches(file_paths, commit_message)
+        # 关键修改：使用 git rm --cached 来处理已删除的文件
+        from utils.git_utils import run_git_command
+        
+        # 正确处理已删除文件的方式：使用 --cached 参数
+        # 这会告诉 Git 这些文件已被删除，但不实际删除物理文件（但我们已经删了）
+        # 对于已物理删除的文件，Git 需要这个步骤来记录删除操作
+        run_git_command(['git', 'rm', '--cached'] + file_paths)
+        
+        # 现在可以提交了
+        run_git_command(['git', 'commit', '-m', commit_message])
+        
         logger.info(f"✅ Git提交成功: {commit_message}")
         return True
     except Exception as e:
         error_msg = f"Git提交失败: {str(e)}"
         logger.error(error_msg)
+        
+        # 添加诊断信息
+        logger.error("Git状态检查:")
+        try:
+            from utils.git_utils import run_git_command
+            status = run_git_command(['git', 'status', '--short'], capture_output=True)
+            logger.error(f"当前Git状态:\n{status}")
+        except:
+            pass
+            
         return False
 
 def main():

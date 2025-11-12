@@ -34,12 +34,38 @@ jobs:
       
       - name: 安装项目依赖
         run: |
-          # 检查依赖文件是否存在
           if [ -f "requirements.txt" ]; then
             pip install -r requirements.txt
           else
             echo "⚠️ 注意: requirements.txt 不存在，尝试安装常用依赖"
             pip install pandas numpy akshare requests pytz
+          fi
+          
+          # 确保微信推送模块可用
+          if [ ! -f "wechat_push/push.py" ]; then
+            echo "⚠️ 注意: 微信推送模块缺失，创建模拟文件"
+            mkdir -p wechat_push
+            cat > wechat_push/push.py << EOF
+def send_wechat_message(message, message_type="info"):
+    import os
+    import requests
+    
+    webhook = os.environ.get("WECOM_WEBHOOK")
+    if webhook:
+        data = {
+            "msgtype": "text",
+            "text": {
+                "content": message
+            }
+        }
+        try:
+            requests.post(webhook, json=data)
+            return True
+        except Exception as e:
+            print(f"微信消息发送失败: {str(e)}")
+            return False
+    return False
+EOF
           fi
 
       - name: 验证安全路径
@@ -73,6 +99,12 @@ jobs:
           # 检查config模块是否存在
           if [ ! -f "config.py" ]; then
             echo "❌ 错误: config.py 不存在，无法导入Config模块"
+            exit 1
+          fi
+          
+          # 检查工具模块
+          if [ ! -f "utils/date_utils.py" ]; then
+            echo "❌ 错误: utils/date_utils.py 不存在，无法获取北京时间"
             exit 1
           fi
           
@@ -118,15 +150,12 @@ jobs:
           echo "✅ data/flags 目录剩余 $FLAGS_COUNT 个文件"
           echo "✅ data/logs 目录剩余 $LOGS_COUNT 个文件"
           
-          # 列出最近修改的文件（用于验证）
-          if [ $FLAGS_COUNT -gt 0 ]; then
-            echo "data/flags 目录最新文件:"
-            ls -t data/flags | head -5
-          fi
-          
-          if [ $LOGS_COUNT -gt 0 ]; then
-            echo "data/logs 目录最新文件:"
-            ls -t data/logs | head -5
+          # 检查是否真的有文件被删除
+          if [ $FLAGS_COUNT -eq 0 ] && [ $LOGS_COUNT -eq 0 ]; then
+            echo "⚠️ 注意: 所有文件已被删除，可能需要检查清理逻辑"
+          elif [ $FLAGS_COUNT -eq $(find data/flags -maxdepth 1 -type f -mtime +15 | wc -l) ] && 
+               [ $LOGS_COUNT -eq $(find data/logs -maxdepth 1 -type f -mtime +15 | wc -l) ]; then
+            echo "⚠️ 注意: 未删除任何文件，可能清理逻辑有问题"
           fi
 
       - name: 发送清理通知
@@ -138,6 +167,10 @@ jobs:
           FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
           LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
           
+          # 检查是否真的有文件被删除
+          DELETED_COUNT=$(find data/flags -maxdepth 1 -type f -mtime +15 | wc -l) 
+          DELETED_COUNT=$((DELETED_COUNT + $(find data/logs -maxdepth 1 -type f -mtime +15 | wc -l)))
+          
           # 发送微信消息
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【旧文件清理】任务已完成\n- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\n- data/logs 目录剩余 ${LOGS_COUNT} 个文件\n- 清理阈值：15天前\n- 北京时间: ${BEIJING_TIME}\\n\\n详细结果请查看工作流日志\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【旧文件清理】任务已完成\n- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\n- data/logs 目录剩余 ${LOGS_COUNT} 个文件\n- 实际删除 ${DELETED_COUNT} 个文件（超过15天）\n- 清理阈值：15天前\n- 北京时间: ${BEIJING_TIME}\\n\\n详细结果请查看工作流日志\"}}"

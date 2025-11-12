@@ -4,8 +4,9 @@
 清理旧文件脚本（终极修复版 - 基于文件名日期解析）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 从文件名中提取日期信息进行清理判断（不再依赖文件系统创建时间）
+2. 从文件名中提取日期信息进行清理判断
 3. 在清理前后同时显示基于文件名日期和修改时间排序的最旧文件
+4. 使用 config.py 中已有的路径结构构建临时目录
 """
 
 import os
@@ -225,6 +226,10 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
     total_files = 0
     old_files = 0
     
+    # 确保临时目录存在
+    temp_dir = os.path.join(Config.DATA_DIR, "temp", "cleanup_backup")
+    os.makedirs(temp_dir, exist_ok=True)
+    
     # 遍历目录中的所有文件（不递归子目录）
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
@@ -243,9 +248,6 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
                     old_files += 1
                     
                     # 先备份文件到临时目录（安全操作）
-                    temp_dir = os.path.join(Config.TEMP_DIR, "cleanup_backup")
-                    os.makedirs(temp_dir, exist_ok=True)
-                    
                     backup_path = os.path.join(temp_dir, filename)
                     shutil.copy2(file_path, backup_path)
                     

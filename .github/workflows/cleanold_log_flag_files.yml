@@ -1,0 +1,114 @@
+name: 9-清理旧flag和log文件
+on:
+  workflow_dispatch:
+
+jobs:
+  clean-old-flag-log-files:
+    name: 清理data/flags和data/logs目录下超过15天的文件
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: 安装项目依赖
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-wechat.txt
+      
+      - name: 验证安全路径
+        run: |
+          echo "验证清理路径安全..."
+          
+          # 确保只有指定目录会被清理
+          if [ ! -d "data/flags" ]; then
+            echo "❌ 错误: data/flags 目录不存在"
+            exit 1
+          fi
+          
+          if [ ! -d "data/logs" ]; then
+            echo "❌ 错误: data/logs 目录不存在"
+            exit 1
+          fi
+          
+          echo "✅ 路径验证通过：仅会清理 data/flags 和 data/logs 目录"
+
+      - name: 运行清理脚本
+        run: |
+          python data_crawler/cleanup_old_files.py
+          
+          # 检查脚本退出码
+          if [ $? -ne 0 ]; then
+            echo "❌ 清理脚本执行失败"
+            exit 1
+          fi
+          
+          # 检查Git状态
+          if git status --porcelain | grep -q '^'; then
+            echo "Git仓库有未提交的变更"
+          else
+            echo "Git仓库干净，无需提交"
+          fi
+
+      - name: 提交清理变更
+        if: always()
+        run: |
+          # 如果有Git变更，提交并推送
+          if git status --porcelain | grep -q '^'; then
+            git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+            
+            # 提交清理变更
+            git commit -m "cleanup: 清理旧flag和log文件 [skip ci]"
+            
+            # 推送变更
+            git push origin main
+            echo "✅ 清理变更已提交并推送到远程仓库"
+          else
+            echo "ℹ️ 无需要提交的清理变更"
+          fi
+
+      - name: 验证清理结果
+        run: |
+          # 检查清理后的文件数量
+          FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
+          LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
+          
+          echo "✅ data/flags 目录剩余 $FLAGS_COUNT 个文件"
+          echo "✅ data/logs 目录剩余 $LOGS_COUNT 个文件"
+          
+          # 列出最近修改的文件（用于验证）
+          if [ $FLAGS_COUNT -gt 0 ]; then
+            echo "data/flags 目录最新文件:"
+            ls -t data/flags | head -5
+          fi
+          
+          if [ $LOGS_COUNT -gt 0 ]; then
+            echo "data/logs 目录最新文件:"
+            ls -t data/logs | head -5
+          fi
+
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
+          LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
+          
+          # 发送微信消息
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【旧文件清理】任务已完成\n- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\n- data/logs 目录剩余 ${LOGS_COUNT} 个文件\n- 清理阈值：15天前\n- 北京时间: ${BEIJING_TIME}\\n\\n详细结果请查看工作流日志\"}}"

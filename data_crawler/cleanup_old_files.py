@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（精简版）
+清理旧文件脚本（最终修复版）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 仅生成简洁的清理结果摘要
+2. 仅生成简洁的清理结果摘要（避免消息过长）
 3. 不处理Git提交（由工作流统一处理）
+4. 修复微信消息发送逻辑，确保消息简洁
 """
 
 import os
@@ -37,18 +38,6 @@ CLEANUP_DIRS = {
     "flags": FLAGS_DIR,
     "logs": LOGS_DIR
 }
-
-def get_file_list(directory: str) -> list:
-    """获取目录中的所有文件列表（只包括文件）"""
-    if not os.path.exists(directory):
-        return []
-    
-    files = []
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
-        if os.path.isfile(file_path):
-            files.append(file_path)
-    return files
 
 def extract_date_from_filename(filename: str) -> datetime:
     """
@@ -95,54 +84,26 @@ def extract_date_from_filename(filename: str) -> datetime:
     
     return None
 
-def get_file_time_beijing(file_path: str, use_filename_date: bool = True) -> datetime:
+def get_file_time_beijing(file_path: str) -> datetime:
     """
     获取文件的时间，并转换为北京时间
-    Args:
-        file_path: 文件路径
-        use_filename_date: 是否使用文件名日期（True）或修改时间（False）
+    只使用文件名日期进行判断
     """
     try:
-        if use_filename_date:
-            filename = os.path.basename(file_path)
-            file_date = extract_date_from_filename(filename)
-            if file_date:
-                return file_date
-            
-            # 如果无法从文件名提取日期，则回退到修改时间
-            timestamp = os.path.getmtime(file_path)
-            file_time = datetime.fromtimestamp(timestamp)
-            if file_time.tzinfo is None:
-                file_time = file_time.replace(tzinfo=pytz.utc)
-            return file_time.astimezone(pytz.timezone('Asia/Shanghai'))
-        else:
-            # 使用修改时间
-            timestamp = os.path.getmtime(file_path)
-            file_time = datetime.fromtimestamp(timestamp)
-            if file_time.tzinfo is None:
-                file_time = file_time.replace(tzinfo=pytz.utc)
-            return file_time.astimezone(pytz.timezone('Asia/Shanghai'))
+        filename = os.path.basename(file_path)
+        file_date = extract_date_from_filename(filename)
+        if file_date:
+            return file_date
+        
+        # 如果无法从文件名提取日期，则回退到修改时间
+        timestamp = os.path.getmtime(file_path)
+        file_time = datetime.fromtimestamp(timestamp)
+        if file_time.tzinfo is None:
+            file_time = file_time.replace(tzinfo=pytz.utc)
+        return file_time.astimezone(pytz.timezone('Asia/Shanghai'))
     except Exception as e:
         logger.error(f"获取文件 {file_path} 时间失败: {str(e)}")
         return None
-
-def get_file_list_by_age(directory: str, days: int) -> list:
-    """获取超过指定天数的文件列表"""
-    cutoff_time = datetime.now(pytz.timezone('Asia/Shanghai')) - timedelta(days=days)
-    old_files = []
-    
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
-        if os.path.isfile(file_path):
-            try:
-                # 使用文件名日期判断
-                file_time = get_file_time_beijing(file_path, True)
-                if file_time and file_time < cutoff_time:
-                    old_files.append(file_path)
-            except Exception as e:
-                logger.error(f"文件 {file_path} 时间判断失败: {str(e)}")
-    
-    return old_files
 
 def cleanup_old_files(directory: str, days: int) -> tuple:
     """
@@ -180,7 +141,7 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
         if os.path.isfile(file_path):
             try:
                 # 获取文件的北京时间
-                file_time_beijing = get_file_time_beijing(file_path, True)
+                file_time_beijing = get_file_time_beijing(file_path)
                 if not file_time_beijing:
                     continue
                 
@@ -235,25 +196,25 @@ def main():
         total_deleted += len(deleted_files)
         success = success and dir_success
     
-    # 构建简洁的清理摘要
+    # 构建极简的清理摘要
     if total_deleted > 0:
-        message = f"✅ 【文件清理】任务完成\n\n"
+        message = f"✅ 文件清理完成\n\n"
         for dir_name, res in results.items():
             if res["deleted_files"]:
-                message += f"📁 {dir_name} 目录:\n"
-                message += f"  - 删除文件数: {len(res['deleted_files'])}\n"
-                message += f"  - 清理阈值: 超过 {DAYS_THRESHOLD} 天\n\n"
-        message += f"清理时间: {cleanup_time}"
+                message += f"📁 {dir_name}:\n"
+                message += f"  - 删除: {len(res['deleted_files'])} 个\n"
+        message += f"\n清理时间: {cleanup_time}\n"
+        message += f"阈值: {DAYS_THRESHOLD}天前"
     else:
-        message = f"ℹ️ 【文件清理】任务完成 - 未发现需要清理的文件\n"
-        message += f"  - 清理阈值: 超过 {DAYS_THRESHOLD} 天\n"
-        message += f"  - 清理时间: {cleanup_time}"
+        message = f"ℹ️ 未发现需要清理的文件\n"
+        message += f"阈值: {DAYS_THRESHOLD}天前\n"
+        message += f"清理时间: {cleanup_time}"
     
     # 添加错误信息（如果有）
     for dir_name, res in results.items():
         if not res["success"] and res["error"]:
             success = False
-            message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
+            message += f"\n\n⚠️ {dir_name} 错误:\n{res['error']}"
     
     # 推送微信消息
     sent_success = False

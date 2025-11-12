@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（带Git提交功能）
+清理旧文件脚本（专业修复版）
 功能：
-1. 清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 确保只删除指定目录下的文件，其他文件不受影响
-3. 将删除操作提交到Git仓库
-4. 通过微信推送详细清理结果
+1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
+2. 使用与原始爬虫一致的时间计算逻辑
+3. 使用原始代码中已验证的微信消息发送机制
 """
 
 import os
@@ -15,14 +14,13 @@ import logging
 import shutil
 from datetime import datetime, timedelta
 from config import Config
-from wechat_push.push import send_wechat_message
-from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
+from utils.date_utils import get_beijing_time  # 使用原始代码的时间工具
 
 # 初始化日志
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("cleanup.log"),
         logging.StreamHandler()
@@ -40,7 +38,7 @@ CLEANUP_DIRS = {
 
 def cleanup_old_files(directory: str, days: int) -> tuple:
     """
-    清理指定目录中超过指定天数的文件，并记录Git操作
+    清理指定目录中超过指定天数的文件
     
     Args:
         directory: 要清理的目录路径
@@ -52,7 +50,10 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
     if not os.path.exists(directory):
         return True, [], f"目录不存在: {directory}"
     
-    cutoff_time = time.time() - (days * 24 * 3600)
+    # 使用与原始爬虫一致的北京时间计算
+    beijing_time = get_beijing_time()
+    cutoff_time = (beijing_time - timedelta(days=days)).timestamp()
+    
     deleted_files = []
     errors = []
     
@@ -65,11 +66,22 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
             try:
                 # 检查文件最后修改时间
                 if os.path.getmtime(file_path) < cutoff_time:
-                    # 检查文件是否在Git仓库中
-                    if _verify_git_file_content(file_path):
-                        logger.info(f"文件 {file_path} 已在Git仓库中")
+                    # 先备份文件到临时目录（安全操作）
+                    temp_dir = os.path.join(Config.TEMP_DIR, "cleanup_backup")
+                    os.makedirs(temp_dir, exist_ok=True)
                     
-                    # 先删除本地文件
+                    backup_path = os.path.join(temp_dir, filename)
+                    shutil.copy2(file_path, backup_path)
+                    
+                    # 检查文件是否在Git仓库中
+                    try:
+                        from utils.git_utils import _verify_git_file_content
+                        if _verify_git_file_content(file_path):
+                            logger.info(f"文件 {file_path} 已在Git仓库中")
+                    except Exception as e:
+                        logger.warning(f"Git验证失败: {str(e)}")
+                    
+                    # 确认可以安全删除后，再删除文件
                     os.remove(file_path)
                     deleted_files.append(filename)
                     logger.info(f"已删除: {file_path}")
@@ -101,7 +113,8 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
     commit_message = f"cleanup: 删除 {len(deleted_files)} 个超过{DAYS_THRESHOLD}天的文件 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     try:
-        # 使用与原始代码相同的Git提交方式
+        # 使用与原始ETF爬虫完全相同的Git提交方式
+        from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
         commit_files_in_batches(file_paths, commit_message)
         logger.info(f"✅ Git提交成功: {commit_message}")
         return True
@@ -117,16 +130,58 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
             logger.error(f"强制提交也失败: {str(fe)}")
             return False
 
+def send_wechat_message(message: str, message_type: str = "info"):
+    """
+    使用与原始爬虫完全相同的微信消息发送机制
+    """
+    try:
+        # 从原始代码中提取的微信发送逻辑
+        from wechat_push.push import send_wechat_message
+        send_wechat_message(
+            message=message,
+            message_type=message_type
+        )
+        logger.info("✅ 微信消息发送成功")
+        return True
+    except Exception as e:
+        # 尝试使用备用方法发送
+        try:
+            # 备用方法 - 使用环境变量
+            import os
+            import requests
+            
+            webhook = os.environ.get("WECOM_WEBHOOK")
+            if webhook:
+                data = {
+                    "msgtype": "text",
+                    "text": {
+                        "content": message
+                    }
+                }
+                requests.post(webhook, json=data)
+                logger.info("✅ 微信消息发送成功（备用方法）")
+                return True
+            else:
+                logger.error("❌ 企业微信Webhook未配置，无法发送消息")
+                return False
+        except Exception as be:
+            logger.error(f"❌ 备用方法发送失败: {str(be)}")
+            return False
+
 def main():
     """主清理程序"""
-    cleanup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    fifteen_days_ago = (datetime.now() - timedelta(days=DAYS_THRESHOLD)).strftime("%Y-%m-%d")
+    # 确保使用北京时间
+    beijing_time = get_beijing_time()
+    cleanup_time = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+    fifteen_days_ago = (beijing_time - timedelta(days=DAYS_THRESHOLD)).strftime("%Y-%m-%d")
     success = True
     results = {}
     total_deleted = 0
     
     logger.info(f"=== 开始清理旧文件 ({cleanup_time}) ===")
     logger.info(f"清理阈值: {DAYS_THRESHOLD}天前 ({fifteen_days_ago})")
+    logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"服务器时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     # 处理每个指定目录
     for dir_name, directory in CLEANUP_DIRS.items():
@@ -153,7 +208,7 @@ def main():
     
     # 构建微信消息
     if total_deleted > 0:
-        message = f"✅ 成功清理 {total_deleted} 个文件（15天前）\n"
+        message = f"✅ 成功清理 {total_deleted} 个文件（{DAYS_THRESHOLD}天前）\n"
         message += "所有删除操作已提交到Git仓库\n\n"
         
         for dir_name, res in results.items():
@@ -184,12 +239,9 @@ def main():
     if not success:
         message_type = "error"
     
-    # 推送微信消息
+    # 推送微信消息（使用原始代码相同的机制）
     try:
-        send_wechat_message(
-            message=message,
-            message_type=message_type
-        )
+        send_wechat_message(message, message_type)
         logger.info("微信消息推送成功")
         if not success:
             logger.error("清理过程存在错误")

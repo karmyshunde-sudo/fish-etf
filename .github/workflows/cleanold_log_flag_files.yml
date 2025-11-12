@@ -13,8 +13,7 @@ jobs:
     name: 清理data/flags和data/logs目录下超过15天的文件
     runs-on: ubuntu-latest
     env:
-      # 关键修复：在jobs级别设置环境变量
-      # 确保整个工作流执行期间环境变量都有效
+      # 在jobs级别设置环境变量，确保整个工作流执行期间都有效
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
     permissions:
       contents: write
@@ -45,22 +44,29 @@ jobs:
             pip install pandas numpy akshare requests pytz
           fi
 
-      - name: 验证安全路径
+      - name: 验证安全路径并创建必要目录
         run: |
           echo "验证清理路径安全..."
           
-          # 确保只有指定目录会被清理
+          # 确保数据目录存在
+          mkdir -p data/flags data/logs
+          
+          # 检查并创建目录
           if [ ! -d "data/flags" ]; then
-            echo "❌ 错误: data/flags 目录不存在"
-            exit 1
+            mkdir -p data/flags
+            echo "⚠️ 注意: data/flags 目录不存在，已自动创建"
+          else
+            echo "✅ data/flags 目录存在"
           fi
           
           if [ ! -d "data/logs" ]; then
-            echo "❌ 错误: data/logs 目录不存在"
-            exit 1
+            mkdir -p data/logs
+            echo "⚠️ 注意: data/logs 目录不存在，已自动创建"
+          else
+            echo "✅ data/logs 目录存在"
           fi
           
-          echo "✅ 路径验证通过：仅会清理 data/flags 和 data/logs 目录"
+          echo "✅ 路径验证完成：已确保 data/flags 和 data/logs 目录存在"
 
       - name: 运行清理脚本
         run: |
@@ -106,7 +112,7 @@ jobs:
           if git status --porcelain | grep -q '^'; then
             git config user.name "GitHub Actions" && git config user.email "actions@github.com"
             
-            # 关键修复：使用 git add -A 暂存所有变更（包括删除）
+            # 使用 git add -A 暂存所有变更（包括删除）
             git add -A
             
             # 计算删除的文件数量

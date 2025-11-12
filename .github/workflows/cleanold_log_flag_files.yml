@@ -41,14 +41,6 @@ jobs:
             echo "⚠️ 注意: requirements.txt 不存在，尝试安装常用依赖"
             pip install pandas numpy akshare requests pytz
           fi
-          
-          # 检查微信推送依赖
-          if [ -f "requirements-wechat.txt" ]; then
-            pip install -r requirements-wechat.txt
-          else
-            echo "⚠️ 注意: requirements-wechat.txt 不存在，尝试安装微信推送依赖"
-            pip install requests
-          fi
 
       - name: 验证安全路径
         run: |
@@ -69,12 +61,25 @@ jobs:
 
       - name: 运行清理脚本
         run: |
+          # 确保在项目根目录运行脚本
+          cd $GITHUB_WORKSPACE
+          
           # 检查清理脚本是否存在
           if [ ! -f "data_crawler/cleanup_old_files.py" ]; then
             echo "❌ 错误: 清理脚本不存在 (data_crawler/cleanup_old_files.py)"
             exit 1
           fi
           
+          # 检查config模块是否存在
+          if [ ! -f "config.py" ]; then
+            echo "❌ 错误: config.py 不存在，无法导入Config模块"
+            exit 1
+          fi
+          
+          # 将项目根目录添加到PYTHONPATH
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
+          # 运行清理脚本
           python data_crawler/cleanup_old_files.py
           
           # 检查脚本退出码
@@ -86,6 +91,8 @@ jobs:
       - name: 提交清理变更
         if: always()
         run: |
+          cd $GITHUB_WORKSPACE
+          
           # 如果有Git变更，提交并推送
           if git status --porcelain | grep -q '^'; then
             git config user.name "GitHub Actions" && git config user.email "actions@github.com"
@@ -102,6 +109,8 @@ jobs:
 
       - name: 验证清理结果
         run: |
+          cd $GITHUB_WORKSPACE
+          
           # 检查清理后的文件数量
           FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
           LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)
@@ -123,6 +132,8 @@ jobs:
       - name: 发送清理通知
         if: env.WECOM_WEBHOOK
         run: |
+          cd $GITHUB_WORKSPACE
+          
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           FLAGS_COUNT=$(find data/flags -maxdepth 1 -type f | wc -l)
           LOGS_COUNT=$(find data/logs -maxdepth 1 -type f | wc -l)

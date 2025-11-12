@@ -40,12 +40,13 @@ jobs:
             echo "⚠️ 注意: requirements.txt 不存在，尝试安装常用依赖"
             pip install pandas numpy akshare requests pytz
           fi
-          
-          # 确保微信推送模块可用
+
+      - name: 确保微信推送模块可用
+        run: |
           if [ ! -f "wechat_push/push.py" ]; then
             echo "⚠️ 注意: 微信推送模块缺失，创建模拟文件"
             mkdir -p wechat_push
-            cat > wechat_push/push.py << EOF
+            cat << 'EOF' > wechat_push/push.py
 def send_wechat_message(message, message_type="info"):
     import os
     import requests
@@ -173,4 +174,4 @@ EOF
           
           # 发送微信消息
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【旧文件清理】任务已完成\n- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\n- data/logs 目录剩余 ${LOGS_COUNT} 个文件\n- 实际删除 ${DELETED_COUNT} 个文件（超过15天）\n- 清理阈值：15天前\n- 北京时间: ${BEIJING_TIME}\\n\\n详细结果请查看工作流日志\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【旧文件清理】任务已完成\\n- data/flags 目录剩余 ${FLAGS_COUNT} 个文件\\n- data/logs 目录剩余 ${LOGS_COUNT} 个文件\\n- 实际删除 ${DELETED_COUNT} 个文件（超过15天）\\n- 清理阈值：15天前\\n- 北京时间: ${BEIJING_TIME}\\n\\n详细结果请查看工作流日志\"}}"

@@ -1,45 +1,0 @@
-2025-08-29 15:26:44,655 - root - INFO - 创建目录: /home/runner/work/fish-etf/fish-etf/logs
-2025-08-29 15:26:44,655 - root - INFO - 日志文件已配置: /home/runner/work/fish-etf/fish-etf/logs/etf_strategy.log
-2025-08-29 15:26:44,655 - root - INFO - 配置初始化完成
-2025-08-29 15:26:44,655 - root - INFO - 检测到WECOM_WEBHOOK环境变量已设置
-2025-08-29 15:26:45,862 - data_crawler.akshare_crawler - INFO - AkShare爬虫模块初始化完成
-2025-08-29 15:26:45,864 - data_crawler.sina_crawler - INFO - 新浪爬虫模块初始化完成
-2025-08-29 15:26:45,865 - root - INFO - 日志文件已配置: /home/runner/work/fish-etf/fish-etf/logs/etf_strategy.log
-2025-08-29 15:26:45,865 - data_crawler - INFO - 开始更新ETF列表
-2025-08-29 15:26:45,865 - data_crawler.etf_list_manager - INFO - ETF列表文件不存在或已过期，尝试从网络获取...
-2025-08-29 15:26:45,865 - data_crawler.etf_list_manager - INFO - 尝试从AkShare获取ETF列表...
-2025-08-29 15:26:45,865 - data_crawler.etf_list_manager - INFO - 尝试从AkShare获取ETF列表...
-AkShare版本: 1.17.43
-['amac_fund_abs', 'amac_fund_account_info', 'amac_fund_info', 'amac_fund_sub_info', 'amac_person_fund_org_list', 'fund', 'fund_announcement_personnel_em', 'fund_aum_em', 'fund_aum_hist_em', 'fund_aum_trend_em', 'fund_balance_position_lg', 'fund_cf_em', 'fund_etf_category_sina', 'fund_etf_dividend_sina', 'fund_etf_fund_daily_em', 'fund_etf_fund_info_em', 'fund_etf_hist_em', 'fund_etf_hist_min_em', 'fund_etf_hist_sina', 'fund_etf_spot_em', 'fund_etf_spot_ths', 'fund_exchange_rank_em', 'fund_fee_em', 'fund_fh_em', 'fund_fh_rank_em', 'fund_financial_fund_daily_em', 'fund_financial_fund_info_em', 'fund_graded_fund_daily_em', 'fund_graded_fund_info_em', 'fund_hk_fund_hist_em', 'fund_hk_rank_em', 'fund_hold_structure_em', 'fund_individual_achievement_xq', 'fund_individual_analysis_xq', 'fund_individual_basic_info_xq', 'fund_individual_detail_hold_xq', 'fund_individual_detail_info_xq', 'fund_individual_profit_probability_xq', 'fund_info_index_em', 'fund_lcx_rank_em', 'fund_linghuo_position_lg', 'fund_lof_hist_em', 'fund_lof_hist_min_em', 'fund_lof_spot_em', 'fund_manager_em', 'fund_money_fund_daily_em', 'fund_money_fund_info_em', 'fund_money_rank_em', 'fund_name_em', 'fund_new_found_em', 'fund_open_fund_daily_em', 'fund_open_fund_info_em', 'fund_open_fund_rank_em', 'fund_portfolio_bond_hold_em', 'fund_portfolio_change_em', 'fund_portfolio_hold_em', 'fund_portfolio_industry_allocation_em', 'fund_purchase_em', 'fund_rating_all', 'fund_rating_ja', 'fund_rating_sh', 'fund_rating_zs', 'fund_report_asset_allocation_cninfo', 'fund_report_industry_allocation_cninfo', 'fund_report_stock_cninfo', 'fund_scale_change_em', 'fund_scale_close_sina', 'fund_scale_open_sina', 'fund_scale_structured_sina', 'fund_stock_position_lg', 'fund_value_estimation_em', 'get_qhkc_fund_bs', 'get_qhkc_fund_money_change', 'get_qhkc_fund_position', 'index_hist_fund_sw', 'index_option_100etf_min_qvix', 'index_option_100etf_qvix', 'index_option_300etf_min_qvix', 'index_option_300etf_qvix', 'index_option_500etf_min_qvix', 'index_option_500etf_qvix', 'index_option_50etf_min_qvix', 'index_option_50etf_qvix', 'index_realtime_fund_sw', 'stock_concept_fund_flow_hist', 'stock_fund_flow_big_deal', 'stock_fund_flow_concept', 'stock_fund_flow_individual', 'stock_fund_flow_industry', 'stock_fund_stock_holder', 'stock_fundamental', 'stock_hsgt_fund_flow_summary_em', 'stock_hsgt_fund_min_em', 'stock_individual_fund_flow', 'stock_individual_fund_flow_rank', 'stock_individual_fund_flow_rank_async', 'stock_main_fund_flow', 'stock_market_fund_flow', 'stock_report_fund_hold', 'stock_report_fund_hold_detail', 'stock_sector_fund_flow_hist', 'stock_sector_fund_flow_rank', 'stock_sector_fund_flow_summary']
-  0%|          | 0/12 [00:00<?, ?it/s]  8%|▊         | 1/12 [00:01<00:13,  1.25s/it] 17%|█▋        | 2/12 [00:03<00:18,  1.90s/it] 25%|██▌       | 3/12 [00:04<00:14,  1.61s/it] 33%|███▎      | 4/12 [00:06<00:11,  1.48s/it] 42%|████▏     | 5/12 [00:09<00:14,  2.06s/it] 50%|█████     | 6/12 [00:10<00:10,  1.80s/it] 58%|█████▊    | 7/12 [00:12<00:09,  1.95s/it] 67%|██████▋   | 8/12 [00:14<00:07,  1.96s/it] 75%|███████▌  | 9/12 [00:16<00:05,  1.92s/it] 83%|████████▎ | 10/12 [00:17<00:03,  1.72s/it] 92%|█████████▏| 11/12 [00:19<00:01,  1.77s/it]100%|██████████| 12/12 [00:20<00:00,  1.61s/it]                                               2025-08-29 15:27:09,545 - data_crawler.etf_list_manager - INFO - AkShare获取到1229只ETF，筛选后剩余321只
-2025-08-29 15:27:09,548 - data_crawler.etf_list_manager - INFO - ✅ AkShare更新成功（321只ETF）
-2025-08-29 15:27:09,548 - data_crawler - INFO - ETF列表更新成功，共321只ETF
-2025-08-29 15:27:09,548 - data_crawler - INFO - 数据爬取模块初始化完成
-2025-08-29 15:27:09,558 - strategy.arbitrage - INFO - 套利策略模块初始化完成
-2025-08-29 15:27:09,561 - strategy.position - INFO - 仓位管理模块初始化完成
-2025-08-29 15:27:09,561 - root - INFO - 日志文件已配置: /home/runner/work/fish-etf/fish-etf/logs/etf_strategy.log
-2025-08-29 15:27:09,561 - strategy - INFO - 策略模块初始化完成
-2025-08-29 15:27:09,563 - wechat_push.push - INFO - 微信推送模块初始化完成
-2025-08-29 15:27:09,564 - root - INFO - 日志文件已配置: /home/runner/work/fish-etf/fish-etf/logs/etf_strategy.log
-2025-08-29 15:27:09,564 - __main__ - INFO - ===== 开始执行任务：update_etf_list =====
-2025-08-29 15:27:09,564 - __main__ - INFO - 当前时间：2025-08-29 23:27:09（北京时间）
-2025-08-29 15:27:09,564 - __main__ - INFO - 环境设置完成
-2025-08-29 15:27:09,564 - __main__ - INFO - 开始更新全市场ETF列表
-2025-08-29 15:27:09,564 - data_crawler.etf_list_manager - INFO - ℹ️ 无需更新，加载本地ETF列表
-2025-08-29 15:27:09,566 - __main__ - INFO - 全市场ETF列表更新完成，共321只
-2025-08-29 15:27:09,566 - __main__ - ERROR - ETF列表更新失败: name 'timedelta' is not defined
-2025-08-29 15:27:09,566 - __main__ - ERROR - Traceback (most recent call last):
-  File "/home/runner/work/fish-etf/fish-etf/main.py", line 265, in handle_update_etf_list
-    expiration = last_modified + timedelta(days=7)
-NameError: name 'timedelta' is not defined
-
-2025-08-29 15:27:10,445 - wechat_push.push - INFO - 微信消息发送成功
-2025-08-29 15:27:10,446 - __main__ - INFO - 已发送任务完成通知: update_etf_list - 失败
-2025-08-29 15:27:10,446 - __main__ - INFO - ===== 任务执行结束：error =====
-ETF列表未过期(0天)，无需更新
-{
-  "status": "error",
-  "task": "update_etf_list",
-  "message": "ETF列表更新失败: name 'timedelta' is not defined",
-  "timestamp": "2025-08-29 23:27:09"
-}

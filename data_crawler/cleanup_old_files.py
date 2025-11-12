@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（终极修复版 - 优化微信消息发送逻辑）
+清理旧文件脚本（修复版 - 直接提交删除操作）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
 2. 从文件名中提取日期信息进行清理判断
-3. 优化微信消息发送逻辑，确保准确报告发送结果
+3. 直接使用 commit_files_in_batches 提交文件删除操作
 """
 
 import os
@@ -291,22 +291,16 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
     commit_message = f"cleanup: 删除 {len(deleted_files)} 个超过{DAYS_THRESHOLD}天的文件 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     try:
-        # 使用与原始ETF爬虫完全相同的Git提交方式
-        from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
+        # 直接使用 commit_files_in_batches 提交删除操作
+        from utils.git_utils import commit_files_in_batches
         commit_files_in_batches(file_paths, commit_message)
         logger.info(f"✅ Git提交成功: {commit_message}")
         return True
     except Exception as e:
         error_msg = f"Git提交失败: {str(e)}"
         logger.error(error_msg)
-        # 尝试强制提交
-        try:
-            force_commit_remaining_files()
-            logger.info("✅ 强制提交成功")
-            return True
-        except Exception as fe:
-            logger.error(f"强制提交也失败: {str(fe)}")
-            return False
+        # 不再尝试强制提交
+        return False
 
 def main():
     """主清理程序"""
@@ -357,114 +351,4 @@ def main():
                 success = False  # 标记为失败
         
         if error_msg:
-            logger.error(f"{directory} 清理错误: {error_msg}")
-        
-        results[dir_name] = {
-            "success": dir_success,
-            "deleted_files": deleted_files,
-            "error": error_msg
-        }
-        total_deleted += len(deleted_files)
-        success = success and dir_success
-    
-    # 3. 统计清理后的文件数量
-    for dir_name, directory in CLEANUP_DIRS.items():
-        file_list = get_file_list(directory)
-        post_cleanup_stats[dir_name] = {
-            "total": len(file_list),
-            "oldest_files_fname": get_oldest_files_info(directory, 5, True),
-            "oldest_files_mtime": get_oldest_files_info(directory, 5, False)
-        }
-        
-        logger.info(f"{directory} 目录清理后状态:")
-        logger.info(f"  - 剩余文件数: {post_cleanup_stats[dir_name]['total']}")
-        logger.info(f"  - 基于文件名日期的最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files_fname']}")
-        logger.info(f"  - 基于修改时间的最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files_mtime']}")
-    
-    # 4. 构建微信消息
-    if total_deleted > 0:
-        message = f"✅ 成功清理 {total_deleted} 个文件（{DAYS_THRESHOLD}天前）\n"
-        message += "所有删除操作已提交到Git仓库\n\n"
-        
-        for dir_name, res in results.items():
-            if res["deleted_files"]:
-                message += f"📁 {dir_name} 目录:\n"
-                message += f"  - 初始文件数: {pre_cleanup_stats[dir_name]['total']} → 剩余文件数: {post_cleanup_stats[dir_name]['total']}\n"
-                message += f"  - 已删除 {len(res['deleted_files'])} 个文件\n"
-                
-                # 添加最旧文件信息
-                if pre_cleanup_stats[dir_name]['old_files_count'] > 0:
-                    message += f"  - 清理前基于文件名日期的最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files_fname']}\n"
-                    message += f"  - 清理前基于修改时间的最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files_mtime']}\n"
-                    message += f"  - 清理后基于文件名日期的最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files_fname']}\n"
-                    message += f"  - 清理后基于修改时间的最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files_mtime']}\n"
-                
-                # 列出部分文件（最多5个）
-                if len(res["deleted_files"]) > 5:
-                    message += "    " + ", ".join(res["deleted_files"][:5]) + " ...\n"
-                else:
-                    message += "    " + ", ".join(res["deleted_files"]) + "\n"
-                
-                if res["error"]:
-                    message += f"  ⚠️ 错误: {res['error']}\n"
-        message += f"\n清理时间: {cleanup_time}"
-    else:
-        message = "ℹ️ 未发现需要清理的文件\n"
-        message += f"清理时间: {cleanup_time}\n"
-        message += f"清理阈值: {DAYS_THRESHOLD}天前 ({fifteen_days_ago})"
-        
-        # 添加清理前状态信息
-        for dir_name in CLEANUP_DIRS.keys():
-            message += f"\n\n📁 {dir_name} 目录:"
-            message += f"\n  - 初始文件数: {pre_cleanup_stats[dir_name]['total']}"
-            message += f"\n  - 超{DAYS_THRESHOLD}天文件数: {pre_cleanup_stats[dir_name]['old_files_count']}"
-            message += f"\n  - 基于文件名日期的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_fname']}"
-            message += f"\n  - 基于修改时间的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_mtime']}"
-        
-        # 检查是否有错误
-        for dir_name, res in results.items():
-            if not res["success"] and res["error"]:
-                success = False
-                message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
-    
-    # 5. 推送微信消息 - 修复：明确区分消息发送状态
-    sent_success = False
-    try:
-        # 正确检查send_wechat_message的返回值
-        sent_success = send_wechat_message(message)
-        if sent_success:
-            logger.info("✅ 微信消息推送成功")
-        else:
-            logger.error("❌ 微信消息推送失败：企业微信Webhook未配置")
-    except Exception as e:
-        error_msg = f"❌ 微信消息推送失败: {str(e)}"
-        logger.error(error_msg)
-        # 不再尝试发送额外的错误消息（避免递归调用）
-    
-    # 6. 打印最终状态 - 清晰区分不同类型的失败
-    if success:
-        if sent_success:
-            logger.info(f"✅ 清理完成 - 成功删除 {total_deleted} 个文件并提交Git")
-        else:
-            logger.error(f"⚠️ 清理完成 - 清理操作成功但微信消息发送失败")
-    else:
-        logger.error("❌ 清理完成 - 但存在错误")
-        # 详细报告错误原因
-        if not success:
-            logger.error("❌ Git提交失败：删除操作未记录到版本历史")
-        if not sent_success:
-            logger.error("❌ 微信消息推送失败：企业微信Webhook未配置")
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        error_msg = f"清理脚本执行失败: {str(e)}"
-        logger.exception(error_msg)
-        try:
-            send_wechat_message(
-                f"❌ 清理脚本执行失败:\n{error_msg}"
-            )
-        except:
-            pass
-        raise
+            logger.error(f"{directory} 清

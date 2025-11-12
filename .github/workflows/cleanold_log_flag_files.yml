@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  clean-old-flag-log-files:
+  cleanoldlog:
     name: 清理data/flags和data/logs目录下超过15天的文件
     runs-on: ubuntu-latest
     permissions:

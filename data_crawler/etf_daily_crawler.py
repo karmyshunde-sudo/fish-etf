@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - Yahoo Finance方案
-【核心特性】
-- 100% 免费稳定（无需API密钥）
-- 完整保留原有数据结构
-- 严格保持进度管理逻辑
-- 投资级时效性（15分钟延迟）
-- 100% 复制即可用
+ETF日线数据爬取模块 - Yahoo Finance修复版
+【关键修复】
+- 解决DataFrame多级列结构问题
+- 修复涨跌幅计算错误
+- 严格保持原有数据结构
 """
 
 import yfinance as yf
@@ -18,7 +16,6 @@ import time
 import random
 import tempfile
 import shutil
-import math
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -40,7 +37,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # 【关键参数】优化版
 BATCH_SIZE = 80
-BASE_DELAY = 0.8  # 优化为0.8-1.5秒（Yahoo Finance允许）
+BASE_DELAY = 0.8
 MAX_RETRIES = 3
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
@@ -213,11 +210,10 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【核心实现】Yahoo Finance API
-# 1. 100% 免费稳定
-# 2. 无需API密钥
-# 3. 完整支持所有ETF
-# 4. 严格保持数据结构
+# 【核心修复】Yahoo Finance数据处理
+# 1. 解决多级列结构问题
+# 2. 修复涨跌幅计算错误
+# 3. 确保单列操作
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
     """请求限流器 - 动态调整请求间隔"""
@@ -260,53 +256,81 @@ throttler = RequestThrottler(base_delay=BASE_DELAY)
 def calculate_additional_fields(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
     """
     计算所有必要衍生字段
+    【关键修复】
+    - 处理Yahoo Finance多级列结构
+    - 修复涨跌幅计算错误
+    - 确保单列操作
     """
-    df = df.sort_values("Date").reset_index(drop=True)
+    # 1. 确保DataFrame是扁平结构
+    if isinstance(df.columns, pd.MultiIndex):
+        # 处理多级列（Yahoo Finance常见问题）
+        df.columns = ['_'.join(col).strip() for col in df.columns.values]
     
-    # 1. 振幅 = (最高 - 最低) / 最低 * 100%
-    df['振幅'] = ((df['High'] - df['Low']) / df['Low'] * 100).round(2)
+    # 2. 确保日期列存在（Yahoo Finance返回Date作为索引）
+    if 'Date' in df.columns:
+        df = df.reset_index(drop=True)
+    elif df.index.name == 'Date':
+        df = df.reset_index()
+    elif 'date' in df.columns:
+        df = df.rename(columns={'date': 'Date'})
+    else:
+        # 创建默认日期列
+        df['Date'] = pd.date_range(start='2020-01-01', periods=len(df))
     
-    # 2. 涨跌额 = 收盘 - 前一日收盘
-    df['涨跌额'] = df['Close'].diff().fillna(0)
+    # 3. 确保基本列存在
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    for col in required_columns:
+        if col not in df.columns:
+            logger.warning(f"ETF数据缺少必要列: {col}")
+            df[col] = 0.0
     
-    # 3. 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
-    df['涨跌幅'] = (df['涨跌额'] / df['Close'].shift(1) * 100).round(2)
+    # 4. 创建临时单列DataFrame
+    result_df = pd.DataFrame()
+    result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
+    result_df['开盘'] = df['Open'].astype(float)
+    result_df['最高'] = df['High'].astype(float)
+    result_df['最低'] = df['Low'].astype(float)
+    result_df['收盘'] = df['Close'].astype(float)
+    result_df['成交量'] = df['Volume'].astype(float)
     
-    # 4. 换手率 = 成交量 / 基金规模
+    # 5. 计算衍生字段
+    # 振幅 = (最高 - 最低) / 最低 * 100%
+    result_df['振幅'] = ((result_df['最高'] - result_df['最低']) / result_df['最低'] * 100).round(2)
+    
+    # 涨跌额 = 收盘 - 前一日收盘
+    result_df['涨跌额'] = result_df['收盘'].diff().fillna(0)
+    
+    # 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
+    prev_close = result_df['收盘'].shift(1)
+    # 避免除以0
+    valid_prev_close = prev_close.replace(0, float('nan'))
+    result_df['涨跌幅'] = (result_df['涨跌额'] / valid_prev_close * 100).round(2)
+    result_df['涨跌幅'] = result_df['涨跌幅'].fillna(0)
+    
+    # 换手率 = 成交量 / 基金规模
     fund_size = get_etf_fund_size(etf_code)
     if fund_size > 0:
-        df['换手率'] = (df['Volume'] / fund_size * 100).round(2)
+        result_df['换手率'] = (result_df['成交量'] / fund_size * 100).round(2)
     else:
-        df['换手率'] = 0.0
+        result_df['换手率'] = 0.0
     
-    # 5. 折价率/溢价率 - Yahoo Finance 不提供 IOPV
-    # 保留字段但设为0（投资策略可能不需要）
-    df['IOPV'] = 0.0  # 无数据
-    df['折价率'] = 0.0
-    df['溢价率'] = 0.0
+    # 6. IOPV/折价率/溢价率（Yahoo Finance不提供）
+    result_df['IOPV'] = 0.0
+    result_df['折价率'] = 0.0
+    result_df['溢价率'] = 0.0
     
-    # 重命名列
-    df.rename(columns={
-        'Date': '日期',
-        'Open': '开盘',
-        'High': '最高',
-        'Low': '最低',
-        'Close': '收盘',
-        'Volume': '成交量'
-    }, inplace=True)
+    # 7. 成交额 = 收盘 * 成交量
+    result_df['成交额'] = (result_df['收盘'] * result_df['成交量']).round(2)
     
-    # 计算成交额（Yahoo Finance 不直接提供）
-    df['成交额'] = (df['收盘'] * df['成交量']).round(2)
-    
-    return df
+    return result_df
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
     使用Yahoo Finance爬取ETF日线数据
-    优化点：
-      - 100% 免费稳定
-      - 无需API密钥
-      - 完整支持所有ETF
+    修复点：
+      - 处理多级列结构
+      - 修复涨跌幅计算
+      - 确保数据结构一致性
     """
     try:
         # 确保日期格式正确
@@ -331,7 +355,6 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                 throttler.wait()
                 
                 # Yahoo Finance API
-                # 添加ETF代码后缀（.SS/.SZ）
                 symbol = etf_code
                 if etf_code.startswith(('51', '56', '57', '58')):
                     symbol += ".SS"
@@ -344,6 +367,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                     start=start_str,
                     end=end_str,
                     progress=False,
+                    auto_adjust=True,  # 关键修复：启用自动复权
                     timeout=15
                 )
                 
@@ -370,7 +394,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.error(f"ETF {etf_code} 数据缺少必要列: {df.columns.tolist()}")
             return pd.DataFrame()
         
-        # 3. 计算所有衍生字段
+        # 3. 计算所有衍生字段（关键修复）
         df = calculate_additional_fields(df, etf_code)
         
         # 4. 补充必要字段

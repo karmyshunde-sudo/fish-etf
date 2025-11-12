@@ -31,3 +31,5 @@ temp/
 !data/debug/.csv
 !data/stock/
 !data/stock/*.txt
+!data/etf/daily/
+!data/etf/daily/*.csv

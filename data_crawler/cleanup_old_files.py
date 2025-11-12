@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（终极修复版 - 双重时间排序验证）
+清理旧文件脚本（终极修复版 - 基于文件名日期解析）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 使用文件创建时间作为清理依据
-3. 在清理前后同时显示基于创建时间和修改时间排序的最旧文件
+2. 从文件名中提取日期信息进行清理判断（不再依赖文件系统创建时间）
+3. 在清理前后同时显示基于文件名日期和修改时间排序的最旧文件
 """
 
 import os
 import time
 import logging
 import shutil
+import re
 import pytz
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
-# 导入微信消息发送模块（移到代码开头）
 from wechat_push.push import send_wechat_message
 
 # 初始化日志
@@ -51,12 +51,68 @@ def get_file_list(directory: str) -> list:
             files.append(file_path)
     return files
 
-def get_oldest_files_by_ctime(directory: str, count: int = 5) -> list:
-    """获取目录中按创建时间排序的最早的count个文件"""
+def extract_date_from_filename(filename: str) -> datetime:
+    """
+    从文件名中提取日期
+    支持的日期格式：
+    1. YYYYMMDD（如20251031）
+    2. YYYY-MM-DD（如2025-10-31）
+    3. YYYYMMDD_HHMMSS（如20250827_065100）
+    
+    返回北京时间的datetime对象，如果无法解析则返回None
+    """
+    # 尝试匹配YYYYMMDD格式
+    pattern1 = r'(\d{8})'
+    match = re.search(pattern1, filename)
+    if match:
+        date_str = match.group(1)
+        try:
+            date_obj = datetime.strptime(date_str, "%Y%m%d")
+            return date_obj.replace(tzinfo=pytz.timezone('Asia/Shanghai'))
+        except ValueError:
+            pass
+    
+    # 尝试匹配YYYY-MM-DD格式
+    pattern2 = r'(\d{4}-\d{2}-\d{2})'
+    match = re.search(pattern2, filename)
+    if match:
+        date_str = match.group(1)
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            return date_obj.replace(tzinfo=pytz.timezone('Asia/Shanghai'))
+        except ValueError:
+            pass
+    
+    # 尝试匹配YYYYMMDD_HHMMSS格式
+    pattern3 = r'(\d{8})_\d{6}'
+    match = re.search(pattern3, filename)
+    if match:
+        date_str = match.group(1)
+        try:
+            date_obj = datetime.strptime(date_str, "%Y%m%d")
+            return date_obj.replace(tzinfo=pytz.timezone('Asia/Shanghai'))
+        except ValueError:
+            pass
+    
+    return None
+
+def get_oldest_files_by_filename_date(directory: str, count: int = 5) -> list:
+    """获取目录中按文件名日期排序的最早的count个文件"""
     files = get_file_list(directory)
-    # 按创建时间排序（最早在前）
-    files.sort(key=lambda x: get_file_creation_time(x))
-    return files[:count]
+    
+    # 创建包含文件路径和日期的元组
+    files_with_dates = []
+    for file_path in files:
+        filename = os.path.basename(file_path)
+        file_date = extract_date_from_filename(filename)
+        if file_date:
+            files_with_dates.append((file_path, file_date))
+    
+    # 按日期排序（最早在前）
+    files_with_dates.sort(key=lambda x: x[1])
+    
+    # 返回文件路径
+    return [item[0] for item in files_with_dates[:count]]
 
 def get_oldest_files_by_mtime(directory: str, count: int = 5) -> list:
     """获取目录中按修改时间排序的最早的count个文件"""
@@ -65,91 +121,70 @@ def get_oldest_files_by_mtime(directory: str, count: int = 5) -> list:
     files.sort(key=lambda x: os.path.getmtime(x))
     return files[:count]
 
-def get_file_creation_time(file_path: str) -> float:
-    """
-    获取文件的创建时间戳
-    优先使用创建时间，如果不可用则使用修改时间
-    """
-    try:
-        # 尝试获取创建时间（Windows）
-        if os.name == 'nt':
-            return os.path.getctime(file_path)
-        
-        # Linux/Unix系统：尝试获取创建时间
-        stat = os.stat(file_path)
-        # 对于Linux，有些文件系统支持st_birthtime
-        try:
-            return stat.st_birthtime
-        except AttributeError:
-            # 如果不支持，回退到修改时间
-            return stat.st_mtime
-    except Exception as e:
-        logger.error(f"获取文件 {file_path} 创建时间失败: {str(e)}")
-        # 最后尝试：使用修改时间
-        return os.path.getmtime(file_path)
-
-def get_file_time_beijing(file_path: str, use_creation_time: bool = True) -> datetime:
+def get_file_time_beijing(file_path: str, use_filename_date: bool = True) -> datetime:
     """
     获取文件的时间，并转换为北京时间
     Args:
         file_path: 文件路径
-        use_creation_time: 是否使用创建时间（True）或修改时间（False）
+        use_filename_date: 是否使用文件名日期（True）或修改时间（False）
     """
     try:
-        # 获取文件的时间戳
-        if use_creation_time:
-            timestamp = get_file_creation_time(file_path)
-        else:
+        if use_filename_date:
+            filename = os.path.basename(file_path)
+            file_date = extract_date_from_filename(filename)
+            if file_date:
+                return file_date
+            
+            # 如果无法从文件名提取日期，则回退到修改时间
             timestamp = os.path.getmtime(file_path)
-        
-        file_time = datetime.fromtimestamp(timestamp)
-        
-        # 确保有时区信息
-        if file_time.tzinfo is None:
-            # GitHub Actions 运行在 UTC 时区
-            file_time = file_time.replace(tzinfo=pytz.utc)
-        
-        # 转换为北京时间
-        file_time_beijing = file_time.astimezone(pytz.timezone('Asia/Shanghai'))
-        return file_time_beijing
+            file_time = datetime.fromtimestamp(timestamp)
+            if file_time.tzinfo is None:
+                file_time = file_time.replace(tzinfo=pytz.utc)
+            return file_time.astimezone(pytz.timezone('Asia/Shanghai'))
+        else:
+            # 使用修改时间
+            timestamp = os.path.getmtime(file_path)
+            file_time = datetime.fromtimestamp(timestamp)
+            if file_time.tzinfo is None:
+                file_time = file_time.replace(tzinfo=pytz.utc)
+            return file_time.astimezone(pytz.timezone('Asia/Shanghai'))
     except Exception as e:
         logger.error(f"获取文件 {file_path} 时间失败: {str(e)}")
         return None
 
-def get_file_age(file_path: str, use_creation_time: bool = True) -> int:
-    """获取文件的天数（从创建/修改时间到现在）"""
-    if use_creation_time:
-        file_time = get_file_creation_time(file_path)
-    else:
-        file_time = os.path.getmtime(file_path)
+def get_file_age(file_path: str, use_filename_date: bool = True) -> int:
+    """获取文件的天数（从文件名日期或修改时间到现在）"""
+    file_time = get_file_time_beijing(file_path, use_filename_date)
+    if not file_time:
+        return 0
     
-    now = time.time()
-    age_seconds = now - file_time
-    return int(age_seconds / (24 * 3600))
+    now = datetime.now(pytz.timezone('Asia/Shanghai'))
+    age = now - file_time
+    return age.days
 
 def get_file_list_by_age(directory: str, days: int) -> list:
     """获取超过指定天数的文件列表"""
-    cutoff_time = time.time() - (days * 24 * 3600)
+    cutoff_time = datetime.now(pytz.timezone('Asia/Shanghai')) - timedelta(days=days)
     old_files = []
     
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         if os.path.isfile(file_path):
             try:
-                # 使用创建时间判断
-                ctime = get_file_creation_time(file_path)
-                if ctime < cutoff_time:
+                # 使用文件名日期判断
+                file_time = get_file_time_beijing(file_path, True)
+                if file_time and file_time < cutoff_time:
                     old_files.append(file_path)
             except Exception as e:
                 logger.error(f"文件 {file_path} 时间判断失败: {str(e)}")
     
     return old_files
 
-def get_oldest_files_info(directory: str, count: int = 5, use_creation_time: bool = True) -> str:
+def get_oldest_files_info(directory: str, count: int = 5, use_filename_date: bool = True) -> str:
     """获取目录中最旧文件的详细信息"""
-    if use_creation_time:
-        oldest_files = get_oldest_files_by_ctime(directory, count)
-        time_type = "创建时间"
+    if use_filename_date:
+        oldest_files = get_oldest_files_by_filename_date(directory, count)
+        time_type = "文件名日期"
     else:
         oldest_files = get_oldest_files_by_mtime(directory, count)
         time_type = "修改时间"
@@ -158,8 +193,8 @@ def get_oldest_files_info(directory: str, count: int = 5, use_creation_time: boo
     
     for file_path in oldest_files:
         file_name = os.path.basename(file_path)
-        file_time_beijing = get_file_time_beijing(file_path, use_creation_time)
-        if file_time_beijing is None:
+        file_time_beijing = get_file_time_beijing(file_path, use_filename_date)
+        if not file_time_beijing:
             continue
         
         file_age = (datetime.now(pytz.timezone('Asia/Shanghai')) - file_time_beijing).days
@@ -199,11 +234,11 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
         if os.path.isfile(file_path):
             try:
                 # 获取文件的北京时间
-                file_time_beijing = get_file_time_beijing(file_path, use_creation_time=True)
-                if file_time_beijing is None:
+                file_time_beijing = get_file_time_beijing(file_path, True)
+                if not file_time_beijing:
                     continue
                 
-                # 检查文件创建时间
+                # 检查文件日期
                 if file_time_beijing < cutoff_time:
                     old_files += 1
                     
@@ -225,7 +260,7 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
                     # 确认可以安全删除后，再删除文件
                     os.remove(file_path)
                     deleted_files.append(filename)
-                    logger.info(f"已删除: {file_path} (创建时间: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
+                    logger.info(f"已删除: {file_path} (文件名日期: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
             except Exception as e:
                 error_msg = f"删除 {filename} 失败: {str(e)}"
                 errors.append(error_msg)
@@ -297,14 +332,14 @@ def main():
         pre_cleanup_stats[dir_name] = {
             "total": len(file_list),
             "old_files_count": len(old_files),
-            "oldest_files_ctime": get_oldest_files_info(directory, 5, True),
+            "oldest_files_fname": get_oldest_files_info(directory, 5, True),
             "oldest_files_mtime": get_oldest_files_info(directory, 5, False)
         }
         
         logger.info(f"{directory} 目录清理前状态:")
         logger.info(f"  - 总文件数: {pre_cleanup_stats[dir_name]['total']}")
         logger.info(f"  - 超{DAYS_THRESHOLD}天文件数: {pre_cleanup_stats[dir_name]['old_files_count']}")
-        logger.info(f"  - 基于创建时间的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_ctime']}")
+        logger.info(f"  - 基于文件名日期的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_fname']}")
         logger.info(f"  - 基于修改时间的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_mtime']}")
     
     # 2. 处理每个指定目录
@@ -335,13 +370,13 @@ def main():
         file_list = get_file_list(directory)
         post_cleanup_stats[dir_name] = {
             "total": len(file_list),
-            "oldest_files_ctime": get_oldest_files_info(directory, 5, True),
+            "oldest_files_fname": get_oldest_files_info(directory, 5, True),
             "oldest_files_mtime": get_oldest_files_info(directory, 5, False)
         }
         
         logger.info(f"{directory} 目录清理后状态:")
         logger.info(f"  - 剩余文件数: {post_cleanup_stats[dir_name]['total']}")
-        logger.info(f"  - 基于创建时间的最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files_ctime']}")
+        logger.info(f"  - 基于文件名日期的最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files_fname']}")
         logger.info(f"  - 基于修改时间的最旧5个文件:\n{post_cleanup_stats[dir_name]['oldest_files_mtime']}")
     
     # 4. 构建微信消息
@@ -357,9 +392,9 @@ def main():
                 
                 # 添加最旧文件信息
                 if pre_cleanup_stats[dir_name]['old_files_count'] > 0:
-                    message += f"  - 清理前基于创建时间的最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files_ctime']}\n"
+                    message += f"  - 清理前基于文件名日期的最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files_fname']}\n"
                     message += f"  - 清理前基于修改时间的最旧文件:\n{pre_cleanup_stats[dir_name]['oldest_files_mtime']}\n"
-                    message += f"  - 清理后基于创建时间的最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files_ctime']}\n"
+                    message += f"  - 清理后基于文件名日期的最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files_fname']}\n"
                     message += f"  - 清理后基于修改时间的最旧文件:\n{post_cleanup_stats[dir_name]['oldest_files_mtime']}\n"
                 
                 # 列出部分文件（最多5个）
@@ -381,7 +416,7 @@ def main():
             message += f"\n\n📁 {dir_name} 目录:"
             message += f"\n  - 初始文件数: {pre_cleanup_stats[dir_name]['total']}"
             message += f"\n  - 超{DAYS_THRESHOLD}天文件数: {pre_cleanup_stats[dir_name]['old_files_count']}"
-            message += f"\n  - 基于创建时间的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_ctime']}"
+            message += f"\n  - 基于文件名日期的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_fname']}"
             message += f"\n  - 基于修改时间的最旧5个文件:\n{pre_cleanup_stats[dir_name]['oldest_files_mtime']}"
         
         # 检查是否有错误
@@ -390,9 +425,8 @@ def main():
                 success = False
                 message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
     
-    # 5. 推送微信消息（使用原始代码相同的机制）
+    # 5. 推送微信消息
     try:
-        # 修复：只传递一个参数
         send_wechat_message(message)
         logger.info("微信消息推送成功")
         if not success:
@@ -402,7 +436,6 @@ def main():
         logger.error(error_msg)
         # 尝试发送错误消息
         try:
-            # 修复：只传递一个参数
             send_wechat_message(
                 f"❌ 清理任务执行成功，但消息推送失败:\n{error_msg}"
             )
@@ -422,7 +455,6 @@ if __name__ == "__main__":
         error_msg = f"清理脚本执行失败: {str(e)}"
         logger.exception(error_msg)
         try:
-            # 修复：只传递一个参数
             send_wechat_message(
                 f"❌ 清理脚本执行失败:\n{error_msg}"
             )

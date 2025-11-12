@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（最终修正版）
+清理旧文件脚本（终极修复版）
 功能：
 1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 添加清理前文件统计和最旧文件日志
-3. 使用与原始爬虫完全一致的微信消息发送机制
+2. 正确处理时区问题，确保阈值计算准确
+3. 改进微信消息发送逻辑，准确反映发送状态
 """
 
 import os
 import time
 import logging
 import shutil
+import pytz
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time  # 使用原始代码的时间工具
+from utils.date_utils import get_timezone  # 添加时区获取工具
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -74,6 +76,27 @@ def get_file_list_by_age(directory: str, days: int) -> list:
     
     return old_files
 
+def get_file_time_beijing(file_path: str) -> datetime:
+    """
+    获取文件的修改时间，并转换为北京时间
+    """
+    try:
+        # 获取文件的最后修改时间戳
+        mtime = os.path.getmtime(file_path)
+        file_time = datetime.fromtimestamp(mtime)
+        
+        # 确保有时区信息
+        if file_time.tzinfo is None:
+            # GitHub Actions 运行在 UTC 时区
+            file_time = file_time.replace(tzinfo=pytz.utc)
+        
+        # 转换为北京时间
+        file_time_beijing = file_time.astimezone(pytz.timezone('Asia/Shanghai'))
+        return file_time_beijing
+    except Exception as e:
+        logger.error(f"获取文件 {file_path} 时间失败: {str(e)}")
+        return None
+
 def cleanup_old_files(directory: str, days: int) -> tuple:
     """
     清理指定目录中超过指定天数的文件
@@ -90,20 +113,30 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
     
     # 使用与原始爬虫一致的北京时间计算
     beijing_time = get_beijing_time()
-    cutoff_time = (beijing_time - timedelta(days=days)).timestamp()
+    cutoff_time = beijing_time - timedelta(days=days)
     
     deleted_files = []
     errors = []
+    total_files = 0
+    old_files = 0
     
     # 遍历目录中的所有文件（不递归子目录）
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
+        total_files += 1
         
         # 只处理文件，跳过目录
         if os.path.isfile(file_path):
             try:
+                # 获取文件的北京时间
+                file_time_beijing = get_file_time_beijing(file_path)
+                if file_time_beijing is None:
+                    continue
+                
                 # 检查文件最后修改时间
-                if os.path.getmtime(file_path) < cutoff_time:
+                if file_time_beijing < cutoff_time:
+                    old_files += 1
+                    
                     # 先备份文件到临时目录（安全操作）
                     temp_dir = os.path.join(Config.TEMP_DIR, "cleanup_backup")
                     os.makedirs(temp_dir, exist_ok=True)
@@ -122,12 +155,13 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
                     # 确认可以安全删除后，再删除文件
                     os.remove(file_path)
                     deleted_files.append(filename)
-                    logger.info(f"已删除: {file_path}")
+                    logger.info(f"已删除: {file_path} (文件时间: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
             except Exception as e:
                 error_msg = f"删除 {filename} 失败: {str(e)}"
                 errors.append(error_msg)
                 logger.error(error_msg)
     
+    logger.info(f"清理统计: 总文件数={total_files}, 超{DAYS_THRESHOLD}天文件数={old_files}, 实际删除文件数={len(deleted_files)}")
     return len(errors) == 0, deleted_files, "\n".join(errors) if errors else ""
 
 def commit_deletion(directory: str, deleted_files: list) -> bool:
@@ -168,9 +202,10 @@ def commit_deletion(directory: str, deleted_files: list) -> bool:
             logger.error(f"强制提交也失败: {str(fe)}")
             return False
 
-def send_wechat_message(message: str, message_type: str = "info"):
+def send_wechat_message(message: str, message_type: str = "info") -> bool:
     """
     使用与原始爬虫完全相同的微信消息发送机制
+    返回值表示是否成功发送
     """
     try:
         # 从原始代码中提取的微信发送逻辑
@@ -196,9 +231,13 @@ def send_wechat_message(message: str, message_type: str = "info"):
                         "content": message
                     }
                 }
-                requests.post(webhook, json=data)
-                logger.info("✅ 微信消息发送成功（备用方法）")
-                return True
+                response = requests.post(webhook, json=data)
+                if response.status_code == 200:
+                    logger.info("✅ 微信消息发送成功（备用方法）")
+                    return True
+                else:
+                    logger.error(f"❌ 微信消息发送失败: HTTP {response.status_code}")
+                    return False
             else:
                 logger.error("❌ 企业微信Webhook未配置，无法发送消息")
                 return False
@@ -213,9 +252,12 @@ def get_oldest_files_info(directory: str, count: int = 5) -> str:
     
     for file_path in oldest_files:
         file_name = os.path.basename(file_path)
-        file_age = get_file_age(file_path)
-        file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime("%Y-%m-%d %H:%M:%S")
-        info_lines.append(f"  - {file_name} ({file_age}天前, 修改时间: {file_mtime})")
+        file_time_beijing = get_file_time_beijing(file_path)
+        if file_time_beijing is None:
+            continue
+        
+        file_age = (datetime.now(pytz.timezone('Asia/Shanghai')) - file_time_beijing).days
+        info_lines.append(f"  - {file_name} ({file_age}天前, 修改时间: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
     
     return "\n".join(info_lines) if info_lines else "  - 无足够旧文件"
 
@@ -336,9 +378,13 @@ def main():
         message_type = "error"
     
     # 6. 推送微信消息（使用原始代码相同的机制）
+    sent_success = False
     try:
-        send_wechat_message(message, message_type)
-        logger.info("微信消息推送成功")
+        sent_success = send_wechat_message(message, message_type)
+        if sent_success:
+            logger.info("微信消息推送成功")
+        else:
+            logger.error("微信消息推送失败")
         if not success:
             logger.error("清理过程存在错误")
     except Exception as e:

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-清理旧文件脚本（最终修复版）
+清理旧文件脚本（严格职责分离版）
 功能：
-1. 严格清理 data/flags 和 data/logs 目录下超过15天的文件
-2. 仅生成简洁的清理结果摘要（避免消息过长）
-3. 不处理Git提交（由工作流统一处理）
-4. 修复微信消息发送逻辑，确保消息简洁
+1. 清理 data/flags 和 data/logs 目录下超过15天的文件
+2. 正确处理Git提交（在文件删除前标记为删除）
+3. 生成简洁的微信消息并发送
 """
 
 import os
@@ -18,6 +17,7 @@ from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
 from wechat_push.push import send_wechat_message
+from utils.git_utils import commit_files_in_batches
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -87,7 +87,6 @@ def extract_date_from_filename(filename: str) -> datetime:
 def get_file_time_beijing(file_path: str) -> datetime:
     """
     获取文件的时间，并转换为北京时间
-    只使用文件名日期进行判断
     """
     try:
         filename = os.path.basename(file_path)
@@ -153,16 +152,16 @@ def cleanup_old_files(directory: str, days: int) -> tuple:
                     backup_path = os.path.join(temp_dir, filename)
                     shutil.copy2(file_path, backup_path)
                     
-                    # 确认可以安全删除后，再删除文件
+                    # 将文件标记为要删除（Git会记录此变更）
                     os.remove(file_path)
-                    deleted_files.append(filename)
-                    logger.info(f"已删除: {file_path} (文件名日期: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
+                    deleted_files.append(file_path)
+                    logger.info(f"已标记删除: {file_path} (文件名日期: {file_time_beijing.strftime('%Y-%m-%d %H:%M:%S')})")
             except Exception as e:
-                error_msg = f"删除 {filename} 失败: {str(e)}"
+                error_msg = f"标记删除 {filename} 失败: {str(e)}"
                 errors.append(error_msg)
                 logger.error(error_msg)
     
-    logger.info(f"清理统计: 总文件数={total_files}, 超{DAYS_THRESHOLD}天文件数={old_files}, 实际删除文件数={len(deleted_files)}")
+    logger.info(f"清理统计: 总文件数={total_files}, 超{DAYS_THRESHOLD}天文件数={old_files}, 实际标记删除文件数={len(deleted_files)}")
     return len(errors) == 0, deleted_files, "\n".join(errors) if errors else ""
 
 def main():
@@ -196,25 +195,36 @@ def main():
         total_deleted += len(deleted_files)
         success = success and dir_success
     
-    # 构建极简的清理摘要
+    # 提交Git变更
+    all_deleted_files = []
+    for res in results.values():
+        all_deleted_files.extend(res["deleted_files"])
+    
+    if all_deleted_files:
+        commit_message = f"cleanup: 删除 {total_deleted} 个超过{DAYS_THRESHOLD}天的文件 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        try:
+            commit_files_in_batches(all_deleted_files, commit_message)
+            logger.info(f"✅ Git提交成功: {commit_message}")
+        except Exception as e:
+            logger.error(f"❌ Git提交失败: {str(e)}")
+            success = False
+    
+    # 构建简洁的清理摘要
     if total_deleted > 0:
-        message = f"✅ 文件清理完成\n\n"
-        for dir_name, res in results.items():
-            if res["deleted_files"]:
-                message += f"📁 {dir_name}:\n"
-                message += f"  - 删除: {len(res['deleted_files'])} 个\n"
-        message += f"\n清理时间: {cleanup_time}\n"
-        message += f"阈值: {DAYS_THRESHOLD}天前"
+        message = f"✅ 【文件清理】任务完成\n"
+        message += f"- 删除文件数: {total_deleted} 个\n"
+        message += f"- 清理阈值: 超过 {DAYS_THRESHOLD} 天\n"
+        message += f"- 清理时间: {cleanup_time}"
     else:
-        message = f"ℹ️ 未发现需要清理的文件\n"
-        message += f"阈值: {DAYS_THRESHOLD}天前\n"
-        message += f"清理时间: {cleanup_time}"
+        message = f"ℹ️ 【文件清理】任务完成 - 未发现需要清理的文件\n"
+        message += f"- 清理阈值: 超过 {DAYS_THRESHOLD} 天\n"
+        message += f"- 清理时间: {cleanup_time}"
     
     # 添加错误信息（如果有）
     for dir_name, res in results.items():
         if not res["success"] and res["error"]:
             success = False
-            message += f"\n\n⚠️ {dir_name} 错误:\n{res['error']}"
+            message += f"\n\n⚠️ {dir_name} 目录清理失败:\n{res['error']}"
     
     # 推送微信消息
     sent_success = False

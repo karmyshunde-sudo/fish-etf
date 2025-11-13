@@ -616,7 +616,7 @@ def crawl_all_etfs_daily_data() -> None:
                     
                     # 构建要提交的文件列表
                     file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
-                    file_path = os.path.join(DAILY_DIR, f"{code}.csv")
+                    file_path = os.path.join(DAILY_DIR, "/*.csv")
                     # 提交数据文件
                     commit_msg = f"feat: 批量提交{len(etf_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
                     logger.info(f"提交数据文件: {commit_msg}")

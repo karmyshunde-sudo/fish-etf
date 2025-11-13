@@ -29,7 +29,7 @@ BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 确保目录存在
-os.makedirs(DAILY_DIR, exist_ok=True)
+os.makedirs(_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # 批次大小
@@ -173,9 +173,9 @@ def get_all_etf_codes() -> list:
 
 
 # ✅ 新增：统一规范ETF日线数据结构与精度
-def normalize_etf_daily_df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataFrame:
+def normalize_etf__df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataFrame:
     """
-    规范ETF日线数据结构与精度，使其与data/etf/daily/159222.csv一致
+    规范ETF日线数据结构与精度，使其与data/etf//159222.csv一致
     """
     import datetime
 
@@ -208,7 +208,7 @@ def normalize_etf_daily_df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd
     return df
 
 
-def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+def crawl_etf__data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """使用yfinance爬取ETF日线数据"""
     try:
         if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
@@ -365,7 +365,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         
         end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
         
-        save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
+        save_path = os.path.join(_DIR, f"{etf_code}.csv")
         
         if os.path.exists(save_path):
             try:
@@ -442,25 +442,25 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         return start_date, end_date
 
 
-def save_etf_daily_data_batch(etf_data_dict: dict) -> int:
+def save_etf__data_batch(etf_data_dict: dict) -> int:
     """
     批量保存ETF日线数据 - 真正批量保存版本
     """
     if not etf_data_dict:
         return 0
 
-    os.makedirs(DAILY_DIR, exist_ok=True)
+    os.makedirs(_DIR, exist_ok=True)
     saved_count = 0
 
     for etf_code, df in etf_data_dict.items():
         if df.empty:
             continue
 
-        save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
+        save_path = os.path.join(_DIR, f"{etf_code}.csv")
 
         # ✅ 新增：保存前规范化数据结构与精度
         etf_name = df["ETF名称"].iloc[0] if "ETF名称" in df.columns else get_etf_name(etf_code)
-        df = normalize_etf_daily_df(df, etf_code, etf_name)
+        df = normalize_etf__df(df, etf_code, etf_name)
 
         try:
             if os.path.exists(save_path):
@@ -488,7 +488,7 @@ def save_etf_daily_data_batch(etf_data_dict: dict) -> int:
     return saved_count
 
 
-def crawl_all_etfs_daily_data() -> None:
+def crawl_all_etfs__data() -> None:
     """爬取所有ETF日线数据 - 真正批量保存版本"""
     try:
         logger.info("=== 开始执行ETF日线数据爬取 ===")
@@ -496,7 +496,7 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
         os.makedirs(DATA_DIR, exist_ok=True)
-        os.makedirs(DAILY_DIR, exist_ok=True)
+        os.makedirs(_DIR, exist_ok=True)
         logger.info(f"✅ 确保目录存在: {DATA_DIR}")
         
         etf_codes = get_all_etf_codes()
@@ -550,7 +550,7 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 爬取数据
             logger.info(f"📅 增量爬取日期范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
-            df = crawl_etf_daily_data(etf_code, start_date, end_date)
+            df = crawl_etf__data(etf_code, start_date, end_date)
             
             if df.empty:
                 logger.warning(f"⚠️ 未获取到数据")
@@ -568,11 +568,12 @@ def crawl_all_etfs_daily_data() -> None:
         
         # 【关键修改】所有ETF处理完成后，一次性批量保存所有数据
         logger.info(f"开始批量保存 {len(etf_data_dict)} 个ETF的数据文件...")
-        saved_count = save_etf_daily_data_batch(etf_data_dict)
+        saved_count = save_etf__data_batch(etf_data_dict)
         logger.info(f"✅ 批量保存完成，成功保存 {saved_count} 个ETF数据文件")
 
         # ✅ 新增：确保所有数据文件被暂存
-        os.system("git add data/etf/daily/*.csv")
+        # os.system("git add data/etf/daily/*.csv")
+        os.system("git add data/etf_daily/*.csv")
         
         # 然后提交所有数据文件到Git
         logger.info("开始提交数据文件到Git仓库...")

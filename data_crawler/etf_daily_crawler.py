@@ -45,7 +45,48 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # 【关键参数】可在此处修改每次处理的ETF数量
 # 专业修复：批次大小作为可配置参数
 BATCH_SIZE = 60  # 可根据需要调整为100、150、200等
+COMMIT_BATCH_SIZE = 10  # 每COMMIT_BATCH_SIZE个文件提交一次
+BASE_DELAY = 0.8
+MAX_RETRIES = 3
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class RequestThrottler:
+    """请求限流器 - 动态调整请求间隔"""
+    def __init__(self, base_delay=0.8, max_delay=3.0):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.current_delay = base_delay
+        self.success_count = 0
+        self.failure_count = 0
+        self.last_request_time = None
+    
+    def wait(self):
+        """等待适当时间再请求"""
+        if self.last_request_time:
+            elapsed = time.time() - self.last_request_time
+            if elapsed < self.current_delay:
+                time.sleep(self.current_delay - elapsed)
+        
+        self.last_request_time = time.time()
+    
+    def record_success(self):
+        """记录成功请求"""
+        self.success_count += 1
+        self.failure_count = 0
+        
+        if self.success_count % 10 == 0 and self.current_delay > self.base_delay:
+            self.current_delay = max(self.base_delay, self.current_delay - 0.1)
+    
+    def record_failure(self):
+        """记录失败请求"""
+        self.failure_count += 1
+        self.success_count = 0
+        
+        if self.failure_count >= 3:
+            self.current_delay = min(self.max_delay, self.current_delay + 0.5)
+            self.failure_count = 0
+
+throttler = RequestThrottler(base_delay=BASE_DELAY)
 
 def get_etf_name(etf_code):
     """
@@ -84,6 +125,32 @@ def get_etf_name(etf_code):
     except Exception as e:
         logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
         return etf_code
+
+def get_etf_fund_size(etf_code: str) -> float:
+    """
+    从ETF列表中获取基金规模（只读）
+    """
+    try:
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
+            return 0.0
+        
+        basic_info_df = pd.read_csv(BASIC_INFO_FILE, dtype={"ETF代码": str})
+        if "ETF代码" not in basic_info_df.columns or "基金规模" not in basic_info_df.columns:
+            logger.warning(f"ETF列表缺少必要列（ETF代码/基金规模）")
+            return 0.0
+        
+        etf_row = basic_info_df[basic_info_df["ETF代码"] == str(etf_code).strip()]
+        if etf_row.empty:
+            logger.warning(f"ETF {etf_code} 在列表中不存在")
+            return 0.0
+        
+        fund_size = float(etf_row["基金规模"].values[0])
+        return fund_size * 100000000  # 亿元转股
+    
+    except Exception as e:
+        logger.error(f"获取ETF {etf_code} 基金规模失败: {str(e)}", exc_info=True)
+        return 0.0
 
 def get_next_crawl_index() -> int:
     """
@@ -297,6 +364,14 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
             logger.warning(f"ETF {etf_code} 日线数据文件不存在: {file_path}")
             return pd.DataFrame()
         
+        # 标准列定义
+        standard_columns = [
+            '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
+            '振幅', '涨跌幅', '涨跌额', '换手率',
+            'IOPV', '折价率', '溢价率',
+            'ETF代码', 'ETF名称', '爬取时间'
+        ]
+        
         # 读取CSV文件，明确指定数据类型
         df = pd.read_csv(
             file_path,
@@ -308,9 +383,17 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
                 "最低": float,
                 "收盘": float,
                 "成交量": float,
-                "成交额": float
+                "成交额": float,
+                "振幅": float,
+                "涨跌幅": float,
+                "涨跌额": float,
+                "换手率": float,
+                "IOPV": float,
+                "折价率": float,
+                "溢价率": float
             }
         )
+        
         # 检查必需列
         required_columns = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -325,10 +408,109 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         # 移除未来日期的数据
         today = datetime.now().strftime("%Y-%m-%d")
         df = df[df["日期"] <= today]
-        return df
+        
+        # 只返回标准列中存在的列
+        return df[[col for col in standard_columns if col in df.columns]]
     except Exception as e:
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
+def apply_precision_control(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    应用数据精度控制（保留4位小数）
+    """
+    # 需要保留4位小数的字段
+    precision_fields = [
+        '开盘', '最高', '最低', '收盘', '成交额',
+        '振幅', '涨跌幅', '涨跌额', '换手率',
+        'IOPV', '折价率', '溢价率'
+    ]
+    
+    for field in precision_fields:
+        if field in df.columns:
+            # 保留4位小数
+            df[field] = df[field].round(4)
+    
+    # 成交量通常为整数
+    if '成交量' in df.columns:
+        df['成交量'] = df['成交量'].round(0).astype(int)
+    
+    return df
+
+def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
+    """
+    处理Yahoo Finance返回的DataFrame
+    """
+    # 1. 确保DataFrame是扁平结构
+    if isinstance(df.columns, pd.MultiIndex):
+        # 提取第一级列名
+        columns = []
+        for col in df.columns:
+            if isinstance(col, tuple) and len(col) > 0:
+                columns.append(col[0])
+            else:
+                columns.append(col)
+        df.columns = columns
+    
+    # 2. 确保日期列存在
+    if 'Date' in df.columns:
+        df = df.reset_index(drop=True)
+    elif df.index.name == 'Date':
+        df = df.reset_index()
+    elif 'date' in df.columns:
+        df = df.rename(columns={'date': 'Date'})
+    else:
+        return pd.DataFrame()  # 无有效日期列，返回空DataFrame
+    
+    # 3. 检查必要列
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    for col in required_columns:
+        if col not in df.columns:
+            logger.error(f"ETF {etf_code} 缺少必要列: {col}")
+            return pd.DataFrame()  # 关键修复：缺失必要列，直接返回空DataFrame
+    
+    # 4. 创建临时单列DataFrame
+    result_df = pd.DataFrame()
+    result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
+    result_df['开盘'] = df['Open'].astype(float)
+    result_df['最高'] = df['High'].astype(float)
+    result_df['最低'] = df['Low'].astype(float)
+    result_df['收盘'] = df['Close'].astype(float)
+    result_df['成交量'] = df['Volume'].astype(float)
+    
+    # 5. 计算衍生字段
+    # 振幅 = (最高 - 最低) / 最低 * 100%
+    result_df['振幅'] = ((result_df['最高'] - result_df['最低']) / result_df['最低'] * 100).round(2)
+    
+    # 涨跌额 = 收盘 - 前一日收盘
+    result_df['涨跌额'] = result_df['收盘'].diff().fillna(0)
+    
+    # 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
+    prev_close = result_df['收盘'].shift(1)
+    # 避免除以0
+    valid_prev_close = prev_close.replace(0, float('nan'))
+    result_df['涨跌幅'] = (result_df['涨跌额'] / valid_prev_close * 100).round(2)
+    result_df['涨跌幅'] = result_df['涨跌幅'].fillna(0)
+    
+    # 换手率 = 成交量 / 基金规模
+    fund_size = get_etf_fund_size(etf_code)
+    if fund_size > 0:
+        result_df['换手率'] = (result_df['成交量'] / fund_size * 100).round(2)
+    else:
+        result_df['换手率'] = 0.0
+    
+    # 6. IOPV/折价率/溢价率（Yahoo Finance不提供）
+    result_df['IOPV'] = 0.0
+    result_df['折价率'] = 0.0
+    result_df['溢价率'] = 0.0
+    
+    # 7. 成交额 = 收盘 * 成交量
+    result_df['成交额'] = (result_df['收盘'] * result_df['成交量']).round(2)
+    
+    # 关键修复：应用数据精度控制
+    result_df = apply_precision_control(result_df)
+    
+    return result_df
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
@@ -351,15 +533,10 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         end_str = end_date.strftime("%Y-%m-%d")
         
         # 1. 执行请求（带重试机制）
-        max_retries = 3
+        max_retries = MAX_RETRIES
         for retry in range(max_retries):
             try:
-                # 等待适当时间再请求
-                elapsed = time.time() - (getattr(crawl_etf_daily_data, 'last_request_time', 0) or 0)
-                current_delay = 0.8 + random.uniform(0.1, 0.5)
-                if elapsed < current_delay:
-                    time.sleep(current_delay - elapsed)
-                crawl_etf_daily_data.last_request_time = time.time()
+                throttler.wait()
                 
                 # Yahoo Finance API
                 symbol = etf_code
@@ -382,117 +559,34 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                 if df is None or df.empty:
                     raise ValueError("No data returned")
                 
-                # 记录成功请求
-                if hasattr(crawl_etf_daily_data, 'success_count'):
-                    crawl_etf_daily_data.success_count += 1
-                    crawl_etf_daily_data.failure_count = 0
-                else:
-                    crawl_etf_daily_data.success_count = 1
-                    crawl_etf_daily_data.failure_count = 0
-                
+                throttler.record_success()
                 break
                 
             except Exception as e:
-                # 记录失败请求
-                if hasattr(crawl_etf_daily_data, 'failure_count'):
-                    crawl_etf_daily_data.failure_count += 1
-                else:
-                    crawl_etf_daily_data.failure_count = 1
-                
+                throttler.record_failure()
                 if retry == max_retries - 1:
                     logger.error(f"ETF {etf_code} 接口请求失败 (重试 {max_retries} 次): {str(e)}")
                     return pd.DataFrame()
                 
-                wait_time = 0.8 * (2 ** retry) + random.uniform(0.1, 0.5)
+                wait_time = BASE_DELAY * (2 ** retry) + random.uniform(0.1, 0.5)
                 logger.warning(f"ETF {etf_code} 请求失败，{wait_time:.1f}秒后重试: {str(e)}")
                 time.sleep(wait_time)
         
         # 2. 处理数据
-        # 2.1 确保DataFrame是扁平结构
-        if isinstance(df.columns, pd.MultiIndex):
-            # 提取第一级列名
-            columns = []
-            for col in df.columns:
-                if isinstance(col, tuple) and len(col) > 0:
-                    columns.append(col[0])
-                else:
-                    columns.append(col)
-            df.columns = columns
+        df = process_yfinance_data(df, etf_code)
         
-        # 2.2 确保日期列存在
-        if 'Date' in df.columns:
-            df = df.reset_index(drop=True)
-        elif df.index.name == 'Date':
-            df = df.reset_index()
-        elif 'date' in df.columns:
-            df = df.rename(columns={'date': 'Date'})
-        else:
-            return pd.DataFrame()  # 无有效日期列，返回空DataFrame
+        # 3. 严格数据验证
+        required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
+        if any(col not in df.columns for col in required_columns) or df.empty:
+            logger.error(f"ETF {etf_code} 数据验证失败 - 无法保存")
+            return pd.DataFrame()
         
-        # 2.3 检查必要列
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in required_columns:
-            if col not in df.columns:
-                logger.error(f"ETF {etf_code} 缺少必要列: {col}")
-                return pd.DataFrame()  # 关键修复：缺失必要列，直接返回空DataFrame
+        # 4. 补充必要字段
+        df['ETF代码'] = etf_code
+        df['ETF名称'] = get_etf_name(etf_code)
+        df['爬取时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 2.4 创建临时单列DataFrame
-        result_df = pd.DataFrame()
-        result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
-        result_df['开盘'] = df['Open'].astype(float)
-        result_df['最高'] = df['High'].astype(float)
-        result_df['最低'] = df['Low'].astype(float)
-        result_df['收盘'] = df['Close'].astype(float)
-        result_df['成交量'] = df['Volume'].astype(float)
-        
-        # 2.5 计算衍生字段
-        # 振幅 = (最高 - 最低) / 最低 * 100%
-        result_df['振幅'] = ((result_df['最高'] - result_df['最低']) / result_df['最低'] * 100).round(2)
-        
-        # 涨跌额 = 收盘 - 前一日收盘
-        result_df['涨跌额'] = result_df['收盘'].diff().fillna(0)
-        
-        # 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
-        prev_close = result_df['收盘'].shift(1)
-        # 避免除以0
-        valid_prev_close = prev_close.replace(0, float('nan'))
-        result_df['涨跌幅'] = (result_df['涨跌额'] / valid_prev_close * 100).round(2)
-        result_df['涨跌幅'] = result_df['涨跌幅'].fillna(0)
-        
-        # 换手率 = 成交量 / 基金规模
-        # 由于无法从Yahoo Finance获取基金规模，这里先设为0.0
-        result_df['换手率'] = 0.0
-        
-        # 2.6 IOPV/折价率/溢价率（Yahoo Finance不提供）
-        result_df['IOPV'] = 0.0
-        result_df['折价率'] = 0.0
-        result_df['溢价率'] = 0.0
-        
-        # 2.7 成交额 = 收盘 * 成交量
-        result_df['成交额'] = (result_df['收盘'] * result_df['成交量']).round(2)
-        
-        # 2.8 应用数据精度控制（保留4位小数）
-        precision_fields = [
-            '开盘', '最高', '最低', '收盘', '成交额',
-            '振幅', '涨跌幅', '涨跌额', '换手率',
-            'IOPV', '折价率', '溢价率'
-        ]
-        
-        for field in precision_fields:
-            if field in result_df.columns:
-                # 保留4位小数
-                result_df[field] = result_df[field].round(4)
-        
-        # 成交量通常为整数
-        if '成交量' in result_df.columns:
-            result_df['成交量'] = result_df['成交量'].round(0).astype(int)
-        
-        # 2.9 补充必要字段
-        result_df['ETF代码'] = etf_code
-        result_df['ETF名称'] = get_etf_name(etf_code)
-        result_df['爬取时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 2.10 确保字段顺序
+        # 5. 确保字段顺序
         standard_columns = [
             '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
             '振幅', '涨跌幅', '涨跌额', '换手率',
@@ -500,7 +594,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             'ETF代码', 'ETF名称', '爬取时间'
         ]
         
-        return result_df[[col for col in standard_columns if col in result_df.columns]]
+        return df[[col for col in standard_columns if col in df.columns]]
     
     except Exception as e:
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
@@ -659,8 +753,17 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
             df_save.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
+        
+        # 关键修复：调用 commit_files_in_batches，但不检查返回值
+        commit_message = f"自动更新ETF {etf_code} 日线数据"
+        commit_files_in_batches(save_path, commit_message)
+        logger.debug(f"已添加ETF {etf_code} 日线数据到提交队列")
+        
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+        # 删除临时文件
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
 
 def crawl_all_etfs_daily_data() -> None:
     """
@@ -775,7 +878,7 @@ def crawl_all_etfs_daily_data() -> None:
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
             
             # 【关键修复】每处理10只ETF就调用git_utils提交
-            if processed_count % 10 == 0:
+            if processed_count % COMMIT_BATCH_SIZE == 0:
                 logger.info(f"已处理 {processed_count} 只ETF，提交批量文件...")
                 if not force_commit_remaining_files():
                     logger.error("提交批量文件失败")
@@ -848,6 +951,13 @@ def get_all_etf_codes() -> list:
 
 if __name__ == "__main__":
     try:
+        # 首次运行时确保安装依赖
+        try:
+            import yfinance
+        except ImportError:
+            logger.error("缺少yfinance依赖，请先安装: pip install yfinance")
+            raise SystemExit(1)
+            
         crawl_all_etfs_daily_data()
     except Exception as e:
         logger.error(f"ETF日线数据爬取失败: {str(e)}", exc_info=True)

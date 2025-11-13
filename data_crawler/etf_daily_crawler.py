@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 修复提交问题版本
-yFinance数据-etf_daily_crawler-DS15.py
+ETF日线数据爬取模块 - 修复日期处理问题版本
+yFinance数据-etf_daily_crawler-DS16.py
 """
 
 import yfinance as yf
@@ -170,31 +170,6 @@ def get_all_etf_codes() -> list:
         logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
         return []
 
-def validate_etf_data(etf_code: str) -> bool:
-    """验证ETF是否可获取数据"""
-    try:
-        symbols_to_try = [
-            f"{etf_code}.SS",
-            f"{etf_code}.SZ", 
-            etf_code
-        ]
-        
-        for symbol in symbols_to_try:
-            try:
-                ticker = yf.Ticker(symbol)
-                info = ticker.info
-                if info and 'symbol' in info:
-                    logger.info(f"ETF {etf_code} 有效符号: {symbol}")
-                    return True
-            except:
-                continue
-        
-        logger.warning(f"ETF {etf_code} 无有效符号")
-        return False
-    except Exception as e:
-        logger.error(f"验证ETF {etf_code} 失败: {str(e)}")
-        return False
-
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """使用yfinance爬取ETF日线数据"""
     try:
@@ -276,8 +251,14 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         actual_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
         df = df.rename(columns=actual_mapping)
         
+        # 【关键修复】确保日期列是字符串格式
         if '日期' in df.columns:
-            df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+            # 先将日期列转换为datetime，然后格式化为字符串
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            # 检查是否有无效日期
+            if df['日期'].isnull().any():
+                logger.warning(f"ETF {etf_code} 日期列包含无效日期，已过滤")
+                df = df.dropna(subset=['日期'])
         else:
             logger.error(f"ETF {etf_code} 重命名后缺少日期列")
             return pd.DataFrame()
@@ -427,17 +408,15 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> bool:
     """
     保存ETF日线数据 - 返回是否成功保存
+    【关键修复】不再尝试转换日期格式，因为数据已经在crawl_etf_daily_data中处理过了
     """
     if df.empty:
         return False
     
     os.makedirs(DAILY_DIR, exist_ok=True)
     
-    if "日期" in df.columns:
-        df_save = df.copy()
-        df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
-    else:
-        df_save = df
+    # 【关键修复】直接使用df，不再尝试转换日期格式
+    df_save = df.copy()
     
     save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
     

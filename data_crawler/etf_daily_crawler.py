@@ -488,7 +488,7 @@ def save_etf__data_batch(etf_data_dict: dict) -> int:
     return saved_count
 
 
-def crawl_all_etfs__data() -> None:
+def crawl_all_etfs_daily_data() -> None:
     """爬取所有ETF日线数据 - 真正批量保存版本"""
     try:
         logger.info("=== 开始执行ETF日线数据爬取 ===")

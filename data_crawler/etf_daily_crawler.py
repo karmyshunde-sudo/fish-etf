@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 修复Git提交版本
-yFinance数据-etf_daily_crawler-DS9.py
-【严格按照git_utils的设计逻辑使用】
+ETF日线数据爬取模块 - 批量提交修复版
+yFinance数据-etf_daily_crawler-DS10.py
+【确保每10个成功文件一起提交，而不是只提交最后一个】
 """
 
 import yfinance as yf
@@ -239,9 +239,9 @@ def save_crawl_progress(next_index):
         logger.error(f"保存进度失败: {str(e)}")
 
 def crawl_all_etfs_daily_data():
-    """主爬取函数 - 修复Git提交版本"""
+    """主爬取函数 - 批量提交修复版"""
     try:
-        logger.info("=== 开始执行ETF日线数据爬取（修复Git提交版本）===")
+        logger.info("=== 开始执行ETF日线数据爬取（批量提交修复版）===")
         
         # 获取ETF代码列表
         etf_codes = get_all_etf_codes()
@@ -267,10 +267,12 @@ def crawl_all_etfs_daily_data():
         
         logger.info(f"处理本批次 ETF ({len(batch_codes)}只)，从索引 {start_idx} 开始")
         
-        # 【核心逻辑】严格的计数器
+        # 【关键修复】使用列表累积成功文件，确保批量提交
         success_count = 0
         fail_count = 0
         skip_count = 0
+        batch_files = []  # 累积成功文件的列表
+        batch_number = 1  # 批次编号
         
         for i, etf_code in enumerate(batch_codes):
             time.sleep(random.uniform(3, 8))
@@ -301,32 +303,41 @@ def crawl_all_etfs_daily_data():
             # 保存数据到本地
             file_path = save_etf_data(etf_code, df)
             if file_path:
+                # 【关键修复】添加到批量文件列表，而不是立即提交
+                batch_files.append(file_path)
                 success_count += 1
-                
-                # 【关键修复】每次成功保存一个文件就调用commit_files_in_batches
-                # 让git_utils内部的计数器来决定何时提交
-                commit_message = f"自动更新ETF {etf_code} 日线数据"
-                commit_result = commit_files_in_batches(file_path, commit_message)
-                
-                if commit_result:
-                    logger.info(f"✅ ETF {etf_code} 提交处理成功")
-                else:
-                    # 注意：这里返回False不代表提交失败，只是计数器没达到10
-                    logger.debug(f"ETF {etf_code} 已添加到Git暂存区，等待批量提交")
-                
                 logger.info(f"🎯 成功计数器: {success_count}/{COMMIT_BATCH_SIZE}")
+                
+                # 检查是否达到提交条件
+                if success_count >= COMMIT_BATCH_SIZE:
+                    logger.info(f"🚀 达到提交条件! 开始提交批次{batch_number}，包含 {len(batch_files)} 个文件")
+                    
+                    # 【关键修复】使用LAST_FILE参数确保批量提交
+                    commit_message = f"自动更新ETF日线数据 批次{batch_number} [skip ci]"
+                    commit_result = commit_files_in_batches("LAST_FILE", commit_message)
+                    
+                    if commit_result:
+                        logger.info(f"✅ 批次{batch_number}提交成功! 提交了 {len(batch_files)} 个文件")
+                        # 重置计数器和文件列表
+                        success_count = 0
+                        batch_files = []
+                        batch_number += 1
+                    else:
+                        logger.error(f"❌ 批次{batch_number}提交失败!")
             else:
                 fail_count += 1
             
-            logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
+            logger.info(f"进度: {current_index}/{total1} ({(current_index)/total_count*100:.1f}%)")
         
-        # 【关键修复】强制提交剩余文件
-        logger.info("🚀 开始强制提交剩余文件...")
-        force_commit_result = force_commit_remaining_files()
-        if force_commit_result:
-            logger.info("✅ 剩余文件强制提交成功!")
-        else:
-            logger.error("❌ 剩余文件强制提交失败!")
+        # 【关键修复】提交剩余文件
+        if batch_files:
+            logger.info(f"🚀 提交剩余 {len(batch_files)} 个文件")
+            commit_message = f"自动更新ETF日线数据 最终批次 [skip ci]"
+            commit_result = commit_files_in_batches("LAST_FILE", commit_message)
+            if commit_result:
+                logger.info("✅ 剩余文件提交成功!")
+            else:
+                logger.error("❌ 剩余文件提交失败!")
         
         # 更新进度
         new_index = end_idx % total_count
@@ -340,13 +351,15 @@ def crawl_all_etfs_daily_data():
         logger.info(f"❌ 失败: {fail_count}") 
         logger.info(f"⏭️  跳过: {skip_count}")
         logger.info(f"📦 总计: {total_processed}/{len(batch_codes)}")
+        logger.info(f"💾 提交批次: {batch_number - 1}")
         logger.info("=" * 60)
         
     except Exception as e:
         logger.error(f"ETF爬取任务失败: {str(e)}", exc_info=True)
-        # 尝试强制提交剩余文件
+        # 尝试提交剩余文件
         try:
-            force_commit_remaining_files()
+            if 'batch_files' in locals() and batch_files:
+                commit_files_in_batches("LAST_FILE", "紧急提交剩余文件 [skip ci]")
         except:
             pass
         raise

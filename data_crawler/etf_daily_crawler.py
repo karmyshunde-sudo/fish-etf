@@ -268,8 +268,8 @@ def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> p
         
         df = df.reset_index()
         
-        logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
-        logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
+        # logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
+        # logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
         
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -612,16 +612,16 @@ def crawl_all_etfs_daily_data() -> None:
                     logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个ETF数据文件")
                     
                     # ✅ 重新添加：确保数据文件被添加到Git暂存区
-                    # os.system("git add data/etf_daily/*.csv")
+                    os.system("git add data/etf_daily/*.csv")
                     
                     # 构建要提交的文件列表
                     file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
-                    file_path = os.path.join(DAILY_DIR, f"/*.csv")
+                    # file_path = os.path.join(DAILY_DIR, f"/*.csv")
                     # 提交数据文件
                     commit_msg = f"feat: 批量提交{len(etf_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
                     logger.info(f"提交数据文件: {commit_msg}")
-                    #commit_success = commit_files_in_batches(file_list, commit_msg)
-                    commit_success = commit_files_in_batches(file_path, commit_msg)
+                    commit_success = commit_files_in_batches(file_list, commit_msg)
+                    # commit_success = commit_files_in_batches(file_path, commit_msg)
                     
                     if commit_success:
                         logger.info(f"✅ 小批次数据文件提交成功：{len(etf_data_dict)}只")

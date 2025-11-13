@@ -615,7 +615,7 @@ def crawl_all_etfs_daily_data() -> None:
                     os.system("git add data/etf_daily/*.csv")
                     
                     # 构建要提交的文件列表
-                    file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
+                    # file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
                     
                     # 提交数据文件
                     commit_msg = f"feat: 批量提交{len(etf_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -646,7 +646,7 @@ def crawl_all_etfs_daily_data() -> None:
                     logger.info("当前小批次没有新数据，跳过提交")
             
             # 每只ETF之间随机等待
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(1.2, 4.6))
         
         # 处理结束后记录失败ETF
         if failed_etfs:

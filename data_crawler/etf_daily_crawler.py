@@ -635,32 +635,34 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
 
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     """
-    保存ETF日线数据 - 仅负责本地保存，不处理Git提交
+    保存ETF日线数据（关键修复：与股票爬取代码相同）
     """
-    if df.empty:
+    if df.empty: 
+        logger.error(f"ETF {etf_code} 数据为空，无法保存")
         return
     
-    # 确保目录存在
     os.makedirs(DAILY_DIR, exist_ok=True)
-    
-    # 保存前将日期转换为字符串
-    if "日期" in df.columns:
-        df_save = df.copy()
-        df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
-    else:
-        df_save = df
-    
-    # 保存到CSV
     save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
     
-    # 使用临时文件进行原子操作
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-            df_save.to_csv(temp_file.name, index=False)
+            # 保存数据
+            df.to_csv(temp_file.name, index=False)
+        
+        # 移动文件
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
+        
+        # 关键修复：调用 commit_files_in_batches，但不检查返回值
+        commit_message = f"自动更新ETF {etf_code} 日线数据"
+        commit_files_in_batches(save_path, commit_message)
+        logger.debug(f"已添加ETF {etf_code} 日线数据到提交队列")
+        
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
+        # 删除临时文件
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
 
 def crawl_all_etfs_daily_data() -> None:
     """
@@ -744,30 +746,8 @@ def crawl_all_etfs_daily_data() -> None:
                     f.write(f"{etf_code},{etf_name},未获取到数据\n")
                 continue
             
-            # 处理已有数据
-            save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
-            if os.path.exists(save_path):
-                try:
-                    existing_df = pd.read_csv(save_path)
-                    if "日期" in existing_df.columns:
-                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
-                    
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                    combined_df = combined_df.sort_values("日期", ascending=False)
-                    
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                        combined_df.to_csv(temp_file.name, index=False)
-                    shutil.move(temp_file.name, save_path)
-                    logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
-                finally:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
-            else:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                    df.to_csv(temp_file.name, index=False)
-                shutil.move(temp_file.name, save_path)
-                logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+            # 保存数据
+            save_etf_daily_data(etf_code, df)
             
             # 专业修复：不再每个ETF都更新进度
             processed_count += 1

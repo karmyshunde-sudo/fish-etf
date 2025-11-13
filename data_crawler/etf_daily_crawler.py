@@ -29,7 +29,7 @@ BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # 确保目录存在
-os.makedirs(_DIR, exist_ok=True)
+os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # 批次大小

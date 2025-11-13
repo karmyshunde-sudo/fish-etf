@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 
-yFinance数据-etf_daily_crawler-QW19.py
+yFinance数据-etf_daily_crawler-QW21.py
 
 使用指定接口爬取ETF日线数据
 【生产级实现】
@@ -373,18 +373,47 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         
         # 重命名列以匹配原有格式
         df = df.reset_index()
-        df = df.rename(columns={
-            'Date': '日期',
-            'Open': '开盘',
-            'High': '最高',
-            'Low': '最低',
-            'Close': '收盘',
-            'Volume': '成交量',
-            'Adj Close': '收盘(复权)'
+        
+        #df = df.rename(columns={
+        #    'Date': '日期',
+        #    'Open': '开盘',
+        #    'High': '最高',
+        #    'Low': '最低',
+        #    'Close': '收盘',
+        #    'Volume': '成交量',
+        #    'Adj Close': '收盘(复权)'
         })
+
+        # 检查是否有Date列，如果没有则尝试其他可能的日期列名
+        if 'Date' in df.columns:
+            df = df.rename(columns={'Date': '日期'})
+        elif 'date' in df.columns:
+            df = df.rename(columns={'date': '日期'})
+        elif 'datetime' in df.columns:
+            df = df.rename(columns={'datetime': '日期'})
+        else:
+            # 如果没有找到日期列，检查是否已经是索引
+            if df.index.name == 'Date' or df.index.name == 'date':
+                df = df.reset_index()
+                df = df.rename(columns={df.index.name: '日期'})
+            else:
+                logger.error(f"ETF {etf_code} 数据中没有找到日期列，无法处理数据")
+                return pd.DataFrame()
+
         
         # 确保日期列是字符串格式
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
+        #df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
+
+        if '日期' in df.columns:
+            df["日期"] = pd.to_datetime(df["日期"], errors='coerce').dt.strftime('%Y-%m-%d')
+        else:
+            logger.error(f"ETF {etf_code} 数据中没有'日期'列，无法处理数据")
+            return pd.DataFrame()
+
+        # 检查DataFrame是否为空或没有必要列
+        if df.empty or '收盘' not in df.columns:
+            logger.error(f"ETF {etf_code} 数据中缺少必要列，无法处理数据")
+            return pd.DataFrame()
 
         # 确保DataFrame是扁平结构（解决多层列索引问题）
         if isinstance(df.columns, pd.MultiIndex):

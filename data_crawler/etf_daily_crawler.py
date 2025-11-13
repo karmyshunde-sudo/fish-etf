@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 极简修复版
-yFinance数据-etf_daily_crawler-DS8.py
-【只使用现有的git_utils函数，每10个成功文件提交一次】
+ETF日线数据爬取模块 - 修复Git提交版本
+yFinance数据-etf_daily_crawler-DS9.py
+【严格按照git_utils的设计逻辑使用】
 """
 
 import yfinance as yf
@@ -17,7 +17,7 @@ import shutil
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
-from utils.git_utils import commit_files_in_batches
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -239,9 +239,9 @@ def save_crawl_progress(next_index):
         logger.error(f"保存进度失败: {str(e)}")
 
 def crawl_all_etfs_daily_data():
-    """主爬取函数 - 极简版本"""
+    """主爬取函数 - 修复Git提交版本"""
     try:
-        logger.info("=== 开始执行ETF日线数据爬取（极简版本）===")
+        logger.info("=== 开始执行ETF日线数据爬取（修复Git提交版本）===")
         
         # 获取ETF代码列表
         etf_codes = get_all_etf_codes()
@@ -271,7 +271,6 @@ def crawl_all_etfs_daily_data():
         success_count = 0
         fail_count = 0
         skip_count = 0
-        files_to_commit = []  # 要提交的文件列表
         
         for i, etf_code in enumerate(batch_codes):
             time.sleep(random.uniform(3, 8))
@@ -302,40 +301,32 @@ def crawl_all_etfs_daily_data():
             # 保存数据到本地
             file_path = save_etf_data(etf_code, df)
             if file_path:
-                # 【关键步骤】添加到提交列表，成功计数器+1
-                files_to_commit.append(file_path)
                 success_count += 1
-                logger.info(f"🎯 成功计数器: {success_count}/{COMMIT_BATCH_SIZE}")
                 
-                # 检查是否达到提交条件
-                if success_count >= COMMIT_BATCH_SIZE:
-                    logger.info(f"🚀 达到提交条件! 开始提交批次")
-                    
-                    # 【关键】使用现有的git_utils函数提交
-                    commit_message = f"自动更新ETF日线数据 批次 [skip ci]"
-                    commit_result = commit_files_in_batches(files_to_commit, commit_message)
-                    
-                    if commit_result:
-                        logger.info(f"✅ 提交成功! 提交了 {len(files_to_commit)} 个文件")
-                        # 重置计数器和文件列表
-                        success_count = 0
-                        files_to_commit = []
-                    else:
-                        logger.error("❌ 提交失败!")
+                # 【关键修复】每次成功保存一个文件就调用commit_files_in_batches
+                # 让git_utils内部的计数器来决定何时提交
+                commit_message = f"自动更新ETF {etf_code} 日线数据"
+                commit_result = commit_files_in_batches(file_path, commit_message)
+                
+                if commit_result:
+                    logger.info(f"✅ ETF {etf_code} 提交处理成功")
+                else:
+                    # 注意：这里返回False不代表提交失败，只是计数器没达到10
+                    logger.debug(f"ETF {etf_code} 已添加到Git暂存区，等待批量提交")
+                
+                logger.info(f"🎯 成功计数器: {success_count}/{COMMIT_BATCH_SIZE}")
             else:
                 fail_count += 1
             
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
-        # 提交剩余文件
-        if files_to_commit:
-            logger.info(f"🚀 提交剩余 {len(files_to_commit)} 个文件")
-            commit_message = f"自动更新ETF日线数据 最终批次 [skip ci]"
-            commit_result = commit_files_in_batches(files_to_commit, commit_message)
-            if commit_result:
-                logger.info("✅ 剩余文件提交成功!")
-            else:
-                logger.error("❌ 剩余文件提交失败!")
+        # 【关键修复】强制提交剩余文件
+        logger.info("🚀 开始强制提交剩余文件...")
+        force_commit_result = force_commit_remaining_files()
+        if force_commit_result:
+            logger.info("✅ 剩余文件强制提交成功!")
+        else:
+            logger.error("❌ 剩余文件强制提交失败!")
         
         # 更新进度
         new_index = end_idx % total_count
@@ -353,6 +344,11 @@ def crawl_all_etfs_daily_data():
         
     except Exception as e:
         logger.error(f"ETF爬取任务失败: {str(e)}", exc_info=True)
+        # 尝试强制提交剩余文件
+        try:
+            force_commit_remaining_files()
+        except:
+            pass
         raise
 
 if __name__ == "__main__":

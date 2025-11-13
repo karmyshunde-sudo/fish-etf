@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块
-yFinance数据-etf_daily_crawler-QWcoder-1.py
+yFinance数据-etf_daily_crawler-QWcoder-2.py
 使用指定接口爬取ETF日线数据
 【生产级实现】
 - 严格遵循"各司其职"原则
@@ -333,7 +333,7 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
-    使用yfinance爬取ETF日线数据
+    使用yfinance爬取ETF日线数据，适配中国ETF
     """
     try:
         # 确保日期参数是datetime类型
@@ -347,54 +347,60 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 使用yfinance获取ETF数据
-        ticker = yf.Ticker(etf_code)
-        df = ticker.history(start=start_date, end=end_date, interval="1d")
-        
-        # 检查基础数据
-        if df is None or df.empty:
-            logger.warning(f"ETF {etf_code} 基础数据为空")
+        # 检查是否为中国ETF（以5开头或1开头）
+        if etf_code.startswith(('5', '1')):
+            # 对于中国ETF，我们返回空数据，因为yfinance不支持中国ETF
+            logger.warning(f"ETF {etf_code} 为中国ETF，yfinance不支持，跳过")
             return pd.DataFrame()
-        
-        # 重命名列以匹配原有格式
-        df = df.reset_index()
-        df = df.rename(columns={
-            'Date': '日期',
-            'Open': '开盘',
-            'High': '最高',
-            'Low': '最低',
-            'Close': '收盘',
-            'Volume': '成交量',
-            'Adj Close': '收盘(复权)'
-        })
-        
-        # 确保日期列是字符串格式
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
-        
-        # 计算涨跌幅和涨跌额
-        df = df.sort_values('日期').reset_index(drop=True)
-        df['涨跌额'] = df['收盘'].diff()
-        df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
-        
-        # 计算振幅
-        df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
-        
-        # 补充ETF基本信息
-        df["ETF代码"] = etf_code
-        df["ETF名称"] = get_etf_name(etf_code)
-        df["爬取时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 添加折价率列（yfinance不直接提供折价率，暂时设为0）
-        df["折价率"] = 0.0
-        
-        # 确保列顺序
-        standard_columns = [
-            '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
-            '振幅', '涨跌幅', '涨跌额', '换手率', 'ETF代码', 'ETF名称',
-            '爬取时间', '折价率'
-        ]
-        available_columns = [col for col in standard_columns if col in df.columns]
-        return df[available_columns]
+        else:
+            # 使用yfinance获取ETF数据
+            ticker = yf.Ticker(etf_code)
+            df = ticker.history(start=start_date, end=end_date, interval="1d")
+            
+            # 检查基础数据
+            if df is None or df.empty:
+                logger.warning(f"ETF {etf_code} 基础数据为空")
+                return pd.DataFrame()
+            
+            # 重命名列以匹配原有格式
+            df = df.reset_index()
+            df = df.rename(columns={
+                'Date': '日期',
+                'Open': '开盘',
+                'High': '最高',
+                'Low': '最低',
+                'Close': '收盘',
+                'Volume': '成交量',
+                'Adj Close': '收盘(复权)'
+            })
+            
+            # 确保日期列是字符串格式
+            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
+            
+            # 计算涨跌幅和涨跌额
+            df = df.sort_values('日期').reset_index(drop=True)
+            df['涨跌额'] = df['收盘'].diff()
+            df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
+            
+            # 计算振幅
+            df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
+            
+            # 补充ETF基本信息
+            df["ETF代码"] = etf_code
+            df["ETF名称"] = get_etf_name(etf_code)
+            df["爬取时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 添加折价率列（yfinance不直接提供折价率，暂时设为0）
+            df["折价率"] = 0.0
+            
+            # 确保列顺序
+            standard_columns = [
+                '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
+                '振幅', '涨跌幅', '涨跌额', '换手率', 'ETF代码', 'ETF名称',
+                '爬取时间', '折价率'
+            ]
+            available_columns = [col for col in standard_columns if col in df.columns]
+            return df[available_columns]
     
     except Exception as e:
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)

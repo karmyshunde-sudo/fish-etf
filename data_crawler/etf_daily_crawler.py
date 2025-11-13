@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块 - 真正批量保存版本
-yFinance数据-etf_daily_crawler-GPT2.py
+YF数据旧目录10只提交-etf_daily_crawler-QW1.py
 """
 
 import yfinance as yf
@@ -32,8 +32,10 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# 批次大小
-BATCH_SIZE = 160
+# 新增：每10只ETF提交一次
+MINOR_BATCH_SIZE = 10
+# 一次运行处理300只ETF
+MAJOR_BATCH_SIZE = 13
 
 def get_etf_name(etf_code):
     """获取ETF名称"""
@@ -266,8 +268,8 @@ def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> p
         
         df = df.reset_index()
         
-        #logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
-        #logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
+        logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
+        logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
         
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -555,35 +557,24 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"待爬取ETF总数：{total_count}只（全市场ETF）")
         
         next_index = get_next_crawl_index()
+        total_to_process = min(MAJOR_BATCH_SIZE, total_count - next_index)
         
-        # 计算处理范围
+        if total_to_process <= 0:
+            logger.info("没有ETF需要处理")
+            return
+            
+        logger.info(f"本次将处理 {total_to_process} 只ETF（目标：{MAJOR_BATCH_SIZE}只）")
+        
         start_idx = next_index % total_count
-        end_idx = start_idx + BATCH_SIZE
-        actual_end_idx = end_idx % total_count
-        
-        first_stock_idx = start_idx % total_count
-        last_stock_idx = (end_idx - 1) % total_count
-        
-        if end_idx <= total_count:
-            batch_codes = etf_codes[start_idx:end_idx]
-            logger.info(f"处理本批次 ETF ({BATCH_SIZE}只)，从索引 {start_idx} 开始")
-        else:
-            batch_codes = etf_codes[start_idx:total_count] + etf_codes[0:end_idx-total_count]
-            logger.info(f"处理本批次 ETF ({BATCH_SIZE}只)，从索引 {start_idx} 开始（循环处理）")
-        
-        first_stock = f"{etf_codes[first_stock_idx]} - {get_etf_name(etf_codes[first_stock_idx])}" if first_stock_idx < len(etf_codes) else "N/A"
-        last_stock = f"{etf_codes[last_stock_idx]} - {get_etf_name(etf_codes[last_stock_idx])}" if last_stock_idx < len(etf_codes) else "N/A"
-        logger.info(f"当前批次第一只ETF: {first_stock} (索引 {first_stock_idx})")
-        logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {last_stock_idx})")
-        
-        # 【关键修改】先收集所有数据，最后批量保存
-        etf_data_dict = {}  # 用于存储所有ETF数据的字典
+        etf_data_dict = {}  # 小批次数据缓存
         processed_count = 0
         successful_count = 0
         failed_etfs = []
         
-        for i, etf_code in enumerate(batch_codes):
-            time.sleep(random.uniform(1.2, 4.8))
+        # 处理所有ETF（最多300只）
+        for i in range(total_to_process):
+            current_index = (start_idx + i) % total_count
+            etf_code = etf_codes[current_index]
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
             
@@ -604,53 +595,72 @@ def crawl_all_etfs_daily_data() -> None:
                 processed_count += 1
                 continue
             
-            # 【关键修改】将数据存入字典，而不是立即保存
+            # 缓存到小批次
             etf_data_dict[etf_code] = df
             successful_count += 1
             processed_count += 1
             
-            current_index = (start_idx + i) % total_count
-            logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%) - 数据已缓存")
+            current_progress = f"{current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)"
+            logger.info(f"进度: {current_progress} - 数据已缓存")
+            
+            # 每10只ETF提交一次（包括最后一只）
+            if (i + 1) % MINOR_BATCH_SIZE == 0 or i == total_to_process - 1:
+                # 保存当前小批次数据
+                if etf_data_dict:
+                    logger.info(f"开始保存小批次数据（{len(etf_data_dict)}只ETF）...")
+                    saved_count = save_etf_data_batch(etf_data_dict)
+                    logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个ETF数据文件")
+                    
+                    # ✅ 重新添加：确保数据文件被添加到Git暂存区
+                    # os.system("git add data/etf_daily/*.csv")
+                    
+                    # 构建要提交的文件列表
+                    file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
+                    
+                    # 提交数据文件
+                    commit_msg = f"feat: 批量提交{len(etf_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    logger.info(f"提交数据文件: {commit_msg}")
+                    commit_success = commit_files_in_batches(file_list, commit_msg)
+                    
+                    if commit_success:
+                        logger.info(f"✅ 小批次数据文件提交成功：{len(etf_data_dict)}只")
+                    else:
+                        logger.error("❌ 小批次数据文件提交失败")
+                    
+                    # 更新进度（当前已处理数量）
+                    new_index = start_idx + i + 1
+                    new_index = new_index % total_count
+                    save_crawl_progress(new_index)
+                    logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
+                    
+                    # 提交进度文件
+                    progress_commit_success = commit_crawl_progress()
+                    if progress_commit_success:
+                        logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")
+                    else:
+                        logger.error("❌ 进度文件提交失败")
+                    
+                    # 清空小批次缓存
+                    etf_data_dict = {}
+                else:
+                    logger.info("当前小批次没有新数据，跳过提交")
+            
+            # 每只ETF之间随机等待
+            time.sleep(random.uniform(2, 5))
         
-        # 【关键修改】所有ETF处理完成后，一次性批量保存所有数据
-        logger.info(f"开始批量保存 {len(etf_data_dict)} 个ETF的数据文件...")
-        saved_count = save_etf_data_batch(etf_data_dict)
-        logger.info(f"✅ 批量保存完成，成功保存 {saved_count} 个ETF数据文件")
-
-        # ✅ 新增：确保所有数据文件被暂存
-        # os.system("git add data/etf/daily/*.csv")
-        os.system("git add data/etf_daily/*.csv")
-        
-        # 然后提交所有数据文件到Git
-        logger.info("开始提交数据文件到Git仓库...")
-        commit_success = force_commit_remaining_files()
-        if commit_success:
-            logger.info(f"✅ 所有数据文件提交成功，共 {saved_count} 个文件")
-        else:
-            logger.error("❌ 数据文件提交失败")
-        
-        # 然后更新并提交进度文件
-        new_index = actual_end_idx
-        save_crawl_progress(new_index)
-        progress_commit_success = commit_crawl_progress()
-        
-        if progress_commit_success:
-            logger.info(f"✅ 进度文件提交成功，进度已更新为 {new_index}/{total_count}")
-        else:
-            logger.error("❌ 进度文件提交失败")
-        
-        # 记录失败的ETF
+        # 处理结束后记录失败ETF
         if failed_etfs:
             failed_file = os.path.join(DAILY_DIR, "failed_etfs.txt")
             with open(failed_file, "w", encoding="utf-8") as f:
                 f.write("\n".join(failed_etfs))
             logger.info(f"记录了 {len(failed_etfs)} 只失败的ETF")
         
-        remaining_stocks = total_count - new_index
+        # 计算剩余ETF数量
+        remaining_stocks = total_count - (start_idx + total_to_process)
         if remaining_stocks < 0:
-            remaining_stocks = total_count
-        
-        logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF，成功 {successful_count} 只，失败 {len(failed_etfs)} 只")
+            remaining_stocks = total_count + remaining_stocks
+            
+        logger.info(f"本次爬取完成，共处理 {processed_count} 只ETF，成功 {successful_count} 只，失败 {len(failed_etfs)} 只")
         logger.info(f"还有 {remaining_stocks} 只ETF待爬取")
         
     except Exception as e:
@@ -658,9 +668,12 @@ def crawl_all_etfs_daily_data() -> None:
         # 异常情况下尝试保存进度
         try:
             if 'next_index' in locals() and 'total_count' in locals():
+                new_index = start_idx + i + 1 if 'i' in locals() else next_index
+                new_index = new_index % total_count
                 logger.error("尝试保存进度以恢复状态...")
-                save_crawl_progress(next_index)
+                save_crawl_progress(new_index)
                 commit_crawl_progress()
+                logger.info(f"进度已保存为 {new_index}/{total_count}")
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
         raise

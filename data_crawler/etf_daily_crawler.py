@@ -543,6 +543,9 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"开始批量保存 {len(etf_data_dict)} 个ETF的数据文件...")
         saved_count = save_etf_daily_data_batch(etf_data_dict)
         logger.info(f"✅ 批量保存完成，成功保存 {saved_count} 个ETF数据文件")
+
+        # ✅ 新增：确保所有数据文件被暂存
+        os.system("git add data/etf/daily/*.csv")
         
         # 然后提交所有数据文件到Git
         logger.info("开始提交数据文件到Git仓库...")

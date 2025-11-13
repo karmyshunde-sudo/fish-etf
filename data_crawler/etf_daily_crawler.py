@@ -444,7 +444,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
 
 def save_etf_data_batch(etf_data_dict: dict) -> int:
     """
-    批量保存ETF日线数据 - 真正批量保存版本
+    批量保存ETF日线数据 - 真正批量保存版本（修复日期类型混合排序错误）
     """
     if not etf_data_dict:
         return 0
@@ -458,30 +458,76 @@ def save_etf_data_batch(etf_data_dict: dict) -> int:
 
         save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
 
-        # ✅ 新增：保存前规范化数据结构与精度
+        # ✅ 保存前规范化数据结构与精度
         etf_name = df["ETF名称"].iloc[0] if "ETF名称" in df.columns else get_etf_name(etf_code)
         df = normalize_etf_df(df, etf_code, etf_name)
 
         try:
+            # =============================
+            # ✅ Step 1: 读取已有数据（如存在）
+            # =============================
             if os.path.exists(save_path):
                 existing_df = pd.read_csv(save_path)
+
+                # 确保旧数据的“日期”列统一为datetime格式
                 if "日期" in existing_df.columns:
                     existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors="coerce")
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                combined_df = combined_df.sort_values("日期", ascending=True)
 
+                # 确保新数据的“日期”列也是datetime格式
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+
+                # =============================
+                # ✅ Step 2: 合并数据
+                # =============================
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+
+                # 再次统一日期列类型
+                combined_df["日期"] = pd.to_datetime(combined_df["日期"], errors="coerce")
+
+                # 丢弃无效日期
+                invalid_dates = combined_df["日期"].isna().sum()
+                if invalid_dates > 0:
+                    logger.warning(f"⚠️ ETF {etf_code} 合并后发现 {invalid_dates} 条无效日期记录，已过滤")
+                    combined_df = combined_df.dropna(subset=["日期"])
+
+                # =============================
+                # ✅ Step 3: 去重 + 排序
+                # =============================
+                combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                combined_df = combined_df.sort_values("日期", ascending=True).reset_index(drop=True)
+
+                # =============================
+                # ✅ Step 4: 格式化日期列为字符串保存
+                # =============================
+                combined_df["日期"] = combined_df["日期"].dt.strftime("%Y-%m-%d")
+
+                # =============================
+                # ✅ Step 5: 临时文件安全写入
+                # =============================
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
                     combined_df.to_csv(temp_file.name, index=False)
+
                 shutil.move(temp_file.name, save_path)
                 logger.info(f"✅ 数据已合并至: {save_path} (共{len(combined_df)}条)")
+
             else:
+                # =============================
+                # ✅ 无旧数据，直接保存新数据
+                # =============================
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                    df = df.dropna(subset=["日期"])
+                    df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
+
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
                     df.to_csv(temp_file.name, index=False)
+
                 shutil.move(temp_file.name, save_path)
                 logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
 
             saved_count += 1
+
         except Exception as e:
             logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
 

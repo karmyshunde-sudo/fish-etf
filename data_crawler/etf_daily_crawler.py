@@ -173,7 +173,7 @@ def get_all_etf_codes() -> list:
 
 
 # ✅ 新增：统一规范ETF日线数据结构与精度
-def normalize_etf__df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataFrame:
+def normalize_etf_df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataFrame:
     """
     规范ETF日线数据结构与精度，使其与data/etf//159222.csv一致
     """
@@ -208,7 +208,7 @@ def normalize_etf__df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.Data
     return df
 
 
-def crawl_etf__data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """使用yfinance爬取ETF日线数据"""
     try:
         if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
@@ -442,7 +442,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         return start_date, end_date
 
 
-def save_etf__data_batch(etf_data_dict: dict) -> int:
+def save_etf_data_batch(etf_data_dict: dict) -> int:
     """
     批量保存ETF日线数据 - 真正批量保存版本
     """
@@ -460,7 +460,7 @@ def save_etf__data_batch(etf_data_dict: dict) -> int:
 
         # ✅ 新增：保存前规范化数据结构与精度
         etf_name = df["ETF名称"].iloc[0] if "ETF名称" in df.columns else get_etf_name(etf_code)
-        df = normalize_etf__df(df, etf_code, etf_name)
+        df = normalize_etf_df(df, etf_code, etf_name)
 
         try:
             if os.path.exists(save_path):
@@ -550,7 +550,7 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 爬取数据
             logger.info(f"📅 增量爬取日期范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
-            df = crawl_etf__data(etf_code, start_date, end_date)
+            df = crawl_etf_data(etf_code, start_date, end_date)
             
             if df.empty:
                 logger.warning(f"⚠️ 未获取到数据")
@@ -568,7 +568,7 @@ def crawl_all_etfs_daily_data() -> None:
         
         # 【关键修改】所有ETF处理完成后，一次性批量保存所有数据
         logger.info(f"开始批量保存 {len(etf_data_dict)} 个ETF的数据文件...")
-        saved_count = save_etf__data_batch(etf_data_dict)
+        saved_count = save_etf_data_batch(etf_data_dict)
         logger.info(f"✅ 批量保存完成，成功保存 {saved_count} 个ETF数据文件")
 
         # ✅ 新增：确保所有数据文件被暂存

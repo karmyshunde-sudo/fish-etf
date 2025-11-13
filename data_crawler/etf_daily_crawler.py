@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 100%匹配股票爬取机制
+ETF日线数据爬取模块 - 严格匹配股票爬取机制
 【关键修复】
 - 严格匹配股票爬取代码的提交机制
 - 每处理一个ETF调用 commit_files_in_batches() 但不立即提交
@@ -9,7 +9,7 @@ ETF日线数据爬取模块 - 100%匹配股票爬取机制
 - 100%可直接复制使用
 """
 
-import akshare as ak  # 修改1：将yfinance改为akshare
+import yfinance as yf
 import pandas as pd
 import logging
 import os
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
-DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")  # 目录路径已正确设置
+DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
@@ -39,8 +39,9 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # 【关键参数】与股票爬取代码完全一致
 BATCH_SIZE = 80  # 一个批次处理的ETF数量
 COMMIT_BATCH_SIZE = 10  # 每COMMIT_BATCH_SIZE个文件提交一次
-BASE_DELAY = 0.8
-MAX_RETRIES = 3
+BASE_DELAY = 2.5  # 基础延迟增加到2.5秒
+MAX_RETRIES = 8  # 增加重试次数
+CONNECTION_TIMEOUT = 30  # 增加超时时间
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def get_etf_name(etf_code):
@@ -219,14 +220,13 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
 # 2. 每10个ETF调用 force_commit_remaining_files() 确保提交
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
-    """请求限流器 - 动态调整请求间隔"""
-    def __init__(self, base_delay=0.8, max_delay=3.0):
+    """请求限流器 - 修复连接问题"""
+    def __init__(self, base_delay=2.5, max_delay=15.0):
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.current_delay = base_delay
-        self.success_count = 0
-        self.failure_count = 0
         self.last_request_time = None
+        self.failure_count = 0
     
     def wait(self):
         """等待适当时间再请求"""
@@ -235,23 +235,22 @@ class RequestThrottler:
             if elapsed < self.current_delay:
                 time.sleep(self.current_delay - elapsed)
         
-        self.last_request_time = time.time()    
-    def record_success(self):
-        """记录成功请求"""
-        self.success_count += 1
-        self.failure_count = 0
-        
-        if self.success_count % 10 == 0 and self.current_delay > self.base_delay:
-            self.current_delay = max(self.base_delay, self.current_delay - 0.1)
+        self.last_request_time = time.time()
     
     def record_failure(self):
-        """记录失败请求"""
+        """记录失败请求 - 实现指数退避策略"""
         self.failure_count += 1
-        self.success_count = 0
-        
-        if self.failure_count >= 3:
-            self.current_delay = min(self.max_delay, self.current_delay + 0.5)
-            self.failure_count = 0
+        # 指数退避：2^failure_count * base_delay
+        self.current_delay = min(
+            self.max_delay, 
+            self.base_delay * (2 ** self.failure_count) + random.uniform(0.5, 1.5)
+        )
+        logger.warning(f"请求失败，指数退避延时: {self.current_delay:.2f}秒")
+    
+    def record_success(self):
+        """记录成功请求 - 重置延时"""
+        self.failure_count = 0
+        self.current_delay = self.base_delay
 
 throttler = RequestThrottler(base_delay=BASE_DELAY)
 
@@ -277,74 +276,84 @@ def apply_precision_control(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-def process_akshare_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
+def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
     """
-    处理akshare返回的DataFrame
+    处理Yahoo Finance返回的DataFrame
     """
-    # 1. 确保日期列是datetime类型
-    if "日期" in df.columns:
-        df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+    # 1. 确保DataFrame是扁平结构
+    if isinstance(df.columns, pd.MultiIndex):
+        # 提取第一级列名
+        columns = []
+        for col in df.columns:
+            if isinstance(col, tuple) and len(col) > 0:
+                columns.append(col[0])
+            else:
+                columns.append(col)
+        df.columns = columns
     
-    # 2. 检查必要列
-    required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额']
+    # 2. 确保日期列存在
+    if 'Date' in df.columns:
+        df = df.reset_index(drop=True)
+    elif df.index.name == 'Date':
+        df = df.reset_index()
+    elif 'date' in df.columns:
+        df = df.rename(columns={'date': 'Date'})
+    else:
+        return pd.DataFrame()  # 无有效日期列，返回空DataFrame
+    
+    # 3. 检查必要列
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
     for col in required_columns:
         if col not in df.columns:
             logger.error(f"ETF {etf_code} 缺少必要列: {col}")
             return pd.DataFrame()  # 关键修复：缺失必要列，直接返回空DataFrame
     
-    # 3. 计算衍生字段
+    # 4. 创建临时单列DataFrame
+    result_df = pd.DataFrame()
+    result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
+    result_df['开盘'] = df['Open'].astype(float)
+    result_df['最高'] = df['High'].astype(float)
+    result_df['最低'] = df['Low'].astype(float)
+    result_df['收盘'] = df['Close'].astype(float)
+    result_df['成交量'] = df['Volume'].astype(float)
+    
+    # 5. 计算衍生字段
     # 振幅 = (最高 - 最低) / 最低 * 100%
-    if '最高' in df.columns and '最低' in df.columns:
-        df['振幅'] = ((df['最高'] - df['最低']) / df['最低'] * 100).round(2)
-    else:
-        df['振幅'] = 0.0
+    result_df['振幅'] = ((result_df['最高'] - result_df['最低']) / result_df['最低'] * 100).round(2)
     
     # 涨跌额 = 收盘 - 前一日收盘
-    if '收盘' in df.columns:
-        df['涨跌额'] = df['收盘'].diff().fillna(0)
-    else:
-        df['涨跌额'] = 0.0
+    result_df['涨跌额'] = result_df['收盘'].diff().fillna(0)
     
     # 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
-    if '收盘' in df.columns:
-        prev_close = df['收盘'].shift(1)
-        # 避免除以0
-        valid_prev_close = prev_close.replace(0, float('nan'))
-        df['涨跌幅'] = (df['涨跌额'] / valid_prev_close * 100).round(2)
-        df['涨跌幅'] = df['涨跌幅'].fillna(0)
-    else:
-        df['涨跌幅'] = 0.0
+    prev_close = result_df['收盘'].shift(1)
+    # 避免除以0
+    valid_prev_close = prev_close.replace(0, float('nan'))
+    result_df['涨跌幅'] = (result_df['涨跌额'] / valid_prev_close * 100).round(2)
+    result_df['涨跌幅'] = result_df['涨跌幅'].fillna(0)
     
     # 换手率 = 成交量 / 基金规模
     fund_size = get_etf_fund_size(etf_code)
-    if fund_size > 0 and '成交量' in df.columns:
-        df['换手率'] = (df['成交量'] / fund_size * 100).round(2)
+    if fund_size > 0:
+        result_df['换手率'] = (result_df['成交量'] / fund_size * 100).round(2)
     else:
-        df['换手率'] = 0.0
+        result_df['换手率'] = 0.0
     
-    # 4. IOPV/折价率/溢价率
-    # 从akshare获取折价率
-    try:
-        fund_df = ak.fund_etf_fund_daily_em()
-        if not fund_df.empty and "基金代码" in fund_df.columns and "折价率" in fund_df.columns:
-            etf_fund_data = fund_df[fund_df["基金代码"] == etf_code]
-            if not etf_fund_data.empty:
-                df["折价率"] = etf_fund_data["折价率"].values[0]
-    except Exception as e:
-        logger.warning(f"获取ETF {etf_code} 折价率数据失败: {str(e)}")
+    # 6. IOPV/折价率/溢价率（Yahoo Finance不提供）
+    result_df['IOPV'] = 0.0
+    result_df['折价率'] = 0.0
+    result_df['溢价率'] = 0.0
     
-    # IOPV无法从akshare获取，保留为0
-    df['IOPV'] = 0.0
-    df['溢价率'] = 0.0
+    # 7. 成交额 = 收盘 * 成交量
+    result_df['成交额'] = (result_df['收盘'] * result_df['成交量']).round(2)
     
     # 关键修复：应用数据精度控制
-    df = apply_precision_control(df)
+    result_df = apply_precision_control(result_df)
     
-    return df
+    return result_df
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
-    使用akshare爬取ETF日线数据
+    使用Yahoo Finance爬取ETF日线数据
     """
     try:
         # 确保日期格式正确
@@ -358,22 +367,31 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 转换为akshare所需的格式
-        start_str = start_date.strftime("%Y%m%d")
-        end_str = end_date.strftime("%Y%m%d")
+        # 转换为Yahoo Finance所需的格式
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
         
-        # 1. 执行请求（带重试机制）
+        # 1. 执行请求（带增强重试机制）
         max_retries = MAX_RETRIES
         for retry in range(max_retries):
             try:
                 throttler.wait()
                 
-                # akshare API
-                df = ak.fund_etf_hist_em(
-                    symbol=etf_code,
-                    period="daily",
-                    start_date=start_str,
-                    end_date=end_str
+                # Yahoo Finance API
+                symbol = etf_code
+                if etf_code.startswith(('51', '56', '57', '58')):
+                    symbol = f"{etf_code}.SS"
+                elif etf_code.startswith('15'):
+                    symbol = f"{etf_code}.SZ"
+                
+                # 获取数据
+                df = yf.download(
+                    symbol,
+                    start=start_str,
+                    end=end_str,
+                    progress=False,
+                    auto_adjust=True,
+                    timeout=CONNECTION_TIMEOUT
                 )
                 
                 # 检查是否获取到数据
@@ -389,12 +407,12 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
                     logger.error(f"ETF {etf_code} 接口请求失败 (重试 {max_retries} 次): {str(e)}")
                     return pd.DataFrame()
                 
-                wait_time = BASE_DELAY * (2 ** retry) + random.uniform(0.1, 0.5)
+                wait_time = BASE_DELAY * (2 ** retry) + random.uniform(1.5, 3.0)
                 logger.warning(f"ETF {etf_code} 请求失败，{wait_time:.1f}秒后重试: {str(e)}")
                 time.sleep(wait_time)
         
         # 2. 处理数据
-        df = process_akshare_data(df, etf_code)
+        df = process_yfinance_data(df, etf_code)
         
         # 3. 严格数据验证
         required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
@@ -635,9 +653,9 @@ if __name__ == "__main__":
     try:
         # 首次运行时确保安装依赖
         try:
-            import akshare
+            import yfinance
         except ImportError:
-            logger.error("缺少akshare依赖，请先安装: pip install akshare")
+            logger.error("缺少yfinance依赖，请先安装: pip install yfinance")
             raise SystemExit(1)
         
         crawl_all_etfs_daily_data()

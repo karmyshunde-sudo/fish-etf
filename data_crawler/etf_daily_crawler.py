@@ -266,8 +266,8 @@ def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> p
         
         df = df.reset_index()
         
-        logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
-        logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
+        #logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
+        #logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
         
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -583,7 +583,7 @@ def crawl_all_etfs_daily_data() -> None:
         failed_etfs = []
         
         for i, etf_code in enumerate(batch_codes):
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(1.2, 4.8))
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
             

@@ -37,10 +37,10 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # 【关键参数】与股票爬取代码完全一致
-BATCH_SIZE = 80  # 一个批次处理的ETF数量
+BATCH_SIZE = 30  # 一个批次处理的ETF数量
 COMMIT_BATCH_SIZE = 10  # 每COMMIT_BATCH_SIZE个文件提交一次
 BASE_DELAY = 2.5  # 基础延迟增加到2.5秒
-MAX_RETRIES = 8  # 增加重试次数
+MAX_RETRIES = 1  # 增加重试次数
 CONNECTION_TIMEOUT = 30  # 增加超时时间
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 

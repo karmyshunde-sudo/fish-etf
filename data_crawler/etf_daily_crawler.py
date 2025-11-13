@@ -327,7 +327,7 @@ def crawl_all_etfs_daily_data():
             else:
                 fail_count += 1
             
-            logger.info(f"进度: {current_index}/{total1} ({(current_index)/total_count*100:.1f}%)")
+            logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
         # 【关键修复】提交剩余文件
         if batch_files:

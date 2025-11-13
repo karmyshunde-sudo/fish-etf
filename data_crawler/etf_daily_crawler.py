@@ -382,7 +382,7 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         #    'Close': '收盘',
         #    'Volume': '成交量',
         #    'Adj Close': '收盘(复权)'
-        })
+        #})
 
         # 检查是否有Date列，如果没有则尝试其他可能的日期列名
         if 'Date' in df.columns:

@@ -805,7 +805,8 @@ jobs:
           fi
       - name: 创建数据目录
         run: |
-          mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data
+          # mkdir -p data/{etf_daily,flags,logs} && chmod -R 777 data
+          mkdir -p data/{etf,daily,flags,logs} && chmod -R 777 data
       - name: 执行ETF日线数据爬取（手动）
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -829,7 +830,7 @@ jobs:
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions" && git config user.email "actions@github.com"
-          git add data/etf_daily/ && [ -n "$(git diff --cached --name-only data/etf_daily/)" ] && 
+          git add data/etf/daily/ && [ -n "$(git diff --cached --name-only data/etf/daily/)" ] && 
           git commit -m "手动更新ETF日线数据" && git push origin main
       - name: 发送完成通知
         if: steps.execute_task.outputs.task_status == 'success' && env.WECOM_WEBHOOK

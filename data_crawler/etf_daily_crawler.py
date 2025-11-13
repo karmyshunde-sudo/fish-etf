@@ -33,7 +33,7 @@ os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # 批次大小
-BATCH_SIZE = 80
+BATCH_SIZE = 120
 
 def get_etf_name(etf_code):
     """获取ETF名称"""

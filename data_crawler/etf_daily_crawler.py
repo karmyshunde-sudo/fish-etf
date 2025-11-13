@@ -3,6 +3,7 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
+【yFinance数据DS-etf_daily_crawler-3.py】
 【生产级实现】
 - 严格遵循"各司其职"原则
 - 与股票爬取系统完全一致的进度管理逻辑
@@ -730,21 +731,14 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     # 确保目录存在
     os.makedirs(DAILY_DIR, exist_ok=True)
     
-    # 保存前将日期转换为字符串
-    if "日期" in df.columns:
-        df_save = df.copy()
-        df_save["日期"] = df_save["日期"].dt.strftime('%Y-%m-%d')
-    else:
-        df_save = df
-    
-    # 保存到CSV
+    # 保存到CSV - 日期列已经是字符串格式，不需要转换
     save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
     
     # 使用临时文件进行原子操作
     temp_file = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-            df_save.to_csv(temp_file.name, index=False)
+            df.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
         logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
         
@@ -872,9 +866,16 @@ def crawl_all_etfs_daily_data() -> None:
                     if "日期" in existing_df.columns:
                         existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
                     
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    # 确保新数据的日期列也是datetime类型以便合并
+                    df_temp = df.copy()
+                    df_temp["日期"] = pd.to_datetime(df_temp["日期"], errors='coerce')
+                    
+                    combined_df = pd.concat([existing_df, df_temp], ignore_index=True)
                     combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
                     combined_df = combined_df.sort_values("日期", ascending=False)
+                    
+                    # 转换回字符串格式保存
+                    combined_df["日期"] = combined_df["日期"].dt.strftime('%Y-%m-%d')
                     
                     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
                         combined_df.to_csv(temp_file.name, index=False)

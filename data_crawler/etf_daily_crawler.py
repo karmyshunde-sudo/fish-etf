@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 批量提交修复版
-yFinance数据-etf_daily_crawler-DS10.py
-【确保每10个成功文件一起提交，而不是只提交最后一个】
+ETF日线数据爬取模块 - 修复LAST_FILE参数版本
+yFinance数据-etf_daily_crawler-DS11.py
+【正确使用LAST_FILE参数】
 """
 
 import yfinance as yf
@@ -239,9 +239,9 @@ def save_crawl_progress(next_index):
         logger.error(f"保存进度失败: {str(e)}")
 
 def crawl_all_etfs_daily_data():
-    """主爬取函数 - 批量提交修复版"""
+    """主爬取函数 - 修复LAST_FILE参数版本"""
     try:
-        logger.info("=== 开始执行ETF日线数据爬取（批量提交修复版）===")
+        logger.info("=== 开始执行ETF日线数据爬取（修复LAST_FILE参数版本）===")
         
         # 获取ETF代码列表
         etf_codes = get_all_etf_codes()
@@ -267,7 +267,7 @@ def crawl_all_etfs_daily_data():
         
         logger.info(f"处理本批次 ETF ({len(batch_codes)}只)，从索引 {start_idx} 开始")
         
-        # 【关键修复】使用列表累积成功文件，确保批量提交
+        # 使用列表累积成功文件，确保批量提交
         success_count = 0
         fail_count = 0
         skip_count = 0
@@ -303,7 +303,7 @@ def crawl_all_etfs_daily_data():
             # 保存数据到本地
             file_path = save_etf_data(etf_code, df)
             if file_path:
-                # 【关键修复】添加到批量文件列表，而不是立即提交
+                # 添加到批量文件列表
                 batch_files.append(file_path)
                 success_count += 1
                 logger.info(f"🎯 成功计数器: {success_count}/{COMMIT_BATCH_SIZE}")
@@ -312,9 +312,8 @@ def crawl_all_etfs_daily_data():
                 if success_count >= COMMIT_BATCH_SIZE:
                     logger.info(f"🚀 达到提交条件! 开始提交批次{batch_number}，包含 {len(batch_files)} 个文件")
                     
-                    # 【关键修复】使用LAST_FILE参数确保批量提交
-                    commit_message = f"自动更新ETF日线数据 批次{batch_number} [skip ci]"
-                    commit_result = commit_files_in_batches("LAST_FILE", commit_message)
+                    # 【关键修复】正确使用LAST_FILE参数 - 作为commit_message传递
+                    commit_result = commit_files_in_batches(batch_files[0], "LAST_FILE")
                     
                     if commit_result:
                         logger.info(f"✅ 批次{batch_number}提交成功! 提交了 {len(batch_files)} 个文件")
@@ -329,11 +328,10 @@ def crawl_all_etfs_daily_data():
             
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
         
-        # 【关键修复】提交剩余文件
+        # 提交剩余文件
         if batch_files:
             logger.info(f"🚀 提交剩余 {len(batch_files)} 个文件")
-            commit_message = f"自动更新ETF日线数据 最终批次 [skip ci]"
-            commit_result = commit_files_in_batches("LAST_FILE", commit_message)
+            commit_result = commit_files_in_batches(batch_files[0], "LAST_FILE")
             if commit_result:
                 logger.info("✅ 剩余文件提交成功!")
             else:
@@ -359,7 +357,7 @@ def crawl_all_etfs_daily_data():
         # 尝试提交剩余文件
         try:
             if 'batch_files' in locals() and batch_files:
-                commit_files_in_batches("LAST_FILE", "紧急提交剩余文件 [skip ci]")
+                commit_files_in_batches(batch_files[0], "LAST_FILE")
         except:
             pass
         raise

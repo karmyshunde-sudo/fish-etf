@@ -385,14 +385,33 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         
         # 确保日期列是字符串格式
         df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
+
+        # 确保DataFrame是扁平结构（解决多层列索引问题）
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in df.columns]
         
         # 计算涨跌幅和涨跌额
         df = df.sort_values('日期').reset_index(drop=True)
         df['涨跌额'] = df['收盘'].diff()
-        df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
+        # 避免除以0的错误（解决ValueError问题）
+        if not df.empty:
+            prev_close = df['收盘'].shift(1)
+            valid_prev_close = prev_close.replace(0, float('nan'))
+            df['涨跌幅'] = (df['涨跌额'] / valid_prev_close * 100).round(2)
+            df['涨跌幅'] = df['涨跌幅'].fillna(0)
+        else:
+            df['涨跌幅'] = 0.0
         
         # 计算振幅
-        df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
+        if not df.empty:
+            df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
+        else:
+            df['振幅'] = 0.0
+        
+        # df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
+        
+        # 计算振幅
+        # df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
         
         # 补充ETF基本信息
         df["ETF代码"] = etf_code

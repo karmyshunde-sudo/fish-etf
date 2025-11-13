@@ -1,8 +1,8 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块 - 真正批量保存版本
-yFinance数据-etf_daily_crawler-GPT2.py
+yFinance数据-etf_daily_crawler-DS17.py
 """
 
 import yfinance as yf
@@ -66,7 +66,6 @@ def get_etf_name(etf_code):
         logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
         return etf_code
 
-
 def get_next_crawl_index() -> int:
     """获取下一个要处理的ETF索引"""
     try:
@@ -100,9 +99,10 @@ def get_next_crawl_index() -> int:
         logger.error(f"获取ETF进度索引失败: {str(e)}", exc_info=True)
         return 0
 
-
 def save_crawl_progress(next_index: int):
-    """保存ETF爬取进度 - 仅保存到文件，不提交"""
+    """
+    保存ETF爬取进度 - 仅保存到文件，不提交
+    """
     try:
         if not os.path.exists(BASIC_INFO_FILE):
             logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
@@ -126,9 +126,10 @@ def save_crawl_progress(next_index: int):
     except Exception as e:
         logger.error(f"❌ 保存ETF进度失败: {str(e)}", exc_info=True)
 
-
 def commit_crawl_progress():
-    """提交进度文件到Git仓库"""
+    """
+    提交进度文件到Git仓库
+    """
     try:
         commit_message = f"feat: 更新ETF爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         success = commit_files_in_batches(BASIC_INFO_FILE, commit_message)
@@ -140,7 +141,6 @@ def commit_crawl_progress():
     except Exception as e:
         logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
         return False
-
 
 def get_all_etf_codes() -> list:
     """获取所有ETF代码"""
@@ -169,43 +169,6 @@ def get_all_etf_codes() -> list:
     except Exception as e:
         logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
         return []
-
-
-# ✅ 新增：统一规范ETF日线数据结构与精度
-def normalize_etf_daily_df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataFrame:
-    """
-    规范ETF日线数据结构与精度，使其与data/etf/daily/159222.csv一致
-    """
-    import datetime
-
-    expected_columns = [
-        "日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
-        "振幅", "涨跌幅", "涨跌额", "换手率", "IOPV", "折价率", "溢价率",
-        "ETF代码", "ETF名称", "爬取时间"
-    ]
-
-    # 缺少列自动补0
-    for col in expected_columns:
-        if col not in df.columns:
-            df[col] = 0
-
-    # 精度处理
-    four_decimals = ["开盘", "最高", "最低", "收盘", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "IOPV", "折价率", "溢价率"]
-    for col in four_decimals:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
-
-    if "成交量" in df.columns:
-        df["成交量"] = pd.to_numeric(df["成交量"], errors="coerce").fillna(0).astype(int)
-
-    df["ETF代码"] = etf_code
-    df["ETF名称"] = etf_name
-    df["爬取时间"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    df = df[expected_columns]
-    df = df.sort_values(by="日期", ascending=True)
-    return df
-
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """使用yfinance爬取ETF日线数据"""
@@ -440,52 +403,63 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         end_date = last_trading_day.replace(hour=23, minute=59, second=59, microsecond=0)
         return start_date, end_date
 
-
 def save_etf_daily_data_batch(etf_data_dict: dict) -> int:
     """
     批量保存ETF日线数据 - 真正批量保存版本
+    Args:
+        etf_data_dict: {etf_code: df} 的字典
+    Returns:
+        int: 成功保存的文件数量
     """
     if not etf_data_dict:
         return 0
-
+    
     os.makedirs(DAILY_DIR, exist_ok=True)
     saved_count = 0
-
+    
     for etf_code, df in etf_data_dict.items():
         if df.empty:
             continue
-
+            
         save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
-
-        # ✅ 新增：保存前规范化数据结构与精度
-        etf_name = df["ETF名称"].iloc[0] if "ETF名称" in df.columns else get_etf_name(etf_code)
-        df = normalize_etf_daily_df(df, etf_code, etf_name)
-
+        
         try:
+            # 检查是否已有历史数据，如果有则合并
             if os.path.exists(save_path):
-                existing_df = pd.read_csv(save_path)
-                if "日期" in existing_df.columns:
-                    existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors="coerce")
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
-                combined_df = combined_df.sort_values("日期", ascending=True)
-
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
-                    combined_df.to_csv(temp_file.name, index=False)
-                shutil.move(temp_file.name, save_path)
-                logger.info(f"✅ 数据已合并至: {save_path} (共{len(combined_df)}条)")
+                try:
+                    existing_df = pd.read_csv(save_path)
+                    if "日期" in existing_df.columns:
+                        existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors='coerce')
+                    
+                    # 合并数据并去重
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                    combined_df = combined_df.sort_values("日期", ascending=False)
+                    
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
+                        combined_df.to_csv(temp_file.name, index=False)
+                    shutil.move(temp_file.name, save_path)
+                    logger.info(f"✅ 数据已合并至: {save_path} (合并后共{len(combined_df)}条)")
+                except Exception as e:
+                    logger.error(f"合并ETF {etf_code} 数据失败: {str(e)}")
+                    # 如果合并失败，直接保存新数据
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
+                        df.to_csv(temp_file.name, index=False)
+                    shutil.move(temp_file.name, save_path)
+                    logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
             else:
+                # 没有历史数据，直接保存
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
                     df.to_csv(temp_file.name, index=False)
                 shutil.move(temp_file.name, save_path)
                 logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
-
+            
             saved_count += 1
+            
         except Exception as e:
             logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
-
+    
     return saved_count
-
 
 def crawl_all_etfs_daily_data() -> None:
     """爬取所有ETF日线数据 - 真正批量保存版本"""
@@ -552,7 +526,7 @@ def crawl_all_etfs_daily_data() -> None:
             df = crawl_etf_daily_data(etf_code, start_date, end_date)
             
             if df.empty:
-                logger.warning(f⚠️ 未获取到数据")
+                logger.warning(f"⚠️ 未获取到数据")
                 failed_etfs.append(f"{etf_code},{etf_name},未获取到数据")
                 processed_count += 1
                 continue

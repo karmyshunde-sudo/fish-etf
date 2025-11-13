@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块
+yFinance数据-etf_daily_crawler-QWcoder-4.py
 使用指定接口爬取ETF日线数据
-yFinance数据-etf_daily_crawler-QWcoder-3.py
 【生产级实现】
 - 严格遵循"各司其职"原则
 - 与股票爬取系统完全一致的进度管理逻辑
@@ -85,32 +85,6 @@ def get_etf_name(etf_code):
     except Exception as e:
         logger.error(f"获取ETF名称失败: {str(e)}", exc_info=True)
         return etf_code
-
-def get_etf_fund_size(etf_code: str) -> float:
-    """
-    从ETF列表中获取基金规模（只读）
-    """
-    try:
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.warning(f"ETF列表文件不存在: {BASIC_INFO_FILE}")
-            return 0.0
-        
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE, dtype={"ETF代码": str})
-        if "ETF代码" not in basic_info_df.columns or "基金规模" not in basic_info_df.columns:
-            logger.warning(f"ETF列表缺少必要列（ETF代码/基金规模）")
-            return 0.0
-        
-        etf_row = basic_info_df[basic_info_df["ETF代码"] == str(etf_code).strip()]
-        if etf_row.empty:
-            logger.warning(f"ETF {etf_code} 在列表中不存在")
-            return 0.0
-        
-        fund_size = float(etf_row["基金规模"].values[0])
-        return fund_size * 100000000  # 亿元转股
-    
-    except Exception as e:
-        logger.error(f"获取ETF {etf_code} 基金规模失败: {str(e)}", exc_info=True)
-        return 0.0
 
 def get_next_crawl_index() -> int:
     """
@@ -357,106 +331,9 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         logger.error(f"加载ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def apply_precision_control(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    应用数据精度控制（保留4位小数）
-    """
-    # 需要保留4位小数的字段
-    precision_fields = [
-        '开盘', '最高', '最低', '收盘', '成交额',
-        '振幅', '涨跌幅', '涨跌额', '换手率',
-        'IOPV', '折价率', '溢价率'
-    ]
-    
-    for field in precision_fields:
-        if field in df.columns:
-            # 保留4位小数
-            df[field] = df[field].round(4)
-    
-    # 成交量通常为整数
-    if '成交量' in df.columns:
-        df['成交量'] = df['成交量'].round(0).astype(int)
-    
-    return df
-
-def process_yfinance_data(df: pd.DataFrame, etf_code: str) -> pd.DataFrame:
-    """
-    处理Yahoo Finance返回的DataFrame
-    """
-    # 1. 确保DataFrame是扁平结构
-    if isinstance(df.columns, pd.MultiIndex):
-        # 提取第一级列名
-        columns = []
-        for col in df.columns:
-            if isinstance(col, tuple) and len(col) > 0:
-                columns.append(col[0])
-            else:
-                columns.append(col)
-        df.columns = columns
-    
-    # 2. 确保日期列存在
-    if 'Date' in df.columns:
-        df = df.reset_index(drop=True)
-    elif df.index.name == 'Date':
-        df = df.reset_index()
-    elif 'date' in df.columns:
-        df = df.rename(columns={'date': 'Date'})
-    else:
-        return pd.DataFrame()  # 无有效日期列，返回空DataFrame
-    
-    # 3. 检查必要列
-    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-    for col in required_columns:
-        if col not in df.columns:
-            logger.error(f"ETF {etf_code} 缺少必要列: {col}")
-            return pd.DataFrame()  # 关键修复：缺失必要列，直接返回空DataFrame
-    
-    # 4. 创建临时单列DataFrame
-    result_df = pd.DataFrame()
-    result_df['日期'] = df['Date'].dt.strftime('%Y-%m-%d')
-    result_df['开盘'] = df['Open'].astype(float)
-    result_df['最高'] = df['High'].astype(float)
-    result_df['最低'] = df['Low'].astype(float)
-    result_df['收盘'] = df['Close'].astype(float)
-    result_df['成交量'] = df['Volume'].astype(float)
-    
-    # 5. 计算衍生字段
-    # 振幅 = (最高 - 最低) / 最低 * 100%
-    result_df['振幅'] = ((result_df['最高'] - result_df['最低']) / result_df['最低'] * 100).round(2)
-    
-    # 涨跌额 = 收盘 - 前一日收盘
-    result_df['涨跌额'] = result_df['收盘'].diff().fillna(0)
-    
-    # 涨跌幅 = 涨跌额 / 前一日收盘 * 100%
-    prev_close = result_df['收盘'].shift(1)
-    # 避免除以0
-    valid_prev_close = prev_close.replace(0, float('nan'))
-    result_df['涨跌幅'] = (result_df['涨跌额'] / valid_prev_close * 100).round(2)
-    result_df['涨跌幅'] = result_df['涨跌幅'].fillna(0)
-    
-    # 换手率 = 成交量 / 基金规模
-    fund_size = get_etf_fund_size(etf_code)
-    if fund_size > 0:
-        result_df['换手率'] = (result_df['成交量'] / fund_size * 100).round(2)
-    else:
-        result_df['换手率'] = 0.0
-    
-    # 6. IOPV/折价率/溢价率（Yahoo Finance不提供）
-    result_df['IOPV'] = 0.0
-    result_df['折价率'] = 0.0
-    result_df['溢价率'] = 0.0
-    
-    # 7. 成交额 = 收盘 * 成交量
-    result_df['成交额'] = (result_df['收盘'] * result_df['成交量']).round(2)
-    
-    # 关键修复：应用数据精度控制
-    result_df = apply_precision_control(result_df)
-    
-    return result_df
-
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
-    使用yfinance爬取ETF日线数据，适配中国ETF
+    使用yfinance爬取ETF日线数据
     """
     try:
         # 确保日期参数是datetime类型
@@ -470,10 +347,6 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
         
-        # 转换为Yahoo Finance所需的格式
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
-        
         # 构建正确的股票代码格式
         symbol = etf_code
         if etf_code.startswith(('51', '56', '57', '58')):
@@ -484,8 +357,8 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         # 使用yfinance获取ETF数据
         df = yf.download(
             symbol,
-            start=start_str,
-            end=end_str,
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
             progress=False,
             auto_adjust=True,
             timeout=15
@@ -496,26 +369,42 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.warning(f"ETF {etf_code} 基础数据为空")
             return pd.DataFrame()
         
-        # 处理数据
-        df = process_yfinance_data(df, etf_code)
+        # 重命名列以匹配原有格式
+        df = df.reset_index()
+        df = df.rename(columns={
+            'Date': '日期',
+            'Open': '开盘',
+            'High': '最高',
+            'Low': '最低',
+            'Close': '收盘',
+            'Volume': '成交量',
+            'Adj Close': '收盘(复权)'
+        })
         
-        # 严格数据验证
-        required_columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
-        if any(col not in df.columns for col in required_columns) or df.empty:
-            logger.error(f"ETF {etf_code} 数据验证失败 - 无法保存")
-            return pd.DataFrame()
+        # 确保日期列是字符串格式
+        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
+        
+        # 计算涨跌幅和涨跌额
+        df = df.sort_values('日期').reset_index(drop=True)
+        df['涨跌额'] = df['收盘'].diff()
+        df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
+        
+        # 计算振幅
+        df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
         
         # 补充ETF基本信息
         df["ETF代码"] = etf_code
         df["ETF名称"] = get_etf_name(etf_code)
         df["爬取时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # 添加折价率列（yfinance不直接提供折价率，暂时设为0）
+        df["折价率"] = 0.0
+        
         # 确保列顺序
         standard_columns = [
             '日期', '开盘', '最高', '最低', '收盘', '成交量', '成交额',
-            '振幅', '涨跌幅', '涨跌额', '换手率',
-            'IOPV', '折价率', '溢价率',
-            'ETF代码', 'ETF名称', '爬取时间'
+            '振幅', '涨跌幅', '涨跌额', '换手率', 'ETF代码', 'ETF名称',
+            '爬取时间', '折价率'
         ]
         available_columns = [col for col in standard_columns if col in df.columns]
         return df[available_columns]

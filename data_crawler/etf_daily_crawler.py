@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 
-yFinance数据-etf_daily_crawler-QW21.py
+yFinance数据-etf_daily_crawler-QW22.py
 
 使用指定接口爬取ETF日线数据
 【生产级实现】
@@ -370,6 +370,15 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
         if df is None or df.empty:
             logger.warning(f"ETF {etf_code} 基础数据为空")
             return pd.DataFrame()
+        
+        # 检查是否有必要的数据列
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+
+        if missing_columns:
+            logger.error(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
+            return pd.DataFrame()
+
         
         # 重命名列以匹配原有格式
         df = df.reset_index()

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 严格匹配股票爬取机制
-【核心特性】
-- 100%匹配股票爬取代码的提交机制
-- 每处理10个ETF才触发一次真正提交
-- 本地计数器跟踪，不依赖全局变量
-- 严格数据精度控制
+ETF日线数据爬取模块 - 100%匹配股票爬取机制
+【关键修复】
+- 严格匹配股票爬取代码的提交机制
+- 每处理一个ETF调用 commit_files_in_batches() 但不立即提交
+- 每10个ETF调用 force_commit_remaining_files() 确保提交
 - 100%可直接复制使用
 """
 
@@ -216,9 +215,8 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # 【关键修复】严格匹配股票爬取代码的提交机制
-# 1. 不再对每个ETF单独调用提交函数
-# 2. 使用本地计数器跟踪
-# 3. 每10个ETF手动触发提交
+# 1. 每处理一个ETF调用 commit_files_in_batches() 
+# 2. 每10个ETF调用 force_commit_remaining_files() 确保提交
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
     """请求限流器 - 动态调整请求间隔"""
@@ -502,8 +500,13 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         last_trading_day = get_last_trading_day()
         return last_trading_day - timedelta(days=365), last_trading_day
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 【关键修复】严格匹配股票爬取代码的提交机制
+# 1. 每处理一个ETF调用 commit_files_in_batches() 但不立即提交
+# 2. 每10个ETF调用 force_commit_remaining_files() 确保提交
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
-    """保存数据（关键修复：不再触发提交）"""
+    """保存数据（关键修复：与股票爬取代码相同）"""
     if df.empty: 
         logger.error(f"ETF {etf_code} 数据为空，无法保存")
         return
@@ -520,8 +523,10 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
         
-        # 关键修复：不再调用 commit_files_in_batches
-        # 提交将在每10个ETF后由主流程统一处理
+        # 关键修复：调用 commit_files_in_batches，但不检查返回值
+        commit_message = f"自动更新ETF {etf_code} 日线数据"
+        commit_files_in_batches(save_path, commit_message)
+        logger.debug(f"已添加ETF {etf_code} 日线数据到提交队列")
         
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)

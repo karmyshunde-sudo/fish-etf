@@ -365,7 +365,7 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         
         end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
         
-        save_path = os.path.join(_DIR, f"{etf_code}.csv")
+        save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
         
         if os.path.exists(save_path):
             try:
@@ -456,7 +456,7 @@ def save_etf_data_batch(etf_data_dict: dict) -> int:
         if df.empty:
             continue
 
-        save_path = os.path.join(_DIR, f"{etf_code}.csv")
+        save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
 
         # ✅ 新增：保存前规范化数据结构与精度
         etf_name = df["ETF名称"].iloc[0] if "ETF名称" in df.columns else get_etf_name(etf_code)

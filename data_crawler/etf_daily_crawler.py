@@ -335,7 +335,7 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
 
 def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
-    使用yfinance爬取ETF日线数据
+    使用yfinance爬取ETF日线数据 - 修复版本
     """
     try:
         # 确保日期参数是datetime类型
@@ -343,121 +343,130 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.error(f"ETF {etf_code} 日期参数类型错误，应为datetime类型")
             return pd.DataFrame()
         
-        # 确保日期对象有正确的时区信息
-        if start_date.tzinfo is None:
-            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
-        if end_date.tzinfo is None:
-            end_date = end_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
-        
         # 构建正确的股票代码格式
         symbol = etf_code
         if etf_code.startswith(('51', '56', '57', '58')):
             symbol = f"{etf_code}.SS"  # 上海证券交易所
         elif etf_code.startswith('15'):
             symbol = f"{etf_code}.SZ"  # 深圳证券交易所
+        else:
+            # 默认使用.SZ，因为大多数ETF在深交所
+            symbol = f"{etf_code}.SZ"
+        
+        logger.info(f"尝试获取ETF {etf_code} 数据，符号: {symbol}")
         
         # 使用yfinance获取ETF数据
-        df = yf.download(
-            symbol,
+        etf_ticker = yf.Ticker(symbol)
+        df = etf_ticker.history(
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            progress=False,
-            auto_adjust=True,
-            timeout=15
+            auto_adjust=True
         )
         
-        # 检查基础数据
-        if df is None or df.empty:
-            logger.warning(f"ETF {etf_code} 基础数据为空")
+        # 详细检查数据
+        if df is None:
+            logger.warning(f"ETF {etf_code} 返回数据为None")
             return pd.DataFrame()
         
-        # 检查是否有必要的数据列
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-
-        if missing_columns:
-            logger.error(f"ETF {etf_code} 数据缺少必要列: {', '.join(missing_columns)}")
-            return pd.DataFrame()
-
+        if df.empty:
+            logger.warning(f"ETF {etf_code} 返回数据为空")
+            # 尝试另一种交易所后缀
+            alternative_symbols = []
+            if symbol.endswith('.SS'):
+                alternative_symbols.append(symbol.replace('.SS', '.SZ'))
+            elif symbol.endswith('.SZ'):
+                alternative_symbols.append(symbol.replace('.SZ', '.SS'))
+            
+            for alt_symbol in alternative_symbols:
+                logger.info(f"尝试替代符号: {alt_symbol}")
+                try:
+                    alt_ticker = yf.Ticker(alt_symbol)
+                    df = alt_ticker.history(
+                        start=start_date.strftime("%Y-%m-%d"),
+                        end=end_date.strftime("%Y-%m-%d"),
+                        auto_adjust=True
+                    )
+                    if not df.empty:
+                        symbol = alt_symbol
+                        logger.info(f"使用替代符号 {alt_symbol} 成功获取数据")
+                        break
+                except Exception as alt_e:
+                    logger.warning(f"替代符号 {alt_symbol} 也失败: {str(alt_e)}")
+            
+            if df.empty:
+                logger.warning(f"ETF {etf_code} 所有符号尝试均失败")
+                return pd.DataFrame()
         
-        # 重命名列以匹配原有格式
+        # 重置索引，将Date从索引变为列
         df = df.reset_index()
         
-        #df = df.rename(columns={
-        #    'Date': '日期',
-        #    'Open': '开盘',
-        #    'High': '最高',
-        #    'Low': '最低',
-        #    'Close': '收盘',
-        #    'Volume': '成交量',
-        #    'Adj Close': '收盘(复权)'
-        #})
-
-        # 检查是否有Date列，如果没有则尝试其他可能的日期列名
-        if 'Date' in df.columns:
-            df = df.rename(columns={'Date': '日期'})
-        elif 'date' in df.columns:
-            df = df.rename(columns={'date': '日期'})
-        elif 'datetime' in df.columns:
-            df = df.rename(columns={'datetime': '日期'})
-        else:
-            # 如果没有找到日期列，检查是否已经是索引
-            if df.index.name == 'Date' or df.index.name == 'date':
-                df = df.reset_index()
-                df = df.rename(columns={df.index.name: '日期'})
-            else:
-                logger.error(f"ETF {etf_code} 数据中没有找到日期列，无法处理数据")
-                return pd.DataFrame()
-
+        # 调试信息：显示实际获取到的列
+        logger.info(f"ETF {etf_code} 实际列名: {df.columns.tolist()}")
+        logger.info(f"ETF {etf_code} 数据形状: {df.shape}")
         
-        # 确保日期列是字符串格式
-        #df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
-
+        # 检查必要的基础列
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.error(f"ETF {etf_code} 缺少基础列: {', '.join(missing_columns)}")
+            logger.error(f"现有列: {', '.join(df.columns.tolist())}")
+            return pd.DataFrame()
+        
+        # 重命名列为中文
+        column_mapping = {
+            'Date': '日期',
+            'Open': '开盘',
+            'High': '最高', 
+            'Low': '最低',
+            'Close': '收盘',
+            'Volume': '成交量'
+        }
+        
+        # 只重命名存在的列
+        actual_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+        df = df.rename(columns=actual_mapping)
+        
+        # 确保日期列格式正确
         if '日期' in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"], errors='coerce').dt.strftime('%Y-%m-%d')
+            df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
         else:
-            logger.error(f"ETF {etf_code} 数据中没有'日期'列，无法处理数据")
+            logger.error(f"ETF {etf_code} 重命名后缺少日期列")
             return pd.DataFrame()
-
-        # 检查DataFrame是否为空或没有必要列
-        if df.empty or '收盘' not in df.columns:
-            logger.error(f"ETF {etf_code} 数据中缺少必要列，无法处理数据")
-            return pd.DataFrame()
-
-        # 确保DataFrame是扁平结构（解决多层列索引问题）
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in df.columns]
         
-        # 计算涨跌幅和涨跌额
+        # 检查必要的中文列
+        chinese_required = ['日期', '开盘', '最高', '最低', '收盘', '成交量']
+        chinese_missing = [col for col in chinese_required if col not in df.columns]
+        
+        if chinese_missing:
+            logger.error(f"ETF {etf_code} 重命名后缺少列: {', '.join(chinese_missing)}")
+            return pd.DataFrame()
+        
+        # 计算衍生指标
         df = df.sort_values('日期').reset_index(drop=True)
+        
+        # 计算涨跌额
         df['涨跌额'] = df['收盘'].diff()
-        # 避免除以0的错误（解决ValueError问题）
-        if not df.empty:
-            prev_close = df['收盘'].shift(1)
-            valid_prev_close = prev_close.replace(0, float('nan'))
-            df['涨跌幅'] = (df['涨跌额'] / valid_prev_close * 100).round(2)
-            df['涨跌幅'] = df['涨跌幅'].fillna(0)
-        else:
-            df['涨跌幅'] = 0.0
+        
+        # 计算涨跌幅，避免除零错误
+        prev_close = df['收盘'].shift(1)
+        df['涨跌幅'] = (df['涨跌额'] / prev_close.replace(0, float('nan')) * 100).round(2)
+        df['涨跌幅'] = df['涨跌幅'].fillna(0)
         
         # 计算振幅
-        if not df.empty:
-            df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
-        else:
-            df['振幅'] = 0.0
+        df['振幅'] = ((df['最高'] - df['最低']) / prev_close.replace(0, float('nan')) * 100).round(2)
+        df['振幅'] = df['振幅'].fillna(0)
         
-        # df['涨跌幅'] = df['涨跌额'] / df['收盘'].shift(1) * 100
+        # 添加成交额（如果没有，用收盘价*成交量估算）
+        if '成交额' not in df.columns:
+            df['成交额'] = (df['收盘'] * df['成交量']).round(2)
         
-        # 计算振幅
-        # df['振幅'] = ((df['最高'] - df['最低']) / df['收盘'].shift(1)) * 100
-        
-        # 补充ETF基本信息
-        df["ETF代码"] = etf_code
-        df["ETF名称"] = get_etf_name(etf_code)
-        df["爬取时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 添加折价率列（yfinance不直接提供折价率，暂时设为0）
-        df["折价率"] = 0.0
+        # 添加其他必要列
+        df['换手率'] = 0.0  # yfinance不提供换手率
+        df['ETF代码'] = etf_code
+        df['ETF名称'] = get_etf_name(etf_code)
+        df['爬取时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df['折价率'] = 0.0  # yfinance不直接提供折价率
         
         # 确保列顺序
         standard_columns = [
@@ -465,8 +474,14 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             '振幅', '涨跌幅', '涨跌额', '换手率', 'ETF代码', 'ETF名称',
             '爬取时间', '折价率'
         ]
-        return df[[col for col in standard_columns if col in df.columns]]
-    
+        
+        # 只保留存在的列
+        final_columns = [col for col in standard_columns if col in df.columns]
+        df = df[final_columns]
+        
+        logger.info(f"ETF {etf_code} 成功处理 {len(df)} 条数据")
+        return df
+        
     except Exception as e:
         logger.error(f"ETF {etf_code} 数据爬取失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
@@ -627,6 +642,32 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
 
+def validate_etf_data(etf_code: str) -> bool:
+    """验证ETF是否可获取数据"""
+    try:
+        # 尝试多种符号组合
+        symbols_to_try = [
+            f"{etf_code}.SS",
+            f"{etf_code}.SZ", 
+            etf_code  # 无后缀
+        ]
+        
+        for symbol in symbols_to_try:
+            try:
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                if info and 'symbol' in info:
+                    logger.info(f"ETF {etf_code} 有效符号: {symbol}")
+                    return True
+            except:
+                continue
+        
+        logger.warning(f"ETF {etf_code} 无有效符号")
+        return False
+    except Exception as e:
+        logger.error(f"验证ETF {etf_code} 失败: {str(e)}")
+        return False
+
 def crawl_all_etfs_daily_data() -> None:
     """
     爬取所有ETF日线数据
@@ -687,10 +728,15 @@ def crawl_all_etfs_daily_data() -> None:
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(5, 11))
+            time.sleep(random.uniform(2, 5))
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
-            
+
+            # 先验证ETF是否可获取数据
+            if not validate_etf_data(etf_code):
+                logger.warning(f"ETF {etf_code} 数据不可用，跳过")
+                continue
+        
             # 获取增量日期范围
             start_date, end_date = get_incremental_date_range(etf_code)
             if start_date is None or end_date is None:

@@ -3,7 +3,7 @@
 """
 ETF日线数据爬取模块
 使用指定接口爬取ETF日线数据
-【yFinance数据DS-etf_daily_crawler-4.py】
+【yFinance数据DS-etf_daily_crawler-5.py】
 【生产级实现】
 - 严格遵循"各司其职"原则
 - 与股票爬取系统完全一致的进度管理逻辑
@@ -275,7 +275,9 @@ def to_datetime(date_input):
     """
     if isinstance(date_input, datetime):
         return date_input
-    elif isinstance(date_input, date):
+    elif isinstance(date_input, pd.Timestamp):
+        return date_input.to_pydatetime()
+    elif hasattr(date_input, 'date'):
         return datetime.combine(date_input, datetime.min.time())
     elif isinstance(date_input, str):
         # 尝试多种日期格式
@@ -729,17 +731,19 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         end_date = last_trading_day.replace(hour=23, minute=59, second=59, microsecond=0)
         return start_date, end_date
 
-def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
+def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> bool:
     """
-    保存ETF日线数据 - 【关键修复】保存到本地并立即添加到Git暂存区
+    保存ETF日线数据 - 【关键修复】只保存到本地，不立即提交
+    Returns:
+        bool: 是否成功保存
     """
     if df.empty:
-        return
+        return False
     
     # 确保目录存在
     os.makedirs(DAILY_DIR, exist_ok=True)
     
-    # 保存到CSV - 日期列已经是字符串格式，不需要转换
+    # 保存到CSV
     save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
     
     # 使用临时文件进行原子操作
@@ -749,24 +753,112 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
             df.to_csv(temp_file.name, index=False)
         shutil.move(temp_file.name, save_path)
         logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
-        
-        # 【关键修复】立即将文件添加到Git暂存区
-        commit_message = f"自动更新ETF {etf_code} 日线数据"
-        commit_result = commit_files_in_batches(save_path, commit_message)
-        if commit_result:
-            logger.info(f"✅ ETF {etf_code} 数据已添加到Git暂存区")
-        else:
-            logger.warning(f"⚠️ ETF {etf_code} 数据添加到Git暂存区失败")
+        return True
         
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
         # 删除临时文件
         if temp_file and os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
+        return False
+
+def batch_commit_etf_files(etf_codes: list, batch_number: int) -> bool:
+    """
+    【关键修复】批量提交ETF文件
+    Args:
+        etf_codes: 要提交的ETF代码列表
+        batch_number: 批次号
+    Returns:
+        bool: 是否提交成功
+    """
+    try:
+        if not etf_codes:
+            logger.warning("没有ETF文件需要提交")
+            return True
+        
+        # 构建文件路径列表
+        file_paths = []
+        for etf_code in etf_codes:
+            file_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
+            if os.path.exists(file_path):
+                file_paths.append(file_path)
+            else:
+                logger.warning(f"ETF {etf_code} 文件不存在: {file_path}")
+        
+        if not file_paths:
+            logger.warning("没有找到有效的ETF文件")
+            return True
+        
+        # 提交消息
+        commit_message = f"自动更新ETF日线数据 批次{batch_number} [skip ci]"
+        
+        # 使用批量提交
+        logger.info(f"【批量提交】开始提交批次 {batch_number}，包含 {len(file_paths)} 个文件")
+        commit_result = commit_files_in_batches(file_paths, commit_message)
+        
+        if commit_result:
+            logger.info(f"✅ 批量提交成功！批次 {batch_number} 已提交 {len(file_paths)} 个ETF文件")
+            
+            # 验证文件是否真正存在于远程
+            logger.info("正在验证远程仓库文件状态...")
+            success_count = 0
+            for etf_code in etf_codes:
+                file_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
+                if os.path.exists(file_path):
+                    if _verify_git_file_content(file_path):
+                        logger.info(f"✅ 验证通过: ETF {etf_code} 文件已存在于远程仓库")
+                        success_count += 1
+                    else:
+                        logger.error(f"❌ 验证失败: ETF {etf_code} 文件未正确保存到远程仓库")
+            
+            logger.info(f"验证结果: {success_count}/{len(etf_codes)} 个文件成功提交")
+            return success_count == len(etf_codes)
+        else:
+            logger.error(f"❌ 批量提交失败！批次 {batch_number}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"批量提交ETF文件失败: {str(e)}", exc_info=True)
+        return False
+
+def get_all_etf_codes() -> list:
+    """
+    获取所有ETF代码
+    """
+    try:
+        # 确保ETF列表文件存在
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.info("ETF列表文件不存在，正在创建...")
+            from data_crawler.all_etfs import update_all_etf_list
+            update_all_etf_list()
+        
+        # 读取时指定ETF代码列为字符串类型
+        basic_info_df = pd.read_csv(
+            BASIC_INFO_FILE,
+            dtype={"ETF代码": str}
+        )
+        
+        if basic_info_df.empty:
+            logger.error("ETF列表文件为空")
+            return []
+        
+        # 确保"ETF代码"列存在
+        if "ETF代码" not in basic_info_df.columns:
+            logger.error("ETF列表文件缺少'ETF代码'列")
+            return []
+        
+        # 直接获取ETF代码（已确保是字符串）
+        etf_codes = basic_info_df["ETF代码"].tolist()
+        
+        logger.info(f"获取到 {len(etf_codes)} 只ETF代码")
+        return etf_codes
+    except Exception as e:
+        logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
+        return []
 
 def crawl_all_etfs_daily_data() -> None:
     """
-    爬取所有ETF日线数据
+    爬取所有ETF日线数据 - 【关键修复】确保每10个文件正确提交
     """
     try:
         logger.info("=== 开始执行ETF日线数据爬取 ===")
@@ -812,11 +904,15 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"当前批次第一只ETF: {first_stock} (索引 {first_stock_idx})")
         logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {last_stock_idx})")
         
-        # 【关键修复】初始化计数器在循环外部
+        # 【关键修复】重新设计批量提交逻辑
         processed_count = 0
         successful_count = 0
         skipped_count = 0
         failed_count = 0
+        
+        # 用于批量提交的ETF代码列表
+        batch_commit_list = []
+        batch_number = 1
         
         for i, etf_code in enumerate(batch_codes):
             # 添加随机延时，避免请求过于频繁
@@ -828,31 +924,10 @@ def crawl_all_etfs_daily_data() -> None:
             start_date, end_date = get_incremental_date_range(etf_code)
             if start_date is None or end_date is None:
                 logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
-                # 【关键修复】即使跳过也要计数
                 processed_count += 1
                 skipped_count += 1
                 current_index = (start_idx + i) % total_count
                 logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
-                
-                # 检查是否需要提交
-                if processed_count % COMMIT_BATCH_SIZE == 0:
-                    logger.info(f"【批量提交】已处理 {processed_count} 只ETF（成功 {successful_count}，跳过 {skipped_count}，失败 {failed_count}），提交批量文件到远程仓库...")
-                    commit_result = force_commit_remaining_files()
-                    if commit_result:
-                        logger.info(f"✅ 批量提交成功！已提交 {successful_count} 个ETF文件到远程仓库")
-                        # 验证文件是否真正存在于远程
-                        logger.info("正在验证远程仓库文件状态...")
-                        for j in range(i - COMMIT_BATCH_SIZE + 1, i + 1):
-                            if j < len(batch_codes):
-                                check_etf = batch_codes[j]
-                                check_path = os.path.join(DAILY_DIR, f"{check_etf}.csv")
-                                if os.path.exists(check_path):
-                                    if _verify_git_file_content(check_path):
-                                        logger.info(f"✅ 验证通过: ETF {check_etf} 文件已存在于远程仓库")
-                                    else:
-                                        logger.error(f"❌ 验证失败: ETF {check_etf} 文件未正确保存到远程仓库")
-                    else:
-                        logger.error("❌ 批量提交失败！")
                 continue
             
             # 爬取数据
@@ -861,25 +936,15 @@ def crawl_all_etfs_daily_data() -> None:
             
             # 检查是否成功获取数据
             if df.empty:
-                logger.warning(f"⚠️ 未获取到数据")
+                logger.warning(f"⚠️ ETF {etf_code} 未获取到数据")
                 # 记录失败日志
                 with open(os.path.join(DAILY_DIR, "failed_etfs.txt"), "a", encoding="utf-8") as f:
                     f.write(f"{etf_code},{etf_name},未获取到数据\n")
                 
-                # 【关键修复】即使失败也要计数
                 processed_count += 1
                 failed_count += 1
                 current_index = (start_idx + i) % total_count
                 logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
-                
-                # 检查是否需要提交
-                if processed_count % COMMIT_BATCH_SIZE == 0:
-                    logger.info(f"【批量提交】已处理 {processed_count} 只ETF（成功 {successful_count}，跳过 {skipped_count}，失败 {failed_count}），提交批量文件到远程仓库...")
-                    commit_result = force_commit_remaining_files()
-                    if commit_result:
-                        logger.info(f"✅ 批量提交成功！已提交 {successful_count} 个ETF文件到远程仓库")
-                    else:
-                        logger.error("❌ 批量提交失败！")
                 continue
             
             # 处理已有数据
@@ -905,49 +970,57 @@ def crawl_all_etfs_daily_data() -> None:
                         combined_df.to_csv(temp_file.name, index=False)
                     shutil.move(temp_file.name, save_path)
                     logger.info(f"✅ 数据已追加至: {save_path} (合并后共{len(combined_df)}条)")
-                    
-                    # 【关键修复】立即将文件添加到Git暂存区
-                    commit_message = f"自动更新ETF {etf_code} 日线数据"
-                    commit_result = commit_files_in_batches(save_path, commit_message)
-                    if commit_result:
-                        logger.info(f"✅ ETF {etf_code} 数据已添加到Git暂存区")
-                    else:
-                        logger.warning(f"⚠️ ETF {etf_code} 数据添加到Git暂存区失败")
                         
                 except Exception as e:
-                    logger.error(f"合并数据失败: {str(e)}")
+                    logger.error(f"合并ETF {etf_code} 数据失败: {str(e)}")
                     continue
                 finally:
                     if 'temp_file' in locals() and os.path.exists(temp_file.name):
                         os.unlink(temp_file.name)
             else:
-                save_etf_daily_data(etf_code, df)
+                # 直接保存新数据
+                save_success = save_etf_daily_data(etf_code, df)
+                if not save_success:
+                    logger.error(f"保存ETF {etf_code} 数据失败")
+                    processed_count += 1
+                    failed_count += 1
+                    current_index = (start_idx + i) % total_count
+                    logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
+                    continue
             
-            # 【关键修复】成功处理计数
+            # 【关键修复】添加到批量提交列表
+            batch_commit_list.append(etf_code)
+            
+            # 成功处理计数
             processed_count += 1
             successful_count += 1
             current_index = (start_idx + i) % total_count
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
             
-            # 【关键修复】每处理10只ETF就调用git_utils提交
-            if processed_count % COMMIT_BATCH_SIZE == 0:
-                logger.info(f"【批量提交】已处理 {processed_count} 只ETF（成功 {successful_count}，跳过 {skipped_count}，失败 {failed_count}），提交批量文件到远程仓库...")
-                commit_result = force_commit_remaining_files()
-                if commit_result:
-                    logger.info(f"✅ 批量提交成功！已提交 {successful_count} 个ETF文件到远程仓库")
-                    # 验证文件是否真正存在于远程
-                    logger.info("正在验证远程仓库文件状态...")
-                    for j in range(i - COMMIT_BATCH_SIZE + 1, i + 1):
-                        if j < len(batch_codes):
-                            check_etf = batch_codes[j]
-                            check_path = os.path.join(DAILY_DIR, f"{check_etf}.csv")
-                            if os.path.exists(check_path):
-                                if _verify_git_file_content(check_path):
-                                    logger.info(f"✅ 验证通过: ETF {check_etf} 文件已存在于远程仓库")
-                                else:
-                                    logger.error(f"❌ 验证失败: ETF {check_etf} 文件未正确保存到远程仓库")
+            # 【关键修复】每处理10个ETF就执行批量提交
+            if len(batch_commit_list) >= COMMIT_BATCH_SIZE:
+                logger.info(f"【批量提交】准备提交批次 {batch_number}，包含 {len(batch_commit_list)} 个ETF文件")
+                
+                # 执行批量提交
+                commit_success = batch_commit_etf_files(batch_commit_list, batch_number)
+                
+                if commit_success:
+                    logger.info(f"✅ 批次 {batch_number} 提交成功！")
                 else:
-                    logger.error("❌ 批量提交失败！")
+                    logger.error(f"❌ 批次 {batch_number} 提交失败！")
+                
+                # 清空列表并增加批次号
+                batch_commit_list = []
+                batch_number += 1
+        
+        # 【关键修复】处理剩余未提交的文件
+        if batch_commit_list:
+            logger.info(f"【最终批量提交】准备提交剩余 {len(batch_commit_list)} 个ETF文件")
+            commit_success = batch_commit_etf_files(batch_commit_list, batch_number)
+            if commit_success:
+                logger.info("✅ 剩余文件批量提交成功！")
+            else:
+                logger.error("❌ 剩余文件批量提交失败！")
         
         # 专业修复：整批处理完成后才更新进度
         new_index = actual_end_idx
@@ -961,14 +1034,6 @@ def crawl_all_etfs_daily_data() -> None:
         
         logger.info(f"本批次爬取完成，共处理 {processed_count} 只ETF（成功 {successful_count}，跳过 {skipped_count}，失败 {failed_count}），还有 {remaining_stocks} 只ETF待爬取")
         
-        # 关键修复：确保所有剩余文件都被提交
-        logger.info("【最终提交】处理完成后，确保提交所有剩余文件到远程仓库...")
-        final_commit_result = force_commit_remaining_files()
-        if final_commit_result:
-            logger.info("✅ 最终提交成功！所有文件已成功提交到远程仓库")
-        else:
-            logger.error("❌ 最终提交失败！可能有文件未提交到远程仓库")
-        
     except Exception as e:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
         # 尝试保存进度以恢复状态
@@ -976,50 +1041,9 @@ def crawl_all_etfs_daily_data() -> None:
             if 'next_index' in locals() and 'total_count' in locals():
                 logger.error("尝试保存进度以恢复状态...")
                 save_crawl_progress(next_index)
-                # 强制提交剩余文件
-                emergency_commit_result = force_commit_remaining_files()
-                if emergency_commit_result:
-                    logger.info("✅ 紧急提交成功！已保存当前进度")
-                else:
-                    logger.error("❌ 紧急提交失败！")
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
         raise
-
-def get_all_etf_codes() -> list:
-    """
-    获取所有ETF代码
-    """
-    try:
-        # 确保ETF列表文件存在
-        if not os.path.exists(BASIC_INFO_FILE):
-            logger.info("ETF列表文件不存在，正在创建...")
-            from data_crawler.all_etfs import update_all_etf_list
-            update_all_etf_list()
-        
-        # 读取时指定ETF代码列为字符串类型
-        basic_info_df = pd.read_csv(
-            BASIC_INFO_FILE,
-            dtype={"ETF代码": str}
-        )
-        
-        if basic_info_df.empty:
-            logger.error("ETF列表文件为空")
-            return []
-        
-        # 确保"ETF代码"列存在
-        if "ETF代码" not in basic_info_df.columns:
-            logger.error("ETF列表文件缺少'ETF代码'列")
-            return []
-        
-        # 直接获取ETF代码（已确保是字符串）
-        etf_codes = basic_info_df["ETF代码"].tolist()
-        
-        logger.info(f"获取到 {len(etf_codes)} 只ETF代码")
-        return etf_codes
-    except Exception as e:
-        logger.error(f"获取ETF代码列表失败: {str(e)}", exc_info=True)
-        return []
 
 if __name__ == "__main__":
     try:

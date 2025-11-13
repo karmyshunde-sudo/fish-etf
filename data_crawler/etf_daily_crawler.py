@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF日线数据爬取模块 - 严格计数器版本
-yFinance数据DS-etf_daily_crawler-6.py
-【严格按照成功计数器=10时提交，确保每10个成功文件提交一次】
+ETF日线数据爬取模块 - 严格计数器版本（修复Git提交）
+yFinance数据DS-etf_daily_crawler-7.py
+【严格按照成功计数器=10时提交，使用utils.git_utils确保正确提交】
 """
 
 import yfinance as yf
@@ -14,10 +14,10 @@ import time
 import random
 import tempfile
 import shutil
-import subprocess
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ class StrictCounterETFCrawler:
     def save_etf_data(self, etf_code, df):
         """保存ETF数据到本地"""
         if df is None or df.empty:
-            return False
+            return None
         
         try:
             save_path = os.path.join(DAILY_DIR, f"{etf_code}.csv")
@@ -183,70 +183,23 @@ class StrictCounterETFCrawler:
             logger.error(f"保存ETF {etf_code} 数据失败: {str(e)}")
             return None
 
-    def git_add_file(self, file_path):
-        """Git添加单个文件"""
-        try:
-            if not os.path.exists(file_path):
-                logger.warning(f"文件不存在，无法添加: {file_path}")
-                return False
-            
-            result = subprocess.run(
-                ['git', 'add', file_path],
-                capture_output=True, text=True, timeout=30
-            )
-            
-            if result.returncode == 0:
-                logger.info(f"✅ Git添加成功: {file_path}")
-                return True
-            else:
-                logger.error(f"❌ Git添加失败 {file_path}: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Git添加异常 {file_path}: {str(e)}")
-            return False
-
     def git_commit_batch(self, batch_files, batch_number):
-        """提交批次文件到Git"""
+        """【关键修复】使用utils.git_utils提交批次文件"""
         try:
             if not batch_files:
                 logger.warning("没有文件需要提交")
                 return True
             
-            # 检查是否有变更
-            status_result = subprocess.run(
-                ['git', 'status', '--porcelain'],
-                capture_output=True, text=True, timeout=30
-            )
-            
-            if not status_result.stdout.strip():
-                logger.info("没有文件变更，跳过提交")
-                return True
-            
-            # 执行提交
             commit_message = f"自动更新ETF日线数据 批次{batch_number} [skip ci]"
-            commit_result = subprocess.run(
-                ['git', 'commit', '-m', commit_message],
-                capture_output=True, text=True, timeout=30
-            )
             
-            if commit_result.returncode == 0:
-                logger.info(f"✅ Git提交成功: 批次{batch_number}")
-                
-                # 执行推送
-                push_result = subprocess.run(
-                    ['git', 'push'],
-                    capture_output=True, text=True, timeout=60
-                )
-                
-                if push_result.returncode == 0:
-                    logger.info(f"✅ Git推送成功: 批次{batch_number}")
-                    return True
-                else:
-                    logger.error(f"❌ Git推送失败: {push_result.stderr}")
-                    return False
+            # 使用现有的git_utils方法，确保Git配置正确
+            commit_result = commit_files_in_batches(batch_files, commit_message)
+            
+            if commit_result:
+                logger.info(f"✅ 批次{batch_number}提交成功!")
+                return True
             else:
-                logger.error(f"❌ Git提交失败: {commit_result.stderr}")
+                logger.error(f"❌ 批次{batch_number}提交失败!")
                 return False
                 
         except Exception as e:
@@ -256,20 +209,18 @@ class StrictCounterETFCrawler:
     def process_successful_etf(self, etf_code, file_path):
         """
         【核心逻辑】处理成功的ETF
-        - 添加到暂存区
         - 成功计数器+1
         - 检查是否需要提交
         """
-        # 1. Git添加文件到暂存区
-        if self.git_add_file(file_path):
-            # 2. 添加到暂存区列表
+        try:
+            # 1. 添加到暂存区列表
             self.staged_files.append(file_path)
             
-            # 3. 成功计数器+1
+            # 2. 成功计数器+1
             self.success_count += 1
             logger.info(f"🎯 成功计数器: {self.success_count}/{COMMIT_BATCH_SIZE}")
             
-            # 4. 检查是否达到提交条件
+            # 3. 检查是否达到提交条件
             if self.success_count >= COMMIT_BATCH_SIZE:
                 logger.info(f"🚀 达到提交条件! 成功计数器={self.success_count}，开始提交批次{self.batch_commit_number}")
                 
@@ -277,7 +228,7 @@ class StrictCounterETFCrawler:
                 if self.git_commit_batch(self.staged_files, self.batch_commit_number):
                     logger.info(f"✅ 批次{self.batch_commit_number}提交成功!")
                     
-                    # 5. 重置计数器和暂存区
+                    # 4. 重置计数器和暂存区
                     self.success_count = 0
                     self.staged_files = []
                     self.batch_commit_number += 1
@@ -287,8 +238,9 @@ class StrictCounterETFCrawler:
                     logger.error(f"❌ 批次{self.batch_commit_number}提交失败!")
                     return False
             return True
-        else:
-            logger.error(f"❌ ETF {etf_code} Git添加失败")
+            
+        except Exception as e:
+            logger.error(f"处理成功ETF时出错: {str(e)}")
             return False
 
     def get_incremental_date_range(self, etf_code):

@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
-DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")
+# DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")
+DAILY_DIR = os.path.join(DATA_DIR, "etf_daily")  # ✅ 改回旧的路径
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 

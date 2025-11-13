@@ -612,7 +612,7 @@ def crawl_all_etfs_daily_data() -> None:
                     logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个ETF数据文件")
                     
                     # ✅ 重新添加：确保数据文件被添加到Git暂存区
-                    # os.system("git add data/etf_daily/*.csv")
+                    os.system("git add data/etf_daily/*.csv")
                     
                     # 构建要提交的文件列表
                     file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]

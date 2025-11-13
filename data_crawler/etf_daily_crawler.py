@@ -552,7 +552,7 @@ def crawl_all_etfs_daily_data() -> None:
             df = crawl_etf_daily_data(etf_code, start_date, end_date)
             
             if df.empty:
-                logger.warning(f⚠️ 未获取到数据")
+                logger.warning(f"⚠️ 未获取到数据")
                 failed_etfs.append(f"{etf_code},{etf_name},未获取到数据")
                 processed_count += 1
                 continue

@@ -449,7 +449,7 @@ def save_etf_data_batch(etf_data_dict: dict) -> int:
     if not etf_data_dict:
         return 0
 
-    os.makedirs(_DIR, exist_ok=True)
+    os.makedirs(DAILY_DIR, exist_ok=True)
     saved_count = 0
 
     for etf_code, df in etf_data_dict.items():
@@ -496,7 +496,7 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
         os.makedirs(DATA_DIR, exist_ok=True)
-        os.makedirs(_DIR, exist_ok=True)
+        os.makedirs(DAILY_DIR, exist_ok=True)
         logger.info(f"✅ 确保目录存在: {DATA_DIR}")
         
         etf_codes = get_all_etf_codes()

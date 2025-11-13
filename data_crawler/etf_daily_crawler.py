@@ -2,15 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块
-使用指定接口爬取ETF日线数据
-【生产级实现】
-- 严格遵循"各司其职"原则
-- 与股票爬取系统完全一致的进度管理逻辑
-- 专业金融系统可靠性保障
-- 100%可直接复制使用
+使用yfinance爬取ETF日线数据
+【关键修复】
+- 修复yfinance数据结构不一致问题
+- 严格处理列名
+- 确保数据完整性
 """
 
-import yfinance as yf  # 修改1：将akshare改为yfinance
+import yfinance as yf
 import pandas as pd
 import logging
 import os
@@ -25,15 +24,10 @@ from utils.git_utils import commit_files_in_batches, force_commit_remaining_file
 
 # 初始化日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
 
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
-DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")  # 修改2：将目录从"etf_daily"改为"etf/daily"
+DAILY_DIR = os.path.join(DATA_DIR, "etf", "daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_etfs.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 
@@ -367,10 +361,35 @@ def crawl_etf_daily_data(etf_code: str, start_date: datetime, end_date: datetime
             logger.warning(f"ETF {etf_code} 基础数据为空")
             return pd.DataFrame()
         
-        # 重命名列名以匹配标准
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # 【关键修复】解决yfinance数据结构不一致问题
+        # 1. 重置索引
         df = df.reset_index()
-        df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
         
+        # 2. 检查列数并处理
+        if "Date" not in df.columns and "date" in df.columns:
+            df = df.rename(columns={"date": "Date"})
+        
+        # 3. 确保列名一致
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+        if "Date" in df.columns:
+            expected_columns = ['Date'] + required_columns
+        else:
+            expected_columns = required_columns
+        
+        # 4. 仅保留必要列
+        df = df[[col for col in df.columns if col in expected_columns]]
+        
+        # 5. 修复列名
+        if len(df.columns) == 6:  # 没有Date列
+            df.columns = required_columns
+        elif len(df.columns) == 7:  # 有Date列
+            df.columns = expected_columns
+        else:
+            logger.error(f"ETF {etf_code} 数据列数异常: {len(df.columns)}列")
+            return pd.DataFrame()
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
         # 处理数据
         df['Date'] = pd.to_datetime(df['Date'])
         df['IOPV'] = 0.0  # IOPV无法从yfinance获取，保留为0

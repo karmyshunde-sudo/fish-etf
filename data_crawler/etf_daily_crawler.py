@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ETF日线数据爬取模块 - 严格匹配股票爬取机制
-【关键修复】
-- 实现真正的10文件批量提交
-- 解决Git计数器问题
+【核心特性】
+- 100%匹配股票爬取代码的提交机制
+- 每处理10个ETF才触发一次真正提交
+- 本地计数器跟踪，不依赖全局变量
 - 严格数据精度控制
 - 100%可直接复制使用
 """
@@ -17,8 +18,6 @@ import time
 import random
 import tempfile
 import shutil
-import sys
-import atexit
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time, get_last_trading_day, is_trading_day
@@ -38,7 +37,7 @@ os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键参数】
+# 【关键参数】与股票爬取代码完全一致
 BATCH_SIZE = 80  # 一个批次处理的ETF数量
 COMMIT_BATCH_SIZE = 10  # 每COMMIT_BATCH_SIZE个文件提交一次
 BASE_DELAY = 0.8
@@ -216,9 +215,10 @@ def load_etf_daily_data(etf_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键修复】真正匹配股票爬取代码的提交机制
-# 1. 本地计数器跟踪，避免全局变量问题
-# 2. 每10个文件提交一次
+# 【关键修复】严格匹配股票爬取代码的提交机制
+# 1. 不再对每个ETF单独调用提交函数
+# 2. 使用本地计数器跟踪
+# 3. 每10个ETF手动触发提交
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 class RequestThrottler:
     """请求限流器 - 动态调整请求间隔"""
@@ -502,13 +502,8 @@ def get_incremental_date_range(etf_code: str) -> (datetime, datetime):
         last_trading_day = get_last_trading_day()
         return last_trading_day - timedelta(days=365), last_trading_day
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键修复】实现真正的10文件批量提交
-# 1. 本地计数器跟踪
-# 2. 每10个文件提交一次
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
-    """保存数据（关键修复：与股票爬取代码相同）"""
+    """保存数据（关键修复：不再触发提交）"""
     if df.empty: 
         logger.error(f"ETF {etf_code} 数据为空，无法保存")
         return
@@ -525,9 +520,8 @@ def save_etf_daily_data(etf_code: str, df: pd.DataFrame) -> None:
         shutil.move(temp_file.name, save_path)
         logger.info(f"ETF {etf_code} 日线数据已保存至 {save_path}，共{len(df)}条数据")
         
-        # 关键修复：直接提交，不依赖计数器
-        commit_message = f"feat: 更新ETF日线数据 [{etf_code}] [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(save_path, commit_message)
+        # 关键修复：不再调用 commit_files_in_batches
+        # 提交将在每10个ETF后由主流程统一处理
         
     except Exception as e:
         logger.error(f"保存ETF {etf_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -574,7 +568,7 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"当前批次第一只ETF: {first_stock} (索引 {first_stock_idx})")
         logger.info(f"当前批次最后一只ETF: {last_stock} (索引 {last_stock_idx})")
         
-        # 关键修复：本地计数器跟踪
+        # 关键修复：使用本地计数器，不再依赖全局变量
         processed_count = 0
         for i, etf_code in enumerate(batch_codes):
             etf_name = get_etf_name(etf_code)
@@ -594,16 +588,16 @@ def crawl_all_etfs_daily_data() -> None:
                     f.write(f"{etf_code},{etf_name},数据验证失败\n")
                 continue
             
-            # 保存数据
+            # 保存数据（但不提交）
             save_etf_daily_data(etf_code, df)
             
             processed_count += 1
             current_index = (start_idx + i) % total_count
             logger.info(f"进度: {current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)")
             
-            # 关键修复：每10个ETF检查一次提交状态
-            if processed_count % 10 == 0:
-                logger.info(f"已处理 {processed_count} 只ETF，检查提交状态...")
+            # 关键修复：每处理10个ETF，手动触发提交
+            if processed_count % COMMIT_BATCH_SIZE == 0:
+                logger.info(f"已处理 {processed_count} 只ETF，执行批量提交...")
                 if not force_commit_remaining_files():
                     logger.error("提交批量文件失败")
         

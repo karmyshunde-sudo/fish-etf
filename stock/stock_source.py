@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import akshare as ak
 import yfinance as yf
+import requests
+import json
 import logging
 from datetime import datetime
 
@@ -12,15 +14,15 @@ from datetime import datetime
 # 格式: (数据源索引, 接口索引, 优先级分数)
 # 分数越低越优先（1=最稳定，5=最不稳定）
 SOURCE_PRIORITY = [
-    (0, 0, 1),  # AKShare - 东方财富日线（最稳定）
-    (0, 2, 2),  # AKShare - 新浪财经日线
-    (2, 0, 3),  # Tencent Finance - A股日线
-    (0, 1, 4),  # AKShare - 同花顺日线（可能存在兼容性问题）
-    (1, 0, 5),  # Yahoo Finance（最不稳定）
+    (0, 0, 1),  # Baostock - A股日线数据（最稳定）
+    (1, 0, 2),  # Tencent Finance - A股日线数据
+    (2, 0, 3),  # Sina Finance - A股日线数据
+    (3, 0, 4),  # AKShare - 东方财富日线
+    (4, 0, 5),  # Yahoo Finance（最不稳定）
 ]
 
 # ===== 模块级全局状态 =====
-_current_priority_index = 0  # 记录当前优先级位置（同时用于数据源定位）
+_current_priority_index = 0  # 记录当前优先级位置
 
 def get_stock_daily_data_from_sources(stock_code: str, 
                                     start_date: datetime, 
@@ -53,7 +55,53 @@ def get_stock_daily_data_from_sources(stock_code: str,
         
         # ===== 2. 定义真正的多数据源配置 =====
         DATA_SOURCES = [
-            # 数据源1：AKShare（多个接口）
+            # 数据源0：Baostock（最高优先级）
+            {
+                "name": "Baostock",
+                "interfaces": [
+                    {
+                        "name": "A股日线数据",
+                        "func": _fetch_baostock_data,
+                        "params": {
+                            "period": "d",
+                            "adjust": "3"  # 不复权
+                        },
+                        "delay_range": (1.5, 2.5),
+                        "source_type": "baostock"
+                    }
+                ]
+            },
+            # 数据源1：Tencent Finance
+            {
+                "name": "Tencent Finance",
+                "interfaces": [
+                    {
+                        "name": "A股日线数据",
+                        "func": _fetch_tencent_data,
+                        "params": {
+                            "period": "d"
+                        },
+                        "delay_range": (1.0, 1.5),
+                        "source_type": "tencent"
+                    }
+                ]
+            },
+            # 数据源2：Sina Finance
+            {
+                "name": "Sina Finance",
+                "interfaces": [
+                    {
+                        "name": "A股日线数据",
+                        "func": _fetch_sina_data,
+                        "params": {
+                            "period": "d"
+                        },
+                        "delay_range": (1.0, 1.5),
+                        "source_type": "sina"
+                    }
+                ]
+            },
+            # 数据源3：AKShare
             {
                 "name": "AKShare",
                 "interfaces": [
@@ -66,30 +114,10 @@ def get_stock_daily_data_from_sources(stock_code: str,
                         },
                         "delay_range": (3.0, 4.0),
                         "source_type": "akshare"
-                    },
-                    {
-                        "name": "同花顺日线",
-                        "func_name": "stock_zh_a_hist_ths",
-                        "params": {
-                            "period": "daily",
-                            "adjust": "qfq"
-                        },
-                        "delay_range": (4.0, 5.0),
-                        "source_type": "akshare"
-                    },
-                    {
-                        "name": "新浪财经日线",
-                        "func_name": "stock_zh_a_hist_sina",
-                        "params": {
-                            "period": "daily",
-                            "adjust": ""
-                        },
-                        "delay_range": (2.5, 3.5),
-                        "source_type": "akshare"
                     }
                 ]
             },
-            # 数据源2：Yahoo Finance（真正独立数据源）
+            # 数据源4：Yahoo Finance
             {
                 "name": "Yahoo Finance",
                 "interfaces": [
@@ -102,22 +130,6 @@ def get_stock_daily_data_from_sources(stock_code: str,
                         },
                         "delay_range": (2.0, 2.5),
                         "source_type": "yfinance"
-                    }
-                ]
-            },
-            # 数据源3：腾讯财经（真正独立数据源）
-            {
-                "name": "Tencent Finance",
-                "interfaces": [
-                    {
-                        "name": "A股日线数据",
-                        "func_name": "stock_zh_a_hist_qq",
-                        "params": {
-                            "period": "daily",
-                            "adjust": "qfq"
-                        },
-                        "delay_range": (2.0, 2.5),
-                        "source_type": "akshare"
                     }
                 ]
             }
@@ -143,7 +155,8 @@ def get_stock_daily_data_from_sources(stock_code: str,
             interface = source["interfaces"][if_idx]
             
             try:
-                # 检查AKShare接口是否存在
+                # 检查接口是否存在
+                func = None
                 if interface["source_type"] == "akshare" and "func_name" in interface:
                     func_name = interface["func_name"]
                     if hasattr(ak, func_name):
@@ -152,11 +165,8 @@ def get_stock_daily_data_from_sources(stock_code: str,
                         logger.warning(f"跳过不存在的接口: {source['name']}->{interface['name']} "
                                       f"(akshare中无{func_name}函数)")
                         continue
-                elif interface["source_type"] == "yfinance":
-                    func = interface["func"]
                 else:
-                    logger.error(f"未知数据源类型: {interface['source_type']}")
-                    continue
+                    func = interface["func"]
                 
                 # 动态延时（基于优先级优化）
                 delay_min, delay_max = interface["delay_range"]
@@ -174,8 +184,8 @@ def get_stock_daily_data_from_sources(stock_code: str,
                             f"(优先级: {priority_idx+1}/{total_priority})")
                 
                 # 调用接口
-                if interface["source_type"] == "yfinance":
-                    # Yahoo Finance特殊处理
+                if interface["source_type"] in ["yfinance", "baostock", "tencent", "sina"]:
+                    # Baostock、Tencent、Sina、Yahoo Finance特殊处理
                     df = func(
                         symbol=stock_code,
                         start_date=start_date_str,
@@ -268,6 +278,131 @@ def get_stock_daily_data_from_sources(stock_code: str,
         logger.error(f"获取股票 {stock_code} 日线数据时发生异常: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
+def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+    """封装Baostock的API调用"""
+    try:
+        import baostock as bs
+        
+        # 登录Baostock
+        login_result = bs.login()
+        if login_result.error_code != '0':
+            raise ValueError(f"Baostock登录失败: {login_result.error_msg}")
+        
+        # 获取A股代码格式
+        bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
+        
+        # 查询历史K线数据
+        rs = bs.query_history_k_data(
+            code=bs_code,
+            start_date=start_date,
+            end_date=end_date,
+            **kwargs
+        )
+        
+        # 检查是否有数据
+        if rs.error_code != '0':
+            raise ValueError(f"Baostock查询失败: {rs.error_msg}")
+        
+        # 转换为DataFrame
+        data_list = []
+        while rs.next():
+            data_list.append(rs.get_row_data())
+        
+        if not data_list:
+            raise ValueError("Baostock返回空数据")
+        
+        # 创建DataFrame
+        df = pd.DataFrame(data_list, columns=rs.fields)
+        
+        # 登出Baostock
+        bs.logout()
+        
+        return df
+    
+    except Exception as e:
+        # 确保登出
+        try:
+            import baostock as bs
+            bs.logout()
+        except:
+            pass
+        raise ValueError(f"Baostock获取失败: {str(e)}")
+
+def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+    """封装腾讯财经的API调用（直接URL）"""
+    try:
+        # 转换A股代码格式
+        tencent_code = symbol
+        if symbol.startswith('6'):
+            tencent_code = f"sh{symbol}"
+        elif symbol.startswith(('00', '30')):
+            tencent_code = f"sz{symbol}"
+        elif symbol.startswith('8'):
+            tencent_code = f"bj{symbol}"
+        
+        # 构建URL
+        URL = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{end_date},500,qfq"
+        
+        # 发送请求
+        response = requests.get(URL)
+        if response.status_code != 200:
+            raise ValueError(f"腾讯财经API请求失败: 状态码 {response.status_code}")
+        
+        # 解析JSON
+        data = json.loads(response.text)
+        
+        # 检查数据有效性
+        if "data" not in data or tencent_code not in data["data"]:
+            raise ValueError("腾讯财经返回数据格式错误")
+        
+        # 提取K线数据
+        kline_data = data["data"][tencent_code]["qfqday"]
+        
+        # 转换为DataFrame
+        columns = ["date", "open", "close", "high", "low", "volume"]
+        df = pd.DataFrame(kline_data, columns=columns)
+        
+        return df
+    
+    except Exception as e:
+        raise ValueError(f"腾讯财经数据获取失败: {str(e)}")
+
+def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+    """封装新浪财经的API调用（直接URL）"""
+    try:
+        # 转换A股代码格式
+        sina_code = symbol
+        if symbol.startswith('6'):
+            sina_code = f"sh{symbol}"
+        elif symbol.startswith(('00', '30')):
+            sina_code = f"sz{symbol}"
+        elif symbol.startswith('8'):
+            sina_code = f"bj{symbol}"
+        
+        # 构建URL
+        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen=500"
+        
+        # 发送请求
+        response = requests.get(URL)
+        if response.status_code != 200:
+            raise ValueError(f"新浪财经API请求失败: 状态码 {response.status_code}")
+        
+        # 解析JSON
+        data = json.loads(response.text)
+        
+        # 检查数据有效性
+        if not data:
+            raise ValueError("新浪财经返回空数据")
+        
+        # 转换为DataFrame
+        columns = ["day", "open", "high", "low", "close", "volume"]
+        df = pd.DataFrame(data, columns=columns)
+        
+        return df
+    
+    except Exception as e:
+        raise ValueError(f"新浪财经数据获取失败: {str(e)}")
+
 def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装Yahoo Finance的API调用"""
     # 转换A股代码格式
@@ -296,7 +431,43 @@ def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) 
 def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
     """标准化为统一数据格式"""
     # 根据数据源类型处理
-    if source_type == "akshare":
+    if source_type == "baostock":
+        # Baostock处理
+        df = df.rename(columns={
+            "date": "日期",
+            "open": "开盘",
+            "high": "最高",
+            "low": "最低",
+            "close": "收盘",
+            "volume": "成交量",
+            "amount": "成交额"
+        })
+        
+    elif source_type == "tencent":
+        # 腾讯财经处理
+        df = df.rename(columns={
+            "date": "日期",
+            "open": "开盘",
+            "close": "收盘",
+            "high": "最高",
+            "low": "最低",
+            "volume": "成交量"
+        })
+        df["成交额"] = np.nan  # 腾讯财经不提供成交额
+        
+    elif source_type == "sina":
+        # 新浪财经处理
+        df = df.rename(columns={
+            "day": "日期",
+            "open": "开盘",
+            "high": "最高",
+            "low": "最低",
+            "close": "收盘",
+            "volume": "成交量"
+        })
+        df["成交额"] = np.nan  # 新浪财经不提供成交额
+        
+    elif source_type == "akshare":
         # AKShare标准处理逻辑
         if "日期" in df.columns:
             df = df.rename(columns={

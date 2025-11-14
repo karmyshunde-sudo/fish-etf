@@ -467,10 +467,34 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【关键修复】传递提交消息，确保commit_files_in_batches能正确工作
+        # 【新增】立即执行 git add，将文件加入暂存区
+        # 这确保了即使 commit_files_in_batches 没有立即提交，文件也已在暂存区
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        relative_file_path = os.path.relpath(file_path, repo_root)
+        try:
+            import subprocess
+            add_result = subprocess.run(
+                ['git', 'add', relative_file_path],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            logger.debug(f"Git Add 成功: {relative_file_path}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Git Add 失败: {relative_file_path}, 错误: {e.stderr}")
+            # Add 失败不应该阻止后续的 commit_files_in_batches 调用
+            # 可能是文件权限或路径问题
+        except FileNotFoundError:
+            logger.error(f"Git Add 失败: 找不到git命令。文件已保存但未添加到暂存区: {relative_file_path}")
+            # Git 未安装或不在 PATH 中，记录错误但不中断
+
+        # 【保留原有逻辑】传递提交消息，确保commit_files_in_batches能正确工作
+        # 这样，原有的累积到10个文件再提交的机制仍然有效
         commit_message = f"自动更新股票 {stock_code} 日线数据"
         commit_files_in_batches(file_path, commit_message)
         logger.debug(f"已提交股票 {stock_code} 的日线数据到仓库")
+        
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
 

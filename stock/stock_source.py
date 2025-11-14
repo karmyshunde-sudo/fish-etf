@@ -56,14 +56,23 @@ def get_stock_daily_data_from_sources(stock_code: str,
             logger.error(f"股票代码 {stock_code} 格式无效")
             return pd.DataFrame()
         
-        # 日期格式化 - 使用官方示例的YYYY-MM-DD格式
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
+        # 修复时区问题：确保日期对象为naive datetime
+        # 确保日期对象为naive datetime
+        if start_date.tzinfo is not None:
+            start_date = start_date.replace(tzinfo=None)
+        if end_date.tzinfo is not None:
+            end_date = end_date.replace(tzinfo=None)
+
+        # 日期格式化
+        start_date_str = start_date.strftime("%Y%m%d")
+        end_date_str = end_date.strftime("%Y%m%d")
         
-        # 计算需要获取的数据天数
+        # 计算需要获取的数据天数 - 现在 start_date 和 end_date 都是 naive，可以安全相减
         days_diff = (end_date - start_date).days + 1
         data_days = max(MIN_DATA_DAYS, min(MAX_DATA_DAYS, days_diff))
         
+        # ... (其余代码保持不变) ...
+
         # ===== 2. 定义真正的多数据源配置 =====
         DATA_SOURCES = [
             # 数据源0：Baostock（最高优先级）

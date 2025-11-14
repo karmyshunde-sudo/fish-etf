@@ -24,7 +24,12 @@ from stock.all_stocks import update_stock_list
 logger = logging.getLogger("StockCrawler")  # 沿用你仓库的日志器名称
 
 # 从 Config 读取路径（100% 适配你仓库的配置）
-DAILY_DIR = Config.DAILY_DATA_DIR
+# 目录配置（与原有文件结构保持一致）
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DAILY_DIR = Config.STOCK_DAILY_DIR  # 引用config中正确的股票日线目录
+BASIC_INFO_FILE = os.path.join(BASE_DIR, "stock_basic_info.csv")
+
+# DAILY_DIR = Config.DAILY_DATA_DIR
 BASIC_INFO_FILE = Config.STOCK_BASIC_INFO_FILE
 STOCK_LIST_FILE = Config.STOCK_LIST_FILE  # 新增：从Config获取all_stocks.csv路径（假设你Config中已配置，对应all_stocks.csv）
 

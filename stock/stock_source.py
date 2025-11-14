@@ -5,11 +5,16 @@ import numpy as np
 import pandas as pd
 import akshare as ak
 import yfinance as yf
-import baostock as bs
 import requests
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# ===== 全局配置 =====
+# 最小数据量（至少获取7天数据）
+MIN_DATA_DAYS = 7
+# 最大数据量（一年约250-265个交易日）
+MAX_DATA_DAYS = 265
 
 # ===== 优先级配置（硬编码，按稳定性排序）=====
 # 格式: (数据源索引, 接口索引, 优先级分数)
@@ -24,6 +29,7 @@ SOURCE_PRIORITY = [
 
 # ===== 模块级全局状态 =====
 _current_priority_index = 0  # 记录当前优先级位置
+_baostock_logged_in = False  # Baostock登录状态
 
 def get_stock_daily_data_from_sources(stock_code: str, 
                                     start_date: datetime, 
@@ -41,7 +47,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
     Returns:
         pd.DataFrame: 标准化后的日线数据（包含所有必要列）
     """
-    global _current_priority_index
+    global _current_priority_index, _baostock_logged_in
     logger = logging.getLogger("StockCrawler")
     
     try:
@@ -50,9 +56,13 @@ def get_stock_daily_data_from_sources(stock_code: str,
             logger.error(f"股票代码 {stock_code} 格式无效")
             return pd.DataFrame()
         
-        # 日期格式化
-        start_date_str = start_date.strftime("%Y%m%d")
-        end_date_str = end_date.strftime("%Y%m%d")
+        # 日期格式化 - 使用官方示例的YYYY-MM-DD格式
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        
+        # 计算需要获取的数据天数
+        days_diff = (end_date - start_date).days + 1
+        data_days = max(MIN_DATA_DAYS, min(MAX_DATA_DAYS, days_diff))
         
         # ===== 2. 定义真正的多数据源配置 =====
         DATA_SOURCES = [
@@ -191,6 +201,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                         symbol=stock_code,
                         start_date=start_date_str,
                         end_date=end_date_str,
+                        data_days=data_days,
                         **interface["params"]
                     )
                 else:
@@ -224,7 +235,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                 
             except Exception as e:
                 last_error = e
-                logger.debug(f"❌ [{source['name']}->{interface['name']}] 失败: {str(e)}")
+                logger.error(f"❌ [{source['name']}->{interface['name']}] 失败: {str(e)}", exc_info=True)
                 continue
         
         # 所有数据源都失败
@@ -279,44 +290,68 @@ def get_stock_daily_data_from_sources(stock_code: str,
         logger.error(f"获取股票 {stock_code} 日线数据时发生异常: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
-    """封装Baostock的API调用"""
+def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
+    """封装Baostock的API调用 - 严格按照官方示例实现"""
+    global _baostock_logged_in
+    logger = logging.getLogger("StockCrawler")
+    
     try:
+        import baostock as bs
+        logger.info(f"尝试使用Baostock获取 {symbol} 数据（日期范围: {start_date} 到 {end_date}）")
         
+        # 检查登录状态
+        if not _baostock_logged_in:
+            logger.info("Baostock未登录，尝试登录...")
+            lg = bs.login()
+            if lg.error_code != '0':
+                logger.error(f"Baostock登录失败: {lg.error_msg}")
+                _baostock_logged_in = False
+                raise ValueError(f"Baostock登录失败: {lg.error_msg}")
+            _baostock_logged_in = True
+            logger.info("Baostock登录成功")
         
-        # 登录Baostock
-        login_result = bs.login()
-        if login_result.error_code != '0':
-            raise ValueError(f"Baostock登录失败: {login_result.error_msg}")
-        
-        # 获取A股代码格式
+        # 获取A股代码格式 - 使用官方示例格式
         bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
         
-        # 查询历史K线数据
-        rs = bs.query_history_k_data(
-            code=bs_code,
+        logger.debug(f"Baostock查询代码: {bs_code}, 日期范围: {start_date} 到 {end_date}")
+        
+        # 使用官方示例中的query_history_k_data_plus方法和完整指标参数
+        rs = bs.query_history_k_data_plus(
+            bs_code,
+            "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
             start_date=start_date,
             end_date=end_date,
-            **kwargs
+            frequency="d",  # 日线
+            adjustflag="3"  # 不复权
         )
         
-        # 检查是否有数据
+        # 检查查询结果
         if rs.error_code != '0':
+            logger.error(f"Baostock查询失败: {rs.error_msg}")
             raise ValueError(f"Baostock查询失败: {rs.error_msg}")
         
-        # 转换为DataFrame
+        # 转换为DataFrame - 使用官方示例的处理方式
         data_list = []
-        while rs.next():
+        while (rs.error_code == '0') & rs.next():
             data_list.append(rs.get_row_data())
         
         if not data_list:
+            logger.warning("Baostock返回空数据")
             raise ValueError("Baostock返回空数据")
         
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
         
-        # 登出Baostock
-        bs.logout()
+        # 记录获取到的数据量
+        logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
+        
+        # 如果需要限制数据量（根据data_days参数），对结果进行过滤
+        if not df.empty and start_date and end_date:
+            df['date'] = pd.to_datetime(df['date'])
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+            df['date'] = df['date'].dt.strftime('%Y-%m-%d')  # 恢复字符串格式
         
         return df
     
@@ -325,12 +360,17 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) 
         try:
             import baostock as bs
             bs.logout()
+            _baostock_logged_in = False
+            logger.info("Baostock已登出")
         except:
             pass
+        logger.error(f"Baostock获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"Baostock获取失败: {str(e)}")
 
-def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装腾讯财经的API调用（直接URL）"""
+    logger = logging.getLogger("StockCrawler")
+    
     try:
         # 转换A股代码格式
         tencent_code = symbol
@@ -341,12 +381,15 @@ def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -
         elif symbol.startswith('8'):
             tencent_code = f"bj{symbol}"
         
-        # 构建URL
+        # 构建URL - 使用实际的日期范围
         URL = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{end_date},500,qfq"
+        
+        logger.info(f"访问腾讯财经API: {URL}")
         
         # 发送请求
         response = requests.get(URL)
         if response.status_code != 200:
+            logger.error(f"腾讯财经API请求失败: 状态码 {response.status_code}")
             raise ValueError(f"腾讯财经API请求失败: 状态码 {response.status_code}")
         
         # 解析JSON
@@ -354,22 +397,45 @@ def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -
         
         # 检查数据有效性
         if "data" not in data or tencent_code not in data["data"]:
+            logger.error("腾讯财经返回数据格式错误")
             raise ValueError("腾讯财经返回数据格式错误")
         
         # 提取K线数据
         kline_data = data["data"][tencent_code]["qfqday"]
         
+        if not kline_data:
+            logger.warning("腾讯财经返回空数据")
+            raise ValueError("腾讯财经返回空数据")
+        
         # 转换为DataFrame
         columns = ["date", "open", "close", "high", "low", "volume"]
         df = pd.DataFrame(kline_data, columns=columns)
         
+        # 过滤日期范围
+        df['date'] = pd.to_datetime(df['date'])
+        start_date_obj = pd.to_datetime(start_date)
+        end_date_obj = pd.to_datetime(end_date)
+        mask = (df['date'] >= start_date_obj) & (df['date'] <= end_date_obj)
+        df = df[mask]
+        
+        # 恢复日期格式
+        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+        
+        if df.empty:
+            logger.warning("过滤后数据为空")
+            raise ValueError("过滤后数据为空")
+        
+        logger.info(f"腾讯财经获取成功: {len(kline_data)} 条数据")
         return df
     
     except Exception as e:
+        logger.error(f"腾讯财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"腾讯财经数据获取失败: {str(e)}")
 
-def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_sina_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装新浪财经的API调用（直接URL）"""
+    logger = logging.getLogger("StockCrawler")
+    
     try:
         # 转换A股代码格式
         sina_code = symbol
@@ -381,11 +447,14 @@ def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> p
             sina_code = f"bj{symbol}"
         
         # 构建URL
-        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen=500"
+        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen={data_days}"
+        
+        logger.info(f"访问新浪财经API: {URL}")
         
         # 发送请求
         response = requests.get(URL)
         if response.status_code != 200:
+            logger.error(f"新浪财经API请求失败: 状态码 {response.status_code}")
             raise ValueError(f"新浪财经API请求失败: 状态码 {response.status_code}")
         
         # 解析JSON
@@ -393,18 +462,35 @@ def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> p
         
         # 检查数据有效性
         if not data:
+            logger.error("新浪财经返回空数据")
             raise ValueError("新浪财经返回空数据")
         
         # 转换为DataFrame
         columns = ["day", "open", "high", "low", "close", "volume"]
         df = pd.DataFrame(data, columns=columns)
         
+        # 过滤日期范围
+        df['day'] = pd.to_datetime(df['day'])
+        start_date_obj = pd.to_datetime(start_date)
+        end_date_obj = pd.to_datetime(end_date)
+        mask = (df['day'] >= start_date_obj) & (df['day'] <= end_date_obj)
+        df = df[mask]
+        
+        # 恢复日期格式
+        df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+        
+        if df.empty:
+            logger.warning("过滤后数据为空")
+            raise ValueError("过滤后数据为空")
+        
+        logger.info(f"新浪财经获取成功: {len(data)} 条数据")
         return df
     
     except Exception as e:
+        logger.error(f"新浪财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"新浪财经数据获取失败: {str(e)}")
 
-def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装Yahoo Finance的API调用"""
     # 转换A股代码格式
     yf_symbol = symbol
@@ -433,7 +519,7 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     """标准化为统一数据格式"""
     # 根据数据源类型处理
     if source_type == "baostock":
-        # Baostock处理
+        # Baostock处理 - 使用官方示例返回的列名
         df = df.rename(columns={
             "date": "日期",
             "open": "开盘",
@@ -441,8 +527,17 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "low": "最低",
             "close": "收盘",
             "volume": "成交量",
-            "amount": "成交额"
+            "amount": "成交额",
+            "turn": "换手率",
+            "pctChg": "涨跌幅"
         })
+        # 计算缺失的列
+        if "振幅" not in df.columns:
+            if "最高" in df.columns and "最低" in df.columns and "开盘" in df.columns:
+                df["振幅"] = ((df["最高"] - df["最低"]) / df["开盘"] * 100).fillna(0)
+        if "涨跌额" not in df.columns:
+            if "收盘" in df.columns and "开盘" in df.columns:
+                df["涨跌额"] = df["收盘"] - df["开盘"]
         
     elif source_type == "tencent":
         # 腾讯财经处理
@@ -484,12 +579,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     elif source_type == "yfinance":
         # Yahoo Finance处理
         df = df.rename(columns={
-            "Open": "open", "Close": "close", "High": "high", 
-            "Low": "low", "Volume": "volume", "Adj Close": "amount"
+            "Open": "开盘", "Close": "收盘", "High": "最高", 
+            "Low": "最低", "Volume": "成交量", "Adj Close": "成交额"
         })
         # 添加缺失列
-        if "amount" not in df.columns:
-            df["amount"] = df["close"] * df["volume"]
+        if "成交额" not in df.columns:
+            df["成交额"] = df["收盘"] * df["成交量"]
     
     # 统一列名处理
     standard_cols = {

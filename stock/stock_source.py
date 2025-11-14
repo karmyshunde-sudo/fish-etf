@@ -8,10 +8,19 @@ import yfinance as yf
 import logging
 from datetime import datetime
 
-# 模块级全局状态（保证跨调用一致性）
-_current_data_source_index = 0
-_current_interface_index = 0
-_last_successful_source = None
+# ===== 优先级配置（硬编码，按稳定性排序）=====
+# 格式: (数据源索引, 接口索引, 优先级分数)
+# 分数越低越优先（1=最稳定，5=最不稳定）
+SOURCE_PRIORITY = [
+    (0, 1, 1),  # AKShare - 同花顺日线（最稳定）
+    (0, 0, 2),  # AKShare - 东方财富日线
+    (2, 0, 3),  # Tencent Finance - A股日线
+    (0, 2, 4),  # AKShare - 新浪财经日线
+    (1, 0, 5),  # Yahoo Finance（最不稳定）
+]
+
+# ===== 模块级全局状态 =====
+_current_priority_index = 0  # 记录当前优先级位置（同时用于数据源定位）
 
 def get_stock_daily_data_from_sources(stock_code: str, 
                                     start_date: datetime, 
@@ -29,7 +38,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
     Returns:
         pd.DataFrame: 标准化后的日线数据（包含所有必要列）
     """
-    global _current_data_source_index, _current_interface_index, _last_successful_source
+    global _current_priority_index
     logger = logging.getLogger("StockCrawler")
     
     try:
@@ -65,7 +74,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                             "period": "daily",
                             "adjust": "qfq"
                         },
-                        "delay_range": (4.0, 5.0),
+                        "delay_range": (2.5, 3.5),
                         "source_type": "akshare"
                     },
                     {
@@ -75,7 +84,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                             "period": "daily",
                             "adjust": ""
                         },
-                        "delay_range": (2.5, 3.5),
+                        "delay_range": (3.5, 4.5),
                         "source_type": "akshare"
                     }
                 ]
@@ -107,43 +116,47 @@ def get_stock_daily_data_from_sources(stock_code: str,
                             "period": "daily",
                             "adjust": "qfq"
                         },
-                        "delay_range": (1.5, 2.0),
+                        "delay_range": (2.0, 2.5),
                         "source_type": "akshare"
                     }
                 ]
             }
         ]
 
-        # ===== 3. 智能轮换逻辑 =====
-        total_sources = len(DATA_SOURCES)
-        total_interfaces = sum(len(src["interfaces"]) for src in DATA_SOURCES)
-        
-        # 计算从哪里开始尝试
-        start_idx = _current_data_source_index * 100 + _current_interface_index
+        # ===== 3. 智能轮换逻辑（基于优先级索引）=====
         success = False
         result_df = pd.DataFrame()
         last_error = None
+        total_priority = len(SOURCE_PRIORITY)
         
-        for offset in range(total_interfaces):
-            # 计算当前尝试的索引
-            current_idx = (start_idx + offset) % total_interfaces
-            ds_idx = current_idx // 100
-            if_idx = current_idx % 100
+        # 从当前优先级开始尝试
+        for offset in range(total_priority):
+            # 计算当前尝试的优先级索引
+            priority_idx = (_current_priority_index + offset) % total_priority
+            ds_idx, if_idx, _ = SOURCE_PRIORITY[priority_idx]
             
             # 确保接口索引有效
-            if ds_idx >= total_sources or if_idx >= len(DATA_SOURCES[ds_idx]["interfaces"]):
+            if ds_idx >= len(DATA_SOURCES) or if_idx >= len(DATA_SOURCES[ds_idx]["interfaces"]):
                 continue
                 
             source = DATA_SOURCES[ds_idx]
             interface = source["interfaces"][if_idx]
             
             try:
-                # 动态延时
+                # 动态延时（基于优先级优化）
                 delay_min, delay_max = interface["delay_range"]
-                time.sleep(random.uniform(delay_min, delay_max))
+                # 优先级高的接口延时更短（稳定性高）
+                if priority_idx < 2:  # 前两个优先级
+                    delay_factor = 0.8
+                elif priority_idx < 4:  # 中间两个优先级
+                    delay_factor = 1.0
+                else:  # 最后一个优先级
+                    delay_factor = 1.2
+                
+                time.sleep(random.uniform(delay_min * delay_factor, delay_max * delay_factor))
                 
                 logger.debug(f"尝试 [{source['name']}->{interface['name']}] 获取 {stock_code} 数据 "
-                            f"(轮次: {offset+1}/{total_interfaces})")
+                            f"(优先级: {priority_idx+1}/{total_priority})")
                 
                 # 调用接口
                 if interface["source_type"] == "yfinance":
@@ -179,10 +192,8 @@ def get_stock_daily_data_from_sources(stock_code: str,
                 # 保存成功状态
                 result_df = df
                 success = True
-                _current_data_source_index = ds_idx
-                _current_interface_index = if_idx
-                _last_successful_source = f"{source['name']}-{interface['name']}"
-                logger.info(f"✅ 【{source['name']}->{interface['name']}] 成功获取 {len(result_df)} 条数据")
+                _current_priority_index = priority_idx  # 锁定当前优先级
+                logger.info(f"✅ 【{source['name']}->{interface['name']}] 成功获取 {len(result_df)} 条数据 (锁定优先级: {priority_idx+1})")
                 break
                 
             except Exception as e:
@@ -193,6 +204,8 @@ def get_stock_daily_data_from_sources(stock_code: str,
         # 所有数据源都失败
         if not success:
             logger.error(f"所有数据源均无法获取 {stock_code} 数据: {str(last_error)}")
+            # 失败后递增优先级索引
+            _current_priority_index = (_current_priority_index + 1) % total_priority
             return pd.DataFrame()
         
         # ===== 4. 数据完整性保障 =====

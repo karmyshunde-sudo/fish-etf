@@ -27,7 +27,7 @@ logger = logging.getLogger("StockCrawler")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DAILY_DIR = os.path.join(BASE_DIR, "daily_data")
 BASIC_INFO_FILE = os.path.join(BASE_DIR, "stock_basic_info.csv")
-BATCH_SIZE = 50  # 每批次爬取股票数量
+BATCH_SIZE = 8  # 每批次爬取股票数量
 REQUEST_DELAY = (1.5, 2.5)  # 基础请求延时（避免限流，适配批量爬取）
 
 # 数据源配置（3个无调用次数限制，覆盖A股全场景）

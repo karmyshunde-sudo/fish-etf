@@ -12,10 +12,10 @@ from datetime import datetime
 # 格式: (数据源索引, 接口索引, 优先级分数)
 # 分数越低越优先（1=最稳定，5=最不稳定）
 SOURCE_PRIORITY = [
-    (0, 1, 1),  # AKShare - 同花顺日线（最稳定）
-    (0, 0, 2),  # AKShare - 东方财富日线
+    (0, 0, 1),  # AKShare - 东方财富日线（最稳定）
+    (0, 2, 2),  # AKShare - 新浪财经日线
     (2, 0, 3),  # Tencent Finance - A股日线
-    (0, 2, 4),  # AKShare - 新浪财经日线
+    (0, 1, 4),  # AKShare - 同花顺日线（可能存在兼容性问题）
     (1, 0, 5),  # Yahoo Finance（最不稳定）
 ]
 
@@ -59,7 +59,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                 "interfaces": [
                     {
                         "name": "东方财富日线",
-                        "func": ak.stock_zh_a_hist_min_em,
+                        "func_name": "stock_zh_a_hist_min_em",
                         "params": {
                             "period": "daily",
                             "adjust": ""
@@ -69,22 +69,22 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     },
                     {
                         "name": "同花顺日线",
-                        "func": ak.stock_zh_a_hist_ths,
+                        "func_name": "stock_zh_a_hist_ths",
                         "params": {
                             "period": "daily",
                             "adjust": "qfq"
                         },
-                        "delay_range": (2.5, 3.5),
+                        "delay_range": (4.0, 5.0),
                         "source_type": "akshare"
                     },
                     {
                         "name": "新浪财经日线",
-                        "func": ak.stock_zh_a_hist_sina,
+                        "func_name": "stock_zh_a_hist_sina",
                         "params": {
                             "period": "daily",
                             "adjust": ""
                         },
-                        "delay_range": (3.5, 4.5),
+                        "delay_range": (2.5, 3.5),
                         "source_type": "akshare"
                     }
                 ]
@@ -111,7 +111,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                 "interfaces": [
                     {
                         "name": "A股日线数据",
-                        "func": ak.stock_zh_a_hist_qq,
+                        "func_name": "stock_zh_a_hist_qq",
                         "params": {
                             "period": "daily",
                             "adjust": "qfq"
@@ -143,6 +143,21 @@ def get_stock_daily_data_from_sources(stock_code: str,
             interface = source["interfaces"][if_idx]
             
             try:
+                # 检查AKShare接口是否存在
+                if interface["source_type"] == "akshare" and "func_name" in interface:
+                    func_name = interface["func_name"]
+                    if hasattr(ak, func_name):
+                        func = getattr(ak, func_name)
+                    else:
+                        logger.warning(f"跳过不存在的接口: {source['name']}->{interface['name']} "
+                                      f"(akshare中无{func_name}函数)")
+                        continue
+                elif interface["source_type"] == "yfinance":
+                    func = interface["func"]
+                else:
+                    logger.error(f"未知数据源类型: {interface['source_type']}")
+                    continue
+                
                 # 动态延时（基于优先级优化）
                 delay_min, delay_max = interface["delay_range"]
                 # 优先级高的接口延时更短（稳定性高）
@@ -161,7 +176,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                 # 调用接口
                 if interface["source_type"] == "yfinance":
                     # Yahoo Finance特殊处理
-                    df = interface["func"](
+                    df = func(
                         symbol=stock_code,
                         start_date=start_date_str,
                         end_date=end_date_str,
@@ -169,7 +184,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     )
                 else:
                     # AKShare常规处理
-                    df = interface["func"](
+                    df = func(
                         symbol=stock_code,
                         start_date=start_date_str,
                         end_date=end_date_str,

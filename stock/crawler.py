@@ -9,8 +9,9 @@ import akshare as ak
 import yfinance as yf
 from typing import Optional, List, Dict
 
-# == 基础配置（用户可根据实际情况修改）==3数据源crawler-豆包1.py=
+# =======【3数据源crawler-豆包1.py】==============
 
+# ======= 基础配置（用户可根据实际情况修改）=================
 # 日志配置（严谨记录所有操作，便于溯源）
 logging.basicConfig(
     level=logging.INFO,

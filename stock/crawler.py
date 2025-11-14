@@ -23,7 +23,8 @@ DAILY_DIR = Config.STOCK_DAILY_DIR  # 修正：使用配置中的股票日线数
 BASIC_INFO_FILE = Config.ALL_STOCK_PATH  # 修正：使用配置中的全市场股票列表路径
 
 # 批量爬取参数（从配置获取，统一管理）
-BATCH_SIZE = Config.CRAWL_BATCH_SIZE  # 修正：使用全局批量爬取大小
+BATCH_SIZE = 8
+# BATCH_SIZE = Config.CRAWL_BATCH_SIZE  # 修正：使用全局批量爬取大小
 REQUEST_DELAY = (1.5, 2.5)  # 基础请求延时（避免限流，适配批量爬取）
 REQUEST_TIMEOUT = Config.REQUEST_TIMEOUT  # 修正：使用配置中的超时设置
 

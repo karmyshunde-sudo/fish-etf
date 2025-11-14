@@ -3,6 +3,7 @@
 """
 股票数据爬取模块 - 严格确保股票代码为6位格式，日期处理逻辑完善
 【2025-10-14-0836：循环索引，保证每次都是爬取150只股票】
+【2025-11-14：爬取数据源额外新编写代码】
 - 彻底解决Git提交问题
 - 循环批处理机制（可配置批次大小）
 - 专业金融系统可靠性保障
@@ -22,6 +23,8 @@ from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_t
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
 # 导入股票列表更新模块
 from stock.all_stocks import update_stock_list
+# 新增：导入数据源模块（放在文件顶部）
+from stock.stock_source import get_stock_daily_data_from_sources
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -236,13 +239,19 @@ def to_datetime(date_input):
 def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """获取单只股票的日线数据，使用中文列名"""
     try:
+        # ===== 1. 基础检查与日期范围 =====
+        stock_code = format_stock_code(stock_code)
+        if not stock_code:
+            logger.error(f"股票代码格式化失败: {stock_code}")
+            return pd.DataFrame()
+        
         # 【关键修复】确保股票代码是6位（前面补零）
         stock_code = format_stock_code(stock_code)
         if not stock_code:
             logger.error(f"股票代码格式化失败: {stock_code}")
             return pd.DataFrame()
         
-        # 【关键修复】检查本地是否已有该股票的日线数据文件
+        # ===== 2. 获取日期范围 =====
         local_file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         existing_data = None
         last_date = None
@@ -265,8 +274,7 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 existing_data = None
                 last_date = None
         
-        # ===== 关键修复：确保只处理历史交易日 =====
-        # 1. 确定爬取的日期范围
+        # ===== 3. 确定爬取的日期范围 =====
         if last_date is not None:
             # 查找下一个交易日作为起始点
             current_date = last_date + timedelta(days=1)
@@ -309,23 +317,17 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                 end_date = now
                 logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
             
-            # 关键修复：确保日期类型一致
-            if not isinstance(start_date, datetime):
-                start_date = to_datetime(start_date)
-            if not isinstance(end_date, datetime):
-                end_date = to_datetime(end_date)
-            
             # 【关键修复】确保比较前日期类型一致
             # 转换为naive datetime进行比较
             start_date_naive = to_naive_datetime(start_date)
             end_date_naive = to_naive_datetime(end_date)
             
-            # 严格检查日期 - 将 >= 条件拆分为 > 和 == 两种情况
+            # 严格检查日期
             if start_date_naive > end_date_naive:
                 logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} > 结束日期: {end_date.strftime('%Y%m%d')}）")
                 return pd.DataFrame()
             
-            # 处理开始日期等于结束日期的情况（即需要爬取当天数据）
+            # 处理开始日期等于结束日期的情况
             if start_date_naive == end_date_naive:
                 beijing_time = get_beijing_time()
                 # A股收市时间为15:00，为保险起见，15:30后认为当天数据已更新
@@ -339,7 +341,6 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
                     return pd.DataFrame()
                 else:
                     logger.info(f"股票 {stock_code} 当前时间({beijing_time_naive.strftime('%H:%M')})已过A股收市时间(15:30)，需要爬取当天({start_date_naive.strftime('%Y-%m-%d')})数据")
-                    # 继续执行爬取逻辑，不返回
             
             logger.info(f"股票 {stock_code} 增量爬取，从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
         else:
@@ -375,46 +376,16 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             
             logger.info(f"股票 {stock_code} 首次爬取，获取从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')} 的数据")
         
-        # 【关键修复】统一日期格式
-        start_date_str = start_date.strftime("%Y%m%d")
-        end_date_str = end_date.strftime("%Y%m%d")
+        # ===== 4. 使用新的数据源模块获取数据 =====
+        df = get_stock_daily_data_from_sources(
+            stock_code=stock_code,
+            start_date=start_date,
+            end_date=end_date,
+            existing_data=existing_data
+        )
         
-        # 【关键修复】使用测试成功的调用方式：不带市场前缀！
-        logger.debug(f"正在获取股票 {stock_code} 的日线数据 (代码: {stock_code}, 复权参数: qfq)")
-        
-        # 【关键修复】使用测试成功的参数进行增量爬取
-        try:
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,      # 不带市场前缀！
-                period="daily",
-                start_date=start_date_str,
-                end_date=end_date_str,
-                adjust="qfq"
-            )
-        except Exception as e:
-            logger.warning(f"获取股票 {stock_code} 的增量数据失败，尝试获取30天数据: {str(e)}")
-            try:
-                # 尝试获取30天数据（适用于新上市股票）
-                df = ak.stock_zh_a_hist(
-                    symbol=stock_code,      # 不带市场前缀！
-                    period="daily",
-                    start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
-                    end_date=datetime.now().strftime("%Y%m%d"),
-                    adjust="qfq"
-                )
-            except Exception as e:
-                logger.warning(f"获取股票 {stock_code} 的30天数据失败，尝试获取不复权数据: {str(e)}")
-                # 尝试不复权数据
-                df = ak.stock_zh_a_hist(
-                    symbol=stock_code,      # 不带市场前缀！
-                    period="daily",
-                    start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
-                    end_date=datetime.now().strftime("%Y%m%d"),
-                    adjust=""
-                )
-        
-        # 【关键修复】添加详细的API响应检查
-        if df is None or df.empty:
+        # ===== 5. 数据后处理 =====
+        if df.empty:
             logger.warning(f"股票 {stock_code} 的日线数据为空")
             return pd.DataFrame()
         
@@ -450,23 +421,6 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
             df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
             # 移除格式化失败的行
             df = df[df['股票代码'].notna()]
-        
-        # 【关键修复】合并新数据与已有数据
-        if existing_data is not None and not existing_data.empty:
-            # 合并数据并去重
-            combined_df = pd.concat([existing_data, df], ignore_index=True)
-            combined_df = combined_df.drop_duplicates(subset=['日期'], keep='last')
-            # 按日期排序
-            combined_df = combined_df.sort_values('日期').reset_index(drop=True)
-            
-            # 【关键修复】只保留最近一年的数据（约250个交易日）
-            if len(combined_df) > 250:
-                combined_df = combined_df.tail(250)
-            
-            df = combined_df
-            logger.info(f"股票 {stock_code} 合并后共有 {len(df)} 条记录（新增 {len(df) - len(existing_data)} 条）")
-        else:
-            logger.info(f"股票 {stock_code} 成功获取 {len(df)} 条日线数据")
         
         return df
     

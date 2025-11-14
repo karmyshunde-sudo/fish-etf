@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import akshare as ak
 import yfinance as yf
+import baostock as bs
 import requests
 import json
 import logging
@@ -281,7 +282,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
 def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装Baostock的API调用"""
     try:
-        import baostock as bs
+        
         
         # 登录Baostock
         login_result = bs.login()

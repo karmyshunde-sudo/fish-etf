@@ -300,7 +300,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
         return pd.DataFrame()
 
 def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
-    """封装Baostock的API调用 - 严格按照官方示例实现"""
+    """封装Baostock的API调用"""
     global _baostock_logged_in
     logger = logging.getLogger("StockCrawler")
     
@@ -311,35 +311,46 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
         # 检查登录状态
         if not _baostock_logged_in:
             logger.info("Baostock未登录，尝试登录...")
-            lg = bs.login()
-            if lg.error_code != '0':
-                logger.error(f"Baostock登录失败: {lg.error_msg}")
+            login_result = bs.login()
+            if login_result.error_code != '0':
+                logger.error(f"Baostock登录失败: {login_result.error_msg}")
                 _baostock_logged_in = False
-                raise ValueError(f"Baostock登录失败: {lg.error_msg}")
+                raise ValueError(f"Baostock登录失败: {login_result.error_msg}")
             _baostock_logged_in = True
             logger.info("Baostock登录成功")
         
-        # 获取A股代码格式 - 使用官方示例格式
+        # 获取A股代码格式 - 这里确保使用了正确的市场前缀
         bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
+        logger.debug(f"Baostock查询代码: {bs_code}") # 添加调试日志
         
-        logger.debug(f"Baostock查询代码: {bs_code}, 日期范围: {start_date} 到 {end_date}")
+        # 计算实际的开始日期
+        end_date_obj = datetime.strptime(end_date, "%Y%m%d")
+        start_date_obj = end_date_obj - timedelta(days=data_days-1)
+        actual_start_date = start_date_obj.strftime("%Y%m%d")
         
-        # 使用官方示例中的query_history_k_data_plus方法和完整指标参数
+        logger.debug(f"Baostock实际查询日期范围: {actual_start_date} 到 {end_date}")
+        
+        # 查询历史K线数据 - 确保使用了正确的参数和市场前缀
         rs = bs.query_history_k_data_plus(
-            bs_code,
-            "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
-            start_date=start_date,
+            code=bs_code,
+            fields="date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
+            start_date=actual_start_date,
             end_date=end_date,
             frequency="d",  # 日线
             adjustflag="3"  # 不复权
         )
         
-        # 检查查询结果
+        # 关键修复：检查rs是否为None
+        if rs is None:
+            logger.error("Baostock查询返回None，可能是网络问题或API限制")
+            raise ValueError("Baostock查询返回None")
+        
+        # 检查是否有数据
         if rs.error_code != '0':
             logger.error(f"Baostock查询失败: {rs.error_msg}")
             raise ValueError(f"Baostock查询失败: {rs.error_msg}")
         
-        # 转换为DataFrame - 使用官方示例的处理方式
+        # 转换为DataFrame
         data_list = []
         while (rs.error_code == '0') & rs.next():
             data_list.append(rs.get_row_data())
@@ -351,17 +362,7 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
         
-        # 记录获取到的数据量
         logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
-        
-        # 如果需要限制数据量（根据data_days参数），对结果进行过滤
-        if not df.empty and start_date and end_date:
-            df['date'] = pd.to_datetime(df['date'])
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
-            df['date'] = df['date'].dt.strftime('%Y-%m-%d')  # 恢复字符串格式
-        
         return df
     
     except Exception as e:

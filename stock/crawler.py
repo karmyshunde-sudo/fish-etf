@@ -1,3 +1,4 @@
+#=====5数据源crawler-QW8.py=====
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -442,7 +443,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         stock_code = format_stock_code(stock_code)
         if not stock_code:
             logger.error(f"无法保存：股票代码格式化失败")
-            return None
+            return
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         
@@ -468,7 +469,18 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        return file_path  # 返回文件路径，供批量提交使用
+        # 【新增】立即执行 git add，将文件加入暂存区
+        try:
+            # 确保父目录存在
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # 添加文件到暂存区
+            cmd = f"git add \"{file_path}\""
+            os.system(cmd)
+            logger.debug(f"✅ 文件已添加到Git暂存区: {file_path}")
+        except Exception as e:
+            logger.error(f"❌ 添加文件到Git暂存区失败: {str(e)}")
+        
+        return file_path
         
     except Exception as e:
         logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
@@ -535,18 +547,7 @@ def complete_missing_stock_data():
             df = fetch_stock_daily_data(stock_code)
             
             if not df.empty:
-                file_path = save_stock_daily_data(stock_code, df)
-                if file_path:
-                    # 为每只股票立即添加到暂存区
-                    try:
-                        import subprocess
-                        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-                        relative_path = os.path.relpath(file_path, repo_root)
-                        subprocess.run(['git', 'add', relative_path], 
-                                     check=True, cwd=repo_root)
-                        logger.debug(f"文件已添加到暂存区: {relative_path}")
-                    except Exception as e:
-                        logger.error(f"添加文件到暂存区失败: {str(e)}")
+                save_stock_daily_data(stock_code, df)
                 logger.info(f"成功补全股票 {stock_code} 的日线数据")
             else:
                 logger.warning(f"股票 {stock_code} 数据补全失败")
@@ -646,11 +647,11 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
-    # 文件路径缓存
-    file_paths = []
+    # 【关键修复】跟踪已处理股票数量，确保每10个提交一次
+    processed_count = 0
+    batch_file_paths = []  # 用于存储本批次文件路径
     
-    # 处理这批股票
-    for i, stock_code in enumerate(batch_codes):
+    for stock_code in batch_codes:
         # 【关键修复】确保股票代码是6位
         stock_code = format_stock_code(stock_code)
         if not stock_code:
@@ -662,49 +663,53 @@ def update_all_stocks_daily_data():
         if not df.empty:
             file_path = save_stock_daily_data(stock_code, df)
             if file_path:
-                file_paths.append(file_path)
-                # 【关键修复】立即添加到Git暂存区
-                try:
-                    import subprocess
-                    repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-                    relative_path = os.path.relpath(file_path, repo_root)
-                    subprocess.run(['git', 'add', relative_path], 
-                                 check=True, cwd=repo_root)
-                    logger.debug(f"文件已添加到暂存区: {relative_path}")
-                except Exception as e:
-                    logger.error(f"添加文件到暂存区失败: {str(e)}")
+                batch_file_paths.append(file_path)
+                processed_count += 1
         
-        # 【关键修复】每处理MINOR_BATCH_SIZE只股票就提交一次
-        if (i + 1) % MINOR_BATCH_SIZE == 0 and file_paths:
-            logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
-            # 逐个提交文件
-            for file_path in file_paths:
-                if os.path.exists(file_path):
-                    commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    # 使用"LAST_FILE"参数强制提交
-                    commit_files_in_batches(file_path, "LAST_FILE")
+        # 【关键修复】每处理10个股票就检查一次提交状态
+        if (processed_count % MINOR_BATCH_SIZE == 0) and batch_file_paths:
+            logger.info(f"批量提交 {len(batch_file_paths)} 只股票日线数据...")
             
-            logger.info(f"✅ 批量提交成功：{len(file_paths)}只股票")
-            # 清空文件路径列表
-            file_paths = []
+            # 确保所有文件都已添加到暂存区
+            os.system(f"git add \"{DAILY_DIR}/*.csv\"")
+            
+            # 构建要提交的文件列表
+            file_list = batch_file_paths
+            
+            # 提交数据文件
+            commit_msg = f"feat: 批量提交{len(batch_file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            logger.info(f"提交数据文件: {commit_msg}")
+            commit_success = commit_files_in_batches(file_list, commit_msg)
+            
+            if commit_success:
+                logger.info(f"✅ 小批次数据文件提交成功：{len(batch_file_paths)}只")
+            else:
+                logger.error("❌ 小批次数据文件提交失败")
+            
+            # 清空批次文件路径列表
+            batch_file_paths = []
+    
+    # 【关键修复】处理完本批次后，提交任何剩余文件
+    if batch_file_paths:
+        logger.info(f"批量提交剩余 {len(batch_file_paths)} 只股票日线数据...")
+        
+        # 确保所有文件都已添加到暂存区
+        os.system(f"git add \"{DAILY_DIR}/*.csv\"")
+        
+        # 构建要提交的文件列表
+        file_list = batch_file_paths
+        
+        # 提交数据文件
+        commit_msg = f"feat: 批量提交{len(batch_file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        logger.info(f"提交数据文件: {commit_msg}")
+        commit_files_in_batches(file_list, commit_msg)
     
     # 【关键修复】处理完本批次后，确保提交任何剩余文件
     logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
     
-    # 首先提交所有剩余的股票数据文件
-    if file_paths:
-        logger.info(f"提交剩余的 {len(file_paths)} 只股票日线数据...")
-        for file_path in file_paths:
-            if os.path.exists(file_path):
-                commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-                # 使用"LAST_FILE"参数强制提交
-                commit_files_in_batches(file_path, "LAST_FILE")
-    
-    # 然后强制提交剩余文件
+    # 强制提交所有剩余文件
     if not force_commit_remaining_files():
         logger.error("强制提交剩余文件失败，可能导致数据丢失")
-    else:
-        logger.info("✅ 强制提交剩余文件成功")
     
     # 【关键修复】更新 next_crawl_index
     new_index = actual_end_idx
@@ -741,24 +746,6 @@ def main():
         logger.info("已成功处理一批股票数据")
     else:
         logger.error("处理股票数据失败")
-    
-    # 3. 【关键修复】确保最后所有剩余文件都被提交
-    logger.info("执行最终兜底提交...")
-    # 确保所有文件都在暂存区
-    try:
-        import subprocess
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        subprocess.run(['git', 'add', DAILY_DIR], 
-                     check=True, cwd=repo_root)
-        logger.debug(f"已添加所有股票数据文件到暂存区: {DAILY_DIR}")
-    except Exception as e:
-        logger.error(f"添加所有股票数据文件到暂存区失败: {str(e)}")
-    
-    # 强制提交所有剩余文件
-    if force_commit_remaining_files():
-        logger.info("✅ 最终兜底提交成功")
-    else:
-        logger.error("❌ 最终兜底提交失败")
     
     logger.info("===== 股票数据更新完成 =====")
 

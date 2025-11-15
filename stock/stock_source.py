@@ -587,6 +587,21 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "name": "股票名称"
         })
         
+        # ====== 关键修复：在计算前转换为数值类型 ======
+        # 定义需要转换为数值的列（新增涨跌幅和换手率）
+        numeric_cols = [
+            "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
+            "前收盘", "涨跌幅", "换手率"
+        ]
+        for col in numeric_cols:
+            if col in df.columns:
+                # 特殊处理百分比字段（涨跌幅、换手率）
+                if col in ["涨跌幅", "换手率"]:
+                    # 去除%符号并转换为数值
+                    df[col] = df[col].str.replace('%', '', regex=False).astype(float) / 100
+                else:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         # 计算振幅 (最高价-最低价)/前收盘价*100
         if '前收盘' in df.columns and '最高' in df.columns and '最低' in df.columns:
             df['振幅'] = (df['最高'] - df['最低']) / df['前收盘'] * 100
@@ -615,6 +630,13 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         })
         df["成交额"] = np.nan  # 腾讯财经不提供成交额
         
+        # ====== 关键修复：在计算前转换为数值类型 ======
+        # 定义需要转换为数值的列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         # 计算涨跌幅、振幅等
         if '收盘' in df.columns and '开盘' in df.columns:
             df['涨跌幅'] = (df['收盘'] - df['开盘']) / df['开盘'] * 100
@@ -638,6 +660,13 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "volume": "成交量"
         })
         df["成交额"] = np.nan  # 新浪财经不提供成交额
+        
+        # ====== 关键修复：在计算前转换为数值类型 ======
+        # 定义需要转换为数值的列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 计算涨跌幅、振幅等
         if '收盘' in df.columns and '开盘' in df.columns:
@@ -663,6 +692,13 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
                 "open": "open", "close": "close", "high": "high", "low": "low",
                 "volume": "volume", "amount": "amount"
             })
+        
+        # ====== 关键修复：在计算前转换为数值类型 ======
+        # 定义需要转换为数值的列
+        numeric_cols = ["open", "high", "low", "close", "volume", "amount"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
     
     elif source_type == "yfinance":
         # Yahoo Finance处理
@@ -672,6 +708,13 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         })
         if "成交额" not in df.columns:
             df["成交额"] = df["收盘"] * df["成交量"]
+        
+        # ====== 关键修复：在计算前转换为数值类型 ======
+        # 定义需要转换为数值的列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 计算涨跌幅等
         df = df.sort_values('Date')
@@ -704,11 +747,21 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         
         # 3. 按日期排序
         df = df.sort_values('日期').reset_index(drop=True)
-        
+    
     # 重命名列
     for src, dst in standard_cols.items():
         if src in df.columns:
             df[dst] = df[src]
+    
+    # ====== 关键修复：在计算前转换为数值类型 ======
+    # 将数值类型转换移到这里（在计算缺失列之前）
+    numeric_columns = [
+        "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
+        "振幅", "涨跌幅", "涨跌额", "换手率"
+    ]
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     
     # 补充必要列
     required_columns = [
@@ -742,15 +795,6 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     if '日期' in df.columns:
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
         df = df.sort_values('日期').reset_index(drop=True)
-    
-    # 确保数值列是数值类型
-    numeric_columns = [
-        "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
-        "振幅", "涨跌幅", "涨跌额", "换手率"
-    ]
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
     
     # 确保所有必要列存在
     return df[required_columns]

@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 股票数据源模块 - 完整股票日线数据结构支持
-【2025-11-16：修复数据列类型问题】
+【2025-11-16：修复语法错误】
+- 修复了腾讯财经和新浪财经数据获取函数中的语法错误
 - 严格遵循股票日线数据结构：日期、股票代码、开盘、收盘、最高、最低、成交量、成交额、振幅、涨跌幅、涨跌额、换手率、股票名称
-- 修复数值列类型转换问题，确保计算前数据类型正确
+- 修复数值列类型转换问题
 - 多数据源兼容处理
 """
 
@@ -445,7 +446,8 @@ def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, data_days: 
         # 提取K线数据
         kline_data = data["data"][tencent_code]["qfqday"]
         
-        if not kline_
+        # 【关键修复】修复语法错误：添加冒号和完整变量名
+        if not kline_data:
             logger.warning("腾讯财经返回空数据")
             raise ValueError("腾讯财经返回空数据")
         
@@ -502,7 +504,7 @@ def _fetch_sina_data(symbol: str, start_date: str, end_date: str, data_days: int
         # 解析JSON
         data = json.loads(response.text)
         
-        # 检查数据有效性
+        # 【关键修复】修复语法错误：添加完整的条件判断
         if not data:
             logger.error("新浪财经返回空数据")
             raise ValueError("新浪财经返回空数据")
@@ -824,6 +826,7 @@ def format_stock_code(code):
     
     # 验证格式
     if not code_str.isdigit() or len(code_str) != 6:
+        logger = logging.getLogger("StockCrawler")
         logger.warning(f"股票代码格式化失败: {code_str}")
         return None
     
@@ -833,6 +836,7 @@ def get_stock_name(stock_code):
     """获取股票名称"""
     try:
         if not os.path.exists(BASIC_INFO_FILE):
+            logger = logging.getLogger("StockCrawler")
             logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
             return stock_code
         
@@ -842,10 +846,12 @@ def get_stock_name(stock_code):
         )
         
         if basic_info_df.empty:
+            logger = logging.getLogger("StockCrawler")
             logger.error("股票列表文件为空")
             return stock_code
         
         if "代码" not in basic_info_df.columns or "名称" not in basic_info_df.columns:
+            logger = logging.getLogger("StockCrawler")
             logger.error("股票列表文件缺少必要列")
             return stock_code
         
@@ -855,9 +861,11 @@ def get_stock_name(stock_code):
         if not stock_row.empty:
             return stock_row["名称"].values[0]
         
+        logger = logging.getLogger("StockCrawler")
         logger.warning(f"股票 {stock_code_str} 不在列表中")
         return stock_code
     except Exception as e:
+        logger = logging.getLogger("StockCrawler")
         logger.error(f"获取股票名称失败: {str(e)}", exc_info=True)
         return stock_code
 

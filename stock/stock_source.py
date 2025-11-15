@@ -742,10 +742,18 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         # 2. 过滤掉1970-01-01等无效日期
         # A股市场始于1990年，所以过滤掉1990年之前的日期
         # 同时排除NaT (非时间值)
-        valid_dates = df["日期"].notna() & (df["日期"].dt.year >= 1990)
+        #valid_dates = df["日期"].notna() & (df["日期"].dt.year >= 1990)
+        valid_dates = df["日期"].notna() & (df["日期"] > pd.Timestamp('1970-01-02'))
         df = df[valid_dates]
         
-        # 3. 按日期排序
+        # 3. 确保日期在合理范围内（不超过当前日期+1年，不早于1970-01-02）
+        current_time = pd.Timestamp.now()
+        max_date = current_time + pd.DateOffset(years=1)
+        min_date = pd.Timestamp('1970-01-02')
+    
+        df = df[(df["日期"] <= max_date) & (df["日期"] >= min_date)]
+    
+        # 4. 按日期排序
         df = df.sort_values('日期').reset_index(drop=True)
     
     # 重命名列

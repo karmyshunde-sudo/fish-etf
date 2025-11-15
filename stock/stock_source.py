@@ -691,6 +691,20 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         else:
             df["日期"] = pd.to_datetime(df.index).strftime("%Y-%m-%d")
     
+    # ====== 关键修复：过滤无效日期 ======
+    # 1. 确保日期列是datetime类型
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+        
+        # 2. 过滤掉1970-01-01等无效日期
+        # A股市场始于1990年，所以过滤掉1990年之前的日期
+        # 同时排除NaT (非时间值)
+        valid_dates = df["日期"].notna() & (df["日期"].dt.year >= 1990)
+        df = df[valid_dates]
+        
+        # 3. 按日期排序
+        df = df.sort_values('日期').reset_index(drop=True)
+        
     # 重命名列
     for src, dst in standard_cols.items():
         if src in df.columns:

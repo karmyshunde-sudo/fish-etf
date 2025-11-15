@@ -469,24 +469,26 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         # 【新增】立即执行 git add，将文件加入暂存区
         # 这确保了即使 commit_files_in_batches 没有立即提交，文件也已在暂存区
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        relative_file_path = os.path.relpath(file_path, repo_root)
-        try:
-            import subprocess
-            add_result = subprocess.run(
-                ['git', 'add', relative_file_path],
-                cwd=repo_root,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            logger.debug(f"Git Add 成功: {relative_file_path}")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Git Add 失败: {relative_file_path}, 错误: {e.stderr}")
+         # ✅ 重新添加：确保数据文件被添加到Git暂存区
+        os.system("git add data/daily/*.csv")
+        #repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        #relative_file_path = os.path.relpath(file_path, repo_root)
+        #try:
+        #    import subprocess
+        #    add_result = subprocess.run(
+        #        ['git', 'add', relative_file_path],
+        #        cwd=repo_root,
+        #        check=True,
+        #        capture_output=True,
+        #        text=True
+        #    )
+        #    logger.debug(f"Git Add 成功: {relative_file_path}")
+        #except subprocess.CalledProcessError as e:
+        #    logger.error(f"Git Add 失败: {relative_file_path}, 错误: {e.stderr}")
             # Add 失败不应该阻止后续的 commit_files_in_batches 调用
             # 可能是文件权限或路径问题
-        except FileNotFoundError:
-            logger.error(f"Git Add 失败: 找不到git命令。文件已保存但未添加到暂存区: {relative_file_path}")
+        #except FileNotFoundError:
+        #    logger.error(f"Git Add 失败: 找不到git命令。文件已保存但未添加到暂存区: {relative_file_path}")
             # Git 未安装或不在 PATH 中，记录错误但不中断
 
         # 【保留原有逻辑】传递提交消息，确保commit_files_in_batches能正确工作

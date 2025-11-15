@@ -695,7 +695,8 @@ def update_all_stocks_daily_data():
         logger.info(f"批量提交剩余 {len(batch_file_paths)} 只股票日线数据...")
         
         # 确保所有文件都已添加到暂存区
-        os.system(f"git add \"{DAILY_DIR}/*.csv\"")
+        os.system("git add data/daily/*.csv")
+        #os.system(f"git add \"{DAILY_DIR}/*.csv\"")
         
         # 构建要提交的文件列表
         file_list = batch_file_paths

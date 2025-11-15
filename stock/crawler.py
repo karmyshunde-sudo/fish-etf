@@ -1,13 +1,12 @@
+#=====5数据源crawler-QW11.py=====
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票数据爬取模块 - 严格确保股票代码为6位格式，日期处理逻辑完善
-【2025-10-14-0836：循环索引，保证每次都是爬取150只股票】
-【2025-11-14：爬取数据源额外新编写代码】
-- 彻底解决Git提交问题
-- 循环批处理机制（可配置批次大小）
-- 专业金融系统可靠性保障
-- 100%可直接复制使用
+股票日线数据爬取模块 - 完全遵循ETF爬取逻辑
+【2025-11-15：彻底解决Git提交问题】
+- 每10只股票数据缓存并提交
+- 严格遵循ETF爬取逻辑：数据缓存 -> 小批次提交 -> 兜底提交 -> 最后更新进度
+- 确保数据文件先提交，进度文件后更新
 """
 
 import os
@@ -16,23 +15,17 @@ import pandas as pd
 import akshare as ak
 import time
 import random
-import json
-from datetime import datetime, timedelta, date
+import tempfile
+import shutil
+from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
-from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
-# 导入股票列表更新模块
+from utils.git_utils import commit_files_in_batches, force_commit_remaining_files, _verify_git_file_content
 from stock.all_stocks import update_stock_list
-# 新增：导入数据源模块（放在文件顶部）
 from stock.stock_source import get_stock_daily_data_from_sources
 
 # 配置日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
 
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
@@ -44,21 +37,9 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 os.makedirs(DAILY_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# 【关键参数】可在此处修改每次处理的股票数量
-# 专业修复：批次大小作为可配置参数
-BATCH_SIZE = 8  # 可根据需要调整为100、150、200等
+# 批次参数
 MINOR_BATCH_SIZE = 10  # 每10只股票提交一次
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-def ensure_directory_exists():
-    """确保数据目录存在"""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    if not os.path.exists(DAILY_DIR):
-        os.makedirs(DAILY_DIR)
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR)
+BATCH_SIZE = 8         # 单次运行处理8只股票
 
 def format_stock_code(code):
     """
@@ -89,708 +70,531 @@ def format_stock_code(code):
     
     return code_str
 
-def get_stock_section(stock_code: str) -> str:
-    """
-    获取股票所属板块
-    
-    Args:
-        stock_code: 股票代码（已格式化为6位）
-    
-    Returns:
-        str: 板块名称
-    """
-    # 确保股票代码是6位
-    stock_code = format_stock_code(stock_code)
-    if not stock_code:
-        return "格式错误"
-    
-    # 根据股票代码前缀判断板块
-    if stock_code.startswith('60'):
-        return "沪市主板"
-    elif stock_code.startswith('00'):
-        return "深市主板"
-    elif stock_code.startswith('30'):
-        return "创业板"
-    elif stock_code.startswith('688'):
-        return "科创板"
-    elif stock_code.startswith('8'):
-        return "北交所"
-    elif stock_code.startswith('4') or stock_code.startswith('8'):
-        return "三板市场"
-    else:
-        return "其他板块"
-
-def to_naive_datetime(dt):
-    """
-    将日期转换为naive datetime（无时区）
-    Args:
-        dt: 可能是naive或aware datetime
-    Returns:
-        datetime: naive datetime
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is not None:
-        return dt.replace(tzinfo=None)
-    return dt
-
-def to_aware_datetime(dt):
-    """
-    将日期转换为aware datetime（有时区）
-    Args:
-        dt: 可能是naive或aware datetime
-    Returns:
-        datetime: aware datetime（北京时区）
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=Config.BEIJING_TIMEZONE)
-    return dt
-
-def get_valid_trading_date_range(start_date, end_date):
-    """
-    获取有效的交易日范围，确保只包含历史交易日
-    
-    Args:
-        start_date: 起始日期（可能包含非交易日）
-        end_date: 结束日期（可能包含非交易日）
-    
-    Returns:
-        tuple: (valid_start_date, valid_end_date) - 有效的交易日范围
-    """
-    # 统一转换为datetime.datetime类型
-    start_date = to_datetime(start_date)
-    end_date = to_datetime(end_date)
-    
-    if start_date is None or end_date is None:
-        logger.error("日期格式转换失败")
-        return None, None
-    
-    # 确保结束日期不晚于当前时间
-    now = get_beijing_time()
-    # 确保两个日期对象类型一致
-    end_date = to_aware_datetime(end_date)
-    now = to_aware_datetime(now)
-    
-    if end_date > now:
-        end_date = now
-        logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
-    
-    # 查找有效的结束交易日
-    valid_end_date = end_date
-    days_back = 0
-    while days_back < 30:  # 最多查找30天
-        if is_trading_day(valid_end_date.date()):
-            break
-        valid_end_date -= timedelta(days=1)
-        days_back += 1
-    
-    # 如果找不到有效的结束交易日，返回空范围
-    if days_back >= 30:
-        logger.warning(f"无法找到有效的结束交易日（从 {end_date.strftime('%Y-%m-%d')} 开始）")
-        return None, None
-    
-    # 查找有效的起始交易日
-    valid_start_date = start_date
-    days_forward = 0
-    while days_forward < 30:  # 最多查找30天
-        if is_trading_day(valid_start_date.date()):
-            break
-        valid_start_date += timedelta(days=1)
-        days_forward += 1
-    
-    # 如果找不到有效的起始交易日，使用结束交易日作为起始日
-    if days_forward >= 30:
-        valid_start_date = valid_end_date
-    
-    # 确保起始日期不晚于结束日期
-    # 【关键修复】确保比较前类型一致
-    start_naive = to_naive_datetime(valid_start_date)
-    end_naive = to_naive_datetime(valid_end_date)
-    
-    if start_naive > end_naive:
-        valid_start_date = valid_end_date
-    
-    return valid_start_date, valid_end_date
-
-def to_datetime(date_input):
-    """
-    统一转换为datetime.datetime类型
-    Args:
-        date_input: 日期输入，可以是str、date、datetime等类型
-    Returns:
-        datetime.datetime: 统一的datetime类型
-    """
-    if isinstance(date_input, datetime):
-        return date_input
-    elif isinstance(date_input, date):
-        return datetime.combine(date_input, datetime.min.time())
-    elif isinstance(date_input, str):
-        # 尝试多种日期格式
-        for fmt in ["%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"]:
-            try:
-                return datetime.strptime(date_input, fmt)
-            except:
-                continue
-        logger.warning(f"无法解析日期格式: {date_input}")
-        return None
-    return None
-
-def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
-    """获取单只股票的日线数据，使用中文列名"""
+def get_next_crawl_index() -> int:
+    """获取下一个要处理的股票索引"""
     try:
-        # ===== 1. 基础检查与日期范围 =====
-        stock_code = format_stock_code(stock_code)
-        if not stock_code:
-            logger.error(f"股票代码格式化失败: {stock_code}")
-            return pd.DataFrame()
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
+            return 0
         
-        # 【关键修复】确保股票代码是6位（前面补零）
-        stock_code = format_stock_code(stock_code)
-        if not stock_code:
-            logger.error(f"股票代码格式化失败: {stock_code}")
-            return pd.DataFrame()
+        if not _verify_git_file_content(BASIC_INFO_FILE):
+            logger.warning("股票列表文件内容与Git仓库不一致，可能需要重新加载")
         
-        # ===== 2. 获取日期范围 =====
-        local_file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
-        existing_data = None
-        last_date = None
-        
-        if os.path.exists(local_file_path):
-            try:
-                # 读取已有的数据
-                existing_data = pd.read_csv(local_file_path)
-                if not existing_data.empty and '日期' in existing_data.columns:
-                    # 【日期datetime类型规则】确保日期列是datetime类型
-                    existing_data['日期'] = pd.to_datetime(existing_data['日期'], errors='coerce')
-                    # 获取最后一条数据的日期
-                    last_date = existing_data['日期'].max()
-                    if pd.notna(last_date):
-                        logger.info(f"股票 {stock_code} 本地已有数据，最后日期: {last_date.strftime('%Y-%m-%d')}")
-                    else:
-                        last_date = None
-            except Exception as e:
-                logger.warning(f"读取股票 {stock_code} 本地数据失败: {str(e)}")
-                existing_data = None
-                last_date = None
-        
-        # ===== 3. 确定爬取的日期范围 =====
-        if last_date is not None:
-            # 查找下一个交易日作为起始点
-            current_date = last_date + timedelta(days=1)
-            start_date = None
-            
-            # 最多查找30天，避免无限循环
-            for i in range(30):
-                if is_trading_day(current_date.date()):
-                    start_date = current_date
-                    break
-                current_date += timedelta(days=1)
-            
-            if not start_date:
-                # 如果找不到交易日，使用最近一个交易日
-                last_trading_date = get_last_trading_day()
-                if last_trading_date:
-                    # 【日期datetime类型规则】确保last_trading_date是datetime类型
-                    if not isinstance(last_trading_date, datetime):
-                        last_trading_date = datetime.combine(last_trading_date, datetime.min.time())
-                    start_date = last_trading_date
-                    logger.warning(f"无法找到股票 {stock_code} 的下一个交易日，使用最近交易日: {start_date.strftime('%Y%m%d')}")
-                else:
-                    logger.warning(f"无法找到股票 {stock_code} 的有效交易日，跳过爬取")
-                    return pd.DataFrame()
-            
-            # 获取当前日期前的最近一个交易日作为结束日期
-            end_date = get_last_trading_day()
-            
-            # 【日期datetime类型规则】确保end_date是datetime类型
-            if not isinstance(end_date, datetime):
-                end_date = datetime.combine(end_date, datetime.min.time())
-            
-            # 确保结束日期不晚于当前时间
-            now = get_beijing_time()
-            # 【关键修复】确保比较前日期类型一致
-            now_naive = to_naive_datetime(now)
-            end_date_naive = to_naive_datetime(end_date)
-            
-            if end_date_naive > now_naive:
-                end_date = now
-                logger.warning(f"结束日期晚于当前时间，已调整为当前时间: {end_date.strftime('%Y%m%d %H:%M:%S')}")
-            
-            # 【关键修复】确保比较前日期类型一致
-            # 转换为naive datetime进行比较
-            start_date_naive = to_naive_datetime(start_date)
-            end_date_naive = to_naive_datetime(end_date)
-            
-            # 严格检查日期
-            if start_date_naive > end_date_naive:
-                logger.info(f"股票 {stock_code} 没有新数据需要爬取（开始日期: {start_date.strftime('%Y%m%d')} > 结束日期: {end_date.strftime('%Y%m%d')}）")
-                return pd.DataFrame()
-            
-            # 处理开始日期等于结束日期的情况
-            if start_date_naive == end_date_naive:
-                beijing_time = get_beijing_time()
-                # A股收市时间为15:00，为保险起见，15:30后认为当天数据已更新
-                market_close_time = start_date_naive.replace(hour=15, minute=30, second=0, microsecond=0)
-                
-                # 确保比较的两个时间都是naive类型
-                beijing_time_naive = to_naive_datetime(beijing_time)
-                
-                if beijing_time_naive < market_close_time:
-                    logger.info(f"股票 {stock_code} 当前时间({beijing_time_naive.strftime('%H:%M')})未过A股收市时间(15:30)，跳过当天数据爬取")
-                    return pd.DataFrame()
-                else:
-                    logger.info(f"股票 {stock_code} 当前时间({beijing_time_naive.strftime('%H:%M')})已过A股收市时间(15:30)，需要爬取当天({start_date_naive.strftime('%Y-%m-%d')})数据")
-            
-            logger.info(f"股票 {stock_code} 增量爬取，从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')}")
-        else:
-            # 没有本地数据，爬取最近一年的数据
-            now = get_beijing_time()
-            start_date = now - timedelta(days=365)
-            end_date = get_last_trading_day()
-            
-            # 【日期datetime类型规则】确保end_date是datetime类型
-            if not isinstance(end_date, datetime):
-                end_date = datetime.combine(end_date, datetime.min.time())
-            
-            # 确保起始日期是交易日
-            current_date = start_date
-            start_date = None
-            for i in range(30):
-                if is_trading_day(current_date.date()):
-                    start_date = current_date
-                    break
-                current_date += timedelta(days=1)
-            
-            if not start_date:
-                start_date = end_date
-            
-            # 【关键修复】确保比较前日期类型一致
-            # 转换为naive datetime进行比较
-            start_date_naive = to_naive_datetime(start_date)
-            end_date_naive = to_naive_datetime(end_date)
-            
-            # 确保起始日期不晚于结束日期
-            if start_date_naive > end_date_naive:
-                start_date = end_date
-            
-            logger.info(f"股票 {stock_code} 首次爬取，获取从 {start_date.strftime('%Y%m%d')} 到 {end_date.strftime('%Y%m%d')} 的数据")
-        
-        # ===== 4. 使用新的数据源模块获取数据 =====
-        df = get_stock_daily_data_from_sources(
-            stock_code=stock_code,
-            start_date=start_date,
-            end_date=end_date,
-            existing_data=existing_data
+        basic_info_df = pd.read_csv(
+            BASIC_INFO_FILE,
+            dtype={"代码": str}
         )
         
-        # ===== 5. 数据后处理 =====
-        if df.empty:
-            logger.warning(f"股票 {stock_code} 的日线数据为空")
-            return pd.DataFrame()
-        
-        # 添加列名检查日志
-        logger.debug(f"股票 {stock_code} 获取到的列名: {df.columns.tolist()}")
-        
-        # 确保必要列存在
-        required_columns = ["日期", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            logger.error(f"股票 {stock_code} 数据缺少必要列: {missing_columns}")
-            return pd.DataFrame()
-        
-        # 【日期datetime类型规则】确保日期列是datetime类型
-        if '日期' in df.columns:
-            df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
-            df = df.sort_values('日期').reset_index(drop=True)
-        
-        # 确保数值列是数值类型
-        numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 移除NaN值
-        df = df.dropna(subset=['收盘', '成交量'])
-        
-        # 【关键修复】确保"股票代码"列存在且格式正确
-        if '股票代码' not in df.columns:
-            df['股票代码'] = stock_code
-        else:
-            # 确保股票代码是6位格式
-            df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
-            # 移除格式化失败的行
-            df = df[df['股票代码'].notna()]
-        
-        return df
-    
-    except Exception as e:
-        # 添加详细的异常日志
-        logger.error(f"获取股票 {stock_code} 日线数据时发生未捕获的异常:", exc_info=True)
-        logger.error(f"akshare 版本: {ak.__version__}")
-        logger.error(f"akshare 模块路径: {ak.__file__}")
-        return pd.DataFrame()
-        
-def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
-    """保存股票日线数据到CSV文件，使用中文列名"""
-    if df.empty:
-        return
-    
-    try:
-        # 【关键修复】确保股票代码是6位（前面补零）
-        stock_code = format_stock_code(stock_code)
-        if not stock_code:
-            logger.error(f"无法保存：股票代码格式化失败")
-            return None
-        
-        file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
-        
-        # 【关键修复】确保数据中的"股票代码"列是6位格式
-        if '股票代码' in df.columns:
-            # 确保数据中的股票代码列是6位格式
-            df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
-            # 移除格式化失败的行
-            df = df[df['股票代码'].notna()]
-        else:
-            # 如果没有股票代码列，添加它
-            df['股票代码'] = stock_code
-        
-        # 【日期datetime类型规则】保存前将日期列转换为字符串
-        if '日期' in df.columns:
-            df_save = df.copy()
-            df_save['日期'] = df_save['日期'].dt.strftime('%Y-%m-%d')
-        else:
-            df_save = df
-        
-        # 保存数据
-        df_save.to_csv(file_path, index=False)
-        
-        logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
-        
-        # 【关键修复】立即添加到Git暂存区
-        try:
-            import subprocess
-            repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-            relative_path = os.path.relpath(file_path, repo_root)
-            subprocess.run(['git', 'add', relative_path], 
-                         check=True, cwd=repo_root)
-            logger.debug(f"✅ 文件已添加到Git暂存区: {relative_path}")
-        except Exception as e:
-            logger.error(f"❌ 添加文件到Git暂存区失败: {str(e)}")
-        
-        return file_path  # 返回文件路径，供批量提交使用
-        
-    except Exception as e:
-        logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
-        return None
-
-def complete_missing_stock_data():
-    """
-    补全缺失的股票日线数据
-    1. 比对股票列表与日线数据目录
-    2. 为缺失的股票调用正常爬取流程
-    """
-    logger.info("开始检查并补全缺失的股票日线数据...")
-    
-    # 确保目录存在
-    ensure_directory_exists()
-    
-    # 检查基础信息文件
-    if not os.path.exists(BASIC_INFO_FILE):
-        logger.error("基础信息文件不存在，无法执行缺失数据补全")
-        return False
-    
-    try:
-        # 加载基础信息
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
         if basic_info_df.empty:
-            logger.error("基础信息文件为空，无法执行缺失数据补全")
-            return False
+            logger.error("股票列表文件为空，无法获取进度")
+            return 0
         
-        # 确保"代码"列是6位格式
-        basic_info_df["代码"] = basic_info_df["代码"].apply(format_stock_code)
-        # 移除无效股票
-        basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
-        basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
-        basic_info_df = basic_info_df.reset_index(drop=True)
+        if "next_crawl_index" not in basic_info_df.columns:
+            basic_info_df["next_crawl_index"] = 0
+            basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
+            if not _verify_git_file_content(BASIC_INFO_FILE):
+                logger.warning("股票列表文件内容与Git仓库不一致，可能需要重新提交")
+            logger.info("已添加next_crawl_index列并初始化为0")
         
-        # 统计有效股票数量
-        total_stocks = len(basic_info_df)
-        logger.info(f"基础信息中包含 {total_stocks} 只股票")
-        
-        # 检查哪些股票缺失日线数据
-        missing_stocks = []
-        for _, row in basic_info_df.iterrows():
-            stock_code = format_stock_code(row["代码"])
-            if not stock_code:
-                continue
-                
-            file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
-            if not os.path.exists(file_path):
-                missing_stocks.append(stock_code)
-        
-        # 没有缺失数据，直接返回
-        if not missing_stocks:
-            logger.info("所有股票日线数据完整，无需补全")
-            return True
-        
-        logger.info(f"发现 {len(missing_stocks)} 只股票的日线数据缺失，开始补全...")
-        
-        # 按顺序处理缺失股票
-        for i, stock_code in enumerate(missing_stocks):
-            # 添加随机延时，避免请求过于频繁
-            time.sleep(random.uniform(1.5, 2.5))
-            
-            logger.info(f"补全第 {i+1}/{len(missing_stocks)} 只缺失股票: {stock_code}")
-            df = fetch_stock_daily_data(stock_code)
-            
-            if not df.empty:
-                file_path = save_stock_daily_data(stock_code, df)
-                if file_path:
-                    logger.info(f"成功补全股票 {stock_code} 的日线数据")
-            else:
-                logger.warning(f"股票 {stock_code} 数据补全失败")
-        
-        # 检查补全结果
-        still_missing = []
-        for stock_code in missing_stocks:
-            file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
-            if not os.path.exists(file_path):
-                still_missing.append(stock_code)
-        
-        if still_missing:
-            logger.warning(f"补全后仍有 {len(still_missing)} 只股票缺失日线数据: {still_missing}")
-        else:
-            logger.info(f"所有缺失股票数据已成功补全")
-        
-        return len(still_missing) == 0
-    
+        next_index = int(basic_info_df["next_crawl_index"].iloc[0])
+        logger.info(f"当前进度：下一个索引位置: {next_index}/{len(basic_info_df)}")
+        return next_index
     except Exception as e:
-        logger.error(f"补全缺失股票数据失败: {str(e)}", exc_info=True)
-        return False
+        logger.error(f"获取股票进度索引失败: {str(e)}", exc_info=True)
+        return 0
 
-def update_all_stocks_daily_data():
-    """更新所有股票的日线数据，使用中文列名"""
-    ensure_directory_exists()
-    
-    # 确保基础信息文件存在
-    if not os.path.exists(BASIC_INFO_FILE):
-        logger.info("基础信息文件不存在，正在创建...")
-        if not update_stock_list():  # 调用股票列表更新模块
-            logger.error("基础信息文件创建失败，无法更新日线数据")
-            return False
-    
-    # 获取基础信息文件
+def save_crawl_progress(next_index: int):
+    """保存股票爬取进度 - 仅保存到文件，不提交"""
     try:
-        basic_info_df = pd.read_csv(BASIC_INFO_FILE)
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
+            return
+        
+        basic_info_df = pd.read_csv(
+            BASIC_INFO_FILE,
+            dtype={"代码": str}
+        )
+        
         if basic_info_df.empty:
-            logger.error("基础信息文件为空，无法更新日线数据")
-            return False
+            logger.error("股票列表文件为空，无法更新进度")
+            return
         
-        # 【关键修复】确保"代码"列是6位格式
-        basic_info_df["代码"] = basic_info_df["代码"].apply(format_stock_code)
-        # 移除无效股票
-        basic_info_df = basic_info_df[basic_info_df["代码"].notna()]
-        basic_info_df = basic_info_df[basic_info_df["代码"].str.len() == 6]
-        basic_info_df = basic_info_df.reset_index(drop=True)
+        if "next_crawl_index" not in basic_info_df.columns:
+            basic_info_df["next_crawl_index"] = 0
         
-        # 保存更新后的基础信息文件
+        basic_info_df["next_crawl_index"] = next_index
         basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-        commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
-        logger.info(f"已更新基础信息文件，确保所有股票代码为6位格式，共 {len(basic_info_df)} 条记录")
-        
+        logger.info(f"✅ 进度已保存：下一个索引位置: {next_index}/{len(basic_info_df)}")
     except Exception as e:
-        logger.error(f"读取基础信息文件失败: {str(e)}", exc_info=True)
-        return False
-    
-    # 【关键修复】获取 next_crawl_index 值
-    # 由于所有行的 next_crawl_index 值相同，取第一行即可
-    next_index = int(basic_info_df["next_crawl_index"].iloc[0])
-    total_stocks = len(basic_info_df)
-    
-    logger.info(f"当前爬取状态: next_crawl_index = {next_index} (共 {total_stocks} 只股票)")
-    
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    # 专业修复：循环批处理机制
-    # 1. 确定处理范围（使用循环处理）
-    start_idx = next_index % total_stocks
-    end_idx = start_idx + BATCH_SIZE
-    
-    # 2. 计算实际的end_idx（用于进度更新）
-    actual_end_idx = end_idx % total_stocks
-    
-    # 3. 记录第一批和最后一批股票（使用实际索引）
-    first_stock_idx = start_idx % total_stocks
-    last_stock_idx = (end_idx - 1) % total_stocks
-    
-    # 4. 处理循环情况
-    if end_idx <= total_stocks:
-        batch_df = basic_info_df.iloc[start_idx:end_idx]
-        logger.info(f"处理本批次 股票 ({BATCH_SIZE}只)，从索引 {start_idx} 开始")
-    else:
-        # 循环处理：第一部分（start_idx到total_stocks）+ 第二部分（0到end_idx-total_stocks）
-        batch_df = pd.concat([basic_info_df.iloc[start_idx:total_stocks], basic_info_df.iloc[0:end_idx-total_stocks]])
-        logger.info(f"处理本批次 股票 ({BATCH_SIZE}只)，从索引 {start_idx} 开始（循环处理）")
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        logger.error(f"❌ 保存股票进度失败: {str(e)}", exc_info=True)
 
-    # 记录第一批和最后一批股票
-    first_stock = basic_info_df.iloc[first_stock_idx]
-    last_stock = basic_info_df.iloc[last_stock_idx]
-    logger.info(f"当前批次第一只股票: {first_stock['代码']} - {first_stock['名称']} (索引 {first_stock_idx})")
-    logger.info(f"当前批次最后一只股票: {last_stock['代码']} - {last_stock['名称']} (索引 {last_stock_idx})")
-    
-    # 处理这批股票
-    batch_codes = batch_df["代码"].tolist()
-    
-    if not batch_codes:
-        logger.warning("没有可爬取的股票")
-        return False
-    
-    # 文件路径缓存
-    file_paths = []
-    
-    # 处理这批股票
-    for i, stock_code in enumerate(batch_codes):
-        # 【关键修复】确保股票代码是6位
-        stock_code = format_stock_code(stock_code)
-        if not stock_code:
-            continue
-            
-        # 添加随机延时，避免请求过于频繁
-        time.sleep(random.uniform(1.5, 2.5))  # 增加延时，避免被限流
-        df = fetch_stock_daily_data(stock_code)
-        if not df.empty:
-            file_path = save_stock_daily_data(stock_code, df)
-            if file_path:
-                file_paths.append(file_path)
-        
-        # 【关键修复】每处理MINOR_BATCH_SIZE只股票就检查一次提交状态
-        if (i + 1) % MINOR_BATCH_SIZE == 0 and file_paths:
-            logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
-            
-            # 1. 确保所有文件都在暂存区
-            try:
-                import subprocess
-                repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-                subprocess.run(['git', 'add', DAILY_DIR], 
-                             check=True, cwd=repo_root)
-                logger.debug("✅ 已确保所有股票数据文件在暂存区")
-            except Exception as e:
-                logger.error(f"❌ 确保所有文件在暂存区失败: {str(e)}")
-            
-            # 2. 提交数据文件
-            commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-            logger.info(f"提交数据文件: {commit_msg}")
-            commit_success = commit_files_in_batches(file_paths, commit_msg)
-            
-            if commit_success:
-                logger.info(f"✅ 小批次数据文件提交成功：{len(file_paths)}只")
-            else:
-                logger.error("❌ 小批次数据文件提交失败")
-            
-            # 3. 清空文件路径列表
-            file_paths = []
-    
-    # 【关键修复】处理完本批次后，确保提交任何剩余文件
-    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
-    
-    # 首先提交所有剩余的股票数据文件
-    if file_paths:
-        logger.info(f"提交剩余的 {len(file_paths)} 只股票日线数据...")
-        
-        # 1. 确保所有剩余文件都在暂存区
-        try:
-            import subprocess
-            repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-            subprocess.run(['git', 'add', DAILY_DIR], 
-                         check=True, cwd=repo_root)
-            logger.debug("✅ 已确保所有剩余股票数据文件在暂存区")
-        except Exception as e:
-            logger.error(f"❌ 确保剩余文件在暂存区失败: {str(e)}")
-        
-        # 2. 提交数据文件
-        commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_success = commit_files_in_batches(file_paths, commit_msg)
-        
-        if commit_success:
-            logger.info(f"✅ 剩余股票数据文件提交成功：{len(file_paths)}只")
-        else:
-            logger.error("❌ 剩余股票数据文件提交失败")
-    
-    # 【关键修复】处理完本批次后，确保提交任何剩余文件
-    logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
-    
-    # 1. 确保所有股票数据文件都在暂存区
+def commit_crawl_progress():
+    """提交进度文件到Git仓库"""
     try:
-        import subprocess
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        subprocess.run(['git', 'add', DAILY_DIR], 
-                     check=True, cwd=repo_root)
-        logger.debug("✅ 已确保所有股票数据文件在暂存区")
+        commit_message = f"feat: 更新股票爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        success = commit_files_in_batches(BASIC_INFO_FILE, commit_message)
+        if success:
+            logger.info("✅ 进度文件已提交到Git仓库")
+        else:
+            logger.error("❌ 进度文件提交失败")
+        return success
     except Exception as e:
-        logger.error(f"❌ 确保所有文件在暂存区失败: {str(e)}")
+        logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
+        return False
+
+def get_all_stock_codes() -> list:
+    """获取所有股票代码"""
+    try:
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.info("股票列表文件不存在，正在创建...")
+            if not update_stock_list():
+                logger.error("股票列表文件创建失败")
+                return []
+        
+        basic_info_df = pd.read_csv(
+            BASIC_INFO_FILE,
+            dtype={"代码": str}
+        )
+        
+        if basic_info_df.empty:
+            logger.error("股票列表文件为空")
+            return []
+        
+        if "代码" not in basic_info_df.columns:
+            logger.error("股票列表文件缺少'代码'列")
+            return []
+        
+        stock_codes = basic_info_df["代码"].tolist()
+        logger.info(f"获取到 {len(stock_codes)} 只股票代码")
+        return stock_codes
+    except Exception as e:
+        logger.error(f"获取股票代码列表失败: {str(e)}", exc_info=True)
+        return []
+
+def normalize_stock_df(df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+    """
+    规范股票日线数据结构与精度
+    """
+    expected_columns = [
+        "日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
+        "振幅", "涨跌幅", "涨跌额", "换手率", "股票代码", "股票名称"
+    ]
+
+    # 缺少列自动补0
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = 0
+
+    # 精度处理
+    four_decimals = ["开盘", "最高", "最低", "收盘", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+    for col in four_decimals:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+    if "成交量" in df.columns:
+        df["成交量"] = pd.to_numeric(df["成交量"], errors="coerce").fillna(0).astype(int)
+
+    df["股票代码"] = stock_code
+    df["股票名称"] = get_stock_name(stock_code)
     
-    # 2. 强制提交剩余文件
-    if not force_commit_remaining_files():
-        logger.error("强制提交剩余文件失败，可能导致数据丢失")
-    else:
-        logger.info("✅ 强制提交剩余文件成功")
+    df = df[expected_columns]
+    df = df.sort_values(by="日期", ascending=True)
+    return df
+
+def get_stock_name(stock_code):
+    """获取股票名称"""
+    try:
+        if not os.path.exists(BASIC_INFO_FILE):
+            logger.warning(f"股票列表文件不存在: {BASIC_INFO_FILE}")
+            return stock_code
+        
+        basic_info_df = pd.read_csv(
+            BASIC_INFO_FILE,
+            dtype={"代码": str}
+        )
+        
+        if basic_info_df.empty:
+            logger.error("股票列表文件为空")
+            return stock_code
+        
+        if "代码" not in basic_info_df.columns or "名称" not in basic_info_df.columns:
+            logger.error("股票列表文件缺少必要列")
+            return stock_code
+        
+        stock_code_str = str(stock_code).strip()
+        stock_row = basic_info_df[basic_info_df["代码"] == stock_code_str]
+        
+        if not stock_row.empty:
+            return stock_row["名称"].values[0]
+        
+        logger.warning(f"股票 {stock_code_str} 不在列表中")
+        return stock_code
+    except Exception as e:
+        logger.error(f"获取股票名称失败: {str(e)}", exc_info=True)
+        return stock_code
+
+def get_incremental_date_range(stock_code: str) -> (datetime, datetime):
+    """获取增量爬取的日期范围"""
+    try:
+        last_trading_day = get_last_trading_day()
+        if not isinstance(last_trading_day, datetime):
+            last_trading_day = datetime.now()
+        
+        if last_trading_day.tzinfo is None:
+            last_trading_day = last_trading_day.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        
+        end_date = last_trading_day
+        current_time = get_beijing_time()
+        
+        if end_date > current_time:
+            end_date = current_time
+        
+        while not is_trading_day(end_date.date()):
+            end_date -= timedelta(days=1)
+            if (last_trading_day - end_date).days > 30:
+                logger.error("无法找到有效的结束交易日")
+                return None, None
+        
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
+        
+        save_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
+        
+        if os.path.exists(save_path):
+            try:
+                df = pd.read_csv(save_path)
+                
+                if "日期" not in df.columns:
+                    logger.warning(f"股票 {stock_code} 数据文件缺少'日期'列")
+                    start_date = last_trading_day - timedelta(days=365)
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    return start_date, end_date
+                
+                df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+                valid_dates = df["日期"].dropna()
+                if valid_dates.empty:
+                    logger.warning(f"股票 {stock_code} 数据文件中日期列全为NaN")
+                    start_date = last_trading_day - timedelta(days=365)
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    return start_date, end_date
+                
+                latest_date = valid_dates.max()
+                if not isinstance(latest_date, datetime):
+                    latest_date = pd.to_datetime(latest_date)
+                
+                if latest_date.tzinfo is None:
+                    latest_date = latest_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                
+                latest_date_date = latest_date.date()
+                end_date_date = end_date.date()
+                
+                logger.debug(f"股票 {stock_code} 日期比较: 最新日期={latest_date_date}, 结束日期={end_date_date}")
+                
+                if latest_date_date < end_date_date:
+                    start_date = latest_date + timedelta(days=1)
+                    
+                    while not is_trading_day(start_date.date()):
+                        start_date += timedelta(days=1)
+                    
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                    
+                    if start_date > end_date:
+                        logger.info(f"股票 {stock_code} 数据已最新（最新日期={latest_date_date}，结束日期={end_date_date}）")
+                        return None, None
+                    
+                    logger.info(f"股票 {stock_code} 需要更新数据: 最新日期 {latest_date_date} < 结束日期 {end_date_date}")
+                    logger.info(f"股票 {stock_code} 增量爬取日期范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+                    return start_date, end_date
+                else:
+                    logger.info(f"股票 {stock_code} 数据已最新: 最新日期 {latest_date_date} >= 结束日期 {end_date_date}")
+                    return None, None
+            
+            except Exception as e:
+                logger.error(f"读取股票 {stock_code} 数据文件失败: {str(e)}", exc_info=True)
+                start_date = last_trading_day - timedelta(days=365)
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+                return start_date, end_date
+        else:
+            logger.info(f"股票 {stock_code} 无历史数据，将获取一年历史数据")
+            start_date = last_trading_day - timedelta(days=365)
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+            return start_date, end_date
     
-    # 【关键修复】更新 next_crawl_index
-    new_index = actual_end_idx
-    logger.info(f"更新 next_crawl_index = {new_index}")
-    basic_info_df["next_crawl_index"] = new_index
-    basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
-    
-    # 提交更新后的基础信息文件
-    commit_files_in_batches(BASIC_INFO_FILE, "更新股票基础信息")
-    logger.info(f"已提交更新后的基础信息文件到仓库: {BASIC_INFO_FILE}")
-    
-    # 检查是否还有未完成的股票
-    remaining_stocks = (total_stocks - new_index) % total_stocks
-    logger.info(f"已完成 {BATCH_SIZE} 只股票爬取，还有 {remaining_stocks} 只股票待爬取")
-    
-    return True
+    except Exception as e:
+        logger.error(f"获取增量日期范围失败: {str(e)}", exc_info=True)
+        last_trading_day = get_last_trading_day()
+        start_date = last_trading_day - timedelta(days=365)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
+        end_date = last_trading_day.replace(hour=23, minute=59, second=59, microsecond=0)
+        return start_date, end_date
+
+def save_stock_data_batch(stock_data_dict: dict) -> int:
+    """
+    批量保存股票日线数据
+    """
+    if not stock_data_dict:
+        return 0
+
+    os.makedirs(DAILY_DIR, exist_ok=True)
+    saved_count = 0
+
+    for stock_code, df in stock_data_dict.items():
+        if df.empty:
+            continue
+
+        save_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
+
+        # 保存前规范化数据结构与精度
+        stock_name = df["股票名称"].iloc[0] if "股票名称" in df.columns else get_stock_name(stock_code)
+        df = normalize_stock_df(df, stock_code)
+
+        try:
+            # =============================
+            # Step 1: 读取已有数据（如存在）
+            # =============================
+            if os.path.exists(save_path):
+                existing_df = pd.read_csv(save_path)
+
+                # 确保旧数据的"日期"列统一为datetime格式
+                if "日期" in existing_df.columns:
+                    existing_df["日期"] = pd.to_datetime(existing_df["日期"], errors="coerce")
+
+                # 确保新数据的"日期"列也是datetime格式
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+
+                # =============================
+                # Step 2: 合并数据
+                # =============================
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+
+                # 再次统一日期列类型
+                combined_df["日期"] = pd.to_datetime(combined_df["日期"], errors="coerce")
+
+                # 丢弃无效日期
+                invalid_dates = combined_df["日期"].isna().sum()
+                if invalid_dates > 0:
+                    logger.warning(f"⚠️ 股票 {stock_code} 合并后发现 {invalid_dates} 条无效日期记录，已过滤")
+                    combined_df = combined_df.dropna(subset=["日期"])
+
+                # =============================
+                # Step 3: 去重 + 排序
+                # =============================
+                combined_df = combined_df.drop_duplicates(subset=["日期"], keep="last")
+                combined_df = combined_df.sort_values("日期", ascending=True).reset_index(drop=True)
+
+                # =============================
+                # Step 4: 格式化日期列为字符串保存
+                # =============================
+                combined_df["日期"] = combined_df["日期"].dt.strftime("%Y-%m-%d")
+
+                # =============================
+                # Step 5: 临时文件安全写入
+                # =============================
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
+                    combined_df.to_csv(temp_file.name, index=False)
+
+                shutil.move(temp_file.name, save_path)
+                logger.info(f"✅ 数据已合并至: {save_path} (共{len(combined_df)}条)")
+
+            else:
+                # =============================
+                # 无旧数据，直接保存新数据
+                # =============================
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                    df = df.dropna(subset=["日期"])
+                    df["日期"] = df["日期"].dt.strftime("%Y-%m-%d")
+
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8-sig') as temp_file:
+                    df.to_csv(temp_file.name, index=False)
+
+                shutil.move(temp_file.name, save_path)
+                logger.info(f"✅ 数据已保存至: {save_path} ({len(df)}条)")
+
+            saved_count += 1
+
+        except Exception as e:
+            logger.error(f"保存股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
+
+    return saved_count
+
+def crawl_all_stocks_daily_data():
+    """爬取所有股票日线数据"""
+    try:
+        logger.info("=== 开始执行股票日线数据爬取 ===")
+        beijing_time = get_beijing_time()
+        logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
+        
+        os.makedirs(DATA_DIR, exist_ok=True)
+        os.makedirs(DAILY_DIR, exist_ok=True)
+        logger.info(f"✅ 确保目录存在: {DATA_DIR}")
+        
+        stock_codes = get_all_stock_codes()
+        total_count = len(stock_codes)
+        
+        if total_count == 0:
+            logger.error("股票列表为空，无法进行爬取")
+            return
+        
+        logger.info(f"待爬取股票总数：{total_count}只（全市场股票）")
+        
+        next_index = get_next_crawl_index()
+        total_to_process = min(BATCH_SIZE, total_count - next_index)
+        
+        if total_to_process <= 0:
+            logger.info("没有股票需要处理")
+            return
+            
+        logger.info(f"本次将处理 {total_to_process} 只股票（目标：{BATCH_SIZE}只）")
+        
+        start_idx = next_index % total_count
+        stock_data_dict = {}  # 小批次数据缓存
+        processed_count = 0
+        successful_count = 0
+        failed_stocks = []
+        
+        # 处理所有股票
+        for i in range(total_to_process):
+            current_index = (start_idx + i) % total_count
+            stock_code = stock_codes[current_index]
+            stock_name = get_stock_name(stock_code)
+            logger.info(f"股票代码：{stock_code}| 名称：{stock_name}")
+            
+            # 获取增量日期范围
+            start_date, end_date = get_incremental_date_range(stock_code)
+            if start_date is None or end_date is None:
+                logger.info(f"股票 {stock_code} 数据已最新，跳过爬取")
+                processed_count += 1
+                continue
+            
+            # 爬取数据
+            logger.info(f"📅 增量爬取日期范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+            df = get_stock_daily_data_from_sources(
+                stock_code=stock_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if df.empty:
+                logger.warning(f"⚠️ 未获取到数据")
+                failed_stocks.append(f"{stock_code},{stock_name},未获取到数据")
+                processed_count += 1
+                continue
+            
+            # 缓存到小批次
+            stock_data_dict[stock_code] = df
+            successful_count += 1
+            processed_count += 1
+            
+            current_progress = f"{current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)"
+            logger.info(f"进度: {current_progress} - 数据已缓存")
+            
+            # 每10只股票提交一次（包括最后一只）
+            if (i + 1) % MINOR_BATCH_SIZE == 0 or i == total_to_process - 1:
+                # 保存当前小批次数据
+                if stock_data_dict:
+                    logger.info(f"开始保存小批次数据（{len(stock_data_dict)}只股票）...")
+                    saved_count = save_stock_data_batch(stock_data_dict)
+                    logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个股票数据文件")
+                    
+                    # 重新添加：确保数据文件被添加到Git暂存区
+                    os.system("git add data/daily/*.csv")
+                    
+                    # 构建要提交的文件列表
+                    file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in stock_data_dict.keys()]
+                    # 提交数据文件
+                    commit_msg = f"feat: 批量提交{len(stock_data_dict)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    logger.info(f"提交数据文件: {commit_msg}")
+                    commit_success = commit_files_in_batches(file_list, commit_msg)
+                    
+                    if commit_success:
+                        logger.info(f"✅ 小批次数据文件提交成功：{len(stock_data_dict)}只")
+                    else:
+                        logger.error("❌ 小批次数据文件提交失败")
+                    
+                    # 更新进度（当前已处理数量）
+                    new_index = start_idx + i + 1
+                    new_index = new_index % total_count
+                    save_crawl_progress(new_index)
+                    logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
+                    
+                    # 提交进度文件
+                    progress_commit_success = commit_crawl_progress()
+                    if progress_commit_success:
+                        logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")
+                    else:
+                        logger.error("❌ 进度文件提交失败")
+                    
+                    # 清空小批次缓存
+                    stock_data_dict = {}
+                else:
+                    logger.info("当前小批次没有新数据，跳过提交")
+            
+            # 每只股票之间随机等待
+            time.sleep(random.uniform(1.2, 4.6))
+        
+        # 处理结束后记录失败股票
+        if failed_stocks:
+            failed_file = os.path.join(DAILY_DIR, "failed_stocks.txt")
+            with open(failed_file, "w", encoding="utf-8") as f:
+                f.write("\n".join(failed_stocks))
+            logger.info(f"记录了 {len(failed_stocks)} 只失败的股票")
+        
+        # 计算剩余股票数量
+        remaining_stocks = total_count - (start_idx + total_to_process)
+        if remaining_stocks < 0:
+            remaining_stocks = total_count + remaining_stocks
+            
+        logger.info(f"本次爬取完成，共处理 {processed_count} 只股票，成功 {successful_count} 只，失败 {len(failed_stocks)} 只")
+        logger.info(f"还有 {remaining_stocks} 只股票待爬取")
+        
+    except Exception as e:
+        logger.error(f"股票日线数据爬取任务执行失败: {str(e)}", exc_info=True)
+        # 异常情况下尝试保存进度
+        try:
+            if 'next_index' in locals() and 'total_count' in locals():
+                new_index = start_idx + i + 1 if 'i' in locals() else next_index
+                new_index = new_index % total_count
+                logger.error("尝试保存进度以恢复状态...")
+                save_crawl_progress(new_index)
+                commit_crawl_progress()
+                logger.info(f"进度已保存为 {new_index}/{total_count}")
+        except Exception as save_error:
+            logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)
+        raise
 
 def main():
-    """主函数：更新所有股票数据"""
+    """主函数"""
     logger.info("===== 开始更新股票数据 =====")
     
-    # 添加初始延时，避免立即请求
-    time.sleep(random.uniform(1.0, 2.0))
-    
-    # 1. 确保基础信息文件存在
+    # 确保基础信息文件存在
     if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
         logger.info("基础信息文件不存在或为空，正在创建...")
-        if not update_stock_list():  # 调用股票列表更新模块
+        if not update_stock_list():
             logger.error("基础信息文件创建失败，无法继续")
             return
     
-    # 2. 只更新一批股票（最多BATCH_SIZE只）
-    if update_all_stocks_daily_data():
-        logger.info("已成功处理一批股票数据")
-    else:
-        logger.error("处理股票数据失败")
-    
-    # 3. 【关键修复】确保最后所有剩余文件都被提交
-    logger.info("执行最终兜底提交...")
-    
-    # 1. 确保所有股票数据文件都在暂存区
+    # 执行爬取
     try:
-        import subprocess
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        subprocess.run(['git', 'add', DAILY_DIR], 
-                     check=True, cwd=repo_root)
-        logger.debug("✅ 已确保所有股票数据文件在暂存区")
+        crawl_all_stocks_daily_data()
+        logger.info("✅ 股票日线数据爬取完成")
     except Exception as e:
-        logger.error(f"❌ 确保所有文件在暂存区失败: {str(e)}")
-    
-    # 2. 强制提交所有剩余文件
-    if force_commit_remaining_files():
-        logger.info("✅ 最终兜底提交成功")
-    else:
-        logger.error("❌ 最终兜底提交失败")
+        logger.error(f"❌ 股票日线数据爬取失败: {str(e)}", exc_info=True)
+        # 发送错误通知
+        try:
+            from wechat_push.push import send_wechat_message
+            send_wechat_message(
+                message=f"股票日线数据爬取失败: {str(e)}",
+                message_type="error"
+            )
+        except:
+            pass
     
     logger.info("===== 股票数据更新完成 =====")
 

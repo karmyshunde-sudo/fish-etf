@@ -551,6 +551,22 @@ def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) 
 
 def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
     """标准化为统一数据格式"""
+    # ====== 关键修复：打印返回的原始数据 ======
+    logger.info(f"===== 原始返回数据预览 ({source_type}) =====")
+    logger.info(f"数据形状: {df.shape}")
+    if not df.empty:
+        logger.info(f"列名: {', '.join(df.columns)}")
+        logger.info("前5行数据预览:")
+        # 打印完整的原始数据信息
+        for i in range(min(5, len(df))):
+            row = df.iloc[i]
+            row_str = " | ".join([f"{col}: {row[col]}" for col in df.columns])
+            logger.info(f"行 {i+1}: {row_str}")
+        logger.info(f"数据类型: {df.dtypes.to_dict()}")
+    else:
+        logger.warning("数据为空，无法预览")
+    logger.info(f"===== 原始数据预览结束 =====")
+
     # 定义完整的标准列映射 - 必须与股票日线数据结构完全一致
     standard_cols = {
         "date": "日期",
@@ -598,7 +614,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
                 # 特殊处理百分比字段（涨跌幅、换手率）
                 if col in ["涨跌幅", "换手率"]:
                     # 去除%符号并转换为数值
-                    df[col] = df[col].str.replace('%', '', regex=False).astype(float) / 100
+                    # 使用try-except确保安全转换
+                    try:
+                        df[col] = df[col].str.replace('%', '', regex=False).astype(float) / 100
+                    except Exception as e:
+                        logger.error(f"处理百分比字段 {col} 时出错: {str(e)}")
+                        df[col] = np.nan
                 else:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
         
@@ -734,26 +755,10 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         else:
             df["日期"] = pd.to_datetime(df.index).strftime("%Y-%m-%d")
     
-    # ====== 关键修复：过滤无效日期 ======
-    # 1. 确保日期列是datetime类型
+    # 移除所有日期过滤逻辑 - 完全保留原始数据
+    # 仅确保日期列是datetime类型
     if "日期" in df.columns:
         df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
-        
-        # 2. 过滤掉1970-01-01等无效日期
-        # A股市场始于1990年，所以过滤掉1990年之前的日期
-        # 同时排除NaT (非时间值)
-        #valid_dates = df["日期"].notna() & (df["日期"].dt.year >= 1990)
-        valid_dates = df["日期"].notna() & (df["日期"] > pd.Timestamp('1970-01-02'))
-        df = df[valid_dates]
-        
-        # 3. 确保日期在合理范围内（不超过当前日期+1年，不早于1970-01-02）
-        current_time = pd.Timestamp.now()
-        max_date = current_time + pd.DateOffset(years=1)
-        min_date = pd.Timestamp('1970-01-02')
-    
-        df = df[(df["日期"] <= max_date) & (df["日期"] >= min_date)]
-    
-        # 4. 按日期排序
         df = df.sort_values('日期').reset_index(drop=True)
     
     # 重命名列

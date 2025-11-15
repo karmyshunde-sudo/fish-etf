@@ -16,6 +16,12 @@ MIN_DATA_DAYS = 7
 # 最大数据量（一年约250-265个交易日）
 MAX_DATA_DAYS = 265
 
+# Baostock 配置
+BAOSTOCK_CONFIG = {
+    "LOGIN_USER": "anonymous",
+    "LOGIN_PASSWORD": "123456"
+}
+
 # ===== 优先级配置（硬编码，按稳定性排序）=====
 # 格式: (数据源索引, 接口索引, 优先级分数)
 # 分数越低越优先（1=最稳定，5=最不稳定）
@@ -31,10 +37,12 @@ SOURCE_PRIORITY = [
 _current_priority_index = 0  # 记录当前优先级位置
 _baostock_logged_in = False  # Baostock登录状态
 
-def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing_data=None):
+def get_stock_daily_data_from_sources(stock_code: str, 
+                                    start_date: datetime, 
+                                    end_date: datetime,
+                                    existing_data: pd.DataFrame = None) -> pd.DataFrame:
     """
     获取单只股票的日线数据，使用智能多数据源轮换策略
-    严格按照位置参数调用，不使用关键字参数
     
     Args:
         stock_code: 6位股票代码
@@ -59,8 +67,8 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
             start_date = start_date.replace(tzinfo=None)
         if end_date.tzinfo is not None:
             end_date = end_date.replace(tzinfo=None)
-
-        # 日期格式化
+        
+        # 日期格式化 - 严格使用"YYYY-MM-DD"格式
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
         
@@ -185,6 +193,7 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
                 
                 # 动态延时（基于优先级优化）
                 delay_min, delay_max = interface["delay_range"]
+                # 优先级高的接口延时更短（稳定性高）
                 if priority_idx < 2:  # 前两个优先级
                     delay_factor = 0.8
                 elif priority_idx < 4:  # 中间两个优先级
@@ -204,7 +213,6 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
                         symbol=stock_code,
                         start_date=start_date_str,
                         end_date=end_date_str,
-                        data_days=data_days,
                         **interface["params"]
                     )
                 else:
@@ -244,6 +252,7 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
         # 所有数据源都失败
         if not success:
             logger.error(f"所有数据源均无法获取 {stock_code} 数据: {str(last_error)}")
+            # 失败后递增优先级索引
             _current_priority_index = (_current_priority_index + 1) % total_priority
             return pd.DataFrame()
         
@@ -270,12 +279,18 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
         
         # ===== 5. 增量更新处理 =====
         if existing_data is not None and not existing_data.empty:
+            # 标准化已有数据
             existing_data = _standardize_existing_data(existing_data, logger)
+            
+            # 合并数据
             combined_df = pd.concat([existing_data, result_df], ignore_index=True)
             combined_df = combined_df.drop_duplicates(subset=['日期'], keep='last')
             combined_df = combined_df.sort_values('日期').reset_index(drop=True)
+            
+            # 保留最近250条
             if len(combined_df) > 250:
                 combined_df = combined_df.tail(250)
+                
             logger.info(f"股票 {stock_code} 合并后共有 {len(combined_df)} 条记录")
             return combined_df
         
@@ -286,7 +301,7 @@ def get_stock_daily_data_from_sources(stock_code, start_date, end_date, existing
         logger.error(f"获取股票 {stock_code} 日线数据时发生异常: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def _fetch_baostock_data(symbol, start_date, end_date, data_days, **kwargs):
+def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装Baostock的API调用 - 严格遵循官方示例"""
     global _baostock_logged_in
     logger = logging.getLogger("StockCrawler")
@@ -295,10 +310,16 @@ def _fetch_baostock_data(symbol, start_date, end_date, data_days, **kwargs):
         import baostock as bs
         logger.info(f"尝试使用Baostock获取 {symbol} 数据（日期范围: {start_date} 到 {end_date}）")
         
-        # 检查登录状态
+        # 获取A股代码格式 - 严格遵循官方示例
+        bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
+        
+        # 尝试登录
         if not _baostock_logged_in:
             logger.info("Baostock未登录，尝试登录...")
-            login_result = bs.login()
+            login_result = bs.login(
+                BAOSTOCK_CONFIG["LOGIN_USER"], 
+                BAOSTOCK_CONFIG["LOGIN_PASSWORD"]
+            )
             if login_result.error_code != '0':
                 logger.error(f"Baostock登录失败: {login_result.error_msg}")
                 _baostock_logged_in = False
@@ -306,21 +327,11 @@ def _fetch_baostock_data(symbol, start_date, end_date, data_days, **kwargs):
             _baostock_logged_in = True
             logger.info("Baostock登录成功")
         
-        # 获取A股代码格式 - 严格遵循官方示例
-        bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
-        
-        # 计算实际的开始日期
-        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
-        start_date_obj = end_date_obj - timedelta(days=data_days-1)
-        actual_start_date = start_date_obj.strftime("%Y-%m-%d")
-        
-        logger.debug(f"Baostock实际查询日期范围: {actual_start_date} 到 {end_date}")
-        
-        # 使用官方示例中的query_history_k_data_plus方法和完整指标参数
+        # 使用官方示例中的query_history_k_data_plus方法
         rs = bs.query_history_k_data_plus(
-            bs_code,
-            "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
-            start_date=actual_start_date,
+            code=bs_code,
+            fields="date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
+            start_date=start_date,
             end_date=end_date,
             frequency="d",  # 日线
             adjustflag="3"  # 不复权
@@ -342,22 +353,24 @@ def _fetch_baostock_data(symbol, start_date, end_date, data_days, **kwargs):
         
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
+        
         logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
         return df
     
     except Exception as e:
-        # 确保登出
+        # 记录详细错误
+        logger.error(f"Baostock获取失败: {str(e)}", exc_info=True)
         try:
+            # 确保登出
             import baostock as bs
             bs.logout()
             _baostock_logged_in = False
             logger.info("Baostock已登出")
         except:
             pass
-        logger.error(f"Baostock获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"Baostock获取失败: {str(e)}")
 
-def _fetch_tencent_data(symbol, start_date, end_date, data_days, **kwargs):
+def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装腾讯财经的API调用（直接URL）"""
     logger = logging.getLogger("StockCrawler")
     
@@ -422,7 +435,7 @@ def _fetch_tencent_data(symbol, start_date, end_date, data_days, **kwargs):
         logger.error(f"腾讯财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"腾讯财经数据获取失败: {str(e)}")
 
-def _fetch_sina_data(symbol, start_date, end_date, data_days, **kwargs):
+def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装新浪财经的API调用（直接URL）"""
     logger = logging.getLogger("StockCrawler")
     
@@ -437,7 +450,7 @@ def _fetch_sina_data(symbol, start_date, end_date, data_days, **kwargs):
             sina_code = f"bj{symbol}"
         
         # 构建URL
-        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen={data_days}"
+        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen=500"
         
         logger.info(f"访问新浪财经API: {URL}")
         
@@ -450,6 +463,7 @@ def _fetch_sina_data(symbol, start_date, end_date, data_days, **kwargs):
         # 解析JSON
         data = json.loads(response.text)
         
+        # 检查数据有效性
         if not data:
             logger.error("新浪财经返回空数据")
             raise ValueError("新浪财经返回空数据")
@@ -479,7 +493,7 @@ def _fetch_sina_data(symbol, start_date, end_date, data_days, **kwargs):
         logger.error(f"新浪财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"新浪财经数据获取失败: {str(e)}")
 
-def _fetch_yfinance_data(symbol, start_date, end_date, data_days, **kwargs):
+def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
     """封装Yahoo Finance的API调用"""
     # 转换A股代码格式
     yf_symbol = symbol
@@ -504,7 +518,7 @@ def _fetch_yfinance_data(symbol, start_date, end_date, data_days, **kwargs):
     except Exception as e:
         raise ValueError(f"Yahoo Finance请求失败: {str(e)}")
 
-def _standardize_data(df, source_type, stock_code, logger):
+def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
     """标准化为统一数据格式"""
     # 根据数据源类型处理
     if source_type == "baostock":
@@ -604,7 +618,7 @@ def _standardize_data(df, source_type, stock_code, logger):
     # 确保所有必要列存在
     return df[[col for col in required_cols if col in df.columns] + ["股票代码"]]
 
-def _standardize_existing_data(df, logger):
+def _standardize_existing_data(df: pd.DataFrame, logger) -> pd.DataFrame:
     """标准化已有数据格式"""
     # 确保日期列
     if '日期' not in df.columns:

@@ -778,7 +778,7 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     
     # 确保股票代码格式正确
     if '股票代码' in df.columns:
-        df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
+        df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x), logger))
     
     # 确保股票名称存在
     if '股票名称' not in df.columns:
@@ -823,11 +823,12 @@ def _standardize_existing_data(df: pd.DataFrame, logger) -> pd.DataFrame:
     
     return df
 
-def format_stock_code(code):
+def format_stock_code(code, logger=None):
     """
     规范化股票代码为6位字符串格式
     Args:
         code: 股票代码（可能包含前缀或非6位）
+        logger: 可选的logger实例
     Returns:
         str: 规范化的6位股票代码
     """
@@ -851,7 +852,8 @@ def format_stock_code(code):
     
     # 验证格式
     if not code_str.isdigit() or len(code_str) != 6:
-        logger.warning(f"股票代码格式化失败: {code_str}")
+        if logger:
+            logger.warning(f"股票代码格式化失败: {code_str}")
         return None
     
     return code_str

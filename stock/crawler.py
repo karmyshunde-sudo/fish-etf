@@ -679,10 +679,12 @@ def update_all_stocks_daily_data():
             logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
             # 逐个提交文件
             for file_path in file_paths:
-                commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-                commit_files_in_batches(file_path, commit_msg)
-            logger.info(f"✅ 批量提交成功：{len(file_paths)}只股票")
+                if os.path.exists(file_path):
+                    commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    # 使用"LAST_FILE"参数强制提交
+                    commit_files_in_batches(file_path, "LAST_FILE")
             
+            logger.info(f"✅ 批量提交成功：{len(file_paths)}只股票")
             # 清空文件路径列表
             file_paths = []
     
@@ -693,8 +695,10 @@ def update_all_stocks_daily_data():
     if file_paths:
         logger.info(f"提交剩余的 {len(file_paths)} 只股票日线数据...")
         for file_path in file_paths:
-            commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-            commit_files_in_batches(file_path, commit_msg)
+            if os.path.exists(file_path):
+                commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                # 使用"LAST_FILE"参数强制提交
+                commit_files_in_batches(file_path, "LAST_FILE")
     
     # 然后强制提交剩余文件
     if not force_commit_remaining_files():
@@ -740,6 +744,17 @@ def main():
     
     # 3. 【关键修复】确保最后所有剩余文件都被提交
     logger.info("执行最终兜底提交...")
+    # 确保所有文件都在暂存区
+    try:
+        import subprocess
+        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        subprocess.run(['git', 'add', DAILY_DIR], 
+                     check=True, cwd=repo_root)
+        logger.debug(f"已添加所有股票数据文件到暂存区: {DAILY_DIR}")
+    except Exception as e:
+        logger.error(f"添加所有股票数据文件到暂存区失败: {str(e)}")
+    
+    # 强制提交所有剩余文件
     if force_commit_remaining_files():
         logger.info("✅ 最终兜底提交成功")
     else:

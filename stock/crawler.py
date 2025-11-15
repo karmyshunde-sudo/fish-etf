@@ -442,7 +442,7 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         stock_code = format_stock_code(stock_code)
         if not stock_code:
             logger.error(f"无法保存：股票代码格式化失败")
-            return
+            return None
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         
@@ -663,17 +663,25 @@ def update_all_stocks_daily_data():
             file_path = save_stock_daily_data(stock_code, df)
             if file_path:
                 file_paths.append(file_path)
+                # 【关键修复】立即添加到Git暂存区
+                try:
+                    import subprocess
+                    repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+                    relative_path = os.path.relpath(file_path, repo_root)
+                    subprocess.run(['git', 'add', relative_path], 
+                                 check=True, cwd=repo_root)
+                    logger.debug(f"文件已添加到暂存区: {relative_path}")
+                except Exception as e:
+                    logger.error(f"添加文件到暂存区失败: {str(e)}")
         
         # 【关键修复】每处理MINOR_BATCH_SIZE只股票就提交一次
         if (i + 1) % MINOR_BATCH_SIZE == 0 and file_paths:
             logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
-            # 构建要提交的文件列表
-            commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-            success = commit_files_in_batches(file_paths, commit_msg)
-            if success:
-                logger.info(f"✅ 批量提交成功：{len(file_paths)}只股票")
-            else:
-                logger.error("❌ 批量提交失败")
+            # 逐个提交文件
+            for file_path in file_paths:
+                commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                commit_files_in_batches(file_path, commit_msg)
+            logger.info(f"✅ 批量提交成功：{len(file_paths)}只股票")
             
             # 清空文件路径列表
             file_paths = []
@@ -684,11 +692,15 @@ def update_all_stocks_daily_data():
     # 首先提交所有剩余的股票数据文件
     if file_paths:
         logger.info(f"提交剩余的 {len(file_paths)} 只股票日线数据...")
-        commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_files_in_batches(file_paths, commit_msg)
+        for file_path in file_paths:
+            commit_msg = f"feat: 保存股票 {os.path.basename(file_path).replace('.csv', '')} 日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            commit_files_in_batches(file_path, commit_msg)
     
-    # 然后提交基础信息文件
-    force_commit_remaining_files()
+    # 然后强制提交剩余文件
+    if not force_commit_remaining_files():
+        logger.error("强制提交剩余文件失败，可能导致数据丢失")
+    else:
+        logger.info("✅ 强制提交剩余文件成功")
     
     # 【关键修复】更新 next_crawl_index
     new_index = actual_end_idx

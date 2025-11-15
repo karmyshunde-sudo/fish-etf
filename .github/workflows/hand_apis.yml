@@ -1,4 +1,4 @@
-name: 5-用159915测试API
+name: 5-API测试ak和bao
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +8,7 @@ on:
         type: choice
         options:
           - 'test_etf_apis'
+          - 'get_baostock_info'  # 新增任务选项
 
 jobs:
   # ========================
@@ -89,4 +90,94 @@ jobs:
           else
             curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
               -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【ETF API测试】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi
+
+  # ========================
+  # 新增任务：获取Baostock股票数据
+  # ========================
+  get-baostock-info:
+    name: 获取Baostock股票数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'get_baostock_info'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 安装依赖包
+        run: |
+          echo "当前工作目录: $(pwd)"
+          # 检查 requirements.txt 是否存在
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install --upgrade pip
+            pip install -r requirements.txt --no-cache-dir
+            
+            # 验证 baostock 是否安装成功
+            if ! python -c "import baostock; print('baostock 版本:', baostock.__version__)"; then
+              echo "❌ baostock 未正确安装，尝试单独安装..."
+              pip install baostock
+            fi
+            # 再次验证
+            if ! python -c "import baostock"; then
+              echo "❌ baostock 安装失败"
+              exit 1
+            fi
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la
+            exit 1
+          fi
+      
+      - name: 运行Baostock数据获取脚本
+        run: |
+          echo "运行Baostock数据获取脚本..."
+          python data_crawler/get_baostock_info.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 保存数据到缓存（可选）
+        uses: actions/cache@v3
+        if: success()
+        with:
+          path: data/baostock/
+          key: baostock-data-${{ github.sha }}
+      
+      - name: 发送完成通知
+        if: success()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          MSG="✅ 【Baostock数据获取】已完成"
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$MSG\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi
+      
+      - name: 发送失败通知
+        if: failure()
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          if [ -z "$WECOM_WEBHOOK" ]; then
+            echo "⚠️ WECOM_WEBHOOK 环境变量未设置，跳过发送通知"
+          else
+            curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"❌ 【Baostock数据获取】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
           fi

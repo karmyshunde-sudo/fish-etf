@@ -9,6 +9,7 @@ import requests
 import json
 import logging
 from datetime import datetime, timedelta
+import baostock as bs  # 在文件开头正确导入 baostock
 
 # ===== 全局配置 =====
 # 最小数据量（至少获取7天数据）
@@ -71,8 +72,6 @@ def get_stock_daily_data_from_sources(stock_code: str,
         days_diff = (end_date - start_date).days + 1
         data_days = max(MIN_DATA_DAYS, min(MAX_DATA_DAYS, days_diff))
         
-        # ... (其余代码保持不变) ...
-
         # ===== 2. 定义真正的多数据源配置 =====
         DATA_SOURCES = [
             # 数据源0：Baostock（最高优先级）
@@ -305,7 +304,6 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
     logger = logging.getLogger("StockCrawler")
     
     try:
-        import baostock as bs
         logger.info(f"尝试使用Baostock获取 {symbol} 数据（日期范围: {start_date} 到 {end_date}）")
         
         # 检查登录状态
@@ -366,14 +364,7 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
         return df
     
     except Exception as e:
-        # 确保登出
-        try:
-            import baostock as bs
-            bs.logout()
-            _baostock_logged_in = False
-            logger.info("Baostock已登出")
-        except:
-            pass
+        # 不再在此处登出，由主程序负责
         logger.error(f"Baostock获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"Baostock获取失败: {str(e)}")
 

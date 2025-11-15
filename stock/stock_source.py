@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 股票数据源模块 - 完整股票日线数据结构支持
-【2025-11-16：修复股票代码前缀处理问题】
+【2025-11-16：修复数据类型问题，确保数值运算正常】
 - 严格遵循股票日线数据结构：日期、股票代码、开盘、收盘、最高、最低、成交量、成交额、振幅、涨跌幅、涨跌额、换手率、股票名称
-- 正确处理Baostock前缀问题：查询时加前缀，保存时去前缀
+- 完整数据列映射与计算逻辑
 - 多数据源兼容处理
+- 修复数值类型转换问题
 """
 
 import time
@@ -54,7 +55,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
     获取单只股票的日线数据，使用智能多数据源轮换策略
     
     Args:
-        stock_code: 6位股票代码（不含前缀）
+        stock_code: 6位股票代码
         start_date: 数据起始日期
         end_date: 数据结束日期
         existing_data: 已有数据（用于增量更新）
@@ -248,6 +249,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                         symbol=stock_code,
                         start_date=start_date_str,
                         end_date=end_date_str,
+                        data_days=data_days,
                         **interface["params"]
                     )
                 else:
@@ -301,9 +303,9 @@ def get_stock_daily_data_from_sources(stock_code: str,
         result_df["日期"] = pd.to_datetime(result_df["日期"], errors='coerce')
         result_df = result_df.sort_values('日期').reset_index(drop=True)
         
-        # 确保数值列
+        # 【关键修复】在进行任何计算前，确保所有数值列是数值类型
         numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "振幅", 
-                         "涨跌幅", "涨跌额", "换手率"]
+                          "涨跌幅", "涨跌额", "换手率"]
         for col in numeric_columns:
             if col in result_df.columns:
                 result_df[col] = pd.to_numeric(result_df[col], errors='coerce')
@@ -332,7 +334,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
         logger.error(f"获取股票 {stock_code} 日线数据时发生异常: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装Baostock的API调用 - 严格遵循官方示例"""
     global _baostock_logged_in
     logger = logging.getLogger("StockCrawler")
@@ -341,9 +343,8 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) 
         import baostock as bs
         logger.info(f"尝试使用Baostock获取 {symbol} 数据（日期范围: {start_date} 到 {end_date}）")
         
-        # 【关键修复】获取A股代码格式 - 在查询前添加前缀
+        # 获取A股代码格式 - 严格遵循官方示例
         bs_code = f"sh.{symbol}" if symbol.startswith('6') else f"sz.{symbol}"
-        logger.debug(f"Baostock查询代码: {bs_code}")
         
         # 尝试登录
         if not _baostock_logged_in:
@@ -359,11 +360,18 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) 
             _baostock_logged_in = True
             logger.info("Baostock登录成功")
         
+        # 计算实际的开始日期
+        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
+        start_date_obj = end_date_obj - timedelta(days=data_days-1)
+        actual_start_date = start_date_obj.strftime("%Y-%m-%d")
+        
+        logger.debug(f"Baostock实际查询日期范围: {actual_start_date} 到 {end_date}")
+        
         # 使用官方示例中的query_history_k_data_plus方法
         rs = bs.query_history_k_data_plus(
-            code=bs_code,  # 使用带前缀的代码进行查询
+            code=bs_code,
             fields="date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",
-            start_date=start_date,
+            start_date=actual_start_date,
             end_date=end_date,
             frequency="d",  # 日线
             adjustflag="3"  # 不复权
@@ -386,11 +394,6 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) 
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
         
-        # 【关键修复】处理股票代码 - 移除前缀，只保留6位代码
-        if 'code' in df.columns:
-            # 移除前缀，只保留6位股票代码
-            df['code'] = df['code'].apply(lambda x: str(x)[3:] if str(x).startswith(('sh.', 'sz.')) else str(x))
-        
         logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
         return df
     
@@ -407,7 +410,7 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, **kwargs) 
             pass
         raise ValueError(f"Baostock获取失败: {str(e)}")
 
-def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装腾讯财经的API调用（直接URL）"""
     logger = logging.getLogger("StockCrawler")
     
@@ -472,7 +475,7 @@ def _fetch_tencent_data(symbol: str, start_date: str, end_date: str, **kwargs) -
         logger.error(f"腾讯财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"腾讯财经数据获取失败: {str(e)}")
 
-def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_sina_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装新浪财经的API调用（直接URL）"""
     logger = logging.getLogger("StockCrawler")
     
@@ -487,7 +490,7 @@ def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> p
             sina_code = f"bj{symbol}"
         
         # 构建URL
-        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen=500"
+        URL = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=5&datalen={data_days}"
         
         logger.info(f"访问新浪财经API: {URL}")
         
@@ -530,7 +533,7 @@ def _fetch_sina_data(symbol: str, start_date: str, end_date: str, **kwargs) -> p
         logger.error(f"新浪财经数据获取失败: {str(e)}", exc_info=True)
         raise ValueError(f"新浪财经数据获取失败: {str(e)}")
 
-def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) -> pd.DataFrame:
+def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装Yahoo Finance的API调用"""
     # 转换A股代码格式
     yf_symbol = symbol
@@ -557,12 +560,30 @@ def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, **kwargs) 
 
 def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
     """标准化为统一数据格式"""
+    # 定义完整的标准列映射 - 必须与股票日线数据结构完全一致
+    standard_cols = {
+        "date": "日期",
+        "code": "股票代码",
+        "open": "开盘",
+        "close": "收盘",
+        "high": "最高",
+        "low": "最低",
+        "volume": "成交量",
+        "amount": "成交额",
+        "pctChg": "涨跌幅",
+        "turn": "换手率",
+        "preclose": "前收盘",
+        "name": "股票名称",
+        "amplitude": "振幅",
+        "change": "涨跌额"
+    }
+    
     # 根据数据源类型处理
     if source_type == "baostock":
         # Baostock处理 - 严格映射所有列
         df = df.rename(columns={
             "date": "日期",
-            "code": "股票代码",  # 这里code已经是6位格式
+            "code": "股票代码",
             "open": "开盘",
             "high": "最高",
             "low": "最低",
@@ -574,6 +595,13 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "preclose": "前收盘",
             "name": "股票名称"
         })
+        
+        # 【关键修复】在计算前先确保所有数值列是数值类型
+        # Baostock返回的数据列默认为字符串类型，必须先转换
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "前收盘", "涨跌幅", "换手率"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 计算振幅 (最高价-最低价)/前收盘价*100
         if '前收盘' in df.columns and '最高' in df.columns and '最低' in df.columns:
@@ -603,6 +631,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         })
         df["成交额"] = np.nan  # 腾讯财经不提供成交额
         
+        # 先转换数值列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         # 计算涨跌幅、振幅等
         if '收盘' in df.columns and '开盘' in df.columns:
             df['涨跌幅'] = (df['收盘'] - df['开盘']) / df['开盘'] * 100
@@ -626,6 +660,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "volume": "成交量"
         })
         df["成交额"] = np.nan  # 新浪财经不提供成交额
+        
+        # 先转换数值列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 计算涨跌幅、振幅等
         if '收盘' in df.columns and '开盘' in df.columns:
@@ -651,6 +691,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
                 "open": "open", "close": "close", "high": "high", "low": "low",
                 "volume": "volume", "amount": "amount"
             })
+        
+        # 先转换数值列
+        numeric_cols = ["open", "high", "low", "close", "volume", "amount"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
     
     elif source_type == "yfinance":
         # Yahoo Finance处理
@@ -660,6 +706,12 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         })
         if "成交额" not in df.columns:
             df["成交额"] = df["收盘"] * df["成交量"]
+        
+        # 先转换数值列
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 计算涨跌幅等
         df = df.sort_values('Date')
@@ -679,41 +731,17 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         else:
             df["日期"] = pd.to_datetime(df.index).strftime("%Y-%m-%d")
     
-    # 不再过滤日期，只确保日期列是datetime类型
-    if "日期" in df.columns:
-        df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
-        df = df.sort_values('日期').reset_index(drop=True)
-    
     # 重命名列
-    standard_cols = {
-        "date": "日期",
-        "open": "开盘",
-        "high": "最高",
-        "low": "最低",
-        "close": "收盘",
-        "volume": "成交量",
-        "amount": "成交额"
-    }
     for src, dst in standard_cols.items():
         if src in df.columns:
             df[dst] = df[src]
     
     # 补充必要列
-    required_columns = [
-        "日期", "股票代码", "开盘", "收盘", "最高", "最低", 
-        "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "股票名称"
-    ]
-    for col in required_columns:
+    required_cols = ["日期", "股票代码", "开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+    for col in required_cols:
         if col not in df.columns:
             df[col] = np.nan
             logger.debug(f"补充缺失列: {col}")
-    
-    # 【关键修复】确保股票代码列始终为6位格式
-    if '股票代码' in df.columns:
-        df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
-    else:
-        # 如果没有股票代码列，添加它
-        df['股票代码'] = stock_code
     
     # 计算缺失的列
     if '振幅' not in df.columns and '前收盘' in df.columns and '最高' in df.columns and '最低' in df.columns:
@@ -725,6 +753,10 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     if '涨跌额' not in df.columns and '前收盘' in df.columns and '收盘' in df.columns:
         df['涨跌额'] = df['收盘'] - df['前收盘']
     
+    # 确保股票代码格式正确
+    if '股票代码' in df.columns:
+        df['股票代码'] = df['股票代码'].apply(lambda x: format_stock_code(str(x)))
+    
     # 确保股票名称存在
     if '股票名称' not in df.columns:
         df['股票名称'] = get_stock_name(stock_code)
@@ -734,7 +766,8 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
         df = df.sort_values('日期').reset_index(drop=True)
     
-    # 确保数值列
+    # 【关键修复】在函数结束前再次确保所有数值列是数值类型
+    # 这是防止计算后产生的数据类型问题
     numeric_columns = ["开盘", "最高", "最低", "收盘", "成交量", "成交额", "振幅", 
                       "涨跌幅", "涨跌额", "换手率"]
     for col in numeric_columns:
@@ -742,7 +775,7 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
     # 确保所有必要列存在
-    return df[required_columns]
+    return df[[col for col in required_cols if col in df.columns] + ["股票代码"]]
 
 def _standardize_existing_data(df: pd.DataFrame, logger) -> pd.DataFrame:
     """标准化已有数据格式"""
@@ -781,7 +814,7 @@ def format_stock_code(code):
     Args:
         code: 股票代码（可能包含前缀或非6位）
     Returns:
-        str: 规范化的6位股票代码（不含前缀）
+        str: 规范化的6位股票代码
     """
     # 转换为字符串
     code_str = str(code).strip().lower()

@@ -474,8 +474,9 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
             # 确保父目录存在
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             # 添加文件到暂存区
-            cmd = f"git add \"{file_path}\""
-            os.system(cmd)
+            #cmd = f"git add \"{file_path}\""
+            #os.system(cmd)
+            os.system("git add data/daily/*.csv")
             logger.debug(f"✅ 文件已添加到Git暂存区: {file_path}")
         except Exception as e:
             logger.error(f"❌ 添加文件到Git暂存区失败: {str(e)}")

@@ -18,7 +18,6 @@ import time
 import random
 import json
 from datetime import datetime, timedelta, date
-import subprocess  # 新增：用于直接执行git命令
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
 from utils.git_utils import commit_files_in_batches, force_commit_remaining_files
@@ -46,159 +45,6 @@ os.makedirs(LOG_DIR, exist_ok=True)
 BATCH_SIZE = 8  # 可根据需要调整为100、150、200等
 MINOR_BATCH_SIZE = 10  # 每10只股票提交一次
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-# ===== 新增：Git冲突处理函数 =====
-def handle_git_conflicts(repo_root):
-    """处理Git冲突，不依赖git_utils内部实现"""
-    try:
-        # 检查是否存在冲突
-        status_cmd = ['git', 'status', '--porcelain']
-        status_result = subprocess.run(
-            status_cmd,
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-            check=True
-        )
-        
-        # 如果检测到unmerged paths（UU开头）或不能pull with rebase的问题
-        if "UU" in status_result.stdout or "cannot pull with rebase" in status_result.stdout:
-            logger.warning("检测到Git冲突，正在处理...")
-            
-            # 方案1：尝试重置并清理工作区
-            try:
-                logger.info("尝试重置工作区...")
-                subprocess.run(['git', 'reset', '--hard'], cwd=repo_root, check=True)
-                subprocess.run(['git', 'clean', '-fd'], cwd=repo_root, check=True)
-                logger.info("✅ 工作区已重置")
-                return True
-            except subprocess.CalledProcessError as e1:
-                logger.error(f"重置工作区失败: {str(e1)}")
-            
-            # 方案2：尝试stash和pop
-            try:
-                logger.info("尝试stash保存更改...")
-                subprocess.run(['git', 'stash', 'push', '-m', 'auto-stash-before-conflict-resolution'], 
-                              cwd=repo_root, check=True)
-                logger.info("✅ 更改已暂存，尝试拉取最新代码")
-                
-                # 拉取最新代码
-                subprocess.run(['git', 'pull', 'origin', 'main', '--no-rebase'], 
-                              cwd=repo_root, check=True)
-                
-                # 尝试恢复暂存
-                try:
-                    logger.info("尝试恢复暂存的更改...")
-                    subprocess.run(['git', 'stash', 'pop'], cwd=repo_root, check=True)
-                    logger.info("✅ 暂存的更改已成功恢复")
-                    return True
-                except subprocess.CalledProcessError as e2:
-                    logger.warning(f"恢复暂存更改失败: {str(e2)}")
-                    # 强制删除暂存
-                    subprocess.run(['git', 'stash', 'drop'], cwd=repo_root, check=False)
-                    logger.info("⚠️ 已丢弃暂存的更改")
-            except subprocess.CalledProcessError as e3:
-                logger.error(f"stash处理失败: {str(e3)}")
-            
-            # 方案3：强制接受远程更改
-            try:
-                logger.warning("强制接受远程更改...")
-                subprocess.run(['git', 'fetch', 'origin'], cwd=repo_root, check=True)
-                subprocess.run(['git', 'reset', '--hard', 'origin/main'], cwd=repo_root, check=True)
-                logger.info("✅ 已强制同步到远程仓库")
-                return True
-            except subprocess.CalledProcessError as e4:
-                logger.error(f"强制同步失败: {str(e4)}")
-        
-        return True
-    except Exception as e:
-        logger.error(f"处理Git冲突时发生异常: {str(e)}", exc_info=True)
-        return False
-
-# ===== 新增：验证文件是否真正提交 =====
-def verify_file_commit(file_path):
-    """验证文件是否成功提交到远程仓库"""
-    try:
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        relative_path = os.path.relpath(file_path, repo_root)
-        
-        # 检查文件是否在暂存区
-        diff_cached = subprocess.run(
-            ['git', 'diff', '--cached', '--name-only', relative_path],
-            capture_output=True,
-            text=True,
-            cwd=repo_root
-        )
-        
-        if diff_cached.stdout.strip():
-            logger.warning(f"文件 {relative_path} 仍在暂存区，未提交成功")
-            return False
-        
-        # 检查文件是否在最近一次提交中
-        log_check = subprocess.run(
-            ['git', 'log', '-1', '--name-only', '--pretty=format:', '--', relative_path],
-            capture_output=True,
-            text=True,
-            cwd=repo_root
-        )
-        
-        if not log_check.stdout.strip():
-            logger.warning(f"文件 {relative_path} 不在最近提交中")
-            return False
-        
-        logger.info(f"✅ 文件 {relative_path} 已成功提交")
-        return True
-    except Exception as e:
-        logger.error(f"验证文件提交状态失败: {str(e)}")
-        return False
-
-# ===== 新增：增强版提交函数 =====
-def commit_batch_files(file_paths, commit_message):
-    """增强版批量提交函数，包含详细结果日志"""
-    try:
-        # 1. 处理Git冲突
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
-        if not handle_git_conflicts(repo_root):
-            logger.error("❌ Git冲突处理失败，无法继续提交")
-            return False
-        
-        # 2. 添加文件到暂存区
-        for file_path in file_paths:
-            if os.path.exists(file_path):
-                relative_path = os.path.relpath(file_path, repo_root)
-                try:
-                    subprocess.run(['git', 'add', relative_path], cwd=repo_root, check=True)
-                    logger.debug(f"✅ 文件已添加到暂存区: {relative_path}")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"❌ 添加文件失败 {relative_path}: {str(e)}")
-        
-        # 3. 执行提交
-        logger.info(f"📤 开始提交: {commit_message}")
-        commit_success = commit_files_in_batches(file_paths, commit_message)
-        
-        # 4. 详细记录提交结果
-        if commit_success:
-            logger.info(f"✅ 批量提交成功: {len(file_paths)} 个文件")
-            # 验证每个文件是否真正提交
-            all_verified = True
-            for file_path in file_paths:
-                if not verify_file_commit(file_path):
-                    all_verified = False
-                    logger.warning(f"⚠️ 文件提交验证失败: {os.path.basename(file_path)}")
-            
-            if all_verified:
-                logger.info("✅ 所有文件提交验证通过")
-            else:
-                logger.warning("⚠️ 部分文件提交验证失败")
-            
-            return True
-        else:
-            logger.error(f"❌ 批量提交失败: {len(file_paths)} 个文件")
-            return False
-            
-    except Exception as e:
-        logger.error(f"批量提交过程中发生异常: {str(e)}", exc_info=True)
-        return False
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -584,14 +430,14 @@ def fetch_stock_daily_data(stock_code: str) -> pd.DataFrame:
 def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
     """保存股票日线数据到CSV文件，使用中文列名"""
     if df.empty:
-        return
+        return None
     
     try:
         # 【关键修复】确保股票代码是6位（前面补零）
         stock_code = format_stock_code(stock_code)
         if not stock_code:
             logger.error(f"无法保存：股票代码格式化失败")
-            return
+            return None
         
         file_path = os.path.join(DAILY_DIR, f"{stock_code}.csv")
         
@@ -617,14 +463,18 @@ def save_stock_daily_data(stock_code: str, df: pd.DataFrame):
         
         logger.debug(f"已保存股票 {stock_code} 的日线数据到 {file_path}")
         
-        # 【新增】立即执行 git add，将文件加入暂存区
-        repo_root = os.environ.get('GITHUB_WORKSPACE', os.getcwd())
+        # 【关键修复】严格遵循ETF成功模式 - 简单有效的git add
         try:
-            relative_path = os.path.relpath(file_path, repo_root)
-            subprocess.run(['git', 'add', relative_path], cwd=repo_root, check=True)
-            logger.debug(f"✅ 文件已添加到Git暂存区: {relative_path}")
+            # 使用通配符添加所有股票数据文件
+            cmd = f'git add "{DAILY_DIR}/*.csv"'
+            logger.debug(f"执行Git命令: {cmd}")
+            result = os.system(cmd)
+            if result == 0:
+                logger.debug(f"✅ 所有股票数据文件已添加到Git暂存区: {DAILY_DIR}/*.csv")
+            else:
+                logger.error(f"❌ 添加股票数据文件到Git暂存区失败，返回码: {result}")
         except Exception as e:
-            logger.error(f"❌ 添加文件到Git暂存区失败: {str(e)}")
+            logger.error(f"❌ 添加股票数据文件到Git暂存区失败: {str(e)}")
         
         return file_path
         
@@ -794,10 +644,10 @@ def update_all_stocks_daily_data():
         logger.warning("没有可爬取的股票")
         return False
     
-    # 文件路径缓存
-    file_paths = []
+    # 【关键修复】跟踪已处理股票数量，确保每10个提交一次
+    processed_count = 0
+    file_paths = []  # 存储文件路径用于批量提交
     
-    # 处理这批股票
     for i, stock_code in enumerate(batch_codes):
         # 【关键修复】确保股票代码是6位
         stock_code = format_stock_code(stock_code)
@@ -811,45 +661,48 @@ def update_all_stocks_daily_data():
             file_path = save_stock_daily_data(stock_code, df)
             if file_path:
                 file_paths.append(file_path)
-        
-        # 【关键修复】每处理10个股票就检查一次提交状态
-        if (i + 1) % MINOR_BATCH_SIZE == 0 and file_paths:
-            logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
+            processed_count += 1
             
-            # 构建要提交的文件列表
-            commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-            commit_success = commit_batch_files(file_paths, commit_msg)  # 使用增强版提交函数
-            
-            if commit_success:
-                logger.info(f"✅ 小批次数据文件提交成功：{len(file_paths)}只")
-            else:
-                logger.error(f"❌ 小批次数据文件提交失败：{len(file_paths)}只")
-            
-            # 清空文件路径列表
-            file_paths = []
+            # 【关键修复】按ETF成功模式，每10只股票提交一次
+            if (i + 1) % MINOR_BATCH_SIZE == 0 and file_paths:
+                logger.info(f"批量提交 {len(file_paths)} 只股票日线数据...")
+                
+                # 提交数据文件
+                commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                logger.info(f"提交数据文件: {commit_msg}")
+                commit_success = commit_files_in_batches(file_paths, commit_msg)
+                
+                if commit_success:
+                    logger.info(f"✅ 小批次数据文件提交成功：{len(file_paths)}只")
+                else:
+                    logger.error(f"❌ 小批次数据文件提交失败：{len(file_paths)}只")
+                
+                # 清空文件路径列表
+                file_paths = []
     
-    # 【关键修复】处理完本批次后，确保提交任何剩余文件
+    # 处理完本批次后，确保提交任何剩余文件
     logger.info(f"处理完本批次后，检查并提交任何剩余文件...")
     
     # 提交剩余文件
     if file_paths:
         logger.info(f"批量提交剩余 {len(file_paths)} 只股票日线数据...")
         
-        # 构建要提交的文件列表
+        # 提交数据文件
         commit_msg = f"feat: 批量提交{len(file_paths)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        commit_success = commit_batch_files(file_paths, commit_msg)  # 使用增强版提交函数
+        logger.info(f"提交数据文件: {commit_msg}")
+        commit_success = commit_files_in_batches(file_paths, commit_msg)
         
         if commit_success:
             logger.info(f"✅ 剩余股票数据文件提交成功：{len(file_paths)}只")
         else:
             logger.error(f"❌ 剩余股票数据文件提交失败：{len(file_paths)}只")
     
-    # 【关键修复】处理完本批次后，确保提交任何剩余文件
-    logger.info(f"处理完本批次后，强制提交所有剩余文件...")
+    # 【关键修复】兜底提交 - 按ETF成功模式
+    logger.info("执行最终兜底提交...")
     if force_commit_remaining_files():
-        logger.info("✅ 强制提交剩余文件成功")
+        logger.info("✅ 最终兜底提交成功")
     else:
-        logger.error("❌ 强制提交剩余文件失败")
+        logger.error("❌ 最终兜底提交失败")
     
     # 【关键修复】更新 next_crawl_index
     new_index = actual_end_idx
@@ -857,9 +710,10 @@ def update_all_stocks_daily_data():
     basic_info_df["next_crawl_index"] = new_index
     basic_info_df.to_csv(BASIC_INFO_FILE, index=False)
     
-    # 提交更新后的基础信息文件
+    # 【关键修复】提交基础信息文件 - 按ETF成功模式
     commit_msg = f"更新股票基础信息 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-    commit_success = commit_batch_files([BASIC_INFO_FILE], commit_msg)  # 使用增强版提交函数
+    logger.info(f"提交基础信息文件: {commit_msg}")
+    commit_success = commit_files_in_batches(BASIC_INFO_FILE, commit_msg)
     
     if commit_success:
         logger.info(f"✅ 已提交更新后的基础信息文件到仓库: {BASIC_INFO_FILE}")

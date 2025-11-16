@@ -397,14 +397,14 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
         df = pd.DataFrame(data_list, columns=rs.fields)
 
         # ====== 关键修复：添加原始数据日志 ======
-        logger.info(f"Baostock原始数据 ({len(data_list)}条):")
-        if not df.empty:
-            logger.info(f"  【原始数据】第一行: {df.iloc[0].to_dict()}")
+        logger.info(f"Baostock获取成功，原始数据 ({len(data_list)}条):")
+        #if not df.empty:
+        #    logger.info(f"  【原始数据】第一行: {df.iloc[0].to_dict()}")
         
         #for i, row in df.head().iterrows():
         #    logger.info(f"  原始数据行 {i+1}: {row.to_dict()}")
         
-        logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
+        #logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
         return df
     
     except Exception as e:
@@ -571,9 +571,9 @@ def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, data_days:
 def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
     
     # ========= 1、先打印返回的原始数据【添加标准化前数据日志】 =============
-    logger.info(f"标准化前数据 ({len(df)}条):")
-    if not df.empty:
-        logger.info(f"  【标准化前】第1行数据: {df.iloc[0].to_dict()}")
+    #logger.info(f"标准化前数据 ({len(df)}条):")
+    #if not df.empty:
+    #    logger.info(f"  【标准化前】第1行数据: {df.iloc[0].to_dict()}")
     
     # ========= 1、先打印返回的原始数据【添加标准化前数据日志】 =============
     #logger.info(f"标准化前数据 ({len(df)}条):")
@@ -875,9 +875,9 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         df = df.sort_values('日期').reset_index(drop=True)
     
     # ====== 8、打印处理之后的数据【添加标准化后数据日志】 ======
-    logger.info(f"标准化后数据 ({len(df)}条):")
-    if not df.empty:
-        logger.info(f"  【标准化后】第1行数据: {df.iloc[0].to_dict()}")
+    #logger.info(f"标准化后数据 ({len(df)}条):")
+    #if not df.empty:
+    #    logger.info(f"  【标准化后】第1行数据: {df.iloc[0].to_dict()}")
     
     #for i, row in df.head().iterrows():
     #    logger.info(f"  标准化后行 {i+1}: {row.to_dict()}")

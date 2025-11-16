@@ -803,8 +803,8 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         df = df.sort_values('日期').reset_index(drop=True)
 
     # ====== 8、打印处理之后的数据【添加标准化后数据日志】 ======
-    logger.info(f"标准化后数据 ({len(result_df)}条):")
-    for i, row in result_df.head().iterrows():
+    logger.info(f"标准化后数据 ({len(df)}条):")
+    for i, row in df.head().iterrows():
         logger.info(f"  标准化后行 {i+1}: {row.to_dict()}")
     
     # 确保所有必要列存在

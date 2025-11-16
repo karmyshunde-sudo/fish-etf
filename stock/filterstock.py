@@ -35,7 +35,7 @@ from utils.git_utils import commit_files_in_batches
 logger = logging.getLogger(__name__)
 
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
-BATCH_SIZE = 100  # 每次处理的股票数量
+BATCH_SIZE = 400  # 每次处理的股票数量
 
 # 财务指标过滤参数配置（保留动态市盈率大于等于0.1的股票）（保留净利润正的股票）
 FINANCIAL_FILTER_PARAMS = {

@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 新版通用Git工具模块
-【完全通用设计 - 不包含任何硬编码路径】
+【修复Git重置问题 - 完全通用设计】
+- 解决Git重置导致文件丢失问题
 - 支持任意目录的文件提交
-- 支持单个文件、小批次、剩余文件提交
 - 完全解耦，可被任何模块调用
 - 线程安全，错误处理完善
 """
@@ -118,7 +118,7 @@ def verify_git_file_content(file_path):
 
 def safe_git_commit_files(file_paths, commit_message, max_retries=3):
     """
-    通用的安全Git提交函数
+    通用的安全Git提交函数 - 修复重置问题
     
     Args:
         file_paths: 文件路径列表或单个文件路径
@@ -134,6 +134,12 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
     if not isinstance(file_paths, list):
         file_paths = [file_paths]
     
+    # 过滤掉不存在的文件
+    existing_files = [fp for fp in file_paths if fp and os.path.exists(fp)]
+    if not existing_files:
+        logger.warning("❌ 没有存在的文件需要提交")
+        return False
+    
     # 获取线程锁，确保Git操作线程安全
     with _git_lock:
         for attempt in range(max_retries):
@@ -145,37 +151,16 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                         continue
                     return False
                 
-                # 2. 清理Git状态
-                logger.info("🔄 清理Git状态...")
-                try:
-                    subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True, cwd=repo_root)
-                    subprocess.run(['git', 'clean', '-fd'], check=True, cwd=repo_root)
-                except Exception as e:
-                    logger.warning(f"Git状态清理警告: {e}")
-                
-                # 3. 拉取最新更改
-                logger.info("🔄 拉取远程更新...")
-                try:
-                    subprocess.run(['git', 'pull', '--rebase'], check=True, cwd=repo_root)
-                except Exception as e:
-                    logger.warning(f"拉取远程更新警告: {e}")
-                
-                # 4. 添加文件到暂存区
-                logger.info(f"📁 添加 {len(file_paths)} 个文件到暂存区...")
-                files_added = False
-                for file_path in file_paths:
-                    if file_path and os.path.exists(file_path):
+                # 2. 添加文件到暂存区（先添加，避免被重置清除）
+                logger.info(f"📁 添加 {len(existing_files)} 个文件到暂存区...")
+                for file_path in existing_files:
+                    try:
                         subprocess.run(['git', 'add', file_path], check=True, cwd=repo_root)
                         logger.debug(f"✅ 已添加: {file_path}")
-                        files_added = True
-                    else:
-                        logger.warning(f"⚠️ 文件不存在: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"添加文件失败 {file_path}: {e}")
                 
-                if not files_added:
-                    logger.info("📝 没有文件需要添加")
-                    return True
-                
-                # 5. 检查是否有变更
+                # 3. 检查是否有变更需要提交
                 result = subprocess.run(
                     ['git', 'diff', '--cached', '--exit-code'], 
                     cwd=repo_root, 
@@ -187,6 +172,28 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.info("📝 没有变更需要提交")
                     return True
                 
+                # 4. 拉取最新更改（使用合并而非rebase，避免冲突）
+                logger.info("🔄 拉取远程更新...")
+                try:
+                    # 先暂存当前更改
+                    subprocess.run(['git', 'stash'], check=True, cwd=repo_root)
+                    # 拉取更新
+                    subprocess.run(['git', 'pull'], check=True, cwd=repo_root)
+                    # 恢复暂存的更改
+                    subprocess.run(['git', 'stash', 'pop'], check=True, cwd=repo_root)
+                except Exception as e:
+                    logger.warning(f"拉取远程更新警告: {e}")
+                    # 如果拉取失败，继续提交
+                
+                # 5. 重新添加文件（解决可能的冲突）
+                logger.info("🔄 重新添加文件到暂存区...")
+                for file_path in existing_files:
+                    if os.path.exists(file_path):
+                        try:
+                            subprocess.run(['git', 'add', file_path], check=True, cwd=repo_root)
+                        except Exception as e:
+                            logger.warning(f"重新添加文件失败 {file_path}: {e}")
+                
                 # 6. 提交
                 logger.info(f"💾 提交更改: {commit_message}")
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
@@ -196,15 +203,17 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                 subprocess.run(['git', 'push'], check=True, cwd=repo_root)
                 
                 # 8. 验证提交
-                for file_path in file_paths:
-                    if file_path and os.path.exists(file_path):
+                success_count = 0
+                for file_path in existing_files:
+                    if os.path.exists(file_path):
                         if verify_git_file_content(file_path):
                             logger.info(f"✅ 文件验证通过: {os.path.basename(file_path)}")
+                            success_count += 1
                         else:
                             logger.warning(f"⚠️ 文件验证警告: {os.path.basename(file_path)}")
                 
-                logger.info("✅ Git提交成功")
-                return True
+                logger.info(f"✅ Git提交成功，验证通过 {success_count}/{len(existing_files)} 个文件")
+                return success_count > 0
                 
             except Exception as e:
                 logger.error(f"Git提交失败 (尝试 {attempt+1}/{max_retries}): {e}")
@@ -212,6 +221,13 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     wait_time = 2 ** attempt
                     logger.info(f"⏳ 将在 {wait_time} 秒后重试...")
                     time.sleep(wait_time)
+                    
+                    # 重试前清理可能的冲突状态
+                    try:
+                        subprocess.run(['git', 'merge', '--abort'], cwd=repo_root)
+                        subprocess.run(['git', 'rebase', '--abort'], cwd=repo_root)
+                    except:
+                        pass
                 else:
                     logger.error("❌ Git提交失败，已达最大重试次数")
                     return False
@@ -232,6 +248,10 @@ def commit_single_file(file_path, commit_message):
         if "[skip ci]" not in commit_message:
             commit_message = f"{commit_message} [skip ci]"
         
+        if not os.path.exists(file_path):
+            logger.error(f"❌ 文件不存在: {file_path}")
+            return False
+            
         logger.info(f"提交单个文件: {os.path.basename(file_path)}")
         return safe_git_commit_files([file_path], commit_message)
     
@@ -255,16 +275,22 @@ def commit_batch_files(file_paths, commit_message=None):
             logger.info("文件列表为空，无需提交")
             return True
         
+        # 过滤存在的文件
+        existing_files = [fp for fp in file_paths if fp and os.path.exists(fp)]
+        if not existing_files:
+            logger.warning("❌ 没有存在的文件需要提交")
+            return False
+        
         # 创建提交消息
         if not commit_message:
-            commit_message = f"feat: 批量提交{len(file_paths)}个文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            commit_message = f"feat: 批量提交{len(existing_files)}个文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
         else:
             # 确保所有自定义提交消息也包含 [skip ci]
             if "[skip ci]" not in commit_message:
                 commit_message = f"{commit_message} [skip ci]"
         
-        logger.info(f"批量提交 {len(file_paths)} 个文件: {commit_message}")
-        return safe_git_commit_files(file_paths, commit_message)
+        logger.info(f"批量提交 {len(existing_files)} 个文件: {commit_message}")
+        return safe_git_commit_files(existing_files, commit_message)
         
     except Exception as e:
         logger.error(f"批量提交文件失败: {str(e)}", exc_info=True)
@@ -286,15 +312,21 @@ def commit_remaining_files(file_paths, commit_message=None):
             logger.info("没有剩余文件需要提交")
             return True
         
+        # 过滤存在的文件
+        existing_files = [fp for fp in file_paths if fp and os.path.exists(fp)]
+        if not existing_files:
+            logger.warning("❌ 没有存在的剩余文件需要提交")
+            return False
+        
         # 创建提交消息
         if not commit_message:
-            commit_message = f"feat: 提交剩余{len(file_paths)}个文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+            commit_message = f"feat: 提交剩余{len(existing_files)}个文件 [skip ci] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
         else:
             if "[skip ci]" not in commit_message:
                 commit_message = f"{commit_message} [skip ci]"
         
-        logger.info(f"提交剩余 {len(file_paths)} 个文件: {commit_message}")
-        return safe_git_commit_files(file_paths, commit_message)
+        logger.info(f"提交剩余 {len(existing_files)} 个文件: {commit_message}")
+        return safe_git_commit_files(existing_files, commit_message)
         
     except Exception as e:
         logger.error(f"提交剩余文件失败: {str(e)}", exc_info=True)

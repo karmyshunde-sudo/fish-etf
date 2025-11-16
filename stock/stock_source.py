@@ -839,19 +839,35 @@ def format_stock_code(code, logger=None):
     if code_str.startswith('.'):
         code_str = code_str[1:]
     
-    # 移除可能的市场前缀
-    if code_str.startswith(('sh', 'sz', 'hk', 'bj')):
+    # 处理"0.601007"格式
+    if code_str.startswith('0.'):
         code_str = code_str[2:]
     
-    # 移除可能的点号（如"0.600022"）
+    # 移除可能的市场前缀
+    if code_str.startswith(('sh', 'sz', 'hk', 'bj')):
+        # 如果前缀后有点，则跳过点
+        if len(code_str) > 2 and code_str[2] == '.':
+            code_str = code_str[3:]
+        else:
+            code_str = code_str[2:]
+    
+    # 如果还有点号，尝试移除
     if '.' in code_str:
-        code_str = code_str.split('.')[1] if code_str.startswith('0.') else code_str
+        # 尝试分割并取最后一部分
+        parts = code_str.split('.')
+        # 如果最后一部分是6位数字，使用它
+        if len(parts[-1]) == 6 and parts[-1].isdigit():
+            code_str = parts[-1]
+        else:
+            # 否则尝试连接所有部分
+            code_str = ''.join(parts)
     
     # 确保是6位数字
     code_str = code_str.zfill(6)
     
     # 验证格式
     if not code_str.isdigit() or len(code_str) != 6:
+        # 仅当logger存在时才记录警告
         if logger:
             logger.warning(f"股票代码格式化失败: {code_str}")
         return None

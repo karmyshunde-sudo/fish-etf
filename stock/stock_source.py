@@ -395,6 +395,11 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
         
         # 创建DataFrame
         df = pd.DataFrame(data_list, columns=rs.fields)
+
+        # ====== 关键修复：添加原始数据日志 ======
+        logger.info(f"Baostock原始数据 ({len(data_list)}条):")
+        for i, row in df.head().iterrows():
+            logger.info(f"  原始数据行 {i+1}: {row.to_dict()}")
         
         logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
         return df
@@ -561,8 +566,15 @@ def _fetch_yfinance_data(symbol: str, start_date: str, end_date: str, data_days:
         raise ValueError(f"Yahoo Finance请求失败: {str(e)}")
 
 def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logger) -> pd.DataFrame:
-    """标准化为统一数据格式"""
+    
+    # ========= 1、先打印返回的原始数据【添加标准化前数据日志】 =============
+    logger.info(f"标准化前数据 ({len(df)}条):")
+    for i, row in df.head().iterrows():
+        logger.info(f"  标准化前行 {i+1}: {row.to_dict()}")
+    
+    # ========= 2、标准化为统一数据格式================================
     # 定义完整的标准列映射 - 必须与股票日线数据结构完全一致
+    
     standard_cols = {
         "date": "日期",
         "code": "股票代码",
@@ -597,6 +609,7 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "preclose": "前收盘",
             "name": "股票名称"
         })
+
         
         # 【关键修复】在计算前先确保所有数值列是数值类型
         # Baostock返回的数据列默认为字符串类型，必须先转换
@@ -788,6 +801,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     if '日期' in df.columns:
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
         df = df.sort_values('日期').reset_index(drop=True)
+
+    # ====== 8、打印处理之后的数据【添加标准化后数据日志】 ======
+    logger.info(f"标准化后数据 ({len(result_df)}条):")
+    for i, row in result_df.head().iterrows():
+        logger.info(f"  标准化后行 {i+1}: {row.to_dict()}")
     
     # 确保所有必要列存在
     return df[required_columns]

@@ -20,7 +20,9 @@ import shutil
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import is_trading_day, get_last_trading_day, get_beijing_time
-from utils.new_git import safe_git_commit_files, verify_git_file_content
+# 修复导入 - 添加缺失的函数
+from utils.new_git import safe_git_commit_files, verify_git_file_content, commit_single_file, commit_batch_files
+# from utils.new_git import safe_git_commit_files, verify_git_file_content
 from stock.all_stocks import update_stock_list
 from stock.stock_source import get_stock_daily_data_from_sources
 

@@ -130,10 +130,16 @@ def save_crawl_progress(next_index: int):
         logger.error(f"❌ 保存股票进度失败: {str(e)}", exc_info=True)
 
 def commit_crawl_progress():
-    """提交进度文件到Git仓库"""
+    """提交进度文件到Git仓库 - 修复版本"""
     try:
+        # 先确保文件存在且有内容
+        if not os.path.exists(BASIC_INFO_FILE) or os.path.getsize(BASIC_INFO_FILE) == 0:
+            logger.error("❌ 进度文件不存在或为空")
+            return False
+            
         commit_message = f"feat: 更新股票爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        success = safe_git_commit_files([BASIC_INFO_FILE], commit_message)
+        success = commit_single_file(BASIC_INFO_FILE, commit_message)
+        
         if success:
             logger.info("✅ 进度文件已提交到Git仓库")
         else:
@@ -145,7 +151,7 @@ def commit_crawl_progress():
 
 def safe_commit_data_files(stock_data_dict):
     """
-    安全提交数据文件
+    安全提交数据文件 - 修复版本
     """
     if not stock_data_dict:
         return True
@@ -154,14 +160,25 @@ def safe_commit_data_files(stock_data_dict):
         # 构建文件路径列表
         file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in stock_data_dict.keys()]
         
+        # 先保存文件，确保文件存在
+        logger.info(f"🔄 正在保存 {len(stock_data_dict)} 个股票数据文件...")
+        saved_count = save_stock_data_batch(stock_data_dict)
+        logger.info(f"✅ 数据文件保存完成: {saved_count} 个文件")
+        
+        # 检查文件是否真的保存了
+        existing_files = [f for f in file_list if os.path.exists(f)]
+        if not existing_files:
+            logger.error("❌ 数据文件保存后不存在，无法提交")
+            return False
+            
         # 提交消息
-        commit_msg = f"feat: 批量提交{len(stock_data_dict)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_msg = f"feat: 批量提交{len(existing_files)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
         
         # 使用安全的Git提交
-        success = safe_git_commit_files(file_list, commit_msg)
+        success = commit_batch_files(existing_files, commit_msg)
         
         if success:
-            logger.info(f"✅ 数据文件提交成功：{len(stock_data_dict)}只")
+            logger.info(f"✅ 数据文件提交成功：{len(existing_files)}只")
         else:
             logger.error("❌ 数据文件提交失败")
             

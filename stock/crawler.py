@@ -142,6 +142,118 @@ def commit_crawl_progress():
         logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
         return False
 
+def safe_git_commit_files(file_paths, commit_message, max_retries=3):
+    """
+    安全的Git提交函数，处理文件路径列表和Git状态问题
+    """
+    try:
+        from utils.git_utils import get_git_repo
+        repo = get_git_repo()
+        
+        for attempt in range(max_retries):
+            try:
+                # 1. 先清理Git状态
+                logger.info("🔄 清理Git状态...")
+                try:
+                    # 重置所有更改
+                    repo.git.reset('--hard', 'HEAD')
+                    # 清理未跟踪文件
+                    repo.git.clean('-fd')
+                except Exception as e:
+                    logger.warning(f"Git状态清理警告: {e}")
+                
+                # 2. 拉取最新更改
+                logger.info("🔄 拉取远程更新...")
+                try:
+                    repo.git.pull('--rebase')
+                except Exception as e:
+                    logger.warning(f"拉取远程更新警告: {e}")
+                
+                # 3. 添加文件到暂存区
+                logger.info(f"📁 添加 {len(file_paths)} 个文件到暂存区...")
+                for file_path in file_paths:
+                    if os.path.exists(file_path):
+                        repo.git.add(file_path)
+                        logger.debug(f"✅ 已添加: {file_path}")
+                    else:
+                        logger.warning(f"⚠️ 文件不存在: {file_path}")
+                
+                # 4. 检查是否有变更
+                if not repo.index.diff("HEAD"):
+                    logger.info("📝 没有变更需要提交")
+                    return True
+                
+                # 5. 提交
+                logger.info(f"💾 提交更改: {commit_message}")
+                repo.index.commit(commit_message)
+                
+                # 6. 推送
+                logger.info("🚀 推送到远程仓库...")
+                origin = repo.remote(name='origin')
+                origin.push()
+                
+                logger.info("✅ Git提交成功")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Git提交失败 (尝试 {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ 将在 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ Git提交失败，已达最大重试次数")
+                    return False
+                    
+    except Exception as e:
+        logger.error(f"❌ 安全Git提交函数异常: {e}")
+        return False
+
+def safe_commit_data_files(stock_data_dict):
+    """
+    安全提交数据文件
+    """
+    if not stock_data_dict:
+        return True
+        
+    try:
+        # 构建文件路径列表
+        file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in stock_data_dict.keys()]
+        
+        # 提交消息
+        commit_msg = f"feat: 批量提交{len(stock_data_dict)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # 使用安全的Git提交
+        success = safe_git_commit_files(file_list, commit_msg)
+        
+        if success:
+            logger.info(f"✅ 数据文件提交成功：{len(stock_data_dict)}只")
+        else:
+            logger.error("❌ 数据文件提交失败")
+            
+        return success
+        
+    except Exception as e:
+        logger.error(f"❌ 提交数据文件异常: {e}")
+        return False
+
+def safe_commit_progress():
+    """
+    安全提交进度文件
+    """
+    try:
+        commit_message = f"feat: 更新股票爬取进度 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        success = safe_git_commit_files([BASIC_INFO_FILE], commit_message)
+        
+        if success:
+            logger.info("✅ 进度文件已提交到Git仓库")
+        else:
+            logger.error("❌ 进度文件提交失败")
+        return success
+    except Exception as e:
+        logger.error(f"❌ 提交进度文件失败: {str(e)}", exc_info=True)
+        return False
+
 def get_all_stock_codes() -> list:
     """获取所有股票代码"""
     try:
@@ -517,15 +629,8 @@ def crawl_all_stocks_daily_data():
                     saved_count = save_stock_data_batch(stock_data_dict)
                     logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个股票数据文件")
                     
-                    # 重新添加：确保数据文件被添加到Git暂存区
-                    os.system("git add data/daily/*.csv")
-                    
-                    # 构建要提交的文件列表
-                    file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in stock_data_dict.keys()]
-                    # 提交数据文件
-                    commit_msg = f"feat: 批量提交{len(stock_data_dict)}只股票日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    logger.info(f"提交数据文件: {commit_msg}")
-                    commit_success = commit_files_in_batches(file_list, commit_msg)
+                    # === 使用新的安全提交函数 ===
+                    commit_success = safe_commit_data_files(stock_data_dict)
                     
                     if commit_success:
                         logger.info(f"✅ 小批次数据文件提交成功：{len(stock_data_dict)}只")
@@ -538,8 +643,8 @@ def crawl_all_stocks_daily_data():
                     save_crawl_progress(new_index)
                     logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
                     
-                    # 提交进度文件
-                    progress_commit_success = commit_crawl_progress()
+                    # === 使用新的安全进度提交函数 ===
+                    progress_commit_success = safe_commit_progress()
                     if progress_commit_success:
                         logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")
                     else:
@@ -577,7 +682,7 @@ def crawl_all_stocks_daily_data():
                 new_index = new_index % total_count
                 logger.error("尝试保存进度以恢复状态...")
                 save_crawl_progress(new_index)
-                commit_crawl_progress()
+                safe_commit_progress()
                 logger.info(f"进度已保存为 {new_index}/{total_count}")
         except Exception as save_error:
             logger.error(f"异常情况下保存进度失败: {str(save_error)}", exc_info=True)

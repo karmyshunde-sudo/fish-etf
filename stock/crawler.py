@@ -490,6 +490,14 @@ def crawl_all_stocks_daily_data():
     """爬取所有股票日线数据"""
     try:
         logger.info("=== 开始执行股票日线数据爬取 ===")
+        
+        # === 修复：在爬虫开始前清理工作区 ===
+        from utils.new_git import clean_git_working_tree, setup_git_environment
+        logger.info("🧹 爬虫开始前清理Git工作区...")
+        setup_git_environment()
+        clean_git_working_tree()
+        # === 修复结束 ===
+        
         beijing_time = get_beijing_time()
         logger.info(f"北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）")
         
@@ -565,7 +573,7 @@ def crawl_all_stocks_daily_data():
                     saved_count = save_stock_data_batch(stock_data_dict)
                     logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个股票数据文件")
                     
-                    # === 使用新的安全提交函数 ===
+                    # === 使用修复后的安全提交 ===
                     commit_success = safe_commit_data_files(stock_data_dict)
                     
                     if commit_success:
@@ -579,7 +587,7 @@ def crawl_all_stocks_daily_data():
                     save_crawl_progress(new_index)
                     logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
                     
-                    # === 使用新的安全进度提交函数 ===
+                    # === 使用修复后的进度提交 ===
                     progress_commit_success = commit_crawl_progress()
                     if progress_commit_success:
                         logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")

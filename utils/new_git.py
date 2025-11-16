@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 新版通用Git工具模块
-【修复Git重置问题 - 完全通用设计】
-- 解决Git重置导致文件丢失问题
-- 支持任意目录的文件提交
-- 完全解耦，可被任何模块调用
+【完全自包含 - 所有Git操作都在此模块处理】
+- 自动处理工作区清理
+- 自动配置Git用户信息
+- 自动处理文件权限和换行符问题
 - 线程安全，错误处理完善
 """
 
@@ -60,6 +60,73 @@ def wait_for_git_unlock(repo_root, max_retries=15, retry_delay=2):
     
     return True
 
+def setup_git_environment():
+    """
+    设置Git环境，解决用户身份和配置问题
+    这个函数在每次Git操作前调用
+    """
+    repo_root = get_repo_root()
+    
+    try:
+        # 1. 设置Git用户信息（解决Author identity unknown问题）
+        logger.info("👤 配置Git用户信息...")
+        subprocess.run(['git', 'config', 'user.name', 'GitHub Actions Bot'], 
+                      check=True, cwd=repo_root)
+        subprocess.run(['git', 'config', 'user.email', 'actions@github.com'], 
+                      check=True, cwd=repo_root)
+        
+        # 2. 禁用自动换行符转换（解决CRLF/LF问题）
+        subprocess.run(['git', 'config', 'core.autocrlf', 'false'], 
+                      check=True, cwd=repo_root)
+        
+        # 3. 忽略文件权限变化（解决chmod问题）
+        subprocess.run(['git', 'config', 'core.filemode', 'false'], 
+                      check=True, cwd=repo_root)
+        
+        logger.info("✅ Git环境配置完成")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Git环境配置失败: {e}")
+        return False
+
+def clean_git_working_tree():
+    """
+    清理Git工作树，重置所有未提交的更改
+    这个函数在每次提交前调用，确保工作区干净
+    """
+    repo_root = get_repo_root()
+    
+    try:
+        logger.info("🧹 清理Git工作树...")
+        
+        # 1. 重置所有已暂存的更改
+        subprocess.run(['git', 'reset', '--hard', 'HEAD'], 
+                      check=True, cwd=repo_root)
+        
+        # 2. 清理所有未跟踪的文件（除了我们关心的数据文件）
+        # 使用-n先查看会删除什么，然后确认删除
+        result = subprocess.run(['git', 'clean', '-fdn'], 
+                              cwd=repo_root, capture_output=True, text=True)
+        if result.stdout.strip():
+            logger.warning(f"将清理未跟踪文件: {result.stdout}")
+            subprocess.run(['git', 'clean', '-fd'], check=True, cwd=repo_root)
+        
+        # 3. 检查工作区状态
+        status_result = subprocess.run(['git', 'status', '--porcelain'], 
+                                     cwd=repo_root, capture_output=True, text=True)
+        
+        if status_result.stdout.strip():
+            logger.warning(f"⚠️ 工作区仍有未清理的更改，但将继续: {status_result.stdout}")
+        else:
+            logger.info("✅ Git工作树清理完成")
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ 清理Git工作树失败: {e}")
+        return False
+
 def verify_git_file_content(file_path):
     """
     验证文件内容是否真正存在于远程仓库
@@ -79,7 +146,7 @@ def verify_git_file_content(file_path):
                 "Accept": "application/vnd.github.v3+json"
             }
             
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 remote_content = response.json()['content']
                 with open(file_path, "rb") as f:
@@ -102,7 +169,8 @@ def verify_git_file_content(file_path):
             ["git", "ls-tree", "-r", f"origin/{branch}", "--name-only", relative_path],
             cwd=repo_root,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=10
         )
         
         if result.returncode == 0 and result.stdout.strip():
@@ -118,7 +186,15 @@ def verify_git_file_content(file_path):
 
 def safe_git_commit_files(file_paths, commit_message, max_retries=3):
     """
-    通用的安全Git提交函数 - 修复重置问题
+    通用的安全Git提交函数 - 完全自包含版本
+    
+    Args:
+        file_paths: 文件路径列表或单个文件路径
+        commit_message: 提交消息
+        max_retries: 最大重试次数
+    
+    Returns:
+        bool: 操作是否成功
     """
     repo_root = get_repo_root()
     
@@ -143,24 +219,29 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                         continue
                     return False
                 
-                # 2. 设置Git用户信息（修复用户身份问题）
-                logger.info("👤 设置Git用户信息...")
-                try:
-                    subprocess.run(['git', 'config', 'user.name', 'GitHub Actions'], check=True, cwd=repo_root)
-                    subprocess.run(['git', 'config', 'user.email', 'actions@github.com'], check=True, cwd=repo_root)
-                except Exception as e:
-                    logger.warning(f"设置Git用户信息警告: {e}")
+                # 2. 设置Git环境（用户信息、配置等）
+                setup_git_environment()
                 
-                # 3. 添加文件到暂存区（先添加，避免被重置清除）
+                # 3. 只在第一次尝试时清理工作区
+                if attempt == 0:
+                    clean_git_working_tree()
+                
+                # 4. 添加指定文件到暂存区
                 logger.info(f"📁 添加 {len(existing_files)} 个文件到暂存区...")
+                files_added = False
                 for file_path in existing_files:
                     try:
                         subprocess.run(['git', 'add', file_path], check=True, cwd=repo_root)
                         logger.debug(f"✅ 已添加: {file_path}")
+                        files_added = True
                     except Exception as e:
                         logger.warning(f"添加文件失败 {file_path}: {e}")
                 
-                # 4. 检查是否有变更需要提交
+                if not files_added:
+                    logger.info("📝 没有文件需要添加")
+                    return True
+                
+                # 5. 检查是否有变更需要提交
                 result = subprocess.run(
                     ['git', 'diff', '--cached', '--exit-code'], 
                     cwd=repo_root, 
@@ -172,20 +253,15 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.info("📝 没有变更需要提交")
                     return True
                 
-                # 5. 拉取最新更改（使用合并而非rebase，避免冲突）
+                # 6. 拉取最新更改（使用简单pull，避免复杂操作）
                 logger.info("🔄 拉取远程更新...")
                 try:
-                    # 先暂存当前更改
-                    subprocess.run(['git', 'stash'], check=True, cwd=repo_root)
-                    # 拉取更新
-                    subprocess.run(['git', 'pull'], check=True, cwd=repo_root)
-                    # 恢复暂存的更改
-                    subprocess.run(['git', 'stash', 'pop'], check=True, cwd=repo_root)
+                    subprocess.run(['git', 'pull', '--no-rebase'], check=True, cwd=repo_root)
                 except Exception as e:
                     logger.warning(f"拉取远程更新警告: {e}")
-                    # 如果拉取失败，继续提交
+                    # 如果拉取失败，继续提交（可能没有网络或权限）
                 
-                # 6. 重新添加文件（解决可能的冲突）
+                # 7. 重新添加文件（解决可能的冲突）
                 logger.info("🔄 重新添加文件到暂存区...")
                 for file_path in existing_files:
                     if os.path.exists(file_path):
@@ -194,15 +270,15 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                         except Exception as e:
                             logger.warning(f"重新添加文件失败 {file_path}: {e}")
                 
-                # 7. 提交
+                # 8. 提交
                 logger.info(f"💾 提交更改: {commit_message}")
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
                 
-                # 8. 推送
+                # 9. 推送
                 logger.info("🚀 推送到远程仓库...")
                 subprocess.run(['git', 'push'], check=True, cwd=repo_root)
                 
-                # 9. 验证提交
+                # 10. 验证提交
                 success_count = 0
                 for file_path in existing_files:
                     if os.path.exists(file_path):

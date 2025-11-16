@@ -119,14 +119,6 @@ def verify_git_file_content(file_path):
 def safe_git_commit_files(file_paths, commit_message, max_retries=3):
     """
     通用的安全Git提交函数 - 修复重置问题
-    
-    Args:
-        file_paths: 文件路径列表或单个文件路径
-        commit_message: 提交消息
-        max_retries: 最大重试次数
-    
-    Returns:
-        bool: 操作是否成功
     """
     repo_root = get_repo_root()
     
@@ -151,7 +143,15 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                         continue
                     return False
                 
-                # 2. 添加文件到暂存区（先添加，避免被重置清除）
+                # 2. 设置Git用户信息（修复用户身份问题）
+                logger.info("👤 设置Git用户信息...")
+                try:
+                    subprocess.run(['git', 'config', 'user.name', 'GitHub Actions'], check=True, cwd=repo_root)
+                    subprocess.run(['git', 'config', 'user.email', 'actions@github.com'], check=True, cwd=repo_root)
+                except Exception as e:
+                    logger.warning(f"设置Git用户信息警告: {e}")
+                
+                # 3. 添加文件到暂存区（先添加，避免被重置清除）
                 logger.info(f"📁 添加 {len(existing_files)} 个文件到暂存区...")
                 for file_path in existing_files:
                     try:
@@ -160,7 +160,7 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     except Exception as e:
                         logger.warning(f"添加文件失败 {file_path}: {e}")
                 
-                # 3. 检查是否有变更需要提交
+                # 4. 检查是否有变更需要提交
                 result = subprocess.run(
                     ['git', 'diff', '--cached', '--exit-code'], 
                     cwd=repo_root, 
@@ -172,7 +172,7 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.info("📝 没有变更需要提交")
                     return True
                 
-                # 4. 拉取最新更改（使用合并而非rebase，避免冲突）
+                # 5. 拉取最新更改（使用合并而非rebase，避免冲突）
                 logger.info("🔄 拉取远程更新...")
                 try:
                     # 先暂存当前更改
@@ -185,7 +185,7 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.warning(f"拉取远程更新警告: {e}")
                     # 如果拉取失败，继续提交
                 
-                # 5. 重新添加文件（解决可能的冲突）
+                # 6. 重新添加文件（解决可能的冲突）
                 logger.info("🔄 重新添加文件到暂存区...")
                 for file_path in existing_files:
                     if os.path.exists(file_path):
@@ -194,15 +194,15 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                         except Exception as e:
                             logger.warning(f"重新添加文件失败 {file_path}: {e}")
                 
-                # 6. 提交
+                # 7. 提交
                 logger.info(f"💾 提交更改: {commit_message}")
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
                 
-                # 7. 推送
+                # 8. 推送
                 logger.info("🚀 推送到远程仓库...")
                 subprocess.run(['git', 'push'], check=True, cwd=repo_root)
                 
-                # 8. 验证提交
+                # 9. 验证提交
                 success_count = 0
                 for file_path in existing_files:
                     if os.path.exists(file_path):

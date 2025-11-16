@@ -186,15 +186,7 @@ def verify_git_file_content(file_path):
 
 def safe_git_commit_files(file_paths, commit_message, max_retries=3):
     """
-    通用的安全Git提交函数 - 完全自包含版本
-    
-    Args:
-        file_paths: 文件路径列表或单个文件路径
-        commit_message: 提交消息
-        max_retries: 最大重试次数
-    
-    Returns:
-        bool: 操作是否成功
+    通用的安全Git提交函数 - 移除清理操作
     """
     repo_root = get_repo_root()
     
@@ -222,11 +214,7 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                 # 2. 设置Git环境（用户信息、配置等）
                 setup_git_environment()
                 
-                # 3. 只在第一次尝试时清理工作区
-                if attempt == 0:
-                    clean_git_working_tree()
-                
-                # 4. 添加指定文件到暂存区
+                # 3. 添加指定文件到暂存区
                 logger.info(f"📁 添加 {len(existing_files)} 个文件到暂存区...")
                 files_added = False
                 for file_path in existing_files:
@@ -241,7 +229,7 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.info("📝 没有文件需要添加")
                     return True
                 
-                # 5. 检查是否有变更需要提交
+                # 4. 检查是否有变更需要提交
                 result = subprocess.run(
                     ['git', 'diff', '--cached', '--exit-code'], 
                     cwd=repo_root, 
@@ -253,32 +241,15 @@ def safe_git_commit_files(file_paths, commit_message, max_retries=3):
                     logger.info("📝 没有变更需要提交")
                     return True
                 
-                # 6. 拉取最新更改（使用简单pull，避免复杂操作）
-                logger.info("🔄 拉取远程更新...")
-                try:
-                    subprocess.run(['git', 'pull', '--no-rebase'], check=True, cwd=repo_root)
-                except Exception as e:
-                    logger.warning(f"拉取远程更新警告: {e}")
-                    # 如果拉取失败，继续提交（可能没有网络或权限）
-                
-                # 7. 重新添加文件（解决可能的冲突）
-                logger.info("🔄 重新添加文件到暂存区...")
-                for file_path in existing_files:
-                    if os.path.exists(file_path):
-                        try:
-                            subprocess.run(['git', 'add', file_path], check=True, cwd=repo_root)
-                        except Exception as e:
-                            logger.warning(f"重新添加文件失败 {file_path}: {e}")
-                
-                # 8. 提交
+                # 5. 提交
                 logger.info(f"💾 提交更改: {commit_message}")
                 subprocess.run(['git', 'commit', '-m', commit_message], check=True, cwd=repo_root)
                 
-                # 9. 推送
+                # 6. 推送
                 logger.info("🚀 推送到远程仓库...")
                 subprocess.run(['git', 'push'], check=True, cwd=repo_root)
                 
-                # 10. 验证提交
+                # 7. 验证提交
                 success_count = 0
                 for file_path in existing_files:
                     if os.path.exists(file_path):

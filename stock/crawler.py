@@ -172,21 +172,29 @@ def get_all_stock_codes() -> list:
         return []
 
 def normalize_stock_df(df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-    """
-    规范股票日线数据结构与精度
-    """
-    expected_columns = [
-        "日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
-        "振幅", "涨跌幅", "涨跌额", "换手率", "股票代码", "股票名称"
-    ]
+    
+    #============规范股票日线数据结构与精度=============
+    
+    #expected_columns = [
+    #    "日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额",
+    #    "振幅", "涨跌幅", "涨跌额", "换手率", "股票代码", "股票名称"
+    #]
 
+    expected_columns = [
+        "日期", "股票代码", "开盘", "收盘", "最高", "最低", 
+        "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "股票名称",
+        "前收盘", "复权状态", "交易状态", "动态市盈率", "动态市现率", "动态市净率"
+    ]
+    
     # 缺少列自动补0
     for col in expected_columns:
         if col not in df.columns:
             df[col] = 0
 
     # 精度处理
-    four_decimals = ["开盘", "最高", "最低", "收盘", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+    #four_decimals = ["开盘", "最高", "最低", "收盘", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"]
+    four_decimals = ["开盘", "最高", "最低", "收盘", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", 
+                    "前收盘", "动态市盈率", "动态市现率", "动态市净率"]
     for col in four_decimals:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
@@ -194,6 +202,12 @@ def normalize_stock_df(df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
     if "成交量" in df.columns:
         df["成交量"] = pd.to_numeric(df["成交量"], errors="coerce").fillna(0).astype(int)
 
+    # 特殊处理复权状态和交易状态
+    if "复权状态" not in df.columns:
+        df["复权状态"] = "不复权"
+    if "交易状态" not in df.columns:
+        df["交易状态"] = "正常交易"
+    
     df["股票代码"] = stock_code
     df["股票名称"] = get_stock_name(stock_code)
     

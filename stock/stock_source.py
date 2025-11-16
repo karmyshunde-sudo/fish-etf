@@ -398,8 +398,11 @@ def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days:
 
         # ====== 关键修复：添加原始数据日志 ======
         logger.info(f"Baostock原始数据 ({len(data_list)}条):")
-        for i, row in df.head().iterrows():
-            logger.info(f"  原始数据行 {i+1}: {row.to_dict()}")
+        if not df.empty:
+        logger.info(f"  【原始数据】第一行: {df.iloc[0].to_dict()}")
+        
+        #for i, row in df.head().iterrows():
+        #    logger.info(f"  原始数据行 {i+1}: {row.to_dict()}")
         
         logger.info(f"Baostock获取成功: {len(data_list)} 条数据")
         return df

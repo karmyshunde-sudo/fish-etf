@@ -35,7 +35,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # 新增：每10只ETF提交一次
 MINOR_BATCH_SIZE = 10
 # 一次运行处理300只ETF
-MAJOR_BATCH_SIZE = 500
+MAJOR_BATCH_SIZE = 450
 
 def get_etf_name(etf_code):
     """获取ETF名称"""

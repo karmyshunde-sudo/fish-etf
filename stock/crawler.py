@@ -41,8 +41,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # 批次参数
 MINOR_BATCH_SIZE = 10  # 每10只股票提交一次
-BATCH_SIZE = 20        # 单次运行处理20只股票【测试代码时】
-#BATCH_SIZE = 400       # 单次运行处理400只股票【实际运行时】
+#BATCH_SIZE = 20        # 单次运行处理20只股票【测试代码时】
+BATCH_SIZE = 400       # 单次运行处理400只股票【实际运行时】
 
 def format_stock_code(code):
     """

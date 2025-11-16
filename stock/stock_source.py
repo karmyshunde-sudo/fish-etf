@@ -569,12 +569,17 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     
     # ========= 1、先打印返回的原始数据【添加标准化前数据日志】 =============
     logger.info(f"标准化前数据 ({len(df)}条):")
-    for i, row in df.head().iterrows():
-        logger.info(f"  标准化前行 {i+1}: {row.to_dict()}")
+    if not df.empty:
+        logger.info(f"  【标准化前】第1行数据: {df.iloc[0].to_dict()}")
     
+    # ========= 1、先打印返回的原始数据【添加标准化前数据日志】 =============
+    #logger.info(f"标准化前数据 ({len(df)}条):")
+    #for i, row in df.head().iterrows():
+    #    logger.info(f"  标准化前行 {i+1}: {row.to_dict()}")
+        
     # ========= 2、标准化为统一数据格式================================
     # 定义完整的标准列映射 - 必须与股票日线数据结构完全一致
-    
+    # 更新为包含所有19列的完整映射
     standard_cols = {
         "date": "日期",
         "code": "股票代码",
@@ -588,13 +593,20 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         "turn": "换手率",
         "preclose": "前收盘",
         "name": "股票名称",
+        "adjustflag": "复权状态",
+        "tradestatus": "交易状态",
+        "peTTM": "动态市盈率",
+        "psTTM": "动态市销率",
+        "pcfNcfTTM": "动态市现率",
+        "pbMRQ": "动态市净率",
+        "isST": "是否ST",
         "amplitude": "振幅",
         "change": "涨跌额"
     }
     
     # 根据数据源类型处理
     if source_type == "baostock":
-        # Baostock处理 - 严格映射所有列
+        # Baostock处理 - 严格映射所有列（包含19列）
         df = df.rename(columns={
             "date": "日期",
             "code": "股票代码",
@@ -607,15 +619,37 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             "pctChg": "涨跌幅",
             "turn": "换手率",
             "preclose": "前收盘",
-            "name": "股票名称"
+            "name": "股票名称",
+            "adjustflag": "复权状态",
+            "tradestatus": "交易状态",
+            "peTTM": "动态市盈率",
+            "psTTM": "动态市销率",
+            "pcfNcfTTM": "动态市现率",
+            "pbMRQ": "动态市净率",
+            "isST": "是否ST"
         })
-
+        
+        # 处理复权状态（将数值转换为描述）
+        if '复权状态' in df.columns:
+            df['复权状态'] = df['复权状态'].map({
+                '1': '后复权',
+                '2': '前复权',
+                '3': '不复权'
+            }).fillna('不复权')
+        
+        # 处理交易状态
+        if '交易状态' in df.columns:
+            df['交易状态'] = df['交易状态'].map({
+                '1': '正常交易',
+                '0': '停牌'
+            }).fillna('正常交易')
         
         # 【关键修复】在计算前先确保所有数值列是数值类型
         # Baostock返回的数据列默认为字符串类型，必须先转换
         numeric_cols = [
             "开盘", "最高", "最低", "收盘", "成交量", "成交额", 
-            "前收盘", "涨跌幅", "换手率"
+            "前收盘", "涨跌幅", "换手率", "动态市盈率", "动态市销率", 
+            "动态市现率", "动态市净率"
         ]
         for col in numeric_cols:
             if col in df.columns:
@@ -623,7 +657,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
                 if col in ["涨跌幅", "换手率"]:
                     # 去除%符号并转换为数值
                     try:
-                        df[col] = df[col].str.replace('%', '', regex=False).astype(float) / 100
+                        # 先检查是否包含%符号
+                        if df[col].str.contains('%').any():
+                            df[col] = df[col].str.replace('%', '', regex=False).astype(float) / 100
+                        else:
+                            df[col] = pd.to_numeric(df[col], errors='coerce') / 100
                     except Exception as e:
                         logger.error(f"处理百分比字段 {col} 时出错: {str(e)}")
                         df[col] = np.nan
@@ -676,6 +714,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             df['振幅'] = (df['最高'] - df['最低']) / df['前收盘'] * 100
         if '前收盘' in df.columns and '收盘' in df.columns:
             df['涨跌额'] = df['收盘'] - df['前收盘']
+        
+        # 补充其他字段为NaN
+        extra_fields = ["复权状态", "交易状态", "动态市盈率", "动态市销率", "动态市现率", "动态市净率", "是否ST"]
+        for field in extra_fields:
+            df[field] = np.nan
     
     elif source_type == "sina":
         # 新浪财经处理
@@ -707,6 +750,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             df['振幅'] = (df['最高'] - df['最低']) / df['前收盘'] * 100
         if '前收盘' in df.columns and '收盘' in df.columns:
             df['涨跌额'] = df['收盘'] - df['前收盘']
+        
+        # 补充其他字段为NaN
+        extra_fields = ["复权状态", "交易状态", "动态市盈率", "动态市销率", "动态市现率", "动态市净率", "是否ST"]
+        for field in extra_fields:
+            df[field] = np.nan
     
     elif source_type == "akshare":
         # AKShare标准处理逻辑
@@ -727,6 +775,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 补充其他字段为NaN
+        extra_fields = ["复权状态", "交易状态", "动态市盈率", "动态市销率", "动态市现率", "动态市净率", "是否ST"]
+        for field in extra_fields:
+            df[field] = np.nan
     
     elif source_type == "yfinance":
         # Yahoo Finance处理
@@ -750,17 +803,30 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
         df['涨跌额'] = df['收盘'] - df['前收盘']
         df['涨跌幅'] = df['涨跌额'] / df['前收盘'] * 100
         df['振幅'] = (df['最高'] - df['最低']) / df['前收盘'] * 100
+        
+        # 补充其他字段为NaN
+        extra_fields = ["复权状态", "交易状态", "动态市盈率", "动态市销率", "动态市现率", "动态市净率", "是否ST"]
+        for field in extra_fields:
+            df[field] = np.nan
     
-    # 标准化日期格式
+    # ====== 关键修复：正确处理日期列 ======
+    # 确保日期列是datetime类型，但保留原始格式
     if "Date" in df.columns:
-        df["日期"] = df["Date"].dt.strftime("%Y-%m-%d")
+        df["日期"] = pd.to_datetime(df["Date"])
     elif "date" in df.columns:
-        df["日期"] = df["date"].dt.strftime("%Y-%m-%d")
-    else:
+        df["日期"] = pd.to_datetime(df["date"])
+    elif "日期" not in df.columns:
         if 'index' in df.columns:
-            df["日期"] = df["index"].dt.strftime("%Y-%m-%d")
+            df["日期"] = pd.to_datetime(df["index"])
         else:
-            df["日期"] = pd.to_datetime(df.index).strftime("%Y-%m-%d")
+            df["日期"] = pd.to_datetime(df.index)
+    
+    # 确保日期列是datetime类型
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
+    else:
+        # 如果没有日期列，创建一个默认日期
+        df["日期"] = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
     
     # 重命名列
     for src, dst in standard_cols.items():
@@ -768,10 +834,11 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
             df[dst] = df[src]
     
     # ====== 关键修复：确保所有必要列存在 ======
-    # 补充必要列
+    # 更新为包含所有19列的完整结构
     required_columns = [
         "日期", "股票代码", "开盘", "收盘", "最高", "最低", 
-        "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "股票名称"
+        "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "股票名称",
+        "前收盘", "复权状态", "交易状态", "动态市盈率", "动态市现率", "动态市净率"
     ]
     for col in required_columns:
         if col not in df.columns:
@@ -797,15 +864,20 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     if '股票名称' not in df.columns:
         df['股票名称'] = get_stock_name(stock_code)
     
-    # 确保日期列是datetime类型
+    # ====== 关键修复：日期格式化放在最后 ======
+    # 确保日期列格式化为YYYY-MM-DD字符串，而不是Timestamp对象
     if '日期' in df.columns:
-        df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        # 直接格式化为字符串，避免变成Timestamp导致1970-01-01
+        df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
         df = df.sort_values('日期').reset_index(drop=True)
-
+    
     # ====== 8、打印处理之后的数据【添加标准化后数据日志】 ======
     logger.info(f"标准化后数据 ({len(df)}条):")
-    for i, row in df.head().iterrows():
-        logger.info(f"  标准化后行 {i+1}: {row.to_dict()}")
+    if not df.empty:
+        logger.info(f"  【标准化后】第1行数据: {df.iloc[0].to_dict()}")
+    
+    #for i, row in df.head().iterrows():
+    #    logger.info(f"  标准化后行 {i+1}: {row.to_dict()}")
     
     # 确保所有必要列存在
     return df[required_columns]

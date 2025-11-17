@@ -11,6 +11,20 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 添加缺失的 generate_report 函数
+def generate_report():
+    """主程序调用的入口函数 - 测试版本"""
+    logger.info("===== 开始执行指数代码测试 =====")
+    
+    # 按顺序测试各个数据源的代码
+    test_baostock_codes()
+    test_yfinance_codes()
+    test_akshare_codes()
+    test_hk_index_akshare()
+    find_working_codes()
+    
+    logger.info("=== 指数代码测试完成 ===")
+
 def test_baostock_codes():
     """测试baostock中的指数代码"""
     print("=== 测试baostock指数代码 ===")
@@ -213,13 +227,11 @@ def find_working_codes():
             time.sleep(1)
 
 if __name__ == "__main__":
+    # 直接运行测试
     print("开始测试各个数据源的指数代码...")
-    
-    # 按顺序测试
     test_baostock_codes()
     test_yfinance_codes()
     test_akshare_codes()
     test_hk_index_akshare()
     find_working_codes()
-    
     print("\n=== 测试完成 ===")

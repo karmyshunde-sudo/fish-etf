@@ -20,18 +20,16 @@ import traceback
 import subprocess
 # 【关键修复】导入Git工具函数
 from utils.git_utils import commit_files_in_batches
+
 # 配置日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
+
 # 数据目录配置
 DATA_DIR = Config.DATA_DIR
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
 BASIC_INFO_FILE = os.path.join(DATA_DIR, "all_stocks.csv")
 LOG_DIR = os.path.join(DATA_DIR, "logs")
+
 # 策略参数
 CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
@@ -49,6 +47,7 @@ def ensure_directory_exists():
         os.makedirs(DAILY_DIR)
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)
+
 def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
     """检查文件是否过期（超过指定天数）"""
     if not os.path.exists(file_path):
@@ -58,6 +57,7 @@ def is_file_expired(file_path, max_age_days=MAX_AGE_DAYS):
     mtime_date = datetime.fromtimestamp(mtime)
     # 检查是否超过指定天数
     return (datetime.now() - mtime_date).days > max_age_days
+
 def get_stock_section(stock_code: str) -> str:
     """
     获取股票所属板块
@@ -84,7 +84,8 @@ def get_stock_section(stock_code: str) -> str:
         return "科创板"
     else:
         return "其他板块"
-def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
+
+def load_stock_daily_data(stock_code: str) -> pd.DataFrame:
     """从本地加载股票日线数据，严格使用中文列名"""
     try:
         # 确保股票代码是字符串，并且是6位（前面补零）
@@ -124,15 +125,18 @@ def get_stock_daily_data(stock_code: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取股票 {stock_code} 日线数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
 def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
     if len(df) < CRITICAL_VALUE_DAYS:
         logger.warning(f"数据不足{CRITICAL_VALUE_DAYS}天，无法准确计算临界值")
         return df["收盘"].mean() if not df.empty else 0.0
     return df['收盘'].rolling(window=CRITICAL_VALUE_DAYS).mean().iloc[-1]
+
 def calculate_deviation(current: float, critical: float) -> float:
     """计算偏离率"""
     return (current - critical) / critical * 100
+
 def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续站上均线的天数"""
     if len(df) < 2:
@@ -150,6 +154,7 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) ->
         else:
             break
     return consecutive_days
+
 def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续跌破均线的天数"""
     if len(df) < 2:
@@ -167,6 +172,7 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
         else:
             break
     return consecutive_days
+
 def calculate_volume_change(df: pd.DataFrame) -> float:
     """
     计算成交量变化率
@@ -200,6 +206,7 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
     except Exception as e:
         logger.error(f"计算成交量变化失败: {str(e)}", exc_info=True)
         return 0.0
+
 def calculate_loss_percentage(df: pd.DataFrame) -> float:
     """计算当前亏损比例（相对于最近一次买入点）"""
     if len(df) < 2:
@@ -222,6 +229,7 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
     buy_price = close_prices[buy_index]
     loss_percentage = (current_price - buy_price) / buy_price * 100
     return loss_percentage
+
 def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     """判断是否处于震荡市
     Returns:
@@ -264,6 +272,7 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
         min_deviation = 0
         max_deviation = 0
     return is_volatile, cross_count, (min_deviation, max_deviation)
+
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     """检测M头和头肩顶形态"""
     if len(df) < 20:  # 需要足够数据
@@ -344,6 +353,7 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
             "confidence": 0,
             "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
+
 def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, critical: float, deviation: float) -> str:
     """生成策略信号消息"""
     # 计算连续站上/跌破均线的天数
@@ -501,6 +511,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     f"⚠️ 重点观察：若跌破前低，立即止损\n"
                 )
     return message
+
 def load_stock_basic_info() -> pd.DataFrame:
     """直接加载股票基础信息，不处理文件缺失或过期情况"""
     global ENABLE_MARKET_VALUE_FILTER
@@ -525,22 +536,25 @@ def load_stock_basic_info() -> pd.DataFrame:
         # 【关键修复】确保总市值列是数值类型
         df["总市值"] = pd.to_numeric(df["总市值"], errors='coerce')
         
-        # === 新增市值数据完整性检查 ===
+        # === 关键修改1：市值数据完整性检查逻辑 ===
         # 检查流通市值数据完整性
         valid_market_value_count = (~df["流通市值"].isna() & (df["流通市值"] > 0)).sum()
         market_value_completion = valid_market_value_count / len(df) if len(df) > 0 else 0
         
-        # 检查总市值数据完整性
+        # 检查总市值数据完整性（仅用于监控）
         valid_total_value_count = (~df["总市值"].isna() & (df["总市值"] > 0)).sum()
         total_value_completion = valid_total_value_count / len(df) if len(df) > 0 else 0
         
-        # 如果两种市值数据均不足80%，临时关闭过滤
-        if market_value_completion < 0.8 and total_value_completion < 0.8:
-            ENABLE_MARKET_VALUE_FILTER = False
-            logger.warning(f"市值数据完整性不足80%（流通市值: {market_value_completion:.1%}, 总市值: {total_value_completion:.1%}），临时关闭市值过滤")
-        else:
+        # === 关键修改2：仅基于流通市值决定是否开启过滤 ===
+        if market_value_completion >= 0.7:  # 流通市值完整性达到70%就开启过滤
             ENABLE_MARKET_VALUE_FILTER = True
-            logger.info(f"市值数据完整性（流通市值: {market_value_completion:.1%}, 总市值: {total_value_completion:.1%}），保持市值过滤开启")
+            logger.info(f"流通市值数据完整性达到{market_value_completion:.1%}，开启市值过滤")
+        else:
+            ENABLE_MARKET_VALUE_FILTER = False
+            logger.warning(f"流通市值数据完整性不足{market_value_completion:.1%}，临时关闭市值过滤")
+        
+        # 记录总市值完整性情况（仅用于监控）
+        logger.info(f"总市值数据完整性：{total_value_completion:.1%}")
         
         # 保留无流通市值股票，但标记它们
         invalid_mask = (df["流通市值"] <= 0) | df["流通市值"].isna()
@@ -570,6 +584,7 @@ def load_stock_basic_info() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"加载股票基础信息失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
 def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
     """计算股票策略评分（更精细化的评分机制）"""
     try:
@@ -697,6 +712,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
     except Exception as e:
         logger.error(f"计算股票 {stock_code} 策略评分失败: {str(e)}", exc_info=True)
         return 0.0
+
 def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     """
     过滤出符合策略要求的有效股票
@@ -726,15 +742,20 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
     if removed > 0:
         logger.info(f"已排除 {removed} 只ST和退市股票")
     
+    # === 关键修改3：市值过滤逻辑 ===
     # 3. 排除市值过小的股票（根据开关决定是否执行）
     if ENABLE_MARKET_VALUE_FILTER:
         initial_count = len(filtered_df)
-        filtered_df = filtered_df[filtered_df["流通市值"] >= 5e8]  # 5亿流通市值
+        # 只检查流通市值，忽略总市值
+        filtered_df = filtered_df[
+            (~filtered_df["流通市值"].isna()) & 
+            (filtered_df["流通市值"] >= 5e8)
+        ]
         removed = initial_count - len(filtered_df)
         if removed > 0:
             logger.info(f"已排除 {removed} 只小市值股票（流通市值<5亿）")
     else:
-        logger.info("⚠️ 市值过滤已关闭，跳过流通市值筛选")
+        logger.info("⚠️ 流通市值过滤已关闭，跳过市值筛选")
     
     # 4. 排除非主板/科创板/创业板股票
     initial_count = len(filtered_df)
@@ -779,16 +800,21 @@ def get_top_stocks_for_strategy() -> dict:
             if section not in section_stocks:
                 section = "其他板块"
             # 2. 获取日线数据（从本地加载）
-            df = get_stock_daily_data(stock_code)
+            df = load_stock_daily_data(stock_code)
             # 3. 检查数据完整性
             if df.empty or len(df) < 40:
                 logger.debug(f"股票 {stock_code} 数据不完整，跳过")
                 return None
-            # 4. 检查市值数据状态 - 只有当市值过滤开启时才检查
-            if ENABLE_MARKET_VALUE_FILTER and '数据状态' in stock:
-                if '流通市值缺失' in stock['数据状态'] or '总市值缺失' in stock['数据状态']:
-                    logger.warning(f"股票 {stock_code} 市值数据缺失，跳过")
+            
+            # === 关键修改4：股票处理逻辑 ===
+            # 只有当市值过滤开启且流通市值确实缺失时才跳过
+            if ENABLE_MARKET_VALUE_FILTER:
+                # 检查流通市值是否有效
+                circulating_market_cap = stock.get("流通市值", 0)
+                if pd.isna(circulating_market_cap) or circulating_market_cap <= 0:
+                    logger.debug(f"股票 {stock_code} 流通市值数据无效，跳过")
                     return None
+            
             # 5. 计算策略评分
             score = calculate_stock_strategy_score(stock_code, df)
             if score > 0:
@@ -902,6 +928,7 @@ def save_and_commit_stock_codes(top_stocks):
         logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
         error_msg = f"❌ 股票筛选结果文件保存失败: {str(e)}"
         send_wechat_message(message=error_msg, message_type="error")
+
 def generate_strategy_report():
     """生成策略报告并发送微信通知"""
     try:
@@ -911,7 +938,20 @@ def generate_strategy_report():
         top_stocks = get_top_stocks_for_strategy()
         if not top_stocks:
             logger.warning("没有找到符合条件的股票")
+            # === 关键修改5：添加策略状态报告 ===
+            status_message = (
+                f"=== 个股MA20趋势策略状态报告 ===\n"
+                f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"策略状态：未找到符合条件的股票\n"
+                f"流通市值过滤：{'已开启' if ENABLE_MARKET_VALUE_FILTER else '已关闭'}\n"
+                f"可能原因：\n"
+                f"  • 市场整体技术信号不佳\n"
+                f"  • 市值过滤条件过于严格\n"
+                f"  • 数据完整性不足\n"
+            )
+            send_wechat_message(status_message)
             return
+        
         # 【关键修改】在推送消息前，保存股票代码到txt文件
         save_and_commit_stock_codes(top_stocks)
         # 【关键修改】按板块分组生成多个消息
@@ -924,8 +964,8 @@ def generate_strategy_report():
                 report.append(f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 report.append(f"策略依据：20日均线+成交量变化+形态识别")
                 # 添加市值过滤状态
-                market_value_status = "已启用" if ENABLE_MARKET_VALUE_FILTER else "已禁用（市值数据不足）"
-                report.append(f"市值过滤：{market_value_status}")
+                market_value_status = "已启用" if ENABLE_MARKET_VALUE_FILTER else "已禁用（流通市值数据不足）"
+                report.append(f"流通市值过滤：{market_value_status}")
                 report.append(f"【{section}】")
                 for i, stock in enumerate(stocks):
                     # 生成股票信号
@@ -960,6 +1000,7 @@ def generate_strategy_report():
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)
         send_wechat_message(f"❌ 个股MA20趋势策略执行失败: {str(e)}")
+
 def main():
     """主函数：执行个股趋势策略"""
     global ENABLE_MARKET_VALUE_FILTER
@@ -977,5 +1018,6 @@ def main():
     # 生成并发送策略报告
     generate_strategy_report()
     logger.info("=== 个股趋势策略执行完成 ===")
+
 if __name__ == "__main__":
     main()

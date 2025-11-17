@@ -45,17 +45,17 @@ logger = logging.getLogger(__name__)
 # etfs格式: [[code1, name1, description1], [code2, name2, description2], ...]
 INDICES_CONFIG = [
     [2, "GC=F", "1、伦敦金现(XAU)", "国际黄金价格", "yfinance", [["518880", "华安黄金ETF", "黄金基金"]]],
-    [1, "^HSTECH", "2、恒生科技指数(HSTECH)", "港股科技龙头企业指数", "yfinance", [["513130", "华夏恒生科技ETF", "恒生科技ETF"]]],
+    [1, "^HSTECH", "2、恒生科技指数(HSTECH)", "港股科技龙头企业指数", "baostock", [["513130", "华夏恒生科技ETF", "恒生科技ETF"]]],
     [2, "^NDX", "3、纳斯达克100(NDX)", "美国科技股代表指数", "yfinance", [["159892", "华夏纳斯达克100ETF", "纳指科技"], ["513100", "国泰纳斯达克100ETF", "纳斯达克"]]],
     [2, "sh.000016", "4、上证50(SH000016)", "上证50蓝筹股指数", "baostock", [["510050", "华夏上证50ETF", "上证50ETF"]]],
     [2, "sh.000300", "5、沪深300(SH000300)", "A股大盘蓝筹股指数", "baostock", [["510300", "华泰柏瑞沪深300ETF", "沪深300ETF"]]],
-    [1, "883418", "6、微盘股(SH883418)", "小微盘股票指数", "akshare", [["510530", "华夏中证500ETF", "微盘股ETF"]]],
+    [1, "883418", "6、微盘股(SH883418)", "小微盘股票指数", "baostock", [["510530", "华夏中证500ETF", "微盘股ETF"]]],
     [2, "sz.399006", "7、创业板指(SZ399006)", "创业板龙头公司", "baostock", [["159915", "易方达创业板ETF", "创业板ETF"]]],
-    [1, "000688", "8、科创50(SH000688)", "科创板龙头公司", "akshare", [["588000", "华夏科创50ETF", "科创50ETF"]]],
-    [1, "899050", "9、北证50(BJ899050)", "北交所龙头公司", "akshare", [["515200", "华夏北证50ETF", "北证50ETF"]]],
+    [1, "000688", "8、科创50(SH000688)", "科创板龙头公司", "baostock", [["588000", "华夏科创50ETF", "科创50ETF"]]],
+    [1, "899050", "9、北证50(BJ899050)", "北交所龙头公司", "baostock", [["515200", "华夏北证50ETF", "北证50ETF"]]],
     [2, "sh.000905", "10、中证500(SH000905)", "A股中小盘股指数", "baostock", [["510500", "南方中证500ETF", "中证500ETF"]]],
-    [1, "HSCEI.HK", "11、恒生国企指数(HSCEI)", "港股国企指数", "yfinance", [["510900", "易方达恒生国企ETF", "H股ETF"]]],
-    [1, "932000", "12、中证2000(SH932000)", "中盘股指数", "akshare", [["561020", "南方中证2000ETF", "中证2000ETF"]]],
+    [1, "HSCEI.HK", "11、恒生国企指数(HSCEI)", "港股国企指数", "baostock", [["510900", "易方达恒生国企ETF", "H股ETF"]]],
+    [1, "932000", "12、中证2000(SH932000)", "中盘股指数", "baostock", [["561020", "南方中证2000ETF", "中证2000ETF"]]],
     [2, "sh.000852", "13、中证1000(SH000852)", "中盘股指数", "baostock", [["512100", "南方中证1000ETF", "中证1000ETF"]]],
     [2, "KWEB", "14、中概互联指数(HXC)", "海外上市中国互联网公司", "yfinance", [["513500", "易方达中概互联网ETF", "中概互联"]]],
     [2, "^HSI", "15、恒生综合指数(HSI)", "香港股市综合蓝筹指数", "yfinance", [["513400", "华夏恒生互联网ETF", "恒生ETF"]]]
@@ -187,6 +187,15 @@ def convert_index_code_to_baostock_format(code: str) -> str:
         "899050": "bj.899050",  # 北证50
         "HSCEI.HK": "hk.8070",  # 恒生国企指数
         "932000": "sh.932000",  # 中证2000
+        "GC=F": "",  # 黄金不在baostock中
+        "^NDX": "",  # 纳斯达克不在baostock中
+        "sh.000016": "sh.000016",  # 上证50
+        "sh.000300": "sh.000300",  # 沪深300
+        "sz.399006": "sz.399006",  # 创业板指
+        "sh.000905": "sh.000905",  # 中证500
+        "sh.000852": "sh.000852",  # 中证1000
+        "KWEB": "",  # 中概互联不在baostock中
+        "^HSI": "hk.800000"  # 恒生指数
     }
     
     return code_mapping.get(code, code)
@@ -207,6 +216,10 @@ def fetch_baostock_data_simplified(index_code: str, days: int = 250) -> pd.DataF
         pd.DataFrame: 指数日线数据
     """
     try:
+        # 如果代码为空，表示不支持该指数
+        if not index_code:
+            return pd.DataFrame()
+            
         # 添加随机延时避免被封
         time.sleep(random.uniform(5.0, 8.0))
         
@@ -297,7 +310,7 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
         logger.info(f"使用yfinance获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
         # 获取数据
         try:
-            df = yf.download(index_code, start=start_date, end=end_date)
+            df = yf.download(index_code, start=start_date, end=end_date, auto_adjust=False)
             # 处理yfinance返回的MultiIndex列名
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
@@ -374,7 +387,7 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
                     start_date=start_date,
                     end_date=end_date
                 )
-            elif index_code.startswith('H'):  # 港股指数
+            elif index_code.startswith('H') or index_code.startswith('^'):  # 港股指数
                 # 尝试恒生系列指数
                 if 'HSI' in index_code or 'HSTECH' in index_code or 'HSCEI' in index_code:
                     df = ak.index_hk_hist(
@@ -447,29 +460,67 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def fetch_index_data_simplified(index_info: dict, days: int = 250) -> pd.DataFrame:
+def fetch_index_data_smart(index_info: dict, days: int = 250) -> tuple:
     """
-    根据配置中的数据源获取指数历史数据
+    智能数据获取函数，当首选数据源失败时自动切换到备用数据源
     Args:
         index_info: 指数信息字典（包含code, name, source等）
         days: 获取最近多少天的数据
     Returns:
-        pd.DataFrame: 指数日线数据
+        tuple: (DataFrame, 实际使用的数据源)
     """
-    source = index_info["source"]
     code = index_info["code"]
+    name = index_info["name"]
+    preferred_source = index_info["source"]
     
-    # 对于baostock数据源，需要转换代码格式
-    if source == "baostock":
-        baostock_code = convert_index_code_to_baostock_format(code)
-        return fetch_baostock_data_simplified(baostock_code, days)
-    elif source == "yfinance":
-        return fetch_yfinance_data(code, days)
-    elif source == "akshare":
-        return fetch_akshare_data(code, days)
+    # 定义数据源优先级（按可靠性排序）
+    data_sources = ["baostock", "akshare", "yfinance"]
+    
+    # 如果首选数据源不在优先级列表中，将其添加到最前面
+    if preferred_source in data_sources:
+        # 将首选数据源移到最前面
+        data_sources.remove(preferred_source)
+        data_sources.insert(0, preferred_source)
     else:
-        logger.error(f"未知数据源: {source}")
-        return pd.DataFrame()
+        # 如果首选数据源不在已知列表中，将其添加到最前面
+        data_sources.insert(0, preferred_source)
+    
+    logger.info(f"为指数 {name}({code}) 尝试数据源顺序: {data_sources}")
+    
+    # 尝试每个数据源，直到成功获取数据
+    for source in data_sources:
+        logger.info(f"尝试使用 {source} 数据源获取 {name}({code}) 数据")
+        
+        try:
+            if source == "baostock":
+                # 转换代码为baostock格式
+                baostock_code = convert_index_code_to_baostock_format(code)
+                df = fetch_baostock_data_simplified(baostock_code, days)
+            elif source == "yfinance":
+                df = fetch_yfinance_data(code, days)
+            elif source == "akshare":
+                df = fetch_akshare_data(code, days)
+            else:
+                logger.warning(f"未知数据源: {source}")
+                continue
+            
+            # 如果成功获取到数据
+            if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+                logger.info(f"✅ 成功通过 {source} 获取到 {name} 数据")
+                return df, source
+            
+            # 如果数据量不足，继续尝试下一个数据源
+            if not df.empty and len(df) < CRITICAL_VALUE_DAYS:
+                logger.warning(f"通过 {source} 获取的 {name} 数据量不足，继续尝试其他数据源")
+                continue
+                
+        except Exception as e:
+            logger.error(f"通过 {source} 获取 {name} 数据时发生异常: {str(e)}")
+            continue
+    
+    # 所有数据源都失败
+    logger.error(f"所有数据源都无法获取 {name}({code}) 的有效数据")
+    return pd.DataFrame(), "所有数据源均失败"
 
 def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
@@ -965,7 +1016,7 @@ def generate_report():
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
-            source = idx["source"]
+            preferred_source = idx["source"]
             
             # 处理开关为2的指数
             if idx.get("switch", 1) == 2:
@@ -974,13 +1025,14 @@ def generate_report():
                 etf_str = "，".join(etf_list)
                 disabled_message = f"{name} 【{code}；ETF：{etf_str}】 - 已暂时屏蔽，不作任何YES/NO计算"
                 disabled_messages.append(disabled_message)
+                # 发送单独的屏蔽消息
                 send_wechat_message(disabled_message)
                 time.sleep(1)
                 continue
                 
-            # 严格按配置的数据源获取数据
-            logger.info(f"使用{source}数据源获取指数: {name}({code})")
-            df = fetch_index_data_simplified(idx)
+            # 使用智能数据获取函数
+            logger.info(f"为指数 {name}({code}) 尝试首选数据源: {preferred_source}")
+            df, actual_source = fetch_index_data_smart(idx)
             
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
@@ -992,10 +1044,10 @@ def generate_report():
                     f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A",
                     f"❌ 信号：数据获取失败",
                     "──────────────────",
-                    "⚠️ 获取指数数据失败，请检查数据源",
+                    f"⚠️ 所有数据源都无法获取有效数据（首选: {preferred_source}，尝试: {actual_source}）",
                     "──────────────────",
                     f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
-                    f"📊 数据来源：{source}"
+                    f"📊 实际尝试数据源：{actual_source}"
                 ]
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据获取失败）")
@@ -1016,7 +1068,7 @@ def generate_report():
                     f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天",
                     "──────────────────",
                     f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
-                    f"📊 数据来源：{source}"
+                    f"📊 实际使用数据源：{actual_source}（首选: {preferred_source}）"
                 ]
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据不足）")
@@ -1058,13 +1110,13 @@ def generate_report():
             ]
             message = "".join(message_lines)
             
-            logger.info(f"推送 {name} 策略信号")
+            logger.info(f"推送 {name} 策略信号（使用数据源: {actual_source}）")
             send_wechat_message(message)
             
             # 添加到总结
             name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
+            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}% | 数据源：{actual_source}\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)
@@ -1075,16 +1127,20 @@ def generate_report():
         
         # 构建总结消息
         final_summary_lines = []
+        
+        # 添加屏蔽指数的信息
         if disabled_messages:
             final_summary_lines.append("【已屏蔽指数】\n")
             for msg in disabled_messages:
                 final_summary_lines.append(f"🔇 {msg}\n")
             final_summary_lines.append("\n")
         
+        # 添加正常计算的指数信息
         if summary_lines:
             final_summary_lines.append("【策略信号总结】\n")
             final_summary_lines.extend(summary_lines)
         
+        # 如果有任何指数信息，发送总结消息
         if final_summary_lines:
             summary_message = "".join(final_summary_lines)
             logger.info("推送总结消息")
@@ -1095,6 +1151,7 @@ def generate_report():
         
     except Exception as e:
         logger.error(f"策略执行失败: {str(e)}", exc_info=True)
+        # 修正：错误消息与正常信号消息分离
         try:
             send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}")
         except Exception as wechat_error:

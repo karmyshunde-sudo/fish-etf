@@ -171,91 +171,111 @@ for message in SCENARIO_MESSAGES:
     SCENARIO_MESSAGES_DICT[signal_type][scenario_type] = message[2]
 # =============== 消息配置区结束 ===============
 
+# =============== 将指数代码转换为baostock要求的格式 ===============
+def convert_index_code_to_baostock_format(code: str) -> str:
+    """
+    Args:
+        code: 原始指数代码
+    Returns:
+        str: baostock格式的代码
+    """
+    # baostock指数代码格式映射
+    code_mapping = {
+        "^HSTECH": "hk.8075",  # 恒生科技指数
+        "883418": "sh.883418",  # 微盘股指数
+        "000688": "sh.000688",  # 科创50
+        "899050": "bj.899050",  # 北证50
+        "HSCEI.HK": "hk.8070",  # 恒生国企指数
+        "932000": "sh.932000",  # 中证2000
+    }
+    
+    return code_mapping.get(code, code)
+# =============== 将指数代码转换为baostock要求的格式 ===============
+
 # 策略参数
 CRITICAL_VALUE_DAYS = 20  # 计算临界值的周期（20日均线）
 DEVIATION_THRESHOLD = 0.02  # 偏离阈值（2%）
 PATTERN_CONFIDENCE_THRESHOLD = 0.7  # 形态确认阈值（70%置信度）
-def fetch_baostock_data(index_code: str, days: int = 250) -> pd.DataFrame:
+
+def fetch_baostock_data_simplified(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    从baostock获取A股指数历史数据
+    简化的baostock数据获取函数（不包含登录退出）
     Args:
-        index_code: 指数代码
+        index_code: 已转换的baostock格式代码
         days: 获取最近多少天的数据
     Returns:
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 添加随机延时避免被封（5.0-8.0秒）
+        # 添加随机延时避免被封
         time.sleep(random.uniform(5.0, 8.0))
+        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        # 转换为字符串格式
         start_date = start_date_dt.strftime("%Y-%m-%d")
         end_date = end_date_dt.strftime("%Y-%m-%d")
+        
         logger.info(f"使用baostock获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        # 登录baostock
-        login_result = bs.login()
-        if login_result.error_code != '0':
-            logger.error(f"baostock登录失败: {login_result.error_msg}")
+        
+        # 使用baostock获取数据（已经在外层登录）
+        rs = bs.query_history_k_data_plus(index_code,
+                                         "date,open,high,low,close,volume,amount",
+                                         start_date=start_date,
+                                         end_date=end_date,
+                                         frequency="d",
+                                         adjustflag="3")
+        # 检查返回结果
+        if rs.error_code != '0':
+            logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
             return pd.DataFrame()
-        try:
-            # 使用baostock获取数据
-            rs = bs.query_history_k_data_plus(index_code,
-                                             "date,open,high,low,close,volume,amount",
-                                             start_date=start_date,
-                                             end_date=end_date,
-                                             frequency="d",
-                                             adjustflag="3")
-            # 检查返回结果
-            if rs.error_code != '0':
-                logger.error(f"获取指数 {index_code} 数据失败: {rs.error_msg}")
-                return pd.DataFrame()
-            # 将数据转换为DataFrame
-            data_list = []
-            while rs.next():
-                data_list.append(rs.get_row_data())
-            if not data_list:
-                logger.warning(f"获取指数 {index_code} 数据为空")
-                return pd.DataFrame()
-            df = pd.DataFrame(data_list, columns=rs.fields)
-            # 标准化列名
-            df = df.rename(columns={
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量',
-                'amount': '成交额'
-            })
-            # 确保日期列为datetime类型
-            df['日期'] = pd.to_datetime(df['日期'])
-            # 确保价格列是数值类型
-            price_columns = ['开盘', '最高', '最低', '收盘']
-            for col in price_columns:
-                # 将非数值数据转换为NaN
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            # 确保成交量和成交额是数值类型
-            volume_columns = ['成交量', '成交额']
-            for col in volume_columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            # 删除包含NaN的行
-            df = df.dropna(subset=price_columns)
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            logger.info(f"✅ 通过baostock成功获取到 {len(df)} 条指数数据")
-            return df
-        finally:
-            # 确保登出
-            bs.logout()
+            
+        # 将数据转换为DataFrame
+        data_list = []
+        while rs.next():
+            data_list.append(rs.get_row_data())
+        if not data_list:
+            logger.warning(f"获取指数 {index_code} 数据为空")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(data_list, columns=rs.fields)
+        # 标准化列名和处理数据格式（保持原有逻辑）
+        df = df.rename(columns={
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量',
+            'amount': '成交额'
+        })
+        df['日期'] = pd.to_datetime(df['日期'])
+        
+        # 确保价格列是数值类型
+        price_columns = ['开盘', '最高', '最低', '收盘']
+        for col in price_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+        # 确保成交量和成交额是数值类型
+        volume_columns = ['成交量', '成交额']
+        for col in volume_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+        # 删除包含NaN的行
+        df = df.dropna(subset=price_columns)
+        df = df.sort_values('日期').reset_index(drop=True)
+        
+        if len(df) <= 1:
+            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+            return pd.DataFrame()
+            
+        logger.info(f"✅ 通过baostock成功获取到 {len(df)} 条指数数据")
+        return df
+        
     except Exception as e:
         logger.error(f"通过baostock获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
 def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从yfinance获取国际/港股/美股指数历史数据
@@ -324,24 +344,7 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
-def fetch_index_data(index_info: dict, days: int = 250) -> pd.DataFrame:
-    """
-    根据指数类型使用不同的数据源获取历史数据
-    Args:
-        index_info: 指数信息字典（包含code, name, source等）
-        days: 获取最近多少天的数据
-    Returns:
-        pd.DataFrame: 指数日线数据
-    """
-    if index_info["source"] == "baostock":
-        return fetch_baostock_data(index_info["code"], days)
-    elif index_info["source"] == "yfinance":
-        return fetch_yfinance_data(index_info["code"], days)
-    elif index_info["source"] == "akshare":
-        return fetch_akshare_data(index_info["code"], days)
-    else:
-        logger.error(f"未知数据源: {index_info['source']}")
-        return pd.DataFrame()
+
 def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
     """
     从akshare获取指数历史数据
@@ -443,6 +446,31 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
+def fetch_index_data_simplified(index_info: dict, days: int = 250) -> pd.DataFrame:
+    """
+    根据配置中的数据源获取指数历史数据
+    Args:
+        index_info: 指数信息字典（包含code, name, source等）
+        days: 获取最近多少天的数据
+    Returns:
+        pd.DataFrame: 指数日线数据
+    """
+    source = index_info["source"]
+    code = index_info["code"]
+    
+    # 对于baostock数据源，需要转换代码格式
+    if source == "baostock":
+        baostock_code = convert_index_code_to_baostock_format(code)
+        return fetch_baostock_data_simplified(baostock_code, days)
+    elif source == "yfinance":
+        return fetch_yfinance_data(code, days)
+    elif source == "akshare":
+        return fetch_akshare_data(code, days)
+    else:
+        logger.error(f"未知数据源: {source}")
+        return pd.DataFrame()
+
 def calculate_critical_value(df: pd.DataFrame) -> float:
     """计算临界值（20日均线）"""
     if len(df) < CRITICAL_VALUE_DAYS:
@@ -457,9 +485,11 @@ def calculate_critical_value(df: pd.DataFrame) -> float:
         if not np.isnan(ma.iloc[i]):
             return ma.iloc[i]
     return df["收盘"].dropna().mean()
+
 def calculate_deviation(current: float, critical: float) -> float:
     """计算偏离率"""
     return (current - critical) / critical * 100
+
 def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续站上均线的天数"""
     if len(df) < 2:
@@ -486,6 +516,7 @@ def calculate_consecutive_days_above(df: pd.DataFrame, critical_value: float) ->
             else:
                 break
     return consecutive_days
+
 def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) -> int:
     """计算连续跌破均线的天数"""
     if len(df) < 2:
@@ -512,6 +543,7 @@ def calculate_consecutive_days_below(df: pd.DataFrame, critical_value: float) ->
             else:
                 break
     return consecutive_days
+
 def calculate_volume_change(df: pd.DataFrame) -> float:
     """
     计算成交量变化率
@@ -544,6 +576,7 @@ def calculate_volume_change(df: pd.DataFrame) -> float:
     except Exception as e:
         logger.error(f"计算成交量变化失败: {str(e)}", exc_info=True)
         return 0.0
+
 def calculate_loss_percentage(df: pd.DataFrame) -> float:
     """计算当前亏损比例（相对于最近一次买入点）"""
     if len(df) < 2:
@@ -576,6 +609,7 @@ def calculate_loss_percentage(df: pd.DataFrame) -> float:
         return 0.0
     loss_percentage = (current_price - buy_price) / buy_price * 100
     return loss_percentage
+
 def is_in_volatile_market(df: pd.DataFrame) -> tuple:
     """判断是否处于震荡市"""
     if len(df) < 10:
@@ -637,6 +671,7 @@ def is_in_volatile_market(df: pd.DataFrame) -> tuple:
         min_deviation = 0
         max_deviation = 0
     return is_volatile, cross_count, (min_deviation, max_deviation)
+
 def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
     """检测M头和头肩顶形态"""
     if len(df) < 20:  # 需要足够数据
@@ -746,6 +781,7 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
             "confidence": 0.0,
             "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
+
 def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, critical: float, deviation: float) -> str:
     """生成策略信号消息"""
     # 计算连续站上/跌破均线的天数
@@ -904,93 +940,16 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     etf_code=index_info['etfs'][0]['code']
                 )
 
-def fetch_baostock_data_for_enabled_indices(index_info: dict, days: int = 250) -> pd.DataFrame:
-    """
-    专门为开关为1的指数从baostock获取历史数据
-    Args:
-        index_info: 指数信息字典（包含code, name等）
-        days: 获取最近多少天的数据
-    Returns:
-        pd.DataFrame: 指数日线数据
-    """
-    try:
-        # 添加随机延时避免被封（5.0-8.0秒）
-        time.sleep(random.uniform(5.0, 8.0))
-        # 计算日期范围
-        end_date_dt = datetime.now()
-        start_date_dt = end_date_dt - timedelta(days=days)
-        # 转换为字符串格式
-        start_date = start_date_dt.strftime("%Y-%m-%d")
-        end_date = end_date_dt.strftime("%Y-%m-%d")
-        logger.info(f"使用baostock获取指数 {index_info['code']} 数据，时间范围: {start_date} 至 {end_date}")
-        
-        # 使用baostock获取数据（已经在外层登录）
-        rs = bs.query_history_k_data_plus(index_info["code"],
-                                         "date,open,high,low,close,volume,amount",
-                                         start_date=start_date,
-                                         end_date=end_date,
-                                         frequency="d",
-                                         adjustflag="3")
-        # 检查返回结果
-        if rs.error_code != '0':
-            logger.error(f"获取指数 {index_info['code']} 数据失败: {rs.error_msg}")
-            return pd.DataFrame()
-        # 将数据转换为DataFrame
-        data_list = []
-        while rs.next():
-            data_list.append(rs.get_row_data())
-        if not data_list:
-            logger.warning(f"获取指数 {index_info['code']} 数据为空")
-            return pd.DataFrame()
-        df = pd.DataFrame(data_list, columns=rs.fields)
-        # 标准化列名
-        df = df.rename(columns={
-            'date': '日期',
-            'open': '开盘',
-            'high': '最高',
-            'low': '最低',
-            'close': '收盘',
-            'volume': '成交量',
-            'amount': '成交额'
-        })
-        # 确保日期列为datetime类型
-        df['日期'] = pd.to_datetime(df['日期'])
-        # 确保价格列是数值类型
-        price_columns = ['开盘', '最高', '最低', '收盘']
-        for col in price_columns:
-            # 将非数值数据转换为NaN
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        # 确保成交量和成交额是数值类型
-        volume_columns = ['成交量', '成交额']
-        for col in volume_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        # 删除包含NaN的行
-        df = df.dropna(subset=price_columns)
-        # 排序
-        df = df.sort_values('日期').reset_index(drop=True)
-        # 检查数据量
-        if len(df) <= 1:
-            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-            return pd.DataFrame()
-        logger.info(f"✅ 通过baostock成功获取到 {len(df)} 条指数数据")
-        return df
-    except Exception as e:
-        logger.error(f"通过baostock获取指数 {index_info['code']} 数据失败: {str(e)}", exc_info=True)
-        return pd.DataFrame()
-
 def generate_report():
     """生成策略报告并推送微信"""
     try:
-        # 定义必须使用baostock的指数代码列表
-        BAOSTOCK_INDICES = ["^HSTECH", "883418", "000688", "899050", "HSCEI.HK", "932000"]
-        
-        # 添加指数统计日志
+        # 统计信息
         total_indices = len(INDICES)
         disabled_indices = sum(1 for idx in INDICES if idx.get("switch", 1) == 2)
         enabled_indices = total_indices - disabled_indices
         logger.info(f"共设计{total_indices}个指数，其中{disabled_indices}个指数暂停计算，本次计算{enabled_indices}个指数")
         
-        # 在循环开始前登录baostock
+        # 登录baostock（一次）
         login_result = bs.login()
         if login_result.error_code != '0':
             logger.error(f"baostock登录失败: {login_result.error_msg}")
@@ -998,93 +957,83 @@ def generate_report():
             logger.info("baostock登录成功")
         
         beijing_time = get_beijing_time()
-        # 用于存储所有指数的简要信息，用于总结消息
         summary_lines = []
         valid_indices_count = 0
-        disabled_messages = []  # 存储屏蔽指数的消息
+        disabled_messages = []
         
         # 按配置顺序处理
         for idx in INDICES:
             code = idx["code"]
             name = idx["name"]
+            source = idx["source"]
             
-            # 处理开关为2的指数 - 完全跳过计算，只记录屏蔽消息
+            # 处理开关为2的指数
             if idx.get("switch", 1) == 2:
                 logger.info(f"跳过开关为2的指数: {name}({code})")
-                # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 disabled_message = f"{name} 【{code}；ETF：{etf_str}】 - 已暂时屏蔽，不作任何YES/NO计算"
                 disabled_messages.append(disabled_message)
-                # 发送单独的屏蔽消息
                 send_wechat_message(disabled_message)
                 time.sleep(1)
                 continue
                 
-            # 对于指定的6个指数，强制使用baostock数据源
-            if code in BAOSTOCK_INDICES:
-                logger.info(f"强制使用baostock数据源: {name}({code})")
-                df = fetch_baostock_data_for_enabled_indices(idx)
-                data_source = "baostock"
-            else:
-                # 其他指数使用原配置的数据源
-                df = fetch_index_data(idx)
-                data_source = idx["source"]
-                
+            # 严格按配置的数据源获取数据
+            logger.info(f"使用{source}数据源获取指数: {name}({code})")
+            df = fetch_index_data_simplified(idx)
+            
             if df.empty:
                 logger.warning(f"无数据: {name}({code})")
-                # 即使没有数据，也发送一条消息通知
-                message_lines = []
-                # 整合所有ETF到一条消息
+                # 数据获取失败的消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
-                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A")
-                message_lines.append(f"❌ 信号：数据获取失败")
-                message_lines.append("──────────────────")
-                message_lines.append("⚠️ 获取指数数据失败，请检查数据源")
-                message_lines.append("──────────────────")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append(f"📊 数据来源：{data_source}")
+                message_lines = [
+                    f"{name} 【{code}；ETF：{etf_str}】",
+                    f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A",
+                    f"❌ 信号：数据获取失败",
+                    "──────────────────",
+                    "⚠️ 获取指数数据失败，请检查数据源",
+                    "──────────────────",
+                    f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
+                    f"📊 数据来源：{source}"
+                ]
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据获取失败）")
                 send_wechat_message(message)
                 time.sleep(1)
                 continue
 
-            # 确保有足够数据
+            # 数据量检查
             if len(df) < CRITICAL_VALUE_DAYS:
                 logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
-                # 发送数据不足的消息
-                message_lines = []
-                # 整合所有ETF到一条消息
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
-                message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-                message_lines.append(f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A")
-                message_lines.append(f"⚠️ 信号：数据不足")
-                message_lines.append("──────────────────")
-                message_lines.append(f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天")
-                message_lines.append("──────────────────")
-                message_lines.append(f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}")
-                message_lines.append(f"📊 数据来源：{data_source}")
+                message_lines = [
+                    f"{name} 【{code}；ETF：{etf_str}】",
+                    f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A",
+                    f"⚠️ 信号：数据不足",
+                    "──────────────────",
+                    f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天",
+                    "──────────────────",
+                    f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
+                    f"📊 数据来源：{source}"
+                ]
                 message = "".join(message_lines)
                 logger.info(f"推送 {name} 策略信号（数据不足）")
                 send_wechat_message(message)
                 time.sleep(2)
                 continue
 
-            # 修复：确保获取标量值而不是Series
+            # 正常计算逻辑（保持不变）
             close_price = df['收盘'].values[-1]
-            # 修复：确保critical_value是标量值
             critical_value = calculate_critical_value(df)
-            # 如果返回的是Series，获取最后一个值
+            
+            # 确保是标量值
             if isinstance(critical_value, pd.Series):
                 critical_value = critical_value.values[-1]
-            # 如果返回的是DataFrame，获取最后一个值
             elif isinstance(critical_value, pd.DataFrame):
                 critical_value = critical_value.iloc[-1, 0]
-            # 修复：确保close_price和critical_value都是数值类型
+                
             try:
                 close_price = float(close_price)
                 critical_value = float(critical_value)
@@ -1092,33 +1041,29 @@ def generate_report():
                 logger.error(f"转换价格值失败: {str(e)}")
                 continue
 
-            # 计算偏离率
+            # 计算偏离率和信号
             deviation = calculate_deviation(close_price, critical_value)
-            # 状态判断（收盘价在临界值之上为YES，否则为NO）
             status = "YES" if close_price >= critical_value else "NO"
-            # 生成详细策略信号
             signal_message = generate_signal_message(idx, df, close_price, critical_value, deviation)
-            # 构建消息
-            message_lines = []
-            # 整合所有ETF到一条消息
+            
+            # 构建推送消息
             etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
             etf_str = "，".join(etf_list)
-            message_lines.append(f"{name} 【{code}；ETF：{etf_str}】")
-            message_lines.append(f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%")
-            # 修正：根据信号类型选择正确的符号
             signal_symbol = "✅" if status == "YES" else "❌"
-            message_lines.append(f"{signal_symbol} 信号：{status} {signal_message}")            
+            
+            message_lines = [
+                f"{name} 【{code}；ETF：{etf_str}】",
+                f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%",
+                f"{signal_symbol} 信号：{status} {signal_message}"
+            ]
             message = "".join(message_lines)
-            # 发送消息
+            
             logger.info(f"推送 {name} 策略信号")
             send_wechat_message(message)
-            # 添加到总结消息
-            # 确保名称对齐 - 使用固定宽度
-            name_padding = 10 if len(name) <= 4 else 8  # 中文名称通常2-4个字
+            
+            # 添加到总结
+            name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            # 修正：根据信号类型选择正确的符号
-            signal_symbol = "✅" if status == "YES" else "❌"
-            # 修复：添加了缺失的引号，确保字符串正确闭合
             summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
@@ -1128,22 +1073,18 @@ def generate_report():
         bs.logout()
         logger.info("baostock已退出")
         
-        # 构建完整的总结消息，包含所有指数状态
+        # 构建总结消息
         final_summary_lines = []
-        
-        # 添加屏蔽指数的信息
         if disabled_messages:
             final_summary_lines.append("【已屏蔽指数】\n")
             for msg in disabled_messages:
                 final_summary_lines.append(f"🔇 {msg}\n")
             final_summary_lines.append("\n")
         
-        # 添加正常计算的指数信息
         if summary_lines:
             final_summary_lines.append("【策略信号总结】\n")
             final_summary_lines.extend(summary_lines)
         
-        # 如果有任何指数信息，发送总结消息
         if final_summary_lines:
             summary_message = "".join(final_summary_lines)
             logger.info("推送总结消息")
@@ -1151,9 +1092,9 @@ def generate_report():
             time.sleep(1)
             
         logger.info(f"所有指数策略报告已成功发送至企业微信（共{valid_indices_count}个有效指数，{len(disabled_messages)}个屏蔽指数）")
+        
     except Exception as e:
         logger.error(f"策略执行失败: {str(e)}", exc_info=True)
-        # 修正：错误消息与正常信号消息分离
         try:
             send_wechat_message(f"🚨 【错误通知】策略执行异常: {str(e)}")
         except Exception as wechat_error:

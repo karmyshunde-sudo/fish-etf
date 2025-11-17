@@ -11,7 +11,6 @@
 #    - yf.download() - 下载历史数据
 # 3. akshare:
 #    - ak.index_zh_a_hist() - 获取A股指数历史行情数据
-#    - ak.index_hk_hist() - 获取港股指数历史行情数据  
 #    - ak.stock_hk_index_daily_em() - 获取东方财富港股指数行情数据
 # 4. pandas:
 #    - pd.to_datetime() - 转换日期格式
@@ -217,23 +216,23 @@ def convert_index_code_to_baostock_format(code: str) -> str:
     Returns:
         str: baostock格式的代码
     """
-    # baostock指数代码格式映射
+    # baostock指数代码格式映射 - 修复代码格式问题
     code_mapping = {
-        "^HSTECH": "hk.8075",  # 恒生科技指数
-        "883418": "sh.883418",  # 微盘股指数
-        "000688": "sh.000688",  # 科创50
-        "899050": "bj.899050",  # 北证50
-        "HSCEI.HK": "hk.8070",  # 恒生国企指数
-        "932000": "sh.932000",  # 中证2000
-        "GC=F": "",  # 黄金不在baostock中
-        "^NDX": "",  # 纳斯达克不在baostock中
-        "sh.000016": "sh.000016",  # 上证50
-        "sh.000300": "sh.000300",  # 沪深300
-        "sz.399006": "sz.399006",  # 创业板指
-        "sh.000905": "sh.000905",  # 中证500
-        "sh.000852": "sh.000852",  # 中证1000
-        "KWEB": "",  # 中概互联不在baostock中
-        "^HSI": "hk.800000"  # 恒生指数
+        "^HSTECH": "hk.807500",  # 恒生科技指数 - 补足6位
+        "883418": "sh.883418",   # 微盘股指数
+        "000688": "sh.000688",   # 科创50
+        "899050": "bj.899050",   # 北证50
+        "HSCEI.HK": "hk.807000", # 恒生国企指数 - 补足6位
+        "932000": "sh.932000",   # 中证2000
+        "GC=F": "",              # 黄金不在baostock中
+        "^NDX": "",              # 纳斯达克不在baostock中
+        "sh.000016": "sh.000016", # 上证50
+        "sh.000300": "sh.000300", # 沪深300
+        "sz.399006": "sz.399006", # 创业板指
+        "sh.000905": "sh.000905", # 中证500
+        "sh.000852": "sh.000852", # 中证1000
+        "KWEB": "",              # 中概互联不在baostock中
+        "^HSI": "hk.800000"      # 恒生指数 - 补足6位
     }
     
     return code_mapping.get(code, code)
@@ -267,7 +266,9 @@ def fetch_baostock_data_simplified(index_code: str, days: int = 250) -> pd.DataF
         start_date = start_date_dt.strftime("%Y-%m-%d")
         end_date = end_date_dt.strftime("%Y-%m-%d")
         
-        logger.info(f"使用baostock获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
+        # 记录详细的接口调用信息
+        logger.info(f"📡 调用baostock接口 query_history_k_data_plus")
+        logger.info(f"📋 调用参数: code={index_code}, start_date={start_date}, end_date={end_date}, frequency=d, adjustflag=3, fields=date,open,high,low,close,volume,amount")
         
         # 使用baostock获取数据（已经在外层登录）
         rs = bs.query_history_k_data_plus(index_code,
@@ -285,12 +286,20 @@ def fetch_baostock_data_simplified(index_code: str, days: int = 250) -> pd.DataF
         data_list = []
         while rs.next():
             data_list.append(rs.get_row_data())
+            
         if not data_list:
             logger.warning(f"获取指数 {index_code} 数据为空")
             return pd.DataFrame()
             
         df = pd.DataFrame(data_list, columns=rs.fields)
-        # 标准化列名和处理数据格式（保持原有逻辑）
+        
+        # 记录详细的数据返回信息
+        logger.info(f"✅ baostock接口调用成功，返回数据条数: {len(df)}")
+        if len(df) > 0:
+            logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict()}")
+            logger.info(f"📊 最后一条返回数据: {df.iloc[-1].to_dict()}")
+        
+        # 标准化列名和处理数据格式
         df = df.rename(columns={
             'date': '日期',
             'open': '开盘',
@@ -313,7 +322,11 @@ def fetch_baostock_data_simplified(index_code: str, days: int = 250) -> pd.DataF
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
         # 删除包含NaN的行
+        initial_count = len(df)
         df = df.dropna(subset=price_columns)
+        after_count = len(df)
+        logger.info(f"删除NaN后数据量: {after_count}/{initial_count}")
+        
         df = df.sort_values('日期').reset_index(drop=True)
         
         if len(df) <= 1:
@@ -337,61 +350,100 @@ def fetch_yfinance_data(index_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 添加随机延时避免被封（5.0-8.0秒）
+        # 添加随机延时避免被封
         time.sleep(random.uniform(5.0, 8.0))
+        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        # 转换为字符串格式
         end_date = end_date_dt.strftime("%Y-%m-%d")
         start_date = start_date_dt.strftime("%Y-%m-%d")
-        logger.info(f"使用yfinance获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        # 获取数据
-        try:
-            df = yf.download(index_code, start=start_date, end=end_date, auto_adjust=False)
-            # 处理yfinance返回的MultiIndex列名
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-            if df.empty:
-                logger.warning(f"yfinance获取指数 {index_code} 数据为空")
-                return pd.DataFrame()
-            # 标准化列名
-            df = df.reset_index()
-            df = df.rename(columns={
-                'Date': '日期',
-                'Open': '开盘',
-                'High': '最高',
-                'Low': '最低',
-                'Close': '收盘',
-                'Volume': '成交量'
-            })
-            # 确保日期列为datetime类型
-            df['日期'] = pd.to_datetime(df['日期'])
-            # 确保价格列是数值类型
-            price_columns = ['开盘', '最高', '最低', '收盘']
-            for col in price_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            # 确保成交量是数值类型
-            if '成交量' in df.columns:
-                df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
-            # 添加成交额列（如果不存在）
-            if '成交额' not in df.columns:
-                df['成交额'] = np.nan
-            # 删除包含NaN的行
-            if '收盘' in df.columns:
-                df = df.dropna(subset=['收盘'])
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
-            return df
-        except Exception as e:
-            logger.error(f"通过yfinance获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
-            return pd.DataFrame()
+        
+        # 港股指数代码映射 - 尝试多种格式
+        hk_code_mapping = {
+            "^HSTECH": ["3077.HK", "HSTECH.HK", "HSTEC.HK"],  # 恒生科技指数ETF
+            "HSCEI.HK": ["2828.HK", "HSCEI.HK"],  # 恒生国企指数ETF
+            "^HSI": ["2800.HK", "HSI.HK"]  # 恒生指数ETF
+        }
+        
+        # 使用映射后的代码
+        actual_codes = hk_code_mapping.get(index_code, [index_code])
+        
+        for actual_code in actual_codes:
+            try:
+                # 记录详细的接口调用信息
+                logger.info(f"📡 调用yfinance接口 download")
+                logger.info(f"📋 调用参数: symbol={actual_code}, start={start_date}, end={end_date}, auto_adjust=False")
+                
+                df = yf.download(actual_code, start=start_date, end=end_date, auto_adjust=False)
+                
+                # 记录详细的数据返回信息
+                logger.info(f"✅ yfinance接口调用成功，返回数据形状: {df.shape}")
+                if not df.empty:
+                    logger.info(f"📊 第一条返回数据索引: {df.index[0] if hasattr(df.index, '__len__') else 'N/A'}")
+                    logger.info(f"📊 数据列名: {df.columns.tolist()}")
+                    if len(df) > 0:
+                        first_row = df.iloc[0] if isinstance(df, pd.DataFrame) else None
+                        if first_row is not None:
+                            logger.info(f"📊 第一条返回数据值: {first_row.to_dict()}")
+                
+                # 处理yfinance返回的MultiIndex列名
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+                    
+                if df.empty:
+                    logger.warning(f"yfinance获取指数 {actual_code} 数据为空，尝试下一个代码")
+                    continue
+                
+                # 标准化列名
+                df = df.reset_index()
+                df = df.rename(columns={
+                    'Date': '日期',
+                    'Open': '开盘',
+                    'High': '最高',
+                    'Low': '最低',
+                    'Close': '收盘',
+                    'Volume': '成交量'
+                })
+                
+                # 确保日期列为datetime类型
+                df['日期'] = pd.to_datetime(df['日期'])
+                
+                # 确保价格列是数值类型
+                price_columns = ['开盘', '最高', '最低', '收盘']
+                for col in price_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # 确保成交量是数值类型
+                if '成交量' in df.columns:
+                    df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
+                
+                # 添加成交额列（如果不存在）
+                if '成交额' not in df.columns:
+                    df['成交额'] = np.nan
+                
+                # 删除包含NaN的行
+                if '收盘' in df.columns:
+                    df = df.dropna(subset=['收盘'])
+                
+                # 排序
+                df = df.sort_values('日期').reset_index(drop=True)
+                
+                if len(df) <= 1:
+                    logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+                    continue
+                
+                logger.info(f"✅ 通过yfinance成功获取到 {len(df)} 条指数数据，代码: {actual_code}")
+                return df
+                
+            except Exception as e:
+                logger.warning(f"yfinance代码 {actual_code} 获取失败: {str(e)}，尝试下一个")
+                continue
+        
+        logger.warning(f"所有yfinance代码尝试都失败: {actual_codes}")
+        return pd.DataFrame()
+        
     except Exception as e:
         logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
@@ -406,109 +458,189 @@ def fetch_akshare_data(index_code: str, days: int = 250) -> pd.DataFrame:
         pd.DataFrame: 指数日线数据
     """
     try:
-        # 添加随机延时避免被封（5.0-8.0秒）
+        # 添加随机延时避免被封
         time.sleep(random.uniform(5.0, 8.0))
+        
         # 计算日期范围
         end_date_dt = datetime.now()
         start_date_dt = end_date_dt - timedelta(days=days)
-        # 转换为字符串格式
         end_date = end_date_dt.strftime("%Y%m%d")
         start_date = start_date_dt.strftime("%Y%m%d")
+        
         logger.info(f"使用akshare获取指数 {index_code} 数据，时间范围: {start_date} 至 {end_date}")
-        # 尝试获取数据
-        try:
-            # 根据指数代码类型选择不同的akshare接口
-            if index_code.startswith(('0', '3', '6')):  # A股指数
+        
+        # 根据指数代码类型选择不同的akshare接口
+        if index_code.startswith(('0', '3', '6', '8', '9')):  # A股指数
+            try:
+                # 记录详细的接口调用信息
+                logger.info(f"📡 调用akshare接口 index_zh_a_hist")
+                logger.info(f"📋 调用参数: symbol={index_code}, period=daily, start_date={start_date}, end_date={end_date}")
+                
                 df = ak.index_zh_a_hist(
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
                     end_date=end_date
                 )
-            elif index_code.startswith('H') or index_code.startswith('^'):  # 港股指数
-                # 尝试恒生系列指数
-                if 'HSI' in index_code or 'HSTECH' in index_code or 'HSCEI' in index_code:
-                    df = ak.index_hk_hist(
-                        symbol=index_code,
-                        period="daily",
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                else:
-                    # 其他港股指数
-                    df = ak.stock_hk_index_daily_em(
-                        symbol=index_code,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-            elif index_code.startswith(('8', '9')):  # 其他A股指数
+                
+                # 记录详细的数据返回信息
+                logger.info(f"✅ akshare index_zh_a_hist接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                if not df.empty:
+                    logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                    
+            except Exception as e:
+                logger.warning(f"index_zh_a_hist接口失败，尝试stock_zh_index_daily: {str(e)}")
+                # 尝试备用接口
+                market_code = f"sh{index_code}" if index_code.startswith(('00', '60', '88', '93')) else f"sz{index_code}" if index_code.startswith('399') else f"bj{index_code}" if index_code.startswith('899') else index_code
+                
+                # 记录详细的接口调用信息
+                logger.info(f"📡 调用akshare接口 stock_zh_index_daily")
+                logger.info(f"📋 调用参数: symbol={market_code}")
+                
+                df = ak.stock_zh_index_daily(symbol=market_code)
+                
+                # 记录详细的数据返回信息
+                logger.info(f"✅ akshare stock_zh_index_daily接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                if not df.empty:
+                    logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                    
+        elif index_code.startswith('H') or index_code.startswith('^'):  # 港股指数
+            # 移除不存在的index_hk_hist，直接使用有效的接口
+            try:
+                # 清理代码格式
+                clean_code = index_code.replace('^', '')
+                
+                # 记录详细的接口调用信息
+                logger.info(f"📡 调用akshare接口 stock_hk_index_daily_em")
+                logger.info(f"📋 调用参数: symbol={clean_code}, start_date={start_date}, end_date={end_date}")
+                
+                df = ak.stock_hk_index_daily_em(
+                    symbol=clean_code,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                
+                # 记录详细的数据返回信息
+                logger.info(f"✅ akshare stock_hk_index_daily_em接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                if not df.empty:
+                    logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                    
+            except Exception as e:
+                logger.warning(f"stock_hk_index_daily_em失败: {str(e)}")
+                # 尝试其他港股接口
+                try:
+                    # 记录详细的接口调用信息
+                    logger.info(f"📡 调用akshare接口 index_global_hist_em")
+                    logger.info(f"📋 调用参数: symbol={clean_code}")
+                    
+                    df = ak.index_global_hist_em(symbol=clean_code)
+                    
+                    # 记录详细的数据返回信息
+                    logger.info(f"✅ akshare index_global_hist_em接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                    if not df.empty:
+                        logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                        
+                except Exception as e2:
+                    logger.warning(f"index_global_hist_em也失败: {str(e2)}")
+                    return pd.DataFrame()
+        else:
+            # 默认处理
+            try:
+                # 记录详细的接口调用信息
+                logger.info(f"📡 调用akshare接口 index_zh_a_hist (默认)")
+                logger.info(f"📋 调用参数: symbol={index_code}, period=daily, start_date={start_date}, end_date={end_date}")
+                
                 df = ak.index_zh_a_hist(
                     symbol=index_code,
                     period="daily",
                     start_date=start_date,
                     end_date=end_date
                 )
-            else:
-                # 默认处理
-                df = ak.index_zh_a_hist(
-                    symbol=index_code,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            if df.empty:
-                logger.warning(f"通过akshare获取指数 {index_code} 数据为空")
+                
+                # 记录详细的数据返回信息
+                logger.info(f"✅ akshare index_zh_a_hist接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                if not df.empty:
+                    logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                    
+            except Exception as e:
+                logger.warning(f"默认接口失败: {str(e)}")
                 return pd.DataFrame()
-            # 标准化列名
-            df = df.rename(columns={
-                'date': '日期',
-                'open': '开盘',
-                'high': '最高',
-                'low': '最低',
-                'close': '收盘',
-                'volume': '成交量',
-                'amount': '成交额'
-            })
-            # 确保日期列为datetime类型
-            df['日期'] = pd.to_datetime(df['日期'])
-            # 确保价格列是数值类型
-            price_columns = ['开盘', '最高', '最低', '收盘']
-            for col in price_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            # 确保成交量和成交额是数值类型
-            volume_columns = ['成交量', '成交额']
-            for col in volume_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            # 删除包含NaN的行
-            df = df.dropna(subset=['收盘'])
-            # 排序
-            df = df.sort_values('日期').reset_index(drop=True)
-            # 检查数据量
-            if len(df) <= 1:
-                logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
-                return pd.DataFrame()
-            logger.info(f"✅ 通过akshare成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
-            return df
-        except Exception as e:
-            logger.error(f"通过akshare获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        
+        if df.empty:
+            logger.warning(f"通过akshare获取指数 {index_code} 数据为空")
             return pd.DataFrame()
+            
+        # 标准化列名
+        df = df.rename(columns={
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量',
+            'amount': '成交额'
+        })
+        
+        # 确保日期列为datetime类型
+        if '日期' in df.columns:
+            df['日期'] = pd.to_datetime(df['日期'])
+        
+        # 确保价格列是数值类型
+        price_columns = ['开盘', '最高', '最低', '收盘']
+        for col in price_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 确保成交量和成交额是数值类型
+        volume_columns = ['成交量', '成交额']
+        for col in volume_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 删除包含NaN的行
+        df = df.dropna(subset=['收盘'])
+        
+        # 排序
+        df = df.sort_values('日期').reset_index(drop=True)
+        
+        # 检查数据量
+        if len(df) <= 1:
+            logger.warning(f"⚠️ 只获取到{len(df)}条数据，可能是当天数据，无法用于历史分析")
+            return pd.DataFrame()
+            
+        logger.info(f"✅ 通过akshare成功获取到 {len(df)} 条指数数据，日期范围: {df['日期'].min()} 至 {df['日期'].max()}")
+        return df
+        
     except Exception as e:
-        logger.error(f"获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
+        logger.error(f"通过akshare获取指数 {index_code} 数据失败: {str(e)}", exc_info=True)
         return pd.DataFrame()
 
-def fetch_akshare_stock_zh_index_daily(index_code: str) -> pd.DataFrame:
+def fetch_akshare_stock_zh_index_daily(index_code: str, days: int = 250) -> pd.DataFrame:
     """
-    使用akshare的stock_zh_index_daily接口获取指数数据（测试成功的接口）
+    使用akshare的stock_zh_index_daily接口获取指数数据
     Args:
         index_code: akshare格式的指数代码（如sh000688）
+        days: 获取最近多少天的数据
     Returns:
         pd.DataFrame: 指数日线数据
     """
     try:
-        logger.info(f"使用akshare stock_zh_index_daily接口获取指数数据: {index_code}")
+        # 记录详细的接口调用信息
+        logger.info(f"📡 调用akshare接口 stock_zh_index_daily")
+        logger.info(f"📋 调用参数: symbol={index_code}")
+        
         df = ak.stock_zh_index_daily(symbol=index_code)
+        
+        # 记录详细的数据返回信息
+        logger.info(f"✅ akshare stock_zh_index_daily接口调用成功，返回数据形状: {df.shape}")
+        if not df.empty:
+            logger.info(f"📊 第一条返回数据索引: {df.index[0] if hasattr(df.index, '__len__') else 'N/A'}")
+            logger.info(f"📊 数据列名: {df.columns.tolist()}")
+            if len(df) > 0:
+                first_row = df.iloc[0] if isinstance(df, pd.DataFrame) else None
+                if first_row is not None:
+                    logger.info(f"📊 第一条返回数据值: {first_row.to_dict()}")
+        
         if not df.empty:
             # 标准化列名
             df = df.reset_index()
@@ -520,16 +652,25 @@ def fetch_akshare_stock_zh_index_daily(index_code: str) -> pd.DataFrame:
                 'close': '收盘',
                 'volume': '成交量'
             })
+            
             # 确保日期列为datetime类型
             df['日期'] = pd.to_datetime(df['日期'])
+            
+            # 按日期范围过滤数据
+            end_date_dt = datetime.now()
+            start_date_dt = end_date_dt - timedelta(days=days)
+            df = df[(df['日期'] >= start_date_dt) & (df['日期'] <= end_date_dt)]
+            
             # 确保价格列是数值类型
             price_columns = ['开盘', '最高', '最低', '收盘']
             for col in price_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
             # 确保成交量是数值类型
             if '成交量' in df.columns:
                 df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce')
+                
             # 添加成交额列（如果不存在）
             if '成交额' not in df.columns:
                 df['成交额'] = np.nan
@@ -577,7 +718,17 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
             else:
                 market_code = index_code
                 
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 stock_zh_index_daily")
+            logger.info(f"📋 调用参数: symbol={market_code}")
+                
             df = ak.stock_zh_index_daily(symbol=market_code)
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare stock_zh_index_daily增强接口调用成功，返回数据形状: {df.shape}")
+            if not df.empty:
+                logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                
             if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
                 logger.info(f"✅ 通过stock_zh_index_daily成功获取 {index_name} 数据")
                 df = df.reset_index()
@@ -596,12 +747,22 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口2: 尝试index_zh_a_hist
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 index_zh_a_hist")
+            logger.info(f"📋 调用参数: symbol={index_code}, period=daily, start_date={start_date}, end_date={end_date}")
+            
             df = ak.index_zh_a_hist(
                 symbol=index_code,
                 period="daily",
                 start_date=start_date,
                 end_date=end_date
             )
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare index_zh_a_hist增强接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+            if not df.empty:
+                logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                
             if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
                 logger.info(f"✅ 通过index_zh_a_hist成功获取 {index_name} 数据")
                 df = df.rename(columns={
@@ -620,7 +781,16 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口3: 尝试index_csindex_all (中证指数)
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 index_csindex_all")
+            
             df_all = ak.index_csindex_all()
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare index_csindex_all增强接口调用成功，返回数据形状: {df_all.shape}")
+            if not df_all.empty:
+                logger.info(f"📊 包含的指数数量: {len(df_all)}")
+                
             if not df_all.empty and '指数代码' in df_all.columns:
                 # 检查是否包含目标指数
                 if index_code in df_all['指数代码'].values:
@@ -631,7 +801,16 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口4: 尝试index_stock_info
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 index_stock_info")
+            
             df_info = ak.index_stock_info()
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare index_stock_info增强接口调用成功，返回数据形状: {df_info.shape}")
+            if not df_info.empty:
+                logger.info(f"📊 包含的指数数量: {len(df_info)}")
+                
             if not df_info.empty and '指数代码' in df_info.columns:
                 if index_code in df_info['指数代码'].values:
                     logger.info(f"✅ 在index_stock_info中找到 {index_name}，但需要单独获取历史数据")
@@ -643,7 +822,17 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口1: 尝试stock_hk_index_daily_em
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 stock_hk_index_daily_em")
+            logger.info(f"📋 调用参数: symbol={index_code}, start_date={start_date}, end_date={end_date}")
+            
             df = ak.stock_hk_index_daily_em(symbol=index_code)
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare stock_hk_index_daily_em增强接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+            if not df.empty:
+                logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                
             if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
                 logger.info(f"✅ 通过stock_hk_index_daily_em成功获取 {index_name} 数据")
                 df = df.rename(columns={
@@ -661,7 +850,17 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口2: 尝试index_global_hist_em
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 index_global_hist_em")
+            logger.info(f"📋 调用参数: symbol={index_code}")
+            
             df = ak.index_global_hist_em(symbol=index_code)
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare index_global_hist_em增强接口调用成功，返回数据形状: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+            if not df.empty:
+                logger.info(f"📊 第一条返回数据: {df.iloc[0].to_dict() if hasattr(df, 'iloc') else 'N/A'}")
+                
             if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
                 logger.info(f"✅ 通过index_global_hist_em成功获取 {index_name} 数据")
                 df = df.rename(columns={
@@ -678,7 +877,16 @@ def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 
         
         # 接口3: 尝试index_global_spot_em获取实时数据
         try:
+            # 记录详细的接口调用信息
+            logger.info(f"📡 调用akshare增强接口 index_global_spot_em")
+            
             df_spot = ak.index_global_spot_em()
+            
+            # 记录详细的数据返回信息
+            logger.info(f"✅ akshare index_global_spot_em增强接口调用成功，返回数据形状: {df_spot.shape}")
+            if not df_spot.empty:
+                logger.info(f"📊 包含的指数数量: {len(df_spot)}")
+                
             if not df_spot.empty and '名称' in df_spot.columns:
                 # 查找目标指数
                 target_row = df_spot[df_spot['名称'].str.contains(index_code, na=False)]
@@ -712,7 +920,7 @@ def fetch_index_data_smart(index_info: dict, days: int = 250) -> tuple:
         
         try:
             if optimized_source["primary"] == "akshare" and optimized_source["interface"] == "stock_zh_index_daily":
-                df = fetch_akshare_stock_zh_index_daily(optimized_source["code"])
+                df = fetch_akshare_stock_zh_index_daily(optimized_source["code"], days)
                 if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
                     return df, f"akshare_stock_zh_index_daily({optimized_source['code']})"
             

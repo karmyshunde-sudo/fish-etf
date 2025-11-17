@@ -1,4 +1,4 @@
-# ======= 251117-1436 多数据源-strategy_arbitrage_source-DS1.py ======
+# ======= 251117-1500 多数据源-strategy_arbitrage_source-DS2.py ======
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -8,6 +8,7 @@
 数据保存格式: data/arbitrage/YYYYMMDD.csv
 增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
 【关键修复】使用多数据源轮换机制，降低对akshare的依赖
+【问题修复】修复数据列缺失、异常折溢价率、增强日志记录
 """
 
 import pandas as pd
@@ -371,6 +372,8 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                     continue
                 
                 content = response.text
+                logger.debug(f"腾讯财经原始返回数据: {content}")
+                
                 if not content or "pv_none_match" in content:
                     continue
                 
@@ -389,7 +392,9 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                         "ETF代码": code,
                         "ETF名称": etf_name,
                         "市场价格": current_price,
-                        "IOPV": iopv
+                        "IOPV": iopv,
+                        "收盘": current_price,  # 添加收盘价列
+                        "日期": get_beijing_time().strftime("%Y-%m-%d")  # 添加日期列
                     })
                 
                 # 避免请求过快
@@ -400,7 +405,9 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 continue
         
         df = pd.DataFrame(all_data)
-        logger.info(f"腾讯财经获取到 {len(df)} 只ETF的实时数据")
+        if not df.empty:
+            logger.info(f"腾讯财经获取到 {len(df)} 只ETF的实时数据")
+            logger.info(f"腾讯财经数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
         return df
         
     except Exception as e:
@@ -437,6 +444,8 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 continue
             
             content = response.text
+            logger.debug(f"新浪财经原始返回数据: {content}")
+            
             lines = content.split(';')
             
             for line in lines:
@@ -468,7 +477,9 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                             "ETF代码": etf_code,
                             "ETF名称": etf_name,
                             "市场价格": current_price,
-                            "IOPV": current_price  # 新浪数据中IOPV可能需要其他方式获取
+                            "IOPV": current_price,  # 新浪数据中IOPV可能需要其他方式获取
+                            "收盘": current_price,  # 添加收盘价列
+                            "日期": get_beijing_time().strftime("%Y-%m-%d")  # 添加日期列
                         })
                         
                 except Exception as e:
@@ -479,7 +490,9 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
             time.sleep(0.5)
         
         df = pd.DataFrame(all_data)
-        logger.info(f"新浪财经获取到 {len(df)} 只ETF的实时数据")
+        if not df.empty:
+            logger.info(f"新浪财经获取到 {len(df)} 只ETF的实时数据")
+            logger.info(f"新浪财经数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
         return df
         
     except Exception as e:
@@ -495,6 +508,8 @@ def _fetch_akshare_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         df = ak.fund_etf_spot_em()
         
         logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
+        if not df.empty:
+            logger.info(f"akshare原始数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
         
         if df.empty:
             logger.error("AkShare未返回ETF实时行情数据")
@@ -526,8 +541,12 @@ def _fetch_akshare_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         
         beijing_time = get_beijing_time()
         df.loc[:, '计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+        df.loc[:, '收盘'] = df['市场价格']  # 添加收盘价列
+        df.loc[:, '日期'] = beijing_time.strftime("%Y-%m-%d")  # 添加日期列
         
         logger.info(f"东方财富获取成功: {len(df)} 只ETF的实时数据")
+        if not df.empty:
+            logger.info(f"东方财富处理后的数据样本: {df.iloc[0].to_dict()}")
         return df
         
     except Exception as e:
@@ -568,7 +587,9 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                         "ETF代码": code,
                         "ETF名称": etf_name,
                         "市场价格": current_price,
-                        "IOPV": iopv
+                        "IOPV": iopv,
+                        "收盘": current_price,  # 添加收盘价列
+                        "日期": get_beijing_time().strftime("%Y-%m-%d")  # 添加日期列
                     })
                 
                 # 避免请求过快
@@ -579,7 +600,9 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 continue
         
         df = pd.DataFrame(all_data)
-        logger.info(f"Yahoo Finance获取到 {len(df)} 只ETF的实时数据")
+        if not df.empty:
+            logger.info(f"Yahoo Finance获取到 {len(df)} 只ETF的实时数据")
+            logger.info(f"Yahoo Finance数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
         return df
         
     except Exception as e:
@@ -589,8 +612,11 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
 def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.DataFrame:
     """标准化ETF实时数据格式"""
     
+    if df.empty:
+        return df
+    
     # 确保必要列存在
-    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
     
     # 根据数据源类型处理
     if source_type == "akshare":
@@ -603,7 +629,7 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
         })
     
     # 确保数值列是数值类型
-    numeric_columns = ["市场价格", "IOPV"]
+    numeric_columns = ["市场价格", "IOPV", "收盘"]
     for col in numeric_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -612,6 +638,7 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     df = df[
         (df["市场价格"] > 0) & 
         (df["IOPV"] > 0) &
+        (df["收盘"] > 0) &
         (df["ETF代码"].notna()) &
         (df["ETF名称"].notna())
     ].copy()
@@ -619,16 +646,53 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     # 计算折价率
     if "市场价格" in df.columns and "IOPV" in df.columns:
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+        
+        # 检查异常折溢价率 - 正常范围应该在 -20% 到 +20% 之间
+        abnormal_discount = df[df["折价率"] < -20]
+        abnormal_premium = df[df["折价率"] > 20]
+        
+        if len(abnormal_discount) > 0:
+            logger.error(f"⚠️ 发现 {len(abnormal_discount)} 个异常折价率 (<-20%): {abnormal_discount[['ETF代码', '折价率']].to_dict()}")
+            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+        
+        if len(abnormal_premium) > 0:
+            logger.error(f"⚠️ 发现 {len(abnormal_premium)} 个异常溢价率 (>20%): {abnormal_premium[['ETF代码', '折价率']].to_dict()}")
+            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+        
+        # 记录折价率统计信息
+        if not df.empty:
+            min_discount = df["折价率"].min()
+            max_discount = df["折价率"].max()
+            avg_discount = df["折价率"].mean()
+            logger.info(f"折价率统计 - 最小值: {min_discount:.2f}%, 最大值: {max_discount:.2f}%, 平均值: {avg_discount:.2f}%")
+            
+            # 如果出现极端值，发出严重警告
+            if min_discount < -50 or max_discount > 50:
+                logger.critical("🚨 发现极端折溢价率！这几乎肯定是数据错误，请立即检查数据源和计算逻辑！")
     
     # 确保所有必要列存在
     for col in required_columns:
         if col not in df.columns:
-            df[col] = np.nan
+            if col == "收盘" and "市场价格" in df.columns:
+                df[col] = df["市场价格"]
+            elif col == "日期":
+                df[col] = get_beijing_time().strftime("%Y-%m-%d")
+            else:
+                df[col] = np.nan
+    
+    # 添加成交额列（如果缺失）
+    if "成交额" not in df.columns:
+        df["成交额"] = 0  # 默认值
+    
+    # 添加振幅列（如果缺失）
+    if "振幅" not in df.columns:
+        df["振幅"] = 0  # 默认值
     
     # 移除完全无效的行
-    df = df.dropna(subset=required_columns)
+    df = df.dropna(subset=["ETF代码", "ETF名称", "市场价格", "IOPV"])
     
     logger.info(f"标准化后数据: {len(df)} 条有效记录")
+    
     return df
 
 def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
@@ -755,7 +819,7 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             df["ETF代码"] = df["ETF代码"].astype(str)
         
         # 检查必要列
-        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+        required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
@@ -794,7 +858,7 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
             if not df.empty:
                 df = df.copy(deep=True)
                 
-                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
                 if all(col in df.columns for col in required_columns) and len(df) > 0:
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
                     return df

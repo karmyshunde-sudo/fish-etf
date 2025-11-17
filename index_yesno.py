@@ -917,7 +917,6 @@ def detect_head_and_shoulders(df: pd.DataFrame) -> dict:
             "confidence": 0.0,
             "peaks": peaks[-3:] if len(peaks) >= 3 else peaks
         }
-}
 
 def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, critical: float, deviation: float) -> str:
     """生成策略信号消息"""

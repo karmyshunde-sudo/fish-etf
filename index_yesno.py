@@ -526,6 +526,155 @@ def fetch_akshare_stock_zh_index_daily(index_code: str) -> pd.DataFrame:
         logger.error(f"通过akshare stock_zh_index_daily获取指数 {index_code} 数据失败: {str(e)}")
         return pd.DataFrame()
 
+# =============== 针对失败指数的增强数据获取函数 ===============
+def fetch_failed_indices_enhanced(index_code: str, index_name: str, days: int = 250) -> tuple:
+    """
+    针对失败指数的增强数据获取函数，尝试多个akshare接口
+    Args:
+        index_code: 指数代码
+        index_name: 指数名称
+        days: 获取最近多少天的数据
+    Returns:
+        tuple: (DataFrame, 实际使用的数据源)
+    """
+    logger.info(f"开始增强获取失败指数 {index_name}({index_code}) 的数据")
+    
+    # 计算日期范围
+    end_date_dt = datetime.now()
+    start_date_dt = end_date_dt - timedelta(days=days)
+    start_date = start_date_dt.strftime("%Y%m%d")
+    end_date = end_date_dt.strftime("%Y%m%d")
+    
+    # 根据指数类型尝试不同的接口
+    if index_code in ["883418", "932000", "899050"]:  # A股失败指数
+        logger.info(f"为A股失败指数 {index_name}({index_code}) 尝试多个akshare接口")
+        
+        # 接口1: 尝试stock_zh_index_daily
+        try:
+            if index_code.startswith(('00', '88', '93')):
+                market_code = f"sh{index_code}"
+            elif index_code.startswith('399'):
+                market_code = f"sz{index_code}"
+            elif index_code.startswith('899'):
+                market_code = f"bj{index_code}"
+            else:
+                market_code = index_code
+                
+            df = ak.stock_zh_index_daily(symbol=market_code)
+            if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+                logger.info(f"✅ 通过stock_zh_index_daily成功获取 {index_name} 数据")
+                df = df.reset_index()
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘', 
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘',
+                    'volume': '成交量'
+                })
+                df['日期'] = pd.to_datetime(df['日期'])
+                return df, "akshare_stock_zh_index_daily"
+        except Exception as e:
+            logger.warning(f"接口stock_zh_index_daily失败: {str(e)}")
+        
+        # 接口2: 尝试index_zh_a_hist
+        try:
+            df = ak.index_zh_a_hist(
+                symbol=index_code,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date
+            )
+            if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+                logger.info(f"✅ 通过index_zh_a_hist成功获取 {index_name} 数据")
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘',
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘',
+                    'volume': '成交量',
+                    'amount': '成交额'
+                })
+                df['日期'] = pd.to_datetime(df['日期'])
+                return df, "akshare_index_zh_a_hist"
+        except Exception as e:
+            logger.warning(f"接口index_zh_a_hist失败: {str(e)}")
+        
+        # 接口3: 尝试index_csindex_all (中证指数)
+        try:
+            df_all = ak.index_csindex_all()
+            if not df_all.empty and '指数代码' in df_all.columns:
+                # 检查是否包含目标指数
+                if index_code in df_all['指数代码'].values:
+                    logger.info(f"✅ 在index_csindex_all中找到 {index_name}，但需要单独获取历史数据")
+                    # 这里可以进一步处理获取具体指数的历史数据
+        except Exception as e:
+            logger.warning(f"接口index_csindex_all失败: {str(e)}")
+        
+        # 接口4: 尝试index_stock_info
+        try:
+            df_info = ak.index_stock_info()
+            if not df_info.empty and '指数代码' in df_info.columns:
+                if index_code in df_info['指数代码'].values:
+                    logger.info(f"✅ 在index_stock_info中找到 {index_name}，但需要单独获取历史数据")
+        except Exception as e:
+            logger.warning(f"接口index_stock_info失败: {str(e)}")
+    
+    elif index_code in ["HSTECH", "HSCEI", "HSI"]:  # 港股失败指数
+        logger.info(f"为港股失败指数 {index_name}({index_code}) 尝试多个akshare接口")
+        
+        # 接口1: 尝试stock_hk_index_daily_em
+        try:
+            df = ak.stock_hk_index_daily_em(symbol=index_code)
+            if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+                logger.info(f"✅ 通过stock_hk_index_daily_em成功获取 {index_name} 数据")
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘',
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘',
+                    'volume': '成交量'
+                })
+                df['日期'] = pd.to_datetime(df['日期'])
+                return df, "akshare_stock_hk_index_daily_em"
+        except Exception as e:
+            logger.warning(f"接口stock_hk_index_daily_em失败: {str(e)}")
+        
+        # 接口2: 尝试index_global_hist_em
+        try:
+            df = ak.index_global_hist_em(symbol=index_code)
+            if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+                logger.info(f"✅ 通过index_global_hist_em成功获取 {index_name} 数据")
+                df = df.rename(columns={
+                    'date': '日期',
+                    'open': '开盘',
+                    'high': '最高',
+                    'low': '最低',
+                    'close': '收盘'
+                })
+                df['日期'] = pd.to_datetime(df['日期'])
+                return df, "akshare_index_global_hist_em"
+        except Exception as e:
+            logger.warning(f"接口index_global_hist_em失败: {str(e)}")
+        
+        # 接口3: 尝试index_global_spot_em获取实时数据
+        try:
+            df_spot = ak.index_global_spot_em()
+            if not df_spot.empty and '名称' in df_spot.columns:
+                # 查找目标指数
+                target_row = df_spot[df_spot['名称'].str.contains(index_code, na=False)]
+                if not target_row.empty:
+                    logger.info(f"✅ 在index_global_spot_em中找到 {index_name} 实时数据")
+                    # 这里可以进一步处理获取历史数据
+        except Exception as e:
+            logger.warning(f"接口index_global_spot_em失败: {str(e)}")
+    
+    # 所有接口都失败
+    logger.warning(f"所有增强接口都无法获取 {index_name}({index_code}) 数据")
+    return pd.DataFrame(), "所有增强接口均失败"
+
 def fetch_index_data_smart(index_info: dict, days: int = 250) -> tuple:
     """
     智能数据获取函数，当首选数据源失败时自动切换到备用数据源
@@ -558,7 +707,7 @@ def fetch_index_data_smart(index_info: dict, days: int = 250) -> tuple:
         except Exception as e:
             logger.warning(f"优化数据源获取失败，回退到原始逻辑: {str(e)}")
     
-    # 原始的数据源获取逻辑（保持不变）
+    # 原始的数据源获取逻辑
     data_sources = ["baostock", "akshare", "yfinance"]
     
     # 如果首选数据源不在优先级列表中，将其添加到最前面
@@ -602,6 +751,13 @@ def fetch_index_data_smart(index_info: dict, days: int = 250) -> tuple:
         except Exception as e:
             logger.error(f"通过 {source} 获取 {name} 数据时发生异常: {str(e)}")
             continue
+    
+    # =============== 新增：如果常规数据源都失败，尝试增强数据获取 ===============
+    logger.info(f"常规数据源全部失败，开始增强数据获取: {name}({code})")
+    df, enhanced_source = fetch_failed_indices_enhanced(code, name, days)
+    if not df.empty and len(df) >= CRITICAL_VALUE_DAYS:
+        logger.info(f"✅ 通过增强接口成功获取 {name} 数据")
+        return df, f"enhanced_{enhanced_source}"
     
     # 所有数据源都失败
     logger.error(f"所有数据源都无法获取 {name}({code}) 的有效数据")

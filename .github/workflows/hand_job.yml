@@ -347,10 +347,10 @@ jobs:
           echo "日志文件: $LOG_FILE"
           # 执行爬取
           if [ -f "stock/crawler.py" ]; then
-            echo "找到爬取文件: stock/crawler.py"
+            echo "找到股票日线数据爬取文件: stock/crawler.py"
             python -m stock.crawler 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到股票爬取文件 stock/crawler.py"
+            echo "错误: 未找到股票日线数据爬取文件 stock/crawler.py"
             exit 1
           fi
           # 记录任务状态
@@ -380,9 +380,9 @@ jobs:
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票日线数据爬取（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
 
-  # 多指标共振策略（手动）
+  # 股票多指标共振策略（手动）
   stock-threema-manual:
-    name: 多指标共振策略（手动）
+    name: 股票多指标共振策略（手动）
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_threema'
     permissions:
@@ -429,7 +429,7 @@ jobs:
       - name: 创建数据目录
         run: |
           mkdir -p data/{daily,stock,logs} && chmod -R 777 data
-      - name: 执行多指标共振策略（手动）
+      - name: 执行股票多指标共振策略（手动）
         id: execute_task  # 添加ID以便后续步骤引用
         env:
           WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}  # 使用STOCK_WEBHOOK
@@ -437,14 +437,14 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/macd_ma_strategy_${BEIJING_TIME}.log"
-          echo "正在执行: 多指标共振策略（手动）"
+          echo "正在执行: 股票多指标共振策略（手动）"
           echo "日志文件: $LOG_FILE"
           # 执行策略（macd_ma_strategy.py在stock目录）
           if [ -f "stock/macd_ma_strategy.py" ]; then
-            echo "找到策略文件: stock/macd_ma_strategy.py"
+            echo "找到股票多指标共振策略文件: stock/macd_ma_strategy.py"
             python -m stock.macd_ma_strategy 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到多指标共振策略文件 stock/macd_ma_strategy.py"
+            echo "错误: 未找到股票多指标共振策略文件 stock/macd_ma_strategy.py"
             exit 1
           fi
           # 记录任务状态
@@ -453,25 +453,25 @@ jobs:
           else
             echo "task_status=failed" >> $GITHUB_OUTPUT
           fi
-      - name: 提交股票策略结果
+      - name: 提交股票多指标共振策略结果
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/stock/
           if [ -n "$(git diff --cached --name-only data/stock/)" ]; then
-            git commit -m "手动提交多指标共振策略结果" && git push origin main
+            git commit -m "手动提交股票多指标共振策略结果" && git push origin main
           else
-            echo "多指标共振策略结果没有变化，无需提交"
+            echo "股票多指标共振策略结果没有变化，无需提交"
           fi
-      - name: 发送多指标共振策略通知
+      - name: 发送股票多指标共振策略通知
         if: env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【多指标共振策略（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票多指标共振策略（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # 股票均线缠绕回测任务（手动）
   stock-backtest-manual:
@@ -541,7 +541,7 @@ jobs:
           
           # 检查回测文件是否存在
           if [ -f "stock/backtest.py" ]; then
-            echo "找到回测代码文件: stock/backtest.py"
+            echo "找到股票均线缠绕回测代码文件: stock/backtest.py"
             # ✅ 修复：使用 -m 模块导入方式
             python -m stock.backtest 2>&1 | tee "$LOG_FILE"
             # 记录任务状态
@@ -551,24 +551,24 @@ jobs:
               echo "task_status=failed" >> $GITHUB_OUTPUT
             fi
           else
-            echo "错误: 未找到股票回测代码文件 stock/backtest.py"
+            echo "错误: 未找到股票均线缠绕回测代码文件 stock/backtest.py"
             echo "task_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
       
-      - name: 提交均线缠绕回测结果
+      - name: 提交股票均线缠绕回测结果
         if: steps.execute_task.outputs.task_status == 'success'
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/stock_backtest/
           if [ -n "$(git diff --cached --name-only data/stock_backtest/)" ]; then
-            git commit -m "手动提交股票回测结果" && git push origin main
+            git commit -m "手动提交股票均线缠绕回测结果" && git push origin main
           else
-            echo "股票回测结果没有变化，无需提交"
+            echo "股票均线缠绕回测结果没有变化，无需提交"
           fi
       
-      - name: 发送均线缠绕回测通知
+      - name: 发送股票均线缠绕回测通知
         if: env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
@@ -577,9 +577,9 @@ jobs:
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票均线缠绕回测任务（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
   
-  # 指定股票技术分析（手动）
+  # 单只股票技术分析（手动）
   analyze-stock-manual:
-    name: 指定股票技术分析（手动）
+    name: 单只股票技术分析（手动）
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'analyze_stock'
     permissions:
@@ -636,7 +636,7 @@ jobs:
           else
             echo "✅ 有效股票代码: $INPUT_STOCK_CODE"
           fi
-      - name: 执行指定股票技术分析（手动）
+      - name: 执行单只股票技术分析（手动）
         id: execute_task
         env:
           WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
@@ -646,7 +646,7 @@ jobs:
         run: |
           BEIJING_TIME=$(date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/analyze_stock_${BEIJING_TIME}.log"
-          echo "正在执行: 指定股票技术分析（手动）"
+          echo "正在执行: 单只股票技术分析（手动）"
           echo "股票代码: ${INPUT_STOCK_CODE}"
           echo "日志文件: $LOG_FILE"
           python main.py 2>&1 | tee "$LOG_FILE"
@@ -662,13 +662,13 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【指定股票技术分析（手动）】执行成功\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【单只股票技术分析（手动）】执行成功\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【指定股票技术分析（手动）】执行失败\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【单只股票技术分析（手动）】执行失败\\n股票代码: ${INPUT_STOCK_CODE}\\n北京时间: ${BEIJING_TIME}\"}}"
 
   # ETF列表更新（手动）
   update-etf-list-manual:
@@ -1028,9 +1028,9 @@ jobs:
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【ETF仓位策略计算（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
-  # 股票财务过滤（手动）
+  # 股票列表财务过滤（手动）
   stock-ListFilt-manual:
-    name: 股票财务过滤（手动）
+    name: 股票列表财务过滤（手动）
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stock_ListFilt'
     permissions:
@@ -1083,7 +1083,7 @@ jobs:
         run: |
           mkdir -p data/{flags,logs} && chmod -R 777 data
       
-      - name: 执行股票财务过滤（手动）
+      - name: 执行股票列表财务过滤（手动）
         id: execute_task
         env:
           WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
@@ -1091,15 +1091,15 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/stock_ListFilt_${BEIJING_TIME}.log"
-          echo "正在执行: 股票财务过滤（手动）"
+          echo "正在执行: 股票列表财务过滤（手动）"
           echo "日志文件: $LOG_FILE"
           
-          # 执行股票财务过滤
+          # 执行股票列表财务过滤
           if [ -f "stock/filterstock.py" ]; then
-            echo "找到股票财务过滤文件: stock/filterstock.py"
+            echo "找到股票列表财务过滤文件: stock/filterstock.py"
             python -m stock.filterstock 2>&1 | tee "$LOG_FILE"
           else
-            echo "错误: 未找到股票财务过滤文件 stock/filterstock.py"
+            echo "错误: 未找到股票列表财务过滤文件 stock/filterstock.py"
             exit 1
           fi
           
@@ -1117,9 +1117,9 @@ jobs:
           git config user.email "actions@github.com"
           git add data/all_stocks.csv
           if [ -n "$(git diff --cached --name-only data/all_stocks.csv)" ]; then
-            git commit -m "手动执行股票财务过滤" && git push origin main
+            git commit -m "手动执行股票列表财务过滤" && git push origin main
           else
-            echo "股票列表没有变化，无需提交"
+            echo "财务过滤后股票列表没有变化，无需提交"
           fi
       
       - name: 发送完成通知
@@ -1127,11 +1127,11 @@ jobs:
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【股票财务过滤（手动）】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【股票列表财务过滤（手动）】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
       
       - name: 发送失败通知
         if: failure() && env.WECOM_WEBHOOK
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【股票财务过滤（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"⚠️ 【股票列表财务过滤（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"

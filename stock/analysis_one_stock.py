@@ -20,8 +20,11 @@ from utils.date_utils import (
     get_utc_time
 )
 from wechat_push.push import send_wechat_message
-# 专业修复：从正确的模块导入函数
-from stock.crawler import fetch_stock_daily_data, save_stock_daily_data
+
+# =======【251117-改数据源stock_source.py后函数导入要变】=======
+#from stock.crawler import fetch_stock_daily_data, save_stock_daily_data
+from stock.stock_source import get_stock_daily_data_from_sources
+from stock.crawler import save_stock_data_batch
 
 # 初始化日志
 logger = logging.getLogger(__name__)
@@ -228,12 +231,28 @@ def ensure_stock_data(stock_code: str, days: int = 365) -> bool:
     logger.info(f"股票 {stock_code} 日线数据不存在，开始爬取...")
     
     try:
-        # 爬取数据 - 专业修复：调用正确的函数
-        df = fetch_stock_daily_data(stock_code)
+        
+        # 爬取数据 - ====【251117-改数据源stock_source.py后函数导入要变】=======
+        #df = fetch_stock_daily_data(stock_code)
         
         # 保存数据 - 专业修复：调用正确的函数
+        #if not df.empty:
+        #    save_stock_daily_data(stock_code, df)
+        
+        # =======修复开始====【251117-改数据源stock_source.py后函数导入要变】=======
+        # 爬取数据 - 需要日期参数
+        start_date = datetime.now() - timedelta(days=365)  # 获取一年数据
+        end_date = datetime.now()
+        df = get_stock_daily_data_from_sources(
+            stock_code=stock_code,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # 保存数据 - 使用批量保存函数
         if not df.empty:
-            save_stock_daily_data(stock_code, df)
+            save_stock_data_batch({stock_code: df})
+            # =======修复结束====【251117-改数据源stock_source.py后函数导入要变】=======
             
             # 再次检查数据
             df = load_stock_daily_data(stock_code)

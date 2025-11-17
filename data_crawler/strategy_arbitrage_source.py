@@ -1,24 +1,25 @@
+# ======= 251117-1436 多数据源-strategy_arbitrage_source-DS1.py ======
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-套利策略专用数据源模块
+套利策略专用数据源模块 - 多数据源轮换机制
 负责爬取ETF实时市场价格和IOPV(基金份额参考净值)
 数据保存格式: data/arbitrage/YYYYMMDD.csv
 增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
-【已修复】
-- 修复了非交易日仍尝试爬取数据的问题
-- 修复了ETF数量不一致问题
-- 修复了无日线数据但有溢价率的逻辑矛盾
-- 确保数据源一致性
+【关键修复】使用多数据源轮换机制，降低对akshare的依赖
 """
 
 import pandas as pd
 import numpy as np
 import logging
 import akshare as ak
+import yfinance as yf
+import requests
+import json
 import os
 import time
-import datetime
+import random
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from config import Config
@@ -28,11 +29,18 @@ from data_crawler.all_etfs import get_all_etf_codes, get_etf_name
 
 # 初始化日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
+
+# ===== 多数据源配置 =====
+# 优先级配置（按稳定性排序）
+SOURCE_PRIORITY = [
+    (0, 0, 1),  # 数据源0-接口0：腾讯财经（最稳定）
+    (1, 0, 2),  # 数据源1-接口0：新浪财经
+    (2, 0, 3),  # 数据源2-接口0：东方财富（akshare）- 降级到第三位
+    (3, 0, 4),  # 数据源3-接口0：Yahoo Finance（最不稳定）
+]
+
+# 模块级全局状态
+_current_priority_index = 0  # 记录当前优先级位置
 
 def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     """
@@ -47,12 +55,10 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             logger.info("套利数据目录不存在，无需清理")
             return
         
-        # 【日期datetime类型规则】确保当前日期是datetime类型
         current_date = get_beijing_time()
         logger.info(f"清理旧套利数据：保留最近 {days_to_keep} 天的数据")
         logger.info(f"当前日期: {current_date}")
         
-        # 遍历目录中的所有文件
         files_to_keep = []
         files_to_delete = []
         
@@ -60,24 +66,17 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             if not file_name.endswith(".csv"):
                 continue
                 
-            # 提取文件日期
             try:
                 file_date_str = file_name.split(".")[0]
-                # 【日期datetime类型规则】确保文件日期是datetime类型
                 file_date = datetime.strptime(file_date_str, "%Y%m%d")
                 
-                # 【关键修复】确保文件日期也是有时区信息的
-                # 将无时区的文件日期转换为与current_date相同的时区
                 if file_date.tzinfo is None:
                     file_date = file_date.replace(tzinfo=Config.BEIJING_TIMEZONE)
                 
-                # 计算日期差（使用datetime类型直接计算）
                 days_diff = (current_date - file_date).days
                 
-                # 记录详细信息
                 logger.debug(f"检查文件: {file_name}, 文件日期: {file_date}, 日期差: {days_diff}天")
                 
-                # 判断是否删除
                 if days_diff > days_to_keep:
                     files_to_delete.append((file_name, file_date, days_diff))
                 else:
@@ -86,7 +85,6 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
                 logger.warning(f"解析文件日期失败: {file_name}, 错误: {str(e)}")
                 continue
         
-        # 删除超过保留天数的文件
         for file_name, file_date, days_diff in files_to_delete:
             file_path = os.path.join(arbitrage_dir, file_name)
             try:
@@ -95,19 +93,13 @@ def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
             except Exception as e:
                 logger.error(f"删除文件失败: {file_path}, 错误: {str(e)}")
         
-        # 记录保留的文件
         logger.info(f"保留套利数据文件: {len(files_to_keep)} 个")
         if files_to_keep:
             logger.debug("保留的文件列表:")
             for file_name, file_date, days_diff in files_to_keep:
                 logger.debug(f"  - {file_name} (文件日期: {file_date}, 剩余保留天数: {days_to_keep - days_diff}天)")
         
-        # 记录删除的文件
         logger.info(f"已删除套利数据文件: {len(files_to_delete)} 个")
-        if files_to_delete:
-            logger.debug("已删除的文件列表:")
-            for file_name, file_date, days_diff in files_to_delete:
-                logger.debug(f"  - {file_name} (文件日期: {file_date}, 超期: {days_diff - days_to_keep}天)")
     
     except Exception as e:
         logger.error(f"清理旧套利数据失败: {str(e)}", exc_info=True)
@@ -127,43 +119,31 @@ def append_arbitrage_data(df: pd.DataFrame) -> str:
             logger.warning("套利数据为空，跳过保存")
             return ""
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 添加时间戳列
         if "timestamp" not in df.columns:
-            # 【日期datetime类型规则】确保时间戳是datetime类型
             timestamp = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
             df.loc[:, "timestamp"] = timestamp
         
-        # 创建数据目录
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
         ensure_dir_exists(arbitrage_dir)
         
-        # 生成文件名 (YYYYMMDD.csv)
-        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
         file_date = beijing_time.strftime("%Y%m%d")
         file_path = os.path.join(arbitrage_dir, f"{file_date}.csv")
         
-        # 保存数据 - 增量追加模式
         if os.path.exists(file_path):
-            # 读取现有数据并创建副本
             existing_df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
-            # 【日期datetime类型规则】确保时间戳列是datetime类型
             if "timestamp" in existing_df.columns:
                 existing_df["timestamp"] = pd.to_datetime(existing_df["timestamp"], errors='coerce')
-            # 合并数据
+            
             combined_df = pd.concat([existing_df, df], ignore_index=True)
-            # 去重（基于ETF代码和时间戳）
             combined_df = combined_df.drop_duplicates(
                 subset=["ETF代码", "timestamp"], 
                 keep="last"
             )
-            # 保存合并后的数据
             combined_df.to_csv(file_path, index=False, encoding="utf-8-sig")
         else:
-            # 创建新文件
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
         
         logger.info(f"套利数据已增量保存至: {file_path} (新增{len(df)}条记录)")
@@ -181,28 +161,23 @@ def get_trading_etf_list() -> List[str]:
         List[str]: ETF代码列表
     """
     try:
-        # 获取基础ETF列表
         etf_codes = get_all_etf_codes()
         if not etf_codes:
             logger.error("无法获取ETF代码列表")
             return []
         
-        # 创建ETF列表DataFrame
         etf_list = pd.DataFrame({
             "ETF代码": etf_codes,
             "ETF名称": [get_etf_name(code) for code in etf_codes]
         })
         
-        # 确保ETF代码是字符串类型
         etf_list["ETF代码"] = etf_list["ETF代码"].astype(str)
         
-        # 筛选基础条件：规模、非货币ETF
         etf_list = etf_list[
             (~etf_list["ETF代码"].str.startswith("511")) &  # 排除货币ETF
             (etf_list["ETF代码"].str.len() == 6)  # 确保代码长度为6位
         ].copy()
         
-        # 确保唯一性
         etf_list = etf_list.drop_duplicates(subset=["ETF代码"])
         
         logger.info(f"筛选后用于套利监控的ETF数量: {len(etf_list)}")
@@ -213,14 +188,15 @@ def get_trading_etf_list() -> List[str]:
 
 def fetch_arbitrage_realtime_data() -> pd.DataFrame:
     """
-    爬取所有ETF的实时市场价格和IOPV数据
+    爬取所有ETF的实时市场价格和IOPV数据 - 多数据源版本
     
     Returns:
         pd.DataFrame: 包含ETF代码、名称、市场价格、IOPV等信息的DataFrame
     """
+    global _current_priority_index
+    
     try:
-        logger.info("=== 开始执行套利数据爬取 ===")
-        # 【日期datetime类型规则】确保beijing_time是datetime类型
+        logger.info("=== 开始执行套利数据爬取（多数据源轮换）===")
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -238,7 +214,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
             return pd.DataFrame()
         
-        # 获取需要监控的ETF列表（统一数据源）
+        # 获取需要监控的ETF列表
         etf_codes = get_trading_etf_list()
         if not etf_codes:
             logger.error("无法获取有效的ETF代码列表")
@@ -246,17 +222,284 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         
         logger.info(f"获取到 {len(etf_codes)} 只符合条件的ETF进行套利监控")
         
-        # 爬取数据 - 使用单个API调用获取所有数据
+        # ===== 多数据源轮换逻辑 =====
+        DATA_SOURCES = [
+            # 数据源0：腾讯财经（最高优先级）
+            {
+                "name": "腾讯财经",
+                "interfaces": [
+                    {
+                        "name": "ETF实时行情",
+                        "func": _fetch_tencent_etf_data,
+                        "delay_range": (1.0, 1.5),
+                        "source_type": "tencent"
+                    }
+                ]
+            },
+            # 数据源1：新浪财经
+            {
+                "name": "新浪财经",
+                "interfaces": [
+                    {
+                        "name": "ETF实时行情",
+                        "func": _fetch_sina_etf_data,
+                        "delay_range": (1.0, 1.5),
+                        "source_type": "sina"
+                    }
+                ]
+            },
+            # 数据源2：东方财富（akshare）- 降级到第三位
+            {
+                "name": "东方财富",
+                "interfaces": [
+                    {
+                        "name": "ETF实时行情",
+                        "func": _fetch_akshare_etf_data,
+                        "delay_range": (3.0, 4.0),
+                        "source_type": "akshare"
+                    }
+                ]
+            },
+            # 数据源3：Yahoo Finance
+            {
+                "name": "Yahoo Finance",
+                "interfaces": [
+                    {
+                        "name": "ETF实时行情",
+                        "func": _fetch_yfinance_etf_data,
+                        "delay_range": (2.0, 2.5),
+                        "source_type": "yfinance"
+                    }
+                ]
+            }
+        ]
+        
+        # 智能轮换逻辑
+        success = False
+        result_df = pd.DataFrame()
+        last_error = None
+        total_priority = len(SOURCE_PRIORITY)
+        
+        for offset in range(total_priority):
+            priority_idx = (_current_priority_index + offset) % total_priority
+            ds_idx, if_idx, _ = SOURCE_PRIORITY[priority_idx]
+            
+            if ds_idx >= len(DATA_SOURCES) or if_idx >= len(DATA_SOURCES[ds_idx]["interfaces"]):
+                continue
+                
+            source = DATA_SOURCES[ds_idx]
+            interface = source["interfaces"][if_idx]
+            
+            try:
+                func = interface["func"]
+                
+                # 动态延时
+                delay_min, delay_max = interface["delay_range"]
+                if priority_idx < 2:  # 前两个优先级
+                    delay_factor = 0.8
+                elif priority_idx < 4:  # 中间两个优先级
+                    delay_factor = 1.0
+                else:
+                    delay_factor = 1.2
+                
+                time.sleep(random.uniform(delay_min * delay_factor, delay_max * delay_factor))
+                
+                logger.debug(f"尝试 [{source['name']}->{interface['name']}] 获取ETF实时数据 "
+                            f"(优先级: {priority_idx+1}/{total_priority})")
+                
+                # 调用接口
+                df = func(etf_codes)
+                
+                # 验证数据有效性
+                if df is None or df.empty:
+                    raise ValueError("返回空数据")
+                
+                # 数据标准化
+                df = _standardize_etf_data(df, interface["source_type"], logger)
+                
+                # 检查标准化后数据
+                required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+                if not all(col in df.columns for col in required_columns):
+                    missing = [col for col in required_columns if col not in df.columns]
+                    raise ValueError(f"标准化后仍缺失必要列: {', '.join(missing)}")
+                
+                # 保存成功状态
+                result_df = df
+                success = True
+                _current_priority_index = priority_idx  # 锁定当前优先级
+                logger.info(f"✅ 【{source['name']}->{interface['name']}] 成功获取 {len(result_df)} 条ETF实时数据 (锁定优先级: {priority_idx+1})")
+                break
+                
+            except Exception as e:
+                last_error = e
+                logger.error(f"❌ [{source['name']}->{interface['name']}] 失败: {str(e)}", exc_info=True)
+                continue
+        
+        # 所有数据源都失败
+        if not success:
+            logger.error(f"所有数据源均无法获取ETF实时数据: {str(last_error)}")
+            _current_priority_index = (_current_priority_index + 1) % total_priority
+            return pd.DataFrame()
+        
+        return result_df
+    
+    except Exception as e:
+        logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+
+def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
+    """从腾讯财经获取ETF实时数据"""
+    try:
+        logger.info("尝试从腾讯财经获取ETF实时数据")
+        
+        # 腾讯财经ETF实时数据API
+        base_url = "http://qt.gtimg.cn/q="
+        
+        all_data = []
+        for code in etf_codes:
+            try:
+                # 构建代码格式
+                if code.startswith('5'):
+                    tencent_code = f"sh{code}"
+                else:
+                    tencent_code = f"sz{code}"
+                
+                url = f"{base_url}{tencent_code}"
+                response = requests.get(url, timeout=10)
+                
+                if response.status_code != 200:
+                    continue
+                
+                content = response.text
+                if not content or "pv_none_match" in content:
+                    continue
+                
+                # 解析数据格式: v_sh510050="1~华夏上证50ETF~510050~2.345~2.350~2.340..."
+                parts = content.split('~')
+                if len(parts) < 40:
+                    continue
+                
+                # 提取关键数据
+                etf_name = parts[1] if len(parts) > 1 else ""
+                current_price = float(parts[3]) if len(parts) > 3 and parts[3] else 0
+                iopv = float(parts[38]) if len(parts) > 38 and parts[38] else current_price  # IOPV在腾讯数据中的位置可能不同
+                
+                if current_price > 0:
+                    all_data.append({
+                        "ETF代码": code,
+                        "ETF名称": etf_name,
+                        "市场价格": current_price,
+                        "IOPV": iopv
+                    })
+                
+                # 避免请求过快
+                time.sleep(0.1)
+                
+            except Exception as e:
+                logger.debug(f"获取ETF {code} 数据失败: {str(e)}")
+                continue
+        
+        df = pd.DataFrame(all_data)
+        logger.info(f"腾讯财经获取到 {len(df)} 只ETF的实时数据")
+        return df
+        
+    except Exception as e:
+        logger.error(f"腾讯财经ETF数据获取失败: {str(e)}")
+        raise ValueError(f"腾讯财经ETF数据获取失败: {str(e)}")
+
+def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
+    """从新浪财经获取ETF实时数据"""
+    try:
+        logger.info("尝试从新浪财经获取ETF实时数据")
+        
+        # 新浪财经ETF实时数据API
+        base_url = "http://hq.sinajs.cn/list="
+        
+        all_data = []
+        batch_size = 50  # 分批处理，避免URL过长
+        
+        for i in range(0, len(etf_codes), batch_size):
+            batch_codes = etf_codes[i:i + batch_size]
+            
+            # 构建代码列表
+            code_list = []
+            for code in batch_codes:
+                if code.startswith('5'):
+                    sina_code = f"sh{code}"
+                else:
+                    sina_code = f"sz{code}"
+                code_list.append(sina_code)
+            
+            url = f"{base_url}{','.join(code_list)}"
+            response = requests.get(url, timeout=15)
+            
+            if response.status_code != 200:
+                continue
+            
+            content = response.text
+            lines = content.split(';')
+            
+            for line in lines:
+                if not line.strip():
+                    continue
+                
+                try:
+                    # 解析数据格式: var hq_str_sh510050="华夏上证50ETF,2.345,2.350,2.340,...";
+                    parts = line.split('="')
+                    if len(parts) < 2:
+                        continue
+                    
+                    code_part = parts[0].split('_')[-1]
+                    data_part = parts[1].rstrip('";')
+                    
+                    data_items = data_part.split(',')
+                    if len(data_items) < 30:
+                        continue
+                    
+                    # 提取股票代码
+                    etf_code = code_part[2:]  # 去掉市场前缀
+                    
+                    # 提取关键数据
+                    etf_name = data_items[0] if data_items[0] else ""
+                    current_price = float(data_items[3]) if len(data_items) > 3 and data_items[3] else 0
+                    
+                    if current_price > 0:
+                        all_data.append({
+                            "ETF代码": etf_code,
+                            "ETF名称": etf_name,
+                            "市场价格": current_price,
+                            "IOPV": current_price  # 新浪数据中IOPV可能需要其他方式获取
+                        })
+                        
+                except Exception as e:
+                    logger.debug(f"解析ETF数据失败: {str(e)}")
+                    continue
+            
+            # 批次间延时
+            time.sleep(0.5)
+        
+        df = pd.DataFrame(all_data)
+        logger.info(f"新浪财经获取到 {len(df)} 只ETF的实时数据")
+        return df
+        
+    except Exception as e:
+        logger.error(f"新浪财经ETF数据获取失败: {str(e)}")
+        raise ValueError(f"新浪财经ETF数据获取失败: {str(e)}")
+
+def _fetch_akshare_etf_data(etf_codes: List[str]) -> pd.DataFrame:
+    """从东方财富（akshare）获取ETF实时数据"""
+    try:
+        logger.info("尝试从东方财富获取ETF实时数据")
+        
+        # 使用akshare获取所有ETF实时数据
         df = ak.fund_etf_spot_em()
         
-        # 记录返回的列名
         logger.info(f"fund_etf_spot_em 接口返回列名: {df.columns.tolist()}")
         
         if df.empty:
             logger.error("AkShare未返回ETF实时行情数据")
             return pd.DataFrame()
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
         # 过滤出需要的ETF
@@ -266,7 +509,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             logger.warning("筛选后无符合条件的ETF数据")
             return pd.DataFrame()
         
-        # 重命名列名以匹配我们的需求
+        # 重命名列名
         column_mapping = {
             '代码': 'ETF代码',
             '名称': 'ETF名称',
@@ -276,23 +519,117 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
             '更新时间': '净值时间'
         }
         
-        # 只保留我们需要的列
         available_columns = [col for col in column_mapping.keys() if col in df.columns]
         df = df[available_columns].rename(columns=column_mapping).copy(deep=True)
         
-        # 确保ETF代码是字符串类型
         df["ETF代码"] = df["ETF代码"].astype(str)
         
-        # 添加计算时间
-        # 【日期datetime类型规则】确保计算时间是datetime类型
+        beijing_time = get_beijing_time()
         df.loc[:, '计算时间'] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         
-        logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
+        logger.info(f"东方财富获取成功: {len(df)} 只ETF的实时数据")
         return df
-    
+        
     except Exception as e:
-        logger.error(f"爬取套利实时数据过程中发生未预期错误: {str(e)}", exc_info=True)
-        return pd.DataFrame()
+        logger.error(f"东方财富ETF数据获取失败: {str(e)}")
+        raise ValueError(f"东方财富ETF数据获取失败: {str(e)}")
+
+def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
+    """从Yahoo Finance获取ETF实时数据"""
+    try:
+        logger.info("尝试从Yahoo Finance获取ETF实时数据")
+        
+        all_data = []
+        
+        for code in etf_codes:
+            try:
+                # 转换代码格式
+                if code.startswith('5'):
+                    yf_symbol = f"{code}.SS"
+                else:
+                    yf_symbol = f"{code}.SZ"
+                
+                # 获取实时数据
+                etf = yf.Ticker(yf_symbol)
+                info = etf.info
+                history = etf.history(period="1d")
+                
+                if history.empty:
+                    continue
+                
+                current_price = history['Close'].iloc[-1]
+                etf_name = info.get('longName', '') or info.get('shortName', '')
+                
+                # Yahoo Finance可能不提供IOPV，使用当前价格作为近似值
+                iopv = current_price
+                
+                if current_price > 0:
+                    all_data.append({
+                        "ETF代码": code,
+                        "ETF名称": etf_name,
+                        "市场价格": current_price,
+                        "IOPV": iopv
+                    })
+                
+                # 避免请求过快
+                time.sleep(0.2)
+                
+            except Exception as e:
+                logger.debug(f"获取ETF {code} 数据失败: {str(e)}")
+                continue
+        
+        df = pd.DataFrame(all_data)
+        logger.info(f"Yahoo Finance获取到 {len(df)} 只ETF的实时数据")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Yahoo Finance ETF数据获取失败: {str(e)}")
+        raise ValueError(f"Yahoo Finance ETF数据获取失败: {str(e)}")
+
+def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.DataFrame:
+    """标准化ETF实时数据格式"""
+    
+    # 确保必要列存在
+    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
+    
+    # 根据数据源类型处理
+    if source_type == "akshare":
+        # akshare数据已经过初步处理，只需确保格式
+        df = df.rename(columns={
+            "代码": "ETF代码",
+            "名称": "ETF名称",
+            "最新价": "市场价格",
+            "IOPV实时估值": "IOPV"
+        })
+    
+    # 确保数值列是数值类型
+    numeric_columns = ["市场价格", "IOPV"]
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # 过滤无效数据
+    df = df[
+        (df["市场价格"] > 0) & 
+        (df["IOPV"] > 0) &
+        (df["ETF代码"].notna()) &
+        (df["ETF名称"].notna())
+    ].copy()
+    
+    # 计算折价率
+    if "市场价格" in df.columns and "IOPV" in df.columns:
+        df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+    
+    # 确保所有必要列存在
+    for col in required_columns:
+        if col not in df.columns:
+            df[col] = np.nan
+    
+    # 移除完全无效的行
+    df = df.dropna(subset=required_columns)
+    
+    logger.info(f"标准化后数据: {len(df)} 条有效记录")
+    return df
 
 def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
     """
@@ -305,31 +642,23 @@ def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
         pd.DataFrame: 套利数据
     """
     try:
-        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
         
-        # 默认使用今天
         if not date_str:
-            # 【日期datetime类型规则】直接使用datetime对象
             date_str = beijing_time.strftime("%Y%m%d")
         
-        # 构建文件路径
         arbitrage_dir = os.path.join(Config.DATA_DIR, "arbitrage")
         file_path = os.path.join(arbitrage_dir, f"{date_str}.csv")
         
-        # 检查文件是否存在
         if not os.path.exists(file_path):
             logger.debug(f"套利数据文件不存在: {file_path}")
             return pd.DataFrame()
         
-        # 读取数据并创建副本
         df = pd.read_csv(file_path, encoding="utf-8-sig").copy(deep=True)
         
-        # 【日期datetime类型规则】确保ETF代码是字符串类型
         if "ETF代码" in df.columns:
             df["ETF代码"] = df["ETF代码"].astype(str)
         
-        # 【日期datetime类型规则】确保时间戳列是datetime类型
         if "timestamp" in df.columns:
             df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         
@@ -348,8 +677,7 @@ def crawl_arbitrage_data() -> str:
         str: 保存的文件路径
     """
     try:
-        logger.info("=== 开始执行套利数据爬取 ===")
-        # 【日期datetime类型规则】确保beijing_time是datetime类型
+        logger.info("=== 开始执行套利数据爬取（多数据源）===")
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -358,7 +686,6 @@ def crawl_arbitrage_data() -> str:
             logger.warning("当前不是交易日，跳过套利数据爬取")
             return ""
         
-        # 检查是否为交易时间
         current_time = beijing_time.time()
         trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
         trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
@@ -367,17 +694,15 @@ def crawl_arbitrage_data() -> str:
             logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
             return ""
         
-        # 爬取数据
+        # 使用多数据源爬取数据
         df = fetch_arbitrage_realtime_data()
         
-        # 详细检查爬取结果
         if df.empty:
             logger.warning("未获取到有效的套利数据，爬取结果为空")
             return ""
         else:
             logger.info(f"成功获取 {len(df)} 只ETF的实时数据")
         
-        # 增量保存数据
         return append_arbitrage_data(df)
     
     except Exception as e:
@@ -397,9 +722,7 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.warning("当前不是交易日，跳过获取套利机会")
             return pd.DataFrame()
         
-        # 【日期datetime类型规则】确保beijing_time是datetime类型
         beijing_time = get_beijing_time()
-        # 【日期datetime类型规则】直接使用datetime对象
         today = beijing_time.strftime("%Y%m%d")
         
         # 尝试加载今天的套利数据
@@ -410,7 +733,6 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.warning("无今日套利数据，尝试重新爬取")
             file_path = crawl_arbitrage_data()
             
-            # 详细检查爬取结果
             if file_path and os.path.exists(file_path):
                 logger.info(f"成功爬取并保存套利数据到: {file_path}")
                 df = load_arbitrage_data(today)
@@ -427,10 +749,8 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
             logger.error("无法获取任何有效的套利数据")
             return pd.DataFrame()
         
-        # 创建DataFrame的副本，避免SettingWithCopyWarning
         df = df.copy(deep=True)
         
-        # 【日期datetime类型规则】确保ETF代码是字符串类型
         if "ETF代码" in df.columns:
             df["ETF代码"] = df["ETF代码"].astype(str)
         
@@ -440,7 +760,6 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         
         if missing_columns:
             logger.error(f"数据中缺少必要列: {', '.join(missing_columns)}")
-            # 记录实际存在的列
             logger.debug(f"实际列名: {list(df.columns)}")
             return pd.DataFrame()
         
@@ -466,21 +785,15 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
         pd.DataFrame: 最近有效的套利数据
     """
     try:
-        # 【日期datetime类型规则】确保beijing_now是datetime类型
         beijing_now = get_beijing_time()
         
-        # 从今天开始向前查找
         for i in range(days_back):
-            # 【日期datetime类型规则】确保date_str是datetime类型
             date = (beijing_now - timedelta(days=i)).strftime("%Y%m%d")
             df = load_arbitrage_data(date)
             
-            # 检查数据是否有效
             if not df.empty:
-                # 创建DataFrame的副本，避免SettingWithCopyWarning
                 df = df.copy(deep=True)
                 
-                # 检查是否包含必要列
                 required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if all(col in df.columns for col in required_columns) and len(df) > 0:
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
@@ -499,7 +812,7 @@ try:
     Config.init_dirs()
     
     # 初始化日志
-    logger.info("套利数据源模块初始化完成")
+    logger.info("套利数据源模块初始化完成（多数据源版本）")
     
     # 清理过期的套利数据
     try:

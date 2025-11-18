@@ -959,15 +959,7 @@ def generate_strategy_report():
         # 【关键修改】在推送消息前，保存股票代码到txt文件
         file_path = save_and_commit_stock_codes(top_stocks)
         
-        # 【关键修改】直接调用push.py中的send_txt_file函数发送文件内容
-        if file_path and os.path.exists(file_path):
-            logger.info("=== 发送股票代码文件内容 ===")
-            title = "【每版块8只股票MA20】股票代码清单"
-            send_txt_file(file_path, title, "position")
-            # 添加延时，确保文件消息先到达
-            time.sleep(3)
-        
-        # 【关键修改】按板块分组生成多个消息
+        # ======== 按板块分组生成多个消息 ========
         section_messages = []
         # 生成每个板块的消息
         for section, stocks in top_stocks.items():
@@ -1008,6 +1000,13 @@ def generate_strategy_report():
                 f"今日无符合【每版块8只股票MA20】趋势条件的股票"
             )
             send_wechat_message(default_message)
+        
+        # ======  直接调用push.py中的send_txt_file函数发送文件内容  =======
+        if file_path and os.path.exists(file_path):
+            logger.info("=== 发送股票代码文件内容 ===")
+            title = "【每版块8只股票MA20】股票代码清单"
+            send_txt_file(file_path, title, "position")
+            
         logger.info("【每版块8只股票MA20】执行完成")
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)

@@ -14,7 +14,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
-from wechat_push.push import send_wechat_message
+from wechat_push.push import send_wechat_message,send_txt_file
 import sys
 import traceback
 import subprocess

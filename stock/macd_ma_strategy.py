@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-策略2 - 专业级多指标共振策略（微信推送适配版）
+策略2 - 专业级多指标共振+均线缠绕策略（微信推送适配版）
 功能：
 1. 遍历 data/daily/ 下所有股票日线数据
 2. 计算 MA、MACD、RSI、KDJ 四大指标
@@ -23,7 +23,7 @@ import logging
 import sys
 from config import Config
 from utils.date_utils import is_file_outdated, get_beijing_time
-from wechat_push.push import send_wechat_message  # 确保正确导入推送模块
+from wechat_push.push import send_wechat_message, send_txt_file  # 确保正确导入推送模块
 # 【关键修复】导入Git工具函数
 from utils.git_utils import commit_files_in_batches
 
@@ -220,7 +220,7 @@ def check_ma_signal(df):
             "volume_ratio": volume_ratio
         }
     except Exception as e:
-        logger.debug(f"检查均线信号失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--检查均线信号失败: {str(e)}")
         return None
 
 def calc_macd(df):
@@ -233,7 +233,7 @@ def calc_macd(df):
         macd_bar = (dif - dea) * 2
         return dif, dea, macd_bar
     except Exception as e:
-        logger.debug(f"计算MACD失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--计算MACD失败: {str(e)}")
         return None, None, None
 
 def check_macd_signal(df):
@@ -284,7 +284,7 @@ def check_macd_signal(df):
             "volume_ratio": volume_ratio
         }
     except Exception as e:
-        logger.debug(f"检查MACD信号失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--检查MACD信号失败: {str(e)}")
         return None
 
 def calc_rsi(df, period=RSI_PERIOD):
@@ -297,7 +297,7 @@ def calc_rsi(df, period=RSI_PERIOD):
         rsi = 100 - (100 / (1 + rs))
         return rsi
     except Exception as e:
-        logger.debug(f"计算RSI失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--计算RSI失败: {str(e)}")
         return None
 
 def check_rsi_signal(df):
@@ -340,7 +340,7 @@ def check_rsi_signal(df):
             "rise_days": rise_days
         }
     except Exception as e:
-        logger.debug(f"检查RSI信号失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--检查RSI信号失败: {str(e)}")
         return None
 
 def calc_kdj(df, period=KDJ_PERIOD, slowing=KDJ_SLOWING, double=KDJ_DOUBLE):
@@ -360,7 +360,7 @@ def calc_kdj(df, period=KDJ_PERIOD, slowing=KDJ_SLOWING, double=KDJ_DOUBLE):
         
         return k, d, j
     except Exception as e:
-        logger.debug(f"计算KDJ失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--计算KDJ失败: {str(e)}")
         return None, None, None
 
 def check_kdj_signal(df):
@@ -415,7 +415,7 @@ def check_kdj_signal(df):
             "rise_days": rise_days
         }
     except Exception as e:
-        logger.debug(f"检查KDJ信号失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--检查KDJ信号失败: {str(e)}")
         return None
 
 def check_threema_signal(df):
@@ -514,7 +514,7 @@ def check_threema_signal(df):
             "volume_ratio": df["成交量"].iloc[-1] / consolidation_volume
         }
     except Exception as e:
-        logger.debug(f"检查三均线粘合突破信号失败: {str(e)}")
+        logger.debug(f"股票📋指标共振--检查三均线粘合突破信号失败: {str(e)}")
         return None
 
 def format_single_signal(category, signals):
@@ -535,7 +535,7 @@ def format_single_signal(category, signals):
     # 生成消息
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
-        f"【策略2 - {get_category_name(category)}信号】",
+        f"【📋指标共振 - {get_category_name(category)}信号】",
         f"日期：{today}",
         ""
     ]
@@ -545,25 +545,25 @@ def format_single_signal(category, signals):
         code = signal["code"]
         name = signal["name"]
         if category == "MA":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['deviation']:.1%}，持续：{signal['consolidation_days']}天）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['deviation']:.1%}，持续：{signal['consolidation_days']}天）")
         elif category == "MACD":
-            lines.append(f"{i}. {code} {name}（增长：{signal['growth_rate']:.0%}，持续：{signal['growth_days']}天）")
+            lines.append(f"{i}. {code} {name}（🚀增长：{signal['growth_rate']:.0%}，持续：{signal['growth_days']}天）")
         elif category == "RSI":
-            lines.append(f"{i}. {code} {name}（RSI：{signal['rsi_value']:.0f}，变化：{signal['rsi_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（⚡RSI：{signal['rsi_value']:.0f}，变化：{signal['rsi_change']:.0f}点）")
         elif category == "KDJ":
-            lines.append(f"{i}. {code} {name}（KDJ：{signal['k_value']:.0f}{signal['d_value']:.0f}{signal['j_value']:.0f}，变化：{signal['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（🧵KDJ：{signal['k_value']:.0f}{signal['d_value']:.0f}{signal['j_value']:.0f}，变化：{signal['j_change']:.0f}点）")
     
     if signals:
         lines.append("")
-        lines.append("📈 信号解读：")
+        lines.append("📶 信号解读：")
         if category == "MA":
-            lines.append("均线缠绕代表市场处于蓄势状态，缠绕率越小，突破后动能越大。建议关注缠绕率最小且持续时间最长的个股。")
+            lines.append("❤️均线缠绕代表市场处于蓄势状态，缠绕率越小，突破后动能越大。建议关注缠绕率最小且持续时间最长的个股。")
         elif category == "MACD":
-            lines.append("MACD在0轴上方且持续增长代表动能增强，增长幅度越大，动能越强。建议关注增长幅度大且持续时间长的个股。")
+            lines.append("❤️MACD在0轴上方且持续增长代表动能增强，增长幅度越大，动能越强。建议关注增长幅度大且持续时间长的个股。")
         elif category == "RSI":
-            lines.append("RSI从超卖区回升代表市场情绪改善，变化幅度越大，反弹力度越强。建议关注变化幅度大且持续时间长的个股。")
+            lines.append("❤️RSI从超卖区回升代表市场情绪改善，变化幅度越大，反弹力度越强。建议关注变化幅度大且持续时间长的个股。")
         elif category == "KDJ":
-            lines.append("KDJ低位金叉代表短期动能强劲，J线变化幅度越大，反弹力度越强。建议关注J线快速上升的个股。")
+            lines.append("❤️KDJ低位金叉代表短期动能强劲，J线变化幅度越大，反弹力度越强。建议关注J线快速上升的个股。")
     
     return "\n".join(lines)
 
@@ -578,32 +578,32 @@ def format_double_signal(combination, signals):
     # 生成消息
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
-        f"【策略2 - {get_combination_name(combination)}共振信号】",
+        f"【📋指标共振 - {get_combination_name(combination)} 共振信号】",
         f"日期：{today}",
         ""
     ]
     
-    lines.append(f"🔥 {get_combination_name(combination)}共振信号：")
+    lines.append(f"🔥 {get_combination_name(combination)} 共振信号：")
     for i, signal in enumerate(signals, 1):
         code = signal["code"]
         name = signal["name"]
         if combination == "MA+MACD":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，MACD增长：{signal['macd']['growth_rate']:.0%}）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，🚀MACD增长：{signal['macd']['growth_rate']:.0%}）")
         elif combination == "MA+RSI":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
         elif combination == "MA+KDJ":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
         elif combination == "MACD+RSI":
-            lines.append(f"{i}. {code} {name}（MACD增长：{signal['macd']['growth_rate']:.0%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（🚀MACD增长：{signal['macd']['growth_rate']:.0%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
         elif combination == "MACD+KDJ":
-            lines.append(f"{i}. {code} {name}（MACD增长：{signal['macd']['growth_rate']:.0%}，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（🚀MACD增长：{signal['macd']['growth_rate']:.0%}，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
         elif combination == "RSI+KDJ":
-            lines.append(f"{i}. {code} {name}（RSI变化：{signal['rsi']['rsi_change']:.0f}点，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
     
     if signals:
         lines.append("")
-        lines.append("💡 信号解读：")
-        lines.append("双指标共振是趋势与动能的最佳配合，胜率高达65%。建议优先交易此类信号。")
+        lines.append("💡 📶信号解读：")
+        lines.append("❤️双指标共振是趋势与动能的最佳配合，胜率高达65%。建议优先交易此类信号。")
     
     return "\n".join(lines)
 
@@ -618,7 +618,7 @@ def format_triple_signal(combination, signals):
     # 生成消息
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
-        f"【策略2 - {get_combination_name(combination)}共振信号】",
+        f"【📋指标共振 - {get_combination_name(combination)}共振信号】",
         f"日期：{today}",
         ""
     ]
@@ -628,18 +628,18 @@ def format_triple_signal(combination, signals):
         code = signal["code"]
         name = signal["name"]
         if combination == "MA+MACD+RSI":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，MACD增长：{signal['macd']['growth_rate']:.0%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，🚀MACD增长：{signal['macd']['growth_rate']:.0%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点）")
         elif combination == "MA+MACD+KDJ":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，MACD增长：{signal['macd']['growth_rate']:.0%}，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，🚀MACD增长：{signal['macd']['growth_rate']:.0%}，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
         elif combination == "MA+RSI+KDJ":
-            lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
         elif combination == "MACD+RSI+KDJ":
-            lines.append(f"{i}. {code} {name}（MACD增长：{signal['macd']['growth_rate']:.0%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+            lines.append(f"{i}. {code} {name}（🚀MACD增长：{signal['macd']['growth_rate']:.0%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
     
     if signals:
         lines.append("")
         lines.append("🌟 信号解读：")
-        lines.append("三指标共振代表趋势、动能和超买超卖状态完美配合，是高质量信号。历史回测显示此类信号平均收益率比市场基准高2.8倍。")
+        lines.append("❤️三指标共振代表趋势、动能和超买超卖状态完美配合，是高质量信号。历史回测显示此类信号平均收益率比市场基准高2.8倍。")
     
     return "\n".join(lines)
 
@@ -654,21 +654,21 @@ def format_quadruple_signal(signals):
     # 生成消息
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
-        f"【策略2 - 四指标共振信号】",
+        f"【📋指标共振 - 四指标共振信号】",
         f"日期：{today}",
         ""
     ]
     
-    lines.append("✨ MA+MACD+RSI+KDJ全指标共振信号：")
+    lines.append("✨ MA--MACD--RSI--KDJ 四指标共振信号：")
     for i, signal in enumerate(signals, 1):
         code = signal["code"]
         name = signal["name"]
-        lines.append(f"{i}. {code} {name}（缠绕率：{signal['ma']['deviation']:.1%}，MACD增长：{signal['macd']['growth_rate']:.0%}，RSI变化：{signal['rsi']['rsi_change']:.0f}点，KDJ变化：{signal['kdj']['j_change']:.0f}点）")
+        lines.append(f"{i}. {code} {name}（📈缠绕率：{signal['ma']['deviation']:.1%}，🚀MACD增长：{signal['macd']['growth_rate']:.0%}，⚡RSI变化：{signal['rsi']['rsi_change']:.0f}点，🧵KDJ变化：{signal['kdj']['j_change']:.0f}点）")
     
     if signals:
         lines.append("")
         lines.append("🎯 信号解读：")
-        lines.append("全指标共振是最高质量的交易信号，历史胜率高达78%。建议重仓参与此类信号。")
+        lines.append("❤️MA--MACD--RSI--KDJ 四指标共振是最高质量的交易信号，历史胜率高达78%。建议重仓参与此类信号。")
     
     return "\n".join(lines)
 
@@ -689,24 +689,23 @@ def format_threema_signal(signals):
         # 生成消息
         today = datetime.now().strftime("%Y-%m-%d")
         lines = [
-            f"【策略3 - 3均线粘合{MIN_CONSOLIDATION_DAYS}天】",
-            f"日期：{today}",
+            f"【🎯三均线 - 3均线粘合{MIN_CONSOLIDATION_DAYS}天】",
             f"第{page_num}页（共{len(pages)}页）",
             ""
         ]
         
-        lines.append(f"✅ 三均线粘合突破信号（共{len(signals)}只，本页{len(page_signals)}只）：")
+        lines.append(f"✅ 三均线粘合--突破信号（共{len(signals)}只，本页{len(page_signals)}只）：")
         for i, signal in enumerate(page_signals, 1):
             code = signal["code"]
             name = signal["name"]
-            lines.append(f"{i}. {code} {name}（粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
+            lines.append(f"{i}. {code} {name}（🎯三均线粘合：{signal['consolidation_days']}天，突破：{signal['breakout_ratio']:.1%}，量能：{signal['volume_ratio']:.1f}倍）")
         
         if page_signals:
             # 只在第一页显示信号解读
             if page_num == 1:
                 lines.append("")
                 lines.append("💎 信号解读：")
-                lines.append("三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超90%。")
+                lines.append("❤️三均线粘合突破是主力资金高度控盘后的启动信号，真突破概率超❤️ 90%。❤️")
                 lines.append("信号质量判断：")
                 lines.append("1. 粘合阶段：窄区间（<2%）、长周期（≥5天）、极致缩量（量能缩减50%以上）")
                 lines.append("2. 突破阶段：同步向上、幅度够（>3%）、量能温（量能增加50%-100%）")
@@ -775,37 +774,37 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
             for code in sorted(all_stock_codes):
                 f.write(code + '\n')
         
-        logger.info(f"✅ 已保存股票代码到 {file_path}")
-        logger.info(f"文件内容预览: {list(all_stock_codes)[:5]}... (共{len(all_stock_codes)}个代码)")
+        logger.info(f"✅ 已保存📋指标共振--股票代码到 {file_path}")
+        logger.info(f"📋指标共振文件内容预览: {list(all_stock_codes)[:5]}... (共{len(all_stock_codes)}个代码)")
         
         # 【关键修复】使用 git_utils 提交文件到Git仓库 - 标记为LAST_FILE
-        logger.info("=== 开始Git提交流程 ===")
+        logger.info("=== 开始股票📋指标共振--股票代码文件--Git提交流程 ===")
         # 标记为LAST_FILE确保立即提交（不等待批量阈值）
         success = commit_files_in_batches(file_path, "LAST_FILE")
         
         if success:
-            logger.info(f"✅ 成功提交文件到Git仓库: {file_path}")
+            logger.info(f"✅ 成功提交📋指标共振股票代码文件到Git仓库: {file_path}")
         else:
-            logger.error(f"❌ 提交文件到Git仓库失败: {file_path}")
+            logger.error(f"❌ 提交📋指标共振股票代码文件到Git仓库失败: {file_path}")
             
     except Exception as e:
-        logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 保存📋指标共振股票代码文件失败: {str(e)}", exc_info=True)
 
 def main():
     # 1. 读取所有股票列表
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
     if not os.path.exists(basic_info_file):
-        logger.error("基础信息文件不存在")
-        error_msg = "【策略2 - 多指标共振策略】\n基础信息文件不存在，无法生成交易信号"
+        logger.error("股票列表文件all_stocks.csv不存在")
+        error_msg = "【📋指标共振 - 多指标共振策略】\n股票列表文件不存在，无法生成交易信号"
         send_wechat_message(message=error_msg, message_type="error")
         return
     
     try:
         basic_info_df = pd.read_csv(basic_info_file)
-        logger.info(f"成功读取基础信息文件，共 {len(basic_info_df)} 只股票")
+        logger.info(f"成功读取股票列表文件，共 {len(basic_info_df)} 只股票")
     except Exception as e:
-        logger.error(f"读取基础信息文件失败: {str(e)}")
-        error_msg = f"【策略2 - 多指标共振策略】\n读取基础信息文件失败，无法生成交易信号: {str(e)}"
+        logger.error(f"读取股票列表文件失败: {str(e)}")
+        error_msg = f"【📋指标共振 - 多指标共振策略】\n读取股票列表文件失败，无法生成交易信号: {str(e)}"
         send_wechat_message(message=error_msg, message_type="error")
         return
     
@@ -837,7 +836,7 @@ def main():
     # 3. 遍历所有股票
     total_stocks = len(basic_info_df)
     processed_stocks = 0
-    logger.info(f"开始处理 {total_stocks} 只股票...")
+    logger.info(f"股票📋指标共振--开始处理 {total_stocks} 只股票...")
     
     for _, row in basic_info_df.iterrows():
         code = row["代码"]
@@ -935,19 +934,19 @@ def main():
             
             processed_stocks += 1
             if processed_stocks % 100 == 0:
-                logger.info(f"已处理 {processed_stocks}/{total_stocks} 只股票...")
+                logger.info(f"股票📋指标共振--已处理 {processed_stocks}/{total_stocks} 只股票...")
         
         except Exception as e:
-            logger.debug(f"处理股票 {code} 时出错: {str(e)}")
+            logger.debug(f"股票📋指标共振--处理股票 {code} 时出错: {str(e)}")
             continue
     
-    logger.info(f"处理完成，共处理 {processed_stocks} 只股票")
+    logger.info(f"股票📋指标共振--处理完成，共处理 {processed_stocks} 只股票")
     
     # 4. 生成并发送信号
     total_messages = 0
     
     # 【关键修改】在推送消息前，保存股票代码到txt文件
-    save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
+    file_path = save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
                                double_signals, triple_signals, quadruple_signals)
     
     # 单一指标信号
@@ -956,6 +955,7 @@ def main():
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1
+            time.sleep(1)
     
     # THREEMA信号（三均线粘合突破）- 分页显示
     threema_messages = format_threema_signal(threema_signals)
@@ -963,6 +963,7 @@ def main():
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1
+            time.sleep(1)
     
     # 双指标共振信号
     for combination in double_signals:
@@ -970,6 +971,7 @@ def main():
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1
+            time.sleep(1)
     
     # 三指标共振信号
     for combination in triple_signals:
@@ -977,19 +979,29 @@ def main():
         if message.strip():
             send_wechat_message(message=message, message_type="position")
             total_messages += 1
+            time.sleep(1)
     
     # 四指标共振信号
     message = format_quadruple_signal(quadruple_signals)
     if message.strip():
         send_wechat_message(message=message, message_type="position")
         total_messages += 1
+        time.sleep(1)
     
     if total_messages > 0:
-        logger.info(f"成功发送 {total_messages} 组交易信号到微信")
+        logger.info(f"股票📋指标共振--成功发送 {total_messages} 组交易信号到微信")
     else:
         msg = "【策略2 - 多指标共振策略】\n今日未检测到有效交易信号"
         send_wechat_message(message=msg, message_type="position")
-        logger.info("未检测到有效交易信号")
+        logger.info("股票📋指标共振--未检测到有效交易信号")
+    
+    # ========  【新增】调用封装函数发送txt文件内容  ============
+    if file_path and os.path.exists(file_path):
+        logger.info("=== 发送-- 股票📋指标共振--所有股票代码文件内容 ===")
+        title = "MACD多指标策略股票代码清单"
+        send_txt_file(file_path, title, "position")
+    
+    
 
 if __name__ == "__main__":
     # 配置日志
@@ -1001,16 +1013,16 @@ if __name__ == "__main__":
                         ])
     
     # 记录开始执行
-    logger.info("===== 开始执行任务：MACD均线策略 =====")
+    logger.info("===== 开始执行任务：股票📋指标共振--策略 =====")
     
     try:
         # 执行策略
         main()
         
         # 记录任务完成
-        logger.info("===== 任务执行结束：success =====")
+        logger.info("===== 股票📋指标共振--任务执行结束：success =====")
     except Exception as e:
-        error_msg = f"【策略2 - 多指标共振策略】执行时发生未预期错误: {str(e)}"
+        error_msg = f"【📋指标共振-- - 多指标共振策略】执行时发生未预期错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
         send_wechat_message(message=error_msg, message_type="error")
-        logger.info("===== 任务执行结束：error =====")
+        logger.info("===== 股票📋指标共振--任务执行结束：error =====")

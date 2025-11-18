@@ -851,8 +851,9 @@ def get_top_stocks_for_strategy() -> dict:
         logger.error(traceback.format_exc())
         return {}
 
+# 同时需要修改 save_and_commit_stock_codes 函数，让它返回文件路径
 def save_and_commit_stock_codes(top_stocks):
-    """保存股票代码到文件并提交到Git仓库"""
+    """保存股票代码到文件并提交到Git仓库，返回文件路径"""
     try:
         # 获取当前时间
         now = get_beijing_time()
@@ -924,10 +925,15 @@ def save_and_commit_stock_codes(top_stocks):
             # 发送错误通知
             error_msg = f"❌ 股票筛选结果文件提交失败: {filename}\n请立即检查系统"
             send_wechat_message(message=error_msg, message_type="error")
+        
+        # 【新增】返回文件路径
+        return file_path
+        
     except Exception as e:
         logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
         error_msg = f"❌ 股票筛选结果文件保存失败: {str(e)}"
         send_wechat_message(message=error_msg, message_type="error")
+        return None
 
 def generate_strategy_report():
     """生成策略报告并发送微信通知"""
@@ -938,7 +944,6 @@ def generate_strategy_report():
         top_stocks = get_top_stocks_for_strategy()
         if not top_stocks:
             logger.warning("没有找到符合条件的股票")
-            # === 关键修改5：添加策略状态报告 ===
             status_message = (
                 f"=== 个股MA20趋势策略状态报告 ===\n"
                 f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -953,7 +958,11 @@ def generate_strategy_report():
             return
         
         # 【关键修改】在推送消息前，保存股票代码到txt文件
-        save_and_commit_stock_codes(top_stocks)
+        file_path = save_and_commit_stock_codes(top_stocks)
+        
+        # 【新增】发送txt文件内容
+        send_txt_file_content(file_path, beijing_time)
+        
         # 【关键修改】按板块分组生成多个消息
         section_messages = []
         # 生成每个板块的消息
@@ -981,6 +990,7 @@ def generate_strategy_report():
                     report.append(f"偏离率: {deviation:.2f}%")
                     report.append(signal_msg)                
                 section_messages.append("\n".join(report))
+        
         # 【关键修改】分别发送每个板块的消息
         if section_messages:
             for i, message in enumerate(section_messages):
@@ -1000,6 +1010,47 @@ def generate_strategy_report():
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)
         send_wechat_message(f"❌ 个股MA20趋势策略执行失败: {str(e)}")
+
+def send_txt_file_content(file_path, beijing_time):
+    """读取txt文件内容并通过微信发送"""
+    try:
+        if not os.path.exists(file_path):
+            logger.error(f"股票代码文件不存在: {file_path}")
+            return
+        
+        # 读取文件内容
+        with open(file_path, 'r', encoding='ascii') as f:
+            file_content = f.read().strip()
+        
+        if not file_content:
+            logger.warning("股票代码文件为空")
+            return
+        
+        # 统计股票数量
+        stock_codes = file_content.split('\n')
+        stock_count = len(stock_codes)
+        
+        # 构造文件内容消息
+        file_message = (
+            f"📋 筛选股票代码清单\n"
+            f"══════════════════\n"
+            f"📅 生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📊 股票数量: {stock_count} 只\n"
+            f"══════════════════\n"
+            f"{file_content}\n"
+            f"══════════════════\n"
+            f"💡 提示: 以上为本次筛选的所有股票代码"
+        )
+        
+        # 发送文件内容
+        logger.info(f"发送股票代码文件内容，共 {stock_count} 只股票")
+        send_wechat_message(file_message)
+        
+    except Exception as e:
+        logger.error(f"发送txt文件内容失败: {str(e)}")
+        # 发送错误通知但不要中断主流程
+        error_msg = f"⚠️ 股票代码文件发送失败，但策略报告已正常生成"
+        send_wechat_message(error_msg)
 
 def main():
     """主函数：执行个股趋势策略"""

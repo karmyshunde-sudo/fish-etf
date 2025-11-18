@@ -791,6 +791,9 @@ def save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signa
     except Exception as e:
         logger.error(f"❌ 保存📋指标共振股票代码文件失败: {str(e)}", exc_info=True)
 
+    # 【新增】返回文件路径
+    return file_path
+
 def main():
     # 1. 读取所有股票列表
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")

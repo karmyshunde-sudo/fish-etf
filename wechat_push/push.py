@@ -1047,3 +1047,85 @@ except Exception as e:
     except Exception as basic_log_error:
         print(f"基础日志配置失败: {str(basic_log_error)}")
         print(f"微信推送模块初始化失败: {str(e)}")
+
+def send_txt_file(file_path: str, title: str = "股票代码清单", 
+                 message_type: str = "position", 
+                 webhook: Optional[str] = None) -> bool:
+    """
+    读取文本文件内容并通过微信发送完整内容
+    
+    Args:
+        file_path: 文本文件路径
+        title: 消息标题
+        message_type: 消息类型
+        webhook: 企业微信Webhook地址
+        
+    Returns:
+        bool: 是否成功发送
+    """
+    try:
+        if not file_path or not os.path.exists(file_path):
+            logger.error(f"文本文件不存在: {file_path}")
+            send_wechat_message(f"❌ 文本文件不存在: {os.path.basename(file_path)}", message_type="error")
+            return False
+        
+        # 读取文件内容
+        with open(file_path, 'r', encoding='ascii') as f:
+            file_content = f.read().strip()
+        
+        if not file_content:
+            logger.warning("文本文件为空")
+            send_wechat_message("⚠️ 文本文件为空", message_type=message_type)
+            return False
+        
+        # 统计内容行数
+        content_lines = [line.strip() for line in file_content.split('\n') if line.strip()]
+        line_count = len(content_lines)
+        
+        # 获取当前时间
+        beijing_time = get_beijing_time()
+        
+        # 构造文件内容消息
+        file_message = (
+            f"📋 {title}\n"
+            f"══════════════════════\n"
+            f"📅 生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📊 内容数量: {line_count} 条\n"
+            f"📁 文件名称: {os.path.basename(file_path)}\n"
+            f"══════════════════════\n"
+            f"完整内容:\n"
+        )
+        
+        # 添加完整文件内容
+        for i, line in enumerate(content_lines, 1):
+            file_message += f"{line}\n"
+        
+        file_message += (
+            f"══════════════════════\n"
+            f"💡 提示: 共 {line_count} 条记录，已完整显示"
+        )
+        
+        # 发送文件内容
+        logger.info(f"发送文本文件内容，共 {line_count} 条记录，文件: {os.path.basename(file_path)}")
+        success = send_wechat_message(message=file_message, message_type=message_type, webhook=webhook)
+        
+        if success:
+            logger.info(f"✅ 文本文件内容发送成功: {os.path.basename(file_path)}")
+            return True
+        else:
+            logger.error(f"❌ 文本文件内容发送失败: {os.path.basename(file_path)}")
+            # 尝试发送简化版本
+            simple_message = (
+                f"📋 {title} ({line_count}条)\n"
+                f"文件: {os.path.basename(file_path)}\n"
+                f"前10条: {', '.join(content_lines[:10])}{'...' if len(content_lines) > 10 else ''}"
+            )
+            send_wechat_message(message=simple_message, message_type=message_type, webhook=webhook)
+            return False
+        
+    except Exception as e:
+        logger.error(f"发送文本文件内容失败: {str(e)}")
+        # 发送错误通知但不要中断主流程
+        error_msg = f"⚠️ 文本文件发送失败: {str(e)}"
+        send_wechat_message(message=error_msg, message_type="error", webhook=webhook)
+        return False

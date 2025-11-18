@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-股票趋势策略 (TickTen)
+【每版块8只股票MA20】趋势策略 (TickTen)
 严格使用中文列名，与日线数据文件格式保持一致
 直接使用仓库中已有的数据，不进行任何自动补全
 """
@@ -397,7 +397,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
             )
         # 子条件2：持续站稳（价格维持在均线上）
         else:
-            # 场景A：偏离率≤+5%（趋势稳健）
+            # 场景A：偏离率≤+5%（MA20趋势稳健）
             if deviation <= 5.0:
                 # 添加M头/头肩顶形态检测
                 pattern_msg = ""
@@ -409,13 +409,13 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
                 message = (
-                    f"【趋势稳健】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
+                    f"【MA20趋势稳健】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：持仓不动，不新增仓位\n"
                     f"  • 跟踪止损上移至5日均线（约{current * 0.99:.2f}）\n"
                     f"  • 若收盘跌破5日均线，减仓50%\n"
                     f"{pattern_msg}\n"
                 )
-            # 场景B：+5%＜偏离率≤+10%（趋势较强）
+            # 场景B：+5%＜偏离率≤+10%（MA20趋势较强）
             elif 5.0 < deviation <= 10.0:
                 # 添加M头/头肩顶形态检测
                 pattern_msg = ""
@@ -427,7 +427,7 @@ def generate_signal_message(index_info: dict, df: pd.DataFrame, current: float, 
                     elif confidence >= 0.5:
                         pattern_msg = f"【警告】疑似{pattern_name}形态（置信度{confidence:.0%}），建议减仓5%-10%"
                 message = (
-                    f"【趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
+                    f"【MA20趋势较强】连续{consecutive_above}天站上20日均线，偏离率{deviation:.2f}%\n"
                     f"✅ 操作建议：观望，不新增仓位\n"
                     f"  • 逢高减仓10%-15%\n"
                     f"  • 若收盘跌破10日均线，减仓30%\n"
@@ -604,7 +604,7 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
             return 0.0
         # 获取股票所属板块
         section = get_stock_section(stock_code)
-        # 1. 趋势指标评分 (40%)
+        # 1. 【每版块8只股票MA20】趋势指标评分 (40%)
         trend_score = 0.0
         if len(df) >= 40:
             # 计算移动平均线
@@ -648,14 +648,14 @@ def calculate_stock_strategy_score(stock_code: str, df: pd.DataFrame) -> float:
                 deviation_score = max(0, min(5, 5 - abs(deviation) * 50))  # 理想偏离率在0-2%之间
                 days_score = min(5, above_ma_days * 0.5)  # 每多一天加0.5分，最多5分
                 trend_score += deviation_score + days_score
-        # 1.3 趋势强度评分 (10分) - 基于20日涨幅和趋势稳定性
+        # 1.3 【每版块8只股票MA20】趋势强度评分 (10分) - 基于20日涨幅和趋势稳定性
         if len(df) >= 20:
             price_change_20 = (current - df["收盘"].iloc[-20]) / df["收盘"].iloc[-20] * 100
-            # 计算趋势稳定性 (价格在20日均线之上的比例)
+            # 计算【每版块8只股票MA20】趋势稳定性 (价格在20日均线之上的比例)
             above_ma_ratio = 0
             if "ma20" in df.columns:
                 above_ma_ratio = sum(1 for i in range(20) if df["收盘"].iloc[-i-1] > df["ma20"].iloc[-i-1]) / 20
-            # 趋势强度评分 (0-10分)
+            # 【每版块8只股票MA20】趋势强度评分 (0-10分)
             change_score = min(7, max(0, price_change_20 * 0.2))  # 每1%涨幅得0.2分，最高7分
             stability_score = min(3, above_ma_ratio * 3)  # 稳定性最高3分
             trend_score += change_score + stability_score
@@ -770,7 +770,7 @@ def filter_valid_stocks(basic_info_df: pd.DataFrame) -> pd.DataFrame:
 def get_top_stocks_for_strategy() -> dict:
     """获取各板块中适合策略的股票（直接使用本地已有数据）"""
     try:
-        logger.info("=== 开始执行个股趋势策略(TickTen) ===")
+        logger.info("=== 开始执行【每版块8只股票MA20】(TickTen) ===")
         # 1. 直接获取股票基础信息（不进行任何自动补全）
         basic_info_df = load_stock_basic_info()
         if basic_info_df.empty:
@@ -945,7 +945,7 @@ def generate_strategy_report():
         if not top_stocks:
             logger.warning("没有找到符合条件的股票")
             status_message = (
-                f"=== 个股MA20趋势策略状态报告 ===\n"
+                f"=== 【每版块8只股票MA20】状态报告 ===\n"
                 f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"策略状态：未找到符合条件的股票\n"
                 f"流通市值过滤：{'已开启' if ENABLE_MARKET_VALUE_FILTER else '已关闭'}\n"
@@ -969,11 +969,10 @@ def generate_strategy_report():
         for section, stocks in top_stocks.items():
             if stocks:
                 report = []
-                report.append(f"=== 个股MA20趋势策略报告 - {section} ===")
-                report.append(f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                report.append(f"=== 【每版块8只股票MA20】报告 - {section} ===")
                 report.append(f"策略依据：20日均线+成交量变化+形态识别")
                 # 添加市值过滤状态
-                market_value_status = "已启用" if ENABLE_MARKET_VALUE_FILTER else "已禁用（流通市值数据不足）"
+                market_value_status = "已启用（流通市值数据充足）" if ENABLE_MARKET_VALUE_FILTER else "已禁用（流通市值数据不足）"
                 report.append(f"流通市值过滤：{market_value_status}")
                 report.append(f"【{section}】")
                 for i, stock in enumerate(stocks):
@@ -994,28 +993,27 @@ def generate_strategy_report():
         # 【关键修改】分别发送每个板块的消息
         if section_messages:
             for i, message in enumerate(section_messages):
-                logger.info(f"推送个股趋势策略报告 - 板块 {i+1}/{len(section_messages)}")
+                logger.info(f"推送【每版块8只股票MA20】报告 - 板块 {i+1}/{len(section_messages)}")
                 send_wechat_message(message)
                 # 添加延时避免消息发送过快
-                time.sleep(1)
+                time.sleep(3)
         else:
             # 如果没有板块消息，发送默认消息
             default_message = (
-                f"=== 个股MA20趋势策略报告 ===\n"
-                f"时间：{beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"今日无符合MA20趋势条件的股票"
+                f"=== 【每版块8只股票MA20】报告 ===\n"
+                f"今日无符合【每版块8只股票MA20】趋势条件的股票"
             )
             send_wechat_message(default_message)
-        logger.info("个股MA20趋势策略执行完成")
+        logger.info("【每版块8只股票MA20】执行完成")
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)
-        send_wechat_message(f"❌ 个股MA20趋势策略执行失败: {str(e)}")
+        send_wechat_message(f"❌ 【每版块8只股票MA20】执行失败: {str(e)}")
 
 def send_txt_file_content(file_path, beijing_time):
     """读取txt文件内容并通过微信发送"""
     try:
         if not os.path.exists(file_path):
-            logger.error(f"股票代码文件不存在: {file_path}")
+            logger.error(f"【每版块8只股票MA20】股票代码文件不存在: {file_path}")
             return
         
         # 读取文件内容
@@ -1023,7 +1021,7 @@ def send_txt_file_content(file_path, beijing_time):
             file_content = f.read().strip()
         
         if not file_content:
-            logger.warning("股票代码文件为空")
+            logger.warning("【每版块8只股票MA20】股票代码文件为空")
             return
         
         # 统计股票数量
@@ -1032,33 +1030,30 @@ def send_txt_file_content(file_path, beijing_time):
         
         # 构造文件内容消息
         file_message = (
-            f"📋 筛选股票代码清单\n"
-            f"══════════════════\n"
-            f"📅 生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📊 股票数量: {stock_count} 只\n"
+            f"📊 【每版块8只股票MA20】股票数量: {stock_count} 只\n"
             f"══════════════════\n"
             f"{file_content}\n"
             f"══════════════════\n"
-            f"💡 提示: 以上为本次筛选的所有股票代码"
+            f"💡 以上为【每版块8只股票MA20】筛选所有股票代码"
         )
         
         # 发送文件内容
-        logger.info(f"发送股票代码文件内容，共 {stock_count} 只股票")
+        logger.info(f"发送【每版块8只股票MA20】股票代码文件内容，共 {stock_count} 只股票")
         send_wechat_message(file_message)
         
     except Exception as e:
-        logger.error(f"发送txt文件内容失败: {str(e)}")
+        logger.error(f"发送【每版块8只股票MA20】txt文件内容失败: {str(e)}")
         # 发送错误通知但不要中断主流程
-        error_msg = f"⚠️ 股票代码文件发送失败，但策略报告已正常生成"
+        error_msg = f"⚠️ 【每版块8只股票MA20】股票代码文件发送失败，但策略报告已正常生成"
         send_wechat_message(error_msg)
 
 def main():
-    """主函数：执行个股趋势策略"""
+    """主函数：执行【每版块8只股票MA20】趋势策略"""
     global ENABLE_MARKET_VALUE_FILTER
     # 重置开关，确保每次执行都重新判断
     ENABLE_MARKET_VALUE_FILTER = True
     
-    logger.info("=== 开始执行个股趋势策略(TickTen) ===")
+    logger.info("=== 开始执行【每版块8只股票MA20】趋势策略(TickTen) ===")
     # 确保目录存在
     ensure_directory_exists()
     # 获取基础信息（直接加载，不进行任何自动补全）
@@ -1068,7 +1063,7 @@ def main():
         return
     # 生成并发送策略报告
     generate_strategy_report()
-    logger.info("=== 个股趋势策略执行完成 ===")
+    logger.info("=== 【每版块8只股票MA20】趋势策略执行完成 ===")
 
 if __name__ == "__main__":
     main()

@@ -949,7 +949,13 @@ def main():
     # 【关键修改】在推送消息前，保存股票代码到txt文件
     file_path = save_and_commit_stock_codes(ma_signals, macd_signals, rsi_signals, kdj_signals, threema_signals,
                                double_signals, triple_signals, quadruple_signals)
-    
+
+    # ========  【新增】调用封装函数发送txt文件内容  ============
+    if file_path and os.path.exists(file_path):
+        logger.info("=== 发送-- 股票📋指标共振--所有股票代码文件内容 ===")
+        title = "📋指标共振--3均线缠绕--所有股票代码清单"
+        send_txt_file(file_path, title, "position")
+        
     # 单一指标信号
     for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
         message = format_single_signal(category, signals)
@@ -996,14 +1002,6 @@ def main():
         send_wechat_message(message=msg, message_type="position")
         logger.info("股票📋指标共振--未检测到有效交易信号")
     
-    # ========  【新增】调用封装函数发送txt文件内容  ============
-    if file_path and os.path.exists(file_path):
-        logger.info("=== 发送-- 股票📋指标共振--所有股票代码文件内容 ===")
-        title = "MACD多指标策略股票代码清单"
-        send_txt_file(file_path, title, "position")
-    
-    
-
 if __name__ == "__main__":
     # 配置日志
     logging.basicConfig(level=logging.INFO,

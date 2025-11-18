@@ -14,7 +14,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
-from wechat_push.push import send_wechat_message,send_txt_file
+from wechat_push.push import send_wechat_message, send_txt_file
 import sys
 import traceback
 import subprocess
@@ -851,7 +851,6 @@ def get_top_stocks_for_strategy() -> dict:
         logger.error(traceback.format_exc())
         return {}
 
-# 同时需要修改 save_and_commit_stock_codes 函数，让它返回文件路径
 def save_and_commit_stock_codes(top_stocks):
     """保存股票代码到文件并提交到Git仓库，返回文件路径"""
     try:
@@ -960,8 +959,13 @@ def generate_strategy_report():
         # 【关键修改】在推送消息前，保存股票代码到txt文件
         file_path = save_and_commit_stock_codes(top_stocks)
         
-        # 【新增】发送txt文件内容
-        send_txt_file_content(file_path, beijing_time)
+        # 【关键修改】直接调用push.py中的send_txt_file函数发送文件内容
+        if file_path and os.path.exists(file_path):
+            logger.info("=== 发送股票代码文件内容 ===")
+            title = "【每版块8只股票MA20】股票代码清单"
+            send_txt_file(file_path, title, "position")
+            # 添加延时，确保文件消息先到达
+            time.sleep(3)
         
         # 【关键修改】按板块分组生成多个消息
         section_messages = []
@@ -1008,44 +1012,6 @@ def generate_strategy_report():
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)
         send_wechat_message(f"❌ 【每版块8只股票MA20】执行失败: {str(e)}")
-
-def send_txt_file_content(file_path, beijing_time):
-    """读取txt文件内容并通过微信发送"""
-    try:
-        if not os.path.exists(file_path):
-            logger.error(f"【每版块8只股票MA20】股票代码文件不存在: {file_path}")
-            return
-        
-        # 读取文件内容
-        with open(file_path, 'r', encoding='ascii') as f:
-            file_content = f.read().strip()
-        
-        if not file_content:
-            logger.warning("【每版块8只股票MA20】股票代码文件为空")
-            return
-        
-        # 统计股票数量
-        stock_codes = file_content.split('\n')
-        stock_count = len(stock_codes)
-        
-        # 构造文件内容消息
-        file_message = (
-            f"📊 【每版块8只股票MA20】股票数量: {stock_count} 只\n"
-            f"══════════════════\n"
-            f"{file_content}\n"
-            f"══════════════════\n"
-            f"💡 以上为【每版块8只股票MA20】筛选所有股票代码"
-        )
-        
-        # 发送文件内容
-        logger.info(f"发送【每版块8只股票MA20】股票代码文件内容，共 {stock_count} 只股票")
-        send_wechat_message(file_message)
-        
-    except Exception as e:
-        logger.error(f"发送【每版块8只股票MA20】txt文件内容失败: {str(e)}")
-        # 发送错误通知但不要中断主流程
-        error_msg = f"⚠️ 【每版块8只股票MA20】股票代码文件发送失败，但策略报告已正常生成"
-        send_wechat_message(error_msg)
 
 def main():
     """主函数：执行【每版块8只股票MA20】趋势策略"""

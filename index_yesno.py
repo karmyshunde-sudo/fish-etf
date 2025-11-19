@@ -89,7 +89,7 @@ SCENARIO_MESSAGES = [
         "✅ 操作建议：",
         "  • 核心宽基ETF（{etf_code}）立即建仓30%",
         "  • 卫星行业ETF立即建仓20%",
-        "  • 回调至5日均线（约{target_price:.2f}）可加仓20%",
+        "  • 回调至5日线{target_price:.2f}可加仓20%",
         "⚠️ 止损：买入价下方5%（宽基ETF）或3%（高波动ETF）"
     ]],
     ["YES", "confirmed_breakout", [
@@ -97,14 +97,14 @@ SCENARIO_MESSAGES = [
         "✅ 操作建议：",
         "  • 核心宽基ETF（{etf_code}）可加仓至50%",
         "  • 卫星行业ETF可加仓至35%",
-        "  • 严格跟踪5日均线作为止损位（约{target_price:.2f}）",
+        "  • 严格跟踪5日线作为止损位{target_price:.2f}",
         "⚠️ 注意：若收盘跌破5日均线，立即减仓50%"
     ]],
     ["YES", "trend_stable", [
         "【趋势稳健】连续{consecutive}天站上20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 持仓不动，不新增仓位",
-        "  • 跟踪止损上移至5日均线（约{target_price:.2f}）",
+        "  • 跟踪止损上移至5日线{target_price:.2f}",
         "  • 若收盘跌破5日均线，减仓50%",
         "{pattern_msg}"
     ]],
@@ -121,7 +121,7 @@ SCENARIO_MESSAGES = [
         "✅ 操作建议：",
         "  • 逢高减仓20%-30%（仅卫星ETF）",
         "  • 当前价格已处高位，避免新增仓位",
-        "  • 等待偏离率回落至≤+5%（约{target_price:.2f}）时加回",
+        "  • 等待偏离率回落至≤+5%约{target_price:.2f}时加回",
         "{pattern_msg}"
     ]],
     ["NO", "initial_breakdown", [
@@ -129,7 +129,7 @@ SCENARIO_MESSAGES = [
         "✅ 操作建议：",
         "  • 核心宽基ETF（{etf_code}）立即减仓50%",
         "  • 卫星行业ETF立即减仓70%-80%",
-        "  • 止损位：20日均线上方5%（约{target_price:.2f}）",
+        "  • 止损位：20日均线上方5%约{target_price:.2f}",
         "⚠️ 若收盘未收回均线，明日继续减仓至20%"
     ]],
     ["NO", "confirmed_breakdown", [
@@ -144,7 +144,7 @@ SCENARIO_MESSAGES = [
         "【下跌初期】连续{consecutive}天跌破20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 轻仓观望（仓位≤20%）",
-        "  • 反弹至均线附近（约{target_price:.2f}）减仓剩余仓位",
+        "  • 反弹至均线附近{target_price:.2f}减仓剩余仓位",
         "  • 暂不考虑新增仓位",
         "⚠️ 重点观察：收盘站上5日均线，可轻仓试多"
     ]],
@@ -160,7 +160,7 @@ SCENARIO_MESSAGES = [
         "【超卖机会】连续{consecutive}天跌破20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 核心宽基ETF（{etf_code}）小幅加仓10%-15%",
-        "  • 目标价：偏离率≥-5%（约{target_price:.2f}）",
+        "  • 目标价：偏离率≥-5%约{target_price:.2f}",
         "  • 达到目标即卖出加仓部分",
         "⚠️ 重点观察：若跌破前低，立即止损"
     ]]
@@ -1478,7 +1478,7 @@ def generate_report():
                 logger.info(f"跳过开关为2的指数: {name}({code})")
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
-                disabled_message = f"{name} 【{code}；ETF：{etf_str}】 - 已暂时屏蔽，不作任何YES/NO计算"
+                disabled_message = f"{name} \n【{code}；ETF：{etf_str}】\n本指数已暂时屏蔽，不作任何YES/NO计算"
                 disabled_messages.append(disabled_message)
                 # 发送单独的屏蔽消息
                 send_wechat_message(disabled_message)
@@ -1495,38 +1495,34 @@ def generate_report():
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 message_lines = [
-                    f"{name} 【{code}；ETF：{etf_str}】",
-                    f"📊 当前：数据获取失败 | 临界值：N/A | 偏离率：N/A",
-                    f"❌ 信号：数据获取失败",
-                    "──────────────────",
-                    f"⚠️ 所有数据源都无法获取有效数据（首选: {preferred_source}，尝试: {actual_source}）",
-                    "──────────────────",
-                    f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
-                    f"📊 实际尝试数据源：{actual_source}"
+                    f"{name}【{code}】\n",
+                    f"ETF标的：{etf_str}\n",
+                    f"📊 当前：数据获取失败 | 临界：N/A | 偏离：N/A\n",
+                    f"数据获取失败\n",
+                    "──────────────────\n"
                 ]
                 message = "".join(message_lines)
-                logger.info(f"推送 {name} 策略信号（数据获取失败）")
+                logger.info(f"推送 {name} Yes/no信号（数据获取失败）")
                 send_wechat_message(message)
                 time.sleep(1)
                 continue
 
             # 数据量检查
             if len(df) < CRITICAL_VALUE_DAYS:
-                logger.warning(f"指数 {name}({code}) 数据不足{CRITICAL_VALUE_DAYS}天，跳过计算")
+                logger.warning(f"指数 {name}({code}) 日线天数不足{CRITICAL_VALUE_DAYS}天，跳过计算")
                 etf_list = [f"{etf['code']}({etf['description']})" for etf in idx["etfs"]]
                 etf_str = "，".join(etf_list)
                 message_lines = [
-                    f"{name} 【{code}；ETF：{etf_str}】",
-                    f"📊 当前：数据不足 | 临界值：N/A | 偏离率：N/A",
-                    f"⚠️ 信号：数据不足",
-                    "──────────────────",
-                    f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天",
-                    "──────────────────",
-                    f"📅 计算时间: {beijing_time.strftime('%Y-%m-%d %H:%M')}",
-                    f"📊 实际使用数据源：{actual_source}（首选: {preferred_source}）"
+                    f"{name}【{code}】\n",
+                    f"ETF标的：{etf_str}\n",
+                    f"📊 当前：数据不足 | 临界：N/A | 偏离：N/A\n",
+                    f"⚠️ 该指数的日线数据不足\n",
+                    "──────────────────\n",
+                    f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n",
+                    "──────────────────\n"
                 ]
                 message = "".join(message_lines)
-                logger.info(f"推送 {name} 策略信号（数据不足）")
+                logger.info(f"推送 {name} Yes/no信号（日线天数不足）")
                 send_wechat_message(message)
                 time.sleep(2)
                 continue
@@ -1559,19 +1555,20 @@ def generate_report():
             signal_symbol = "✅" if status == "YES" else "❌"
             
             message_lines = [
-                f"{name} 【{code}；ETF：{etf_str}】",
-                f"📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}%",
-                f"{signal_symbol} 信号：{status} {signal_message}"
+                f"{name}【{code}】\n",
+                f"ETF标的：{etf_str}\n",
+                f"📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}%\n",
+                f"信号：{signal_symbol} {status} {signal_message}\n"
             ]
-            message = "".join(message_lines)
+            message = "\n".join(message_lines)
             
-            logger.info(f"推送 {name} 策略信号（使用数据源: {actual_source}）")
+            logger.info(f"推送 {name} 指数yes/no信号（使用数据源: {actual_source}）")
             send_wechat_message(message)
             
             # 添加到总结
             name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}% \n──────────────────\n"
+            summary_line = f"{name_with_padding}【{code}】\nETF标的：{etf_str}\n信号：{signal_symbol} {status} \n📊当前：{close_price:.2f}\n  临界：{critical_value:.2f}\n  偏离：{deviation:.2f}%\n──────────────────\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)

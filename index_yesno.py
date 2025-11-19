@@ -1555,10 +1555,13 @@ def generate_report():
             signal_symbol = "✅" if status == "YES" else "❌"
             
             message_lines = [
-                f"{name}【{code}】\n",
-                f"ETF标的：{etf_str}\n",
-                f"📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}%\n",
-                f"信号：{signal_symbol} {status} {signal_message}\n"
+                f"{name}【{code}】",
+                f"ETF标的：{etf_str}",
+                f"📊 当前价：{close_price:.2f}",
+                f"📊 临界值：{critical_value:.2f}",
+                f"📊 偏离率：{deviation:.2f}%",
+                f"信号：{signal_symbol} {status}",
+                f"{signal_message}"
             ]
             message = "\n".join(message_lines)
             
@@ -1568,7 +1571,7 @@ def generate_report():
             # 添加到总结
             name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            summary_line = f"{name_with_padding}【{code}】\nETF标的：{etf_str}\n信号：{signal_symbol} {status} \n📊当前：{close_price:.2f}\n  临界：{critical_value:.2f}\n  偏离：{deviation:.2f}%\n──────────────────\n"
+            summary_line = f"{name_with_padding}【{code}】\nETF标的：{etf_str}\n信号：{signal_symbol} {status}\n当前价：{close_price:.2f}\n临界值：{critical_value:.2f}\n偏离率：{deviation:.2f}%\n──────────────────\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)
@@ -1589,7 +1592,7 @@ def generate_report():
         
         # 添加正常计算的指数信息
         if summary_lines:
-            final_summary_lines.append("————指数信号总结————\n")
+            final_summary_lines.append("\n===所有指数信号总结===\n\n")
             final_summary_lines.extend(summary_lines)
         
         # 如果有任何指数信息，发送总结消息

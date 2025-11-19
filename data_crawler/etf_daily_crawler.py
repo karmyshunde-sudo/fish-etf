@@ -580,6 +580,9 @@ def crawl_all_etfs_daily_data() -> None:
             if start_date is None or end_date is None:
                 logger.info(f"ETF {etf_code} 数据已最新，跳过爬取")
                 processed_count += 1
+                # 修改：即使跳过也要记录到进度
+                etf_data_dict[etf_code] = pd.DataFrame()  # 空DataFrame表示跳过
+                successful_count += 1  # 跳过的也算成功处理
                 continue
             
             # 爬取数据
@@ -590,6 +593,8 @@ def crawl_all_etfs_daily_data() -> None:
                 logger.warning(f"⚠️ 未获取到数据")
                 failed_etfs.append(f"{etf_code},{etf_name},未获取到数据")
                 processed_count += 1
+                # 修改：即使失败也要记录到进度
+                etf_data_dict[etf_code] = pd.DataFrame()  # 空DataFrame表示失败
                 continue
             
             # 缓存到小批次
@@ -597,50 +602,54 @@ def crawl_all_etfs_daily_data() -> None:
             successful_count += 1
             processed_count += 1
             
-            current_progress = f"{current_index}/{total_count} ({(current_index)/total_count*100:.1f}%)"
+            current_progress = f"{(next_index + i) % total_count}/{total_count} ({(next_index + i) % total_count/total_count*100:.1f}%)"
             logger.info(f"进度: {current_progress} - 数据已缓存")
             
             # 每10只ETF提交一次（包括最后一只）
             if (i + 1) % MINOR_BATCH_SIZE == 0 or i == total_to_process - 1:
-                # 保存当前小批次数据
-                if etf_data_dict:
-                    logger.info(f"开始保存小批次数据（{len(etf_data_dict)}只ETF）...")
-                    saved_count = save_etf_data_batch(etf_data_dict)
-                    logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个ETF数据文件")
-                    
-                    # ✅ 重新添加：确保数据文件被添加到Git暂存区
-                    os.system("git add data/etf_daily/*.csv")
-                    
-                    # 构建要提交的文件列表
-                    file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in etf_data_dict.keys()]
-                    # file_path = os.path.join(DAILY_DIR, f"/*.csv")
-                    # 提交数据文件
-                    commit_msg = f"feat: 批量提交{len(etf_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    logger.info(f"提交数据文件: {commit_msg}")
-                    commit_success = commit_files_in_batches(file_list, commit_msg)
-                    # commit_success = commit_files_in_batches(file_path, commit_msg)
-                    
-                    if commit_success:
-                        logger.info(f"✅ 小批次数据文件提交成功：{len(etf_data_dict)}只")
-                    else:
-                        logger.error("❌ 小批次数据文件提交失败")
-                    
-                    # 更新进度（当前已处理数量）
-                    new_index = (next_index + i + 1) % total_count
-                    save_crawl_progress(new_index)
-                    logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
-                    
-                    # 提交进度文件
-                    progress_commit_success = commit_crawl_progress()
-                    if progress_commit_success:
-                        logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")
-                    else:
-                        logger.error("❌ 进度文件提交失败")
-                    
-                    # 清空小批次缓存
-                    etf_data_dict = {}
+                # 修改：无论是否有数据都要更新进度
+                # 更新进度（当前已处理数量）
+                new_index = (next_index + i + 1) % total_count
+                save_crawl_progress(new_index)
+                logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
+                
+                # 提交进度文件
+                progress_commit_success = commit_crawl_progress()
+                if progress_commit_success:
+                    logger.info(f"✅ 进度文件提交成功，进度更新为 {new_index}/{total_count}")
                 else:
-                    logger.info("当前小批次没有新数据，跳过提交")
+                    logger.error("❌ 进度文件提交失败")
+                
+                # 如果有数据才保存和提交数据文件
+                if etf_data_dict and any(not df.empty for df in etf_data_dict.values()):
+                    logger.info(f"开始保存小批次数据（{len(etf_data_dict)}只ETF）...")
+                    # 过滤掉空DataFrame
+                    valid_data_dict = {code: df for code, df in etf_data_dict.items() if not df.empty}
+                    if valid_data_dict:
+                        saved_count = save_etf_data_batch(valid_data_dict)
+                        logger.info(f"✅ 小批次数据保存完成，成功保存 {saved_count} 个ETF数据文件")
+                        
+                        # 确保数据文件被添加到Git暂存区
+                        os.system("git add data/etf_daily/*.csv")
+                        
+                        # 构建要提交的文件列表
+                        file_list = [os.path.join(DAILY_DIR, f"{code}.csv") for code in valid_data_dict.keys()]
+                        # 提交数据文件
+                        commit_msg = f"feat: 批量提交{len(valid_data_dict)}只ETF日线数据 [skip ci] - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+                        logger.info(f"提交数据文件: {commit_msg}")
+                        commit_success = commit_files_in_batches(file_list, commit_msg)
+                        
+                        if commit_success:
+                            logger.info(f"✅ 小批次数据文件提交成功：{len(valid_data_dict)}只")
+                        else:
+                            logger.error("❌ 小批次数据文件提交失败")
+                    else:
+                        logger.info("当前小批次没有有效数据，跳过数据文件保存")
+                else:
+                    logger.info("当前小批次没有新数据，跳过数据文件保存")
+                
+                # 清空小批次缓存
+                etf_data_dict = {}
             
             # 每只ETF之间随机等待
             time.sleep(random.uniform(1.2, 4.6))

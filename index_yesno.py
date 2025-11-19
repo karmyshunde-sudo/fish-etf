@@ -101,7 +101,7 @@ SCENARIO_MESSAGES = [
         "⚠️ 注意：若收盘跌破5日均线，立即减仓50%"
     ]],
     ["YES", "trend_stable", [
-        "【趋势稳健】连续{consecutive}天站上20日均线，偏离率{deviation:.2f}%",
+        "【趋势稳健】连续{consecutive}天站上20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 持仓不动，不新增仓位",
         "  • 跟踪止损上移至5日均线（约{target_price:.2f}）",
@@ -109,7 +109,7 @@ SCENARIO_MESSAGES = [
         "{pattern_msg}"
     ]],
     ["YES", "trend_strong", [
-        "【趋势较强】连续{consecutive}天站上20日均线，偏离率{deviation:.2f}%",
+        "【趋势较强】连续{consecutive}天站上20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 观望，不新增仓位",
         "  • 逢高减仓10%-15%（{etf_code}）",
@@ -117,7 +117,7 @@ SCENARIO_MESSAGES = [
         "{pattern_msg}"
     ]],
     ["YES", "overbought", [
-        "【超买风险】连续{consecutive}天站上20日均线，偏离率{deviation:.2f}%",
+        "【超买风险】连续{consecutive}天站上20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 逢高减仓20%-30%（仅卫星ETF）",
         "  • 当前价格已处高位，避免新增仓位",
@@ -141,7 +141,7 @@ SCENARIO_MESSAGES = [
         "⚠️ 信号确认，避免侥幸心理"
     ]],
     ["NO", "decline_initial", [
-        "【下跌初期】连续{consecutive}天跌破20日均线，偏离率{deviation:.2f}%",
+        "【下跌初期】连续{consecutive}天跌破20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 轻仓观望（仓位≤20%）",
         "  • 反弹至均线附近（约{target_price:.2f}）减仓剩余仓位",
@@ -149,7 +149,7 @@ SCENARIO_MESSAGES = [
         "⚠️ 重点观察：收盘站上5日均线，可轻仓试多"
     ]],
     ["NO", "decline_medium", [
-        "【下跌中期】连续{consecutive}天跌破20日均线，偏离率{deviation:.2f}%",
+        "【下跌中期】连续{consecutive}天跌破20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 空仓为主，避免抄底",
         "  • 仅核心宽基ETF（{etf_code}）可试仓5%-10%",
@@ -157,7 +157,7 @@ SCENARIO_MESSAGES = [
         "⚠️ 重点观察：行业基本面是否有利空，有利空则清仓"
     ]],
     ["NO", "oversold", [
-        "【超卖机会】连续{consecutive}天跌破20日均线，偏离率{deviation:.2f}%",
+        "【超卖机会】连续{consecutive}天跌破20日均线，偏离{deviation:.2f}%",
         "✅ 操作建议：",
         "  • 核心宽基ETF（{etf_code}）小幅加仓10%-15%",
         "  • 目标价：偏离率≥-5%（约{target_price:.2f}）",
@@ -1560,7 +1560,7 @@ def generate_report():
             
             message_lines = [
                 f"{name} 【{code}；ETF：{etf_str}】",
-                f"📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}%",
+                f"📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}%",
                 f"{signal_symbol} 信号：{status} {signal_message}"
             ]
             message = "".join(message_lines)
@@ -1571,7 +1571,7 @@ def generate_report():
             # 添加到总结
             name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界值：{critical_value:.2f} | 偏离率：{deviation:.2f}% | 数据源：{actual_source}\n"
+            summary_line = f"{name_with_padding}【{code}；ETF：{etf_str}】{signal_symbol} 信号：{status} 📊 当前：{close_price:.2f} | 临界：{critical_value:.2f} | 偏离：{deviation:.2f}% \n──────────────────\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)
@@ -1592,7 +1592,7 @@ def generate_report():
         
         # 添加正常计算的指数信息
         if summary_lines:
-            final_summary_lines.append("【策略信号总结】\n")
+            final_summary_lines.append("————指数信号总结————\n")
             final_summary_lines.extend(summary_lines)
         
         # 如果有任何指数信息，发送总结消息

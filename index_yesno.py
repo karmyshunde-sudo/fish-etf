@@ -1501,7 +1501,7 @@ def generate_report():
                     f"数据获取失败\n",
                     "──────────────────\n"
                 ]
-                message = "".join(message_lines)
+                message = "\n".join(message_lines)
                 logger.info(f"推送 {name} Yes/no信号（数据获取失败）")
                 send_wechat_message(message)
                 time.sleep(1)
@@ -1521,7 +1521,7 @@ def generate_report():
                     f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n",
                     "──────────────────\n"
                 ]
-                message = "".join(message_lines)
+                message = "\n".join(message_lines)
                 logger.info(f"推送 {name} Yes/no信号（日线天数不足）")
                 send_wechat_message(message)
                 time.sleep(2)

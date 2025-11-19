@@ -1592,7 +1592,7 @@ def generate_report():
         
         # 添加正常计算的指数信息
         if summary_lines:
-            final_summary_lines.append("\n===所有指数信号总结===\n\n")
+            final_summary_lines.append("\n=====所有指数信号总结=====\n\n")
             final_summary_lines.extend(summary_lines)
         
         # 如果有任何指数信息，发送总结消息

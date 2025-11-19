@@ -557,23 +557,20 @@ def crawl_all_etfs_daily_data() -> None:
         logger.info(f"待爬取ETF总数：{total_count}只（全市场ETF）")
         
         next_index = get_next_crawl_index()
-        total_to_process = min(MAJOR_BATCH_SIZE, total_count - next_index)
         
-        if total_to_process <= 0:
-            logger.info("没有ETF需要处理")
-            return
-            
+        # 修改：始终处理MAJOR_BATCH_SIZE只ETF，不足时循环补充
+        total_to_process = MAJOR_BATCH_SIZE
         logger.info(f"本次将处理 {total_to_process} 只ETF（目标：{MAJOR_BATCH_SIZE}只）")
         
-        start_idx = next_index % total_count
         etf_data_dict = {}  # 小批次数据缓存
         processed_count = 0
         successful_count = 0
         failed_etfs = []
         
-        # 处理所有ETF（最多300只）
+        # 修改：处理固定数量的ETF，不足时从索引0开始循环
         for i in range(total_to_process):
-            current_index = (start_idx + i) % total_count
+            # 计算当前ETF在列表中的实际索引（循环处理）
+            current_index = (next_index + i) % total_count
             etf_code = etf_codes[current_index]
             etf_name = get_etf_name(etf_code)
             logger.info(f"ETF代码：{etf_code}| 名称：{etf_name}")
@@ -629,8 +626,7 @@ def crawl_all_etfs_daily_data() -> None:
                         logger.error("❌ 小批次数据文件提交失败")
                     
                     # 更新进度（当前已处理数量）
-                    new_index = start_idx + i + 1
-                    new_index = new_index % total_count
+                    new_index = (next_index + i + 1) % total_count
                     save_crawl_progress(new_index)
                     logger.info(f"✅ 进度已更新为 {new_index}/{total_count}")
                     
@@ -656,8 +652,8 @@ def crawl_all_etfs_daily_data() -> None:
                 f.write("\n".join(failed_etfs))
             logger.info(f"记录了 {len(failed_etfs)} 只失败的ETF")
         
-        # 计算剩余ETF数量
-        remaining_stocks = total_count - (start_idx + total_to_process)
+        # 计算剩余ETF数量（相对于当前进度）
+        remaining_stocks = total_count - ((next_index + total_to_process) % total_count)
         if remaining_stocks < 0:
             remaining_stocks = total_count + remaining_stocks
             
@@ -668,9 +664,8 @@ def crawl_all_etfs_daily_data() -> None:
         logger.error(f"ETF日线数据爬取任务执行失败: {str(e)}", exc_info=True)
         # 异常情况下尝试保存进度
         try:
-            if 'next_index' in locals() and 'total_count' in locals():
-                new_index = start_idx + i + 1 if 'i' in locals() else next_index
-                new_index = new_index % total_count
+            if 'next_index' in locals() and 'total_count' in locals() and 'i' in locals():
+                new_index = (next_index + i + 1) % total_count
                 logger.error("尝试保存进度以恢复状态...")
                 save_crawl_progress(new_index)
                 commit_crawl_progress()

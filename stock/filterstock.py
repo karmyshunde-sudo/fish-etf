@@ -29,13 +29,13 @@ import random
 from datetime import datetime
 from config import Config
 from utils.date_utils import get_beijing_time
-from utils.git_utils import commit_files_in_batches
+from utils.new_git import commit_single_file
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
 # 添加BATCH_SIZE参数，方便灵活调整每次处理的股票数量
-BATCH_SIZE = 400  # 每次处理的股票数量
+BATCH_SIZE = 200  # 每次处理的股票数量
 
 # 财务指标过滤参数配置（保留动态市盈率大于等于0.1的股票）（保留净利润正的股票）
 FINANCIAL_FILTER_PARAMS = {
@@ -417,10 +417,14 @@ def filter_and_update_stocks():
             basic_info_df.to_csv(basic_info_file, index=False)
             logger.info("filter列已重置，为下一次处理做准备")
         
-        # 提交到Git仓库
+        # 提交到Git仓库 - 使用新的Git工具
         try:
-            commit_files_in_batches(Config.DATA_DIR, "LAST_FILE")
-            logger.info("已提交过滤后的股票列表到Git仓库")
+            commit_message = f"更新股票财务过滤结果 - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+            commit_success = commit_single_file(basic_info_file, commit_message)
+            if commit_success:
+                logger.info("已提交过滤后的股票列表到Git仓库")
+            else:
+                logger.error("过滤后的股票列表提交失败")
         except Exception as e:
             logger.error(f"提交到Git仓库失败: {str(e)}")
         

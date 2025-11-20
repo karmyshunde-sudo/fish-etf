@@ -26,7 +26,7 @@ import traceback
 from datetime import datetime
 from config import Config
 from utils.date_utils import get_beijing_time
-from utils.git_utils import commit_files_in_batches
+from utils.new_git import commit_single_file, commit_batch_files, commit_remaining_files
 import akshare as ak  # 新增：用于获取质押数据
 
 # 配置日志
@@ -160,10 +160,14 @@ def save_top_500_stock_data(stock_data):
         # 【关键修复】保存为CSV文件
         top_500.to_csv(TOP_500_FILE, index=False)
         
-        # 【关键修复】提交到Git仓库
-        commit_files_in_batches(TOP_500_FILE, "保存前500条股票数据用于验证")
+        # 【关键修复】提交到Git仓库 - 使用新的Git工具
+        commit_message = f"保存前500条股票数据用于验证 - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_success = commit_single_file(TOP_500_FILE, commit_message)
         
-        logger.info(f"已成功保存前500条股票数据到 {TOP_500_FILE}")
+        if commit_success:
+            logger.info(f"已成功保存前500条股票数据到 {TOP_500_FILE}")
+        else:
+            logger.error(f"前500条股票数据提交失败")
         
         # 【关键修复】检查"名称"列是否存在
         if "名称" in top_500.columns:
@@ -677,10 +681,15 @@ def save_base_stock_info(stock_info, include_pledge=False):
         # 保存到CSV文件
         stock_info.to_csv(BASIC_INFO_FILE, index=False, float_format='%.2f')
         
-        # 提交到Git仓库
-        commit_files_in_batches(BASIC_INFO_FILE, "更新股票列表（基础过滤后）")
+        # 提交到Git仓库 - 使用新的Git工具
+        commit_message = f"更新股票列表（基础过滤后） - {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        commit_success = commit_single_file(BASIC_INFO_FILE, commit_message)
         
-        logger.info(f"基础股票列表已成功更新，共 {len(stock_info)} 条记录")
+        if commit_success:
+            logger.info(f"基础股票列表已成功更新，共 {len(stock_info)} 条记录")
+        else:
+            logger.error("基础股票列表提交失败")
+            
     except Exception as e:
         logger.error(f"保存基础股票列表失败: {str(e)}", exc_info=True)
        

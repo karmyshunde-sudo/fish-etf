@@ -1522,7 +1522,7 @@ def generate_report():
                     f"ETF标的：{etf_str}\n",
                     f"📊 当前：数据获取失败 | 临界：N/A | 偏离：N/A\n",
                     f"数据获取失败\n",
-                    "━━━━━━━━━━━━━━━━━━━\n"
+                    "━━━━━━━━━━\n"
                 ]
                 message = "\n".join(message_lines)
                 logger.info(f"推送 {name} Yes/no信号（数据获取失败）")
@@ -1540,9 +1540,9 @@ def generate_report():
                     f"ETF标的：{etf_str}\n",
                     f"📊 当前：数据不足 | 临界：N/A | 偏离：N/A\n",
                     f"⚠️ 该指数的日线数据不足\n",
-                    "━━━━━━━━━━━━━━━━━━━\n",
+                    "━━━━━━━━━━\n",
                     f"⚠️ 需要至少{CRITICAL_VALUE_DAYS}天数据进行计算，当前只有{len(df)}天\n",
-                    "━━━━━━━━━━━━━━━━━━━\n"
+                    "━━━━━━━━━━\n"
                 ]
                 message = "\n".join(message_lines)
                 logger.info(f"推送 {name} Yes/no信号（日线天数不足）")
@@ -1646,7 +1646,7 @@ def generate_report():
     
             # 构建分组消息
             group_message_lines = []
-            group_message_lines.append(f"\n=====指数信号总结 ({range_str})=====\n")
+            group_message_lines.append(f"\n====指数信号总结 ({range_str})====\n")
             group_message_lines.extend(group_lines)
     
             group_message = "".join(group_message_lines)
@@ -1666,7 +1666,7 @@ def generate_report():
         
         # 添加正常计算的指数信息
         #if summary_lines:
-        #    final_summary_lines.append("\n=====所有指数信号总结=====\n\n")
+        #    final_summary_lines.append("\n====所有指数信号总结====\n\n")
         #    final_summary_lines.extend(summary_lines)
         
         # 如果有任何指数信息，发送总结消息
@@ -1687,7 +1687,7 @@ def generate_report():
             logger.error(f"发送微信消息失败: {str(wechat_error)}", exc_info=True)
 
 if __name__ == "__main__":
-    logger.info("===== 开始执行 指数Yes/No策略 =====")
+    logger.info("==== 开始执行 指数Yes/No策略 ====")
     # 添加延时
     time.sleep(30)
     generate_report()

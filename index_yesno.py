@@ -1594,7 +1594,7 @@ def generate_report():
             # 添加到总结
             name_padding = 10 if len(name) <= 4 else 8
             name_with_padding = f"{name}{' ' * (name_padding - len(name))}"
-            summary_line = f"{name_with_padding}【{code}】\nETF标的：{etf_str}\n信号：{signal_symbol} {status}\n当前价：{close_price:.2f}\n临界值：{critical_value:.2f}\n偏离率：{deviation:.2f}%\n──────────────────\n"
+            summary_line = f"{name_with_padding}【{code}】\nETF标的：{etf_str}\n信号：{signal_symbol} {status}\n当前价：{close_price:.2f}\n临界值：{critical_value:.2f}\n偏离率：{deviation:.2f}%\n━━━━━━━━━━\n"
             summary_lines.append(summary_line)
             valid_indices_count += 1
             time.sleep(1)

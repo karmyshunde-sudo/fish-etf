@@ -1603,27 +1603,78 @@ def generate_report():
         bs.logout()
         logger.info("baostock已退出")
         
+
+        # 构建总结消息 - 按序号范围分组
+        def extract_index_number(line):
+            """从summary_line中提取序号"""
+            # line的第一行格式为"1、伦敦金现(XAU)【GC=F】"
+            first_line = line.split('\n')[0]
+            # 提取序号，如"1"
+            import re
+            match = re.search(r'^(\d+)', first_line)
+            if match:
+                return int(match.group(1))
+            return 0
+
+        # 分组规则：1-19, 20-30, 31-41, ...
+        def get_group_number(index_num):
+            if index_num <= 19:
+                return 1
+            else:
+                return (index_num - 20) // 11 + 2
+
+        # 提取每个指数的序号并分组
+        summary_groups = {}
+        for line in summary_lines:
+            index_num = extract_index_number(line)
+            if index_num == 0:
+                continue  # 无法提取序号，跳过
+            group_num = get_group_number(index_num)
+            if group_num not in summary_groups:
+                summary_groups[group_num] = []
+            summary_groups[group_num].append(line)
+
+        # 发送分组消息
+        for group_num, group_lines in sorted(summary_groups.items()):
+            # 确定序号范围
+            if group_num == 1:
+                range_str = "1-19"
+            else:
+                start = 20 + (group_num - 2) * 11
+                end = start + 10
+                range_str = f"{start}-{end}"
+    
+            # 构建分组消息
+            group_message_lines = []
+            group_message_lines.append(f"\n=====指数信号总结 ({range_str})=====\n")
+            group_message_lines.extend(group_lines)
+    
+            group_message = "".join(group_message_lines)
+            logger.info(f"推送总结消息 - {range_str}组")
+            send_wechat_message(group_message)
+            time.sleep(1)
+        
         # 构建总结消息
-        final_summary_lines = []
+        #final_summary_lines = []
         
         # 添加屏蔽指数的信息
-        if disabled_messages:
-            final_summary_lines.append("【已屏蔽指数】\n")
-            for msg in disabled_messages:
-                final_summary_lines.append(f"🔇 {msg}\n")
-            final_summary_lines.append("\n")
+        #if disabled_messages:
+        #    final_summary_lines.append("【已屏蔽指数】\n")
+        #    for msg in disabled_messages:
+        #        final_summary_lines.append(f"🔇 {msg}\n")
+        #    final_summary_lines.append("\n")
         
         # 添加正常计算的指数信息
-        if summary_lines:
-            final_summary_lines.append("\n=====所有指数信号总结=====\n\n")
-            final_summary_lines.extend(summary_lines)
+        #if summary_lines:
+        #    final_summary_lines.append("\n=====所有指数信号总结=====\n\n")
+        #    final_summary_lines.extend(summary_lines)
         
         # 如果有任何指数信息，发送总结消息
-        if final_summary_lines:
-            summary_message = "".join(final_summary_lines)
-            logger.info("推送总结消息")
-            send_wechat_message(summary_message)
-            time.sleep(1)
+        #if final_summary_lines:
+        #    summary_message = "".join(final_summary_lines)
+        #    logger.info("推送总结消息")
+        #    send_wechat_message(summary_message)
+        #    time.sleep(1)
             
         logger.info(f"所有指数策略报告已成功发送至企业微信（共{valid_indices_count}个有效指数，{len(disabled_messages)}个屏蔽指数）")
         

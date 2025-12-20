@@ -12,6 +12,7 @@
 - 修复列名一致性问题：数据文件中实际为"折价率"而非"折溢价率"
 - 确保基金规模数据正确获取
 - 【关键修复】彻底修复折溢价标识错误问题
+- 【新增修复】增强数据验证，解决异常折价率问题
 """
 
 import pandas as pd
@@ -53,11 +54,6 @@ from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
 
 def extract_scalar_value(value, default=0.0, log_prefix=""):
     """
@@ -145,7 +141,6 @@ def calculate_premium_discount(market_price: float, iopv: float) -> float:
     premium_discount = ((market_price - iopv) / iopv) * 100
     return round(premium_discount, 2)
 
-# 保留原有的 is_manual_trigger 函数定义
 def is_manual_trigger() -> bool:
     """
     判断是否是手动触发的任务
@@ -162,7 +157,8 @@ def is_manual_trigger() -> bool:
 
 def validate_arbitrage_data(df: pd.DataFrame) -> bool:
     """
-    验证实时套利数据
+    增强的实时套利数据验证
+    
     Args:
         df: 实时套利数据DataFrame
     Returns:
@@ -177,19 +173,48 @@ def validate_arbitrage_data(df: pd.DataFrame) -> bool:
     missing_columns = [col for col in required_columns if col not in df.columns]
     
     if missing_columns:
-        logger.warning(f"实时套利数据缺少必要列: {', '.join(missing_columns)}")
+        logger.error(f"实时套利数据缺少必要列: {', '.join(missing_columns)}")
+        logger.error(f"实际列名: {list(df.columns)}")
         return False
     
     # 检查数据量
-    if len(df) < 10:  # 至少需要10个ETF才有分析价值
-        logger.warning(f"实时套利数据量不足({len(df)}条)，需要至少10条数据")
+    if len(df) < 10:
+        logger.warning(f"实时套利数据量不足({len(df)}条)")
         return False
+    
+    # 增强验证：检查价格和IOPV的合理性
+    # 1. 检查价格范围（典型的ETF价格范围）
+    price_range_valid = df[(df["市场价格"] > 0.01) & (df["市场价格"] < 100)].shape[0]
+    price_range_invalid = df.shape[0] - price_range_valid
+    
+    if price_range_invalid > 0:
+        logger.warning(f"发现 {price_range_invalid} 个异常价格数据")
+    
+    # 2. 检查IOPV范围
+    iopv_range_valid = df[(df["IOPV"] > 0.01) & (df["IOPV"] < 100)].shape[0]
+    iopv_range_invalid = df.shape[0] - iopv_range_valid
+    
+    if iopv_range_invalid > 0:
+        logger.warning(f"发现 {iopv_range_invalid} 个异常IOPV数据")
+    
+    # 3. 检查价格和IOPV的比值是否在合理范围内
+    # 正常情况下，市场价格和IOPV不会相差太大
+    valid_ratio = df[(df["市场价格"] / df["IOPV"] > 0.1) & 
+                     (df["市场价格"] / df["IOPV"] < 10)].shape[0]
+    invalid_ratio = df.shape[0] - valid_ratio
+    
+    if invalid_ratio > 10:  # 如果超过10个数据异常
+        logger.error(f"发现大量异常价格/IOPV比值数据: {invalid_ratio}个")
+        # 可以返回False，或者继续处理但警告
+        if invalid_ratio > len(df) * 0.5:  # 超过50%数据异常
+            logger.error("超过50%数据异常，数据源可能有问题")
+            return False
     
     return True
 
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    基于实时数据计算ETF套利机会
+    基于实时数据计算ETF套利机会 - 增强版本
     
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: 折价机会DataFrame, 溢价机会DataFrame
@@ -204,13 +229,32 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         utc_now, beijing_now = get_current_times()
         logger.info(f"开始计算套利机会 (UTC: {utc_now}, CST: {beijing_now})")
         
-        # 获取所有的ETF数据（一个DataFrame）
+        # 获取所有的ETF数据
         all_opportunities = get_arbitrage_data()
         
         # 检查返回值类型
         if not isinstance(all_opportunities, pd.DataFrame):
             logger.error(f"get_arbitrage_data() 返回值类型错误，期望pd.DataFrame，实际返回: {type(all_opportunities)}")
             return pd.DataFrame(), pd.DataFrame()
+        
+        # 添加诊断信息
+        logger.info(f"获取到 {len(all_opportunities)} 条原始数据")
+        if not all_opportunities.empty:
+            logger.info(f"列名: {list(all_opportunities.columns)}")
+            
+            # 检查IOPV和价格的范围
+            if "IOPV" in all_opportunities.columns and "市场价格" in all_opportunities.columns:
+                logger.info(f"IOPV范围: {all_opportunities['IOPV'].min():.3f} ~ {all_opportunities['IOPV'].max():.3f}")
+                logger.info(f"价格范围: {all_opportunities['市场价格'].min():.3f} ~ {all_opportunities['市场价格'].max():.3f}")
+                
+                # 计算价格/IOPV比值
+                ratio = all_opportunities["市场价格"] / all_opportunities["IOPV"]
+                logger.info(f"价格/IOPV比值范围: {ratio.min():.3f} ~ {ratio.max():.3f}")
+                
+                # 统计异常比例
+                abnormal_ratio = ratio[(ratio < 0.5) | (ratio > 2)]
+                if len(abnormal_ratio) > 0:
+                    logger.warning(f"发现 {len(abnormal_ratio)} 个异常价格/IOPV比值数据")
         
         # ===== 使用新的验证函数 =====
         # 验证实时套利数据
@@ -237,28 +281,51 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             logger.warning("筛选后无符合条件的ETF数据")
             return pd.DataFrame(), pd.DataFrame()
         
-        # ===== 关键修复：确保数据有效性 =====
-        # 1. 确保IOPV有效（大于最小阈值）
-        MIN_IOPV = 0.01  # 最小IOPV阈值
-        valid_opportunities = all_opportunities[all_opportunities["IOPV"] > MIN_IOPV].copy()
+        # ===== 关键修复：增强数据清洗 =====
+        # 1. 检查价格和IOPV的基本有效性
+        MIN_IOPV = 0.01
+        MIN_PRICE = 0.01
+        valid_opportunities = all_opportunities[
+            (all_opportunities["IOPV"] > MIN_IOPV) & 
+            (all_opportunities["市场价格"] > MIN_PRICE)
+        ].copy()
         
-        # 2. 确保市场价格有效
-        valid_opportunities = valid_opportunities[valid_opportunities["市场价格"] > 0].copy()
+        # 2. 过滤掉价格和IOPV差异过大的数据
+        # 正常ETF的价格和IOPV不会相差10倍以上
+        if len(valid_opportunities) > 0:
+            price_iopv_ratio = valid_opportunities["市场价格"] / valid_opportunities["IOPV"]
+            valid_opportunities = valid_opportunities[
+                (price_iopv_ratio > 0.1) & (price_iopv_ratio < 10)
+            ].copy()
         
-        # 3. 从原始数据重新计算折溢价率（不依赖可能不可靠的外部计算值）
-        # 【关键修复】使用"折价率"作为列名（与数据文件一致）
+        if valid_opportunities.empty:
+            logger.warning("数据清洗后无有效数据")
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # 3. 重新计算折价率
         valid_opportunities["折价率"] = (
-            (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / valid_opportunities["IOPV"]
-        ) * 100
+            (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / 
+            valid_opportunities["IOPV"] * 100
+        )
         
-        # 检查并记录异常折价率（不修改原始数据）
-        abnormal_discount = valid_opportunities[valid_opportunities["折价率"] < -15.0]
-        abnormal_premium = valid_opportunities[valid_opportunities["折价率"] > 15.0]
+        # 4. 记录并过滤异常折价率
+        original_count = len(valid_opportunities)
         
-        if not abnormal_discount.empty:
-            logger.warning(f"发现 {len(abnormal_discount)} 个异常折价率（<-15%）: {abnormal_discount[['ETF代码', '折价率']].to_dict()}")
-        if not abnormal_premium.empty:
-            logger.warning(f"发现 {len(abnormal_premium)} 个异常溢价率（>15%）: {abnormal_premium[['ETF代码', '折价率']].to_dict()}")
+        # 检查异常数据
+        abnormal_mask = (valid_opportunities["折价率"].abs() > 20)
+        if abnormal_mask.any():
+            abnormal_data = valid_opportunities[abnormal_mask]
+            logger.error(f"⚠️ 发现 {len(abnormal_data)} 个异常折价率数据，将被过滤:")
+            for _, row in abnormal_data.head(5).iterrows():  # 只显示前5个异常
+                logger.error(f"  ETF {row['ETF代码']}: 价格={row['市场价格']}, IOPV={row['IOPV']}, 折价率={row['折价率']:.2f}%")
+            
+            # 过滤掉异常数据
+            valid_opportunities = valid_opportunities[~abnormal_mask].copy()
+            logger.info(f"过滤掉 {len(abnormal_data)} 个异常数据，剩余 {len(valid_opportunities)} 个数据")
+        
+        if valid_opportunities.empty:
+            logger.warning("过滤异常数据后无有效数据")
+            return pd.DataFrame(), pd.DataFrame()
         
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(valid_opportunities)}，折价率范围: {valid_opportunities['折价率'].min():.2f}% ~ {valid_opportunities['折价率'].max():.2f}%")
@@ -318,8 +385,9 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
         # 修复：添加日志，显示评分详情
-        for _, row in premium_opportunities.iterrows():
-            logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折价率']:.2f}%, 评分: {row['综合评分']:.2f}")
+        if not premium_opportunities.empty:
+            for _, row in premium_opportunities.head(3).iterrows():  # 只显示前3个
+                logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折价率']:.2f}%, 评分: {row['综合评分']:.2f}")
         
         return discount_opportunities, premium_opportunities
 
@@ -921,7 +989,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.error(f"获取最新套利机会失败: {str(e)}", exc_info=True)
+        logger.error(f"获取最新套利机会失败: {str(e)}")
         return pd.DataFrame()
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
@@ -1114,10 +1182,62 @@ def generate_arbitrage_message(discount_opportunities: pd.DataFrame, premium_opp
     【关键修复】不区分折溢价，只按折溢价率绝对值排序
     【关键修复】修正日均成交额单位（除以10000）
     【关键修复】严格遵循用户指定的消息模板
+    【关键修复】增强数据验证，解决"不是ETF数据格式"问题
     """
     try:
-        # 合并折价和溢价机会
+        # 合并数据前检查格式
+        required_columns = ["ETF代码", "ETF名称", "折价率", "市场价格", "IOPV", "基金规模", "日均成交额", "综合评分"]
+        
+        # 检查折价机会
+        if not discount_opportunities.empty:
+            missing_cols = [col for col in required_columns if col not in discount_opportunities.columns]
+            if missing_cols:
+                logger.error(f"折价机会数据缺少列: {missing_cols}")
+        
+        # 检查溢价机会
+        if not premium_opportunities.empty:
+            missing_cols = [col for col in required_columns if col not in premium_opportunities.columns]
+            if missing_cols:
+                logger.error(f"溢价机会数据缺少列: {missing_cols}")
+        
+        # 合并数据
         all_opportunities = pd.concat([discount_opportunities, premium_opportunities], ignore_index=True)
+        
+        if all_opportunities.empty:
+            logger.info("没有符合条件的套利机会")
+            return []
+        
+        # 数据质量检查
+        invalid_rows = []
+        for idx, row in all_opportunities.iterrows():
+            # 检查必要字段是否存在且有效
+            try:
+                etf_code = str(row["ETF代码"])
+                etf_name = str(row["ETF名称"])
+                discount_rate = float(row["折价率"])
+                market_price = float(row["市场价格"])
+                iopv = float(row["IOPV"])
+                fund_size = float(row["基金规模"])
+                avg_volume = float(row["日均成交额"])
+                score = float(row["综合评分"])
+                
+                # 检查数值合理性
+                if market_price <= 0 or iopv <= 0:
+                    invalid_rows.append(idx)
+                    logger.warning(f"第{idx}行数据价格或IOPV无效: 价格={market_price}, IOPV={iopv}")
+                    
+            except (KeyError, ValueError, TypeError) as e:
+                invalid_rows.append(idx)
+                logger.warning(f"第{idx}行数据格式错误: {str(e)}")
+        
+        # 移除无效行
+        if invalid_rows:
+            logger.warning(f"移除 {len(invalid_rows)} 行无效数据")
+            all_opportunities = all_opportunities.drop(invalid_rows)
+            
+        if all_opportunities.empty:
+            logger.info("数据清洗后无有效机会")
+            return []
         
         # 按折价率绝对值排序（降序）
         if not all_opportunities.empty:
@@ -1127,7 +1247,7 @@ def generate_arbitrage_message(discount_opportunities: pd.DataFrame, premium_opp
         
         # 如果没有机会，返回空列表
         if all_opportunities.empty:
-            logger.info("没有符合条件的套利机会")
+            logger.info("排序后无符合条件的套利机会")
             return []
         
         # 获取当前时间
@@ -1141,10 +1261,6 @@ def generate_arbitrage_message(discount_opportunities: pd.DataFrame, premium_opp
         total_pages = (len(all_opportunities) + etfs_per_page - 1) // etfs_per_page
         
         # 生成第一页：筛选条件信息
-        if all_opportunities.empty:
-            return []
-        
-        # 【关键修复】生成第一页消息
         header_msg = "【以下ETF市场价格与净值有大差额】\n"
         header_msg += f"💓共{len(all_opportunities)}只ETF，分{total_pages}条消息推送，这是第1/{total_pages}条消息\n\n"
         header_msg += "📊 筛选条件：基金规模≥10.0亿元，日均成交额≥5000.0万元\n"

@@ -202,9 +202,9 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 检查是否为交易日
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过套利数据爬取")
-            return pd.DataFrame()
+        #if not is_trading_day():
+        #    logger.warning("当前不是交易日，跳过套利数据爬取")
+        #    return pd.DataFrame()
         
         # 检查是否为交易时间
         current_time = beijing_time.time()
@@ -746,9 +746,9 @@ def crawl_arbitrage_data() -> str:
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 检查是否为交易日和交易时间
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过套利数据爬取")
-            return ""
+        #if not is_trading_day():
+        #    logger.warning("当前不是交易日，跳过套利数据爬取")
+        #    return ""
         
         current_time = beijing_time.time()
         trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
@@ -782,9 +782,9 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
     """
     try:
         # 检查是否为交易日
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过获取套利机会")
-            return pd.DataFrame()
+        #if not is_trading_day():
+        #    logger.warning("当前不是交易日，跳过获取套利机会")
+        #    return pd.DataFrame()
         
         beijing_time = get_beijing_time()
         today = beijing_time.strftime("%Y%m%d")

@@ -8,14 +8,14 @@ on:
         type: choice
         options:
           - 'index_yesno'
-          - 'update_stock_list'     #新增的股票列表强制更新任务代码文件名stock/all_stocks.py
-          - 'stock_ListFilt'     #新增的财务过滤股票列表任务代码文件名stock/filterstock.py
-          - 'stock_tickten'         #就是原来的stock_fourty任务
-          - 'crawl_stock_daily'     #就是原来的stock_crawler任务
-          - 'stock_threema'         #新增的股票筛选任务代码文件名stock/macd_ma_strategy.py
-          - 'stock_backtest'        #股票均线缠绕回测
-          - 'stock_buyatmarketopen_bollrsi'        #股票开盘买入BollRsi策略（新增）
-          - 'analyze_stock'         #新增：个股技术分析任务
+          - 'update_stock_list'                    #股票列表强制更新任务代码文件名stock/all_stocks.py
+          - 'stock_ListFilt'                       #财务过滤股票列表任务代码文件名stock/filterstock.py
+          - 'stock_tickten'                        #stock_fourty任务
+          - 'crawl_stock_daily'                    #stock_crawler任务
+          - 'stock_threema'                        #股票筛选任务代码文件名stock/macd_ma_strategy.py
+          - 'stock_backtest'                       #股票均线缠绕回测
+          - 'stock_buyatmarketopen_bollrsi'        #251221：股票开盘买入BollRsi策略
+          - 'analyze_stock'                        #个股技术分析任务
           - 'update_etf_list'
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
@@ -127,8 +127,7 @@ jobs:
           STATUS=${{ steps.execute_task.outputs.task_status }} || 'failed'
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
-            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票开盘买入BollRsi策略（手动）】执行${STATUS}\
-北京时间: ${BEIJING_TIME}\"}}"
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【股票开盘买入BollRsi策略（手动）】执行${STATUS}\北京时间: ${BEIJING_TIME}\"}}"
   
   # 指数YesNo 策略（手動）
   index-yesno-manual:

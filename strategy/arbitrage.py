@@ -5,7 +5,7 @@
 基于已保存的实时数据计算套利机会
 严格遵循项目架构原则：只负责计算，不涉及数据爬取和消息格式化
 【已修复】
-- 修复了非交易日仍尝试计算的问题
+- 修复了非交易日仍尝试计算的问题 - 已移除，现在任何时间都可以计算
 - 修复了ETF数量不一致问题
 - 修复了无日线数据但有溢价率的逻辑矛盾
 - 确保数据源一致性
@@ -13,6 +13,7 @@
 - 确保基金规模数据正确获取
 - 【关键修复】彻底修复折溢价标识错误问题
 - 【新增修复】增强数据验证，解决异常折价率问题
+- 【新增修复】移除交易时间判断，支持任何时间测试
 """
 
 import pandas as pd
@@ -27,8 +28,8 @@ from utils.date_utils import (
     get_current_times,
     get_beijing_time,
     get_utc_time,
-    is_trading_day,
-    is_trading_time
+    is_trading_day,  # 保留导入但不再使用
+    is_trading_time  # 保留导入但不再使用
 )
 from utils.file_utils import (
     load_etf_daily_data, 
@@ -215,15 +216,14 @@ def validate_arbitrage_data(df: pd.DataFrame) -> bool:
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     基于实时数据计算ETF套利机会 - 增强版本
+    【重要修改】移除了交易日判断，现在任何时间都可以计算
     
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: 折价机会DataFrame, 溢价机会DataFrame
     """
     try:
-        # ===== 关键修复：检查是否为交易日 =====
-        if not is_trading_day():
-            logger.warning("当前不是交易日，跳过套利机会计算")
-            return pd.DataFrame(), pd.DataFrame()
+        # 【重要修改】移除了交易日判断，现在任何时间都可以计算
+        logger.info("开始计算套利机会（已移除交易日限制）")
         
         # 获取当前双时区时间
         utc_now, beijing_now = get_current_times()
@@ -1313,7 +1313,7 @@ try:
     Config.init_dirs()
     
     # 初始化日志
-    logger.info("套利策略模块初始化完成")
+    logger.info("套利策略模块初始化完成（已移除交易日限制）")
     
     # 清理过期的套利状态记录
     try:

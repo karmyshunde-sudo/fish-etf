@@ -9,6 +9,7 @@
 增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
 【关键修复】使用多数据源轮换机制，降低对akshare的依赖
 【问题修复】修复数据列缺失、异常折溢价率、增强日志记录
+【关键修复】新增数据单位标准化，解决价格和IOPV单位不一致问题
 """
 
 import pandas as pd
@@ -42,6 +43,99 @@ SOURCE_PRIORITY = [
 
 # 模块级全局状态
 _current_priority_index = 0  # 记录当前优先级位置
+
+def normalize_etf_data(df):
+    """
+    标准化ETF数据，确保价格和IOPV单位一致
+    
+    Args:
+        df: 原始ETF数据DataFrame
+    
+    Returns:
+        DataFrame: 标准化后的数据
+    """
+    if df.empty:
+        return df
+    
+    # 创建副本避免SettingWithCopyWarning
+    normalized_df = df.copy()
+    
+    # 确保必要的列存在
+    required_columns = ["市场价格", "IOPV"]
+    if not all(col in normalized_df.columns for col in required_columns):
+        logger.warning("数据缺少必要列，无法进行标准化")
+        return normalized_df
+    
+    # 记录标准化前的数据
+    if not normalized_df.empty:
+        sample_etf = normalized_df.iloc[0]
+        logger.info(f"数据标准化前样本: ETF {sample_etf.get('ETF代码', 'N/A')}, "
+                   f"价格={sample_etf['市场价格']}, IOPV={sample_etf['IOPV']}, "
+                   f"比值={sample_etf['市场价格']/sample_etf['IOPV']:.3f}")
+    
+    # 检查价格和IOPV的范围，如果差异过大则调整
+    price_iopv_ratio = normalized_df["市场价格"] / normalized_df["IOPV"]
+    
+    # 如果价格/IOPV比值异常（不在0.1-10范围内），则可能是单位问题
+    abnormal_mask = (price_iopv_ratio < 0.1) | (price_iopv_ratio > 10)
+    
+    if abnormal_mask.any():
+        abnormal_count = abnormal_mask.sum()
+        total_count = len(normalized_df)
+        logger.warning(f"发现 {abnormal_count}/{total_count} 个价格/IOPV单位不一致的数据，尝试自动调整")
+        
+        # 对于异常数据，尝试不同的调整方案
+        fixed_count = 0
+        for idx in normalized_df[abnormal_mask].index:
+            price = normalized_df.loc[idx, "市场价格"]
+            iopv = normalized_df.loc[idx, "IOPV"]
+            etf_code = normalized_df.loc[idx, "ETF代码"] if "ETF代码" in normalized_df.columns else f"idx_{idx}"
+            
+            # 跳过无效数据
+            if price <= 0 or iopv <= 0:
+                continue
+            
+            ratio = price / iopv
+            original_price = price
+            
+            # 方案1：如果价格太小而IOPV太大，可能价格是"元"而IOPV是"分"
+            # 正常ETF价格在0.5-5元，IOPV在0.5-5元，比值应在0.5-2之间
+            if ratio < 0.1:
+                # 常见情况：价格是元，IOPV是分，需要将价格乘以100
+                if price < 10 and iopv > 10:
+                    new_price = price * 100
+                    normalized_df.loc[idx, "市场价格"] = new_price
+                    fixed_count += 1
+                    logger.debug(f"调整ETF {etf_code}: 价格 {original_price} -> {new_price} (IOPV: {iopv}, 原比值: {ratio:.3f})")
+            
+            # 方案2：如果价格太大而IOPV太小，可能价格是"分"而IOPV是"元"
+            elif ratio > 10:
+                # 常见情况：价格是分，IOPV是元，需要将价格除以100
+                if price > 100 and iopv < 10:
+                    new_price = price / 100
+                    normalized_df.loc[idx, "市场价格"] = new_price
+                    fixed_count += 1
+                    logger.debug(f"调整ETF {etf_code}: 价格 {original_price} -> {new_price} (IOPV: {iopv}, 原比值: {ratio:.3f})")
+        
+        if fixed_count > 0:
+            logger.info(f"成功调整 {fixed_count} 个ETF的数据单位")
+    
+    # 验证调整后的数据
+    if not normalized_df.empty:
+        price_iopv_ratio_after = normalized_df["市场价格"] / normalized_df["IOPV"]
+        normal_ratios = price_iopv_ratio_after[(price_iopv_ratio_after >= 0.1) & (price_iopv_ratio_after <= 10)]
+        
+        if len(normal_ratios) > 0:
+            logger.info(f"标准化后，{len(normal_ratios)}/{len(normalized_df)} 个数据在正常价格/IOPV比值范围内 (0.1-10)")
+        
+        # 如果还有异常数据，记录警告
+        still_abnormal = normalized_df[(price_iopv_ratio_after < 0.1) | (price_iopv_ratio_after > 10)]
+        if len(still_abnormal) > 0:
+            logger.warning(f"标准化后仍有 {len(still_abnormal)} 个数据异常，可能不是单位问题")
+            for _, row in still_abnormal.head(5).iterrows():
+                logger.warning(f"异常数据: ETF {row.get('ETF代码', 'N/A')} 价格={row['市场价格']}, IOPV={row['IOPV']}, 比值={(row['市场价格']/row['IOPV']):.3f}")
+    
+    return normalized_df
 
 def clean_old_arbitrage_data(days_to_keep: int = 7) -> None:
     """
@@ -315,7 +409,10 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                 if df is None or df.empty:
                     raise ValueError("返回空数据")
                 
-                # 数据标准化
+                # 【关键修复】先进行数据单位标准化
+                df = normalize_etf_data(df)
+                
+                # 然后进行标准的数据标准化
                 df = _standardize_etf_data(df, interface["source_type"], logger)
                 
                 # 检查标准化后数据
@@ -407,7 +504,10 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         df = pd.DataFrame(all_data)
         if not df.empty:
             logger.info(f"腾讯财经获取到 {len(df)} 只ETF的实时数据")
-            logger.info(f"腾讯财经数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
+            # 记录样本数据，帮助调试单位问题
+            if len(df) > 0:
+                sample = df.iloc[0]
+                logger.info(f"腾讯财经数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
         return df
         
     except Exception as e:
@@ -492,7 +592,10 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         df = pd.DataFrame(all_data)
         if not df.empty:
             logger.info(f"新浪财经获取到 {len(df)} 只ETF的实时数据")
-            logger.info(f"新浪财经数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
+            # 记录样本数据，帮助调试单位问题
+            if len(df) > 0:
+                sample = df.iloc[0]
+                logger.info(f"新浪财经数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
         return df
         
     except Exception as e:
@@ -546,7 +649,8 @@ def _fetch_akshare_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         
         logger.info(f"东方财富获取成功: {len(df)} 只ETF的实时数据")
         if not df.empty:
-            logger.info(f"东方财富处理后的数据样本: {df.iloc[0].to_dict()}")
+            sample = df.iloc[0]
+            logger.info(f"东方财富数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
         return df
         
     except Exception as e:
@@ -602,7 +706,10 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         df = pd.DataFrame(all_data)
         if not df.empty:
             logger.info(f"Yahoo Finance获取到 {len(df)} 只ETF的实时数据")
-            logger.info(f"Yahoo Finance数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
+            # 记录样本数据，帮助调试单位问题
+            if len(df) > 0:
+                sample = df.iloc[0]
+                logger.info(f"Yahoo Finance数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
         return df
         
     except Exception as e:
@@ -643,8 +750,20 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
         (df["ETF名称"].notna())
     ].copy()
     
+    # 【关键修复】在进行任何计算前，先应用单位标准化
+    # 注意：这里不重复应用，因为已经在fetch_arbitrage_realtime_data中调用过normalize_etf_data
+    
     # 计算折价率
     if "市场价格" in df.columns and "IOPV" in df.columns:
+        # 检查是否有单位问题导致的价格/IOPV比值异常
+        price_iopv_ratio = df["市场价格"] / df["IOPV"]
+        
+        # 记录数据统计信息
+        logger.info(f"标准化后数据统计 - 价格范围: {df['市场价格'].min():.3f}~{df['市场价格'].max():.3f}, "
+                   f"IOPV范围: {df['IOPV'].min():.3f}~{df['IOPV'].max():.3f}, "
+                   f"价格/IOPV比值范围: {price_iopv_ratio.min():.3f}~{price_iopv_ratio.max():.3f}")
+        
+        # 计算折价率
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
         
         # 检查异常折溢价率 - 正常范围应该在 -20% 到 +20% 之间
@@ -652,12 +771,10 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
         abnormal_premium = df[df["折价率"] > 20]
         
         if len(abnormal_discount) > 0:
-            logger.error(f"⚠️ 发现 {len(abnormal_discount)} 个异常折价率 (<-20%): {abnormal_discount[['ETF代码', '折价率']].to_dict()}")
-            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+            logger.warning(f"发现 {len(abnormal_discount)} 个异常折价率 (<-20%)，可能仍有单位问题: {abnormal_discount[['ETF代码', '市场价格', 'IOPV', '折价率']].head().to_dict()}")
         
         if len(abnormal_premium) > 0:
-            logger.error(f"⚠️ 发现 {len(abnormal_premium)} 个异常溢价率 (>20%): {abnormal_premium[['ETF代码', '折价率']].to_dict()}")
-            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+            logger.warning(f"发现 {len(abnormal_premium)} 个异常溢价率 (>20%)，可能仍有单位问题: {abnormal_premium[['ETF代码', '市场价格', 'IOPV', '折价率']].head().to_dict()}")
         
         # 记录折价率统计信息
         if not df.empty:
@@ -668,7 +785,7 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
             
             # 如果出现极端值，发出严重警告
             if min_discount < -50 or max_discount > 50:
-                logger.critical("🚨 发现极端折溢价率！这几乎肯定是数据错误，请立即检查数据源和计算逻辑！")
+                logger.warning("发现极端折溢价率！这可能表明数据源仍有单位问题")
     
     # 确保所有必要列存在
     for col in required_columns:
@@ -835,7 +952,7 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.error(f"获取最新套利数据失败: {str(e)}", exc_info=True)
+        logger.error(f"获取最新套利数据失败: {str(e)}")
         return pd.DataFrame()
 
 def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:

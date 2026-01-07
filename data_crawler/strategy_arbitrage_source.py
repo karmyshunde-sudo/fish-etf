@@ -69,19 +69,34 @@ def normalize_etf_data(df):
     # 记录标准化前的数据
     if not normalized_df.empty:
         sample_etf = normalized_df.iloc[0]
-        logger.info(f"数据标准化前样本: ETF {sample_etf.get('ETF代码', 'N/A')}, "
-                   f"价格={sample_etf['市场价格']}, IOPV={sample_etf['IOPV']}, "
-                   f"比值={sample_etf['市场价格']/sample_etf['IOPV']:.3f}")
+        price = sample_etf.get('市场价格', 0)
+        iopv = sample_etf.get('IOPV', 0)
+        etf_code = sample_etf.get('ETF代码', 'N/A')
+        
+        # 安全计算比值，避免除以0
+        if iopv != 0:
+            ratio = price / iopv
+            logger.info(f"数据标准化前样本: ETF {etf_code}, 价格={price}, IOPV={iopv}, 比值={ratio:.3f}")
+        else:
+            logger.warning(f"数据标准化前样本: ETF {etf_code}, 价格={price}, IOPV={iopv} (IOPV为0，无法计算比值)")
     
     # 检查价格和IOPV的范围，如果差异过大则调整
-    price_iopv_ratio = normalized_df["市场价格"] / normalized_df["IOPV"]
+    # 避免除以0，使用np.where处理
+    valid_mask = (normalized_df["IOPV"] != 0)
+    price_iopv_ratio = np.where(
+        valid_mask,
+        normalized_df["市场价格"] / normalized_df["IOPV"],
+        np.nan  # IOPV为0时设为NaN
+    )
     
     # 如果价格/IOPV比值异常（不在0.1-10范围内），则可能是单位问题
+    # 排除IOPV为0的情况
     abnormal_mask = (price_iopv_ratio < 0.1) | (price_iopv_ratio > 10)
+    abnormal_mask = abnormal_mask & valid_mask  # 只考虑IOPV不为0的情况
     
     if abnormal_mask.any():
         abnormal_count = abnormal_mask.sum()
-        total_count = len(normalized_df)
+        total_count = len(normalized_df[valid_mask])  # 只计算有效数据
         logger.warning(f"发现 {abnormal_count}/{total_count} 个价格/IOPV单位不一致的数据，尝试自动调整")
         
         # 对于异常数据，尝试不同的调整方案
@@ -122,18 +137,41 @@ def normalize_etf_data(df):
     
     # 验证调整后的数据
     if not normalized_df.empty:
-        price_iopv_ratio_after = normalized_df["市场价格"] / normalized_df["IOPV"]
-        normal_ratios = price_iopv_ratio_after[(price_iopv_ratio_after >= 0.1) & (price_iopv_ratio_after <= 10)]
+        # 重新计算比值，使用安全除法
+        valid_mask_after = (normalized_df["IOPV"] != 0)
+        price_iopv_ratio_after = np.where(
+            valid_mask_after,
+            normalized_df["市场价格"] / normalized_df["IOPV"],
+            np.nan
+        )
         
-        if len(normal_ratios) > 0:
-            logger.info(f"标准化后，{len(normal_ratios)}/{len(normalized_df)} 个数据在正常价格/IOPV比值范围内 (0.1-10)")
+        # 统计正常比值的数据
+        normal_mask = (price_iopv_ratio_after >= 0.1) & (price_iopv_ratio_after <= 10) & valid_mask_after
+        normal_count = normal_mask.sum()
+        total_valid = valid_mask_after.sum()
+        
+        if total_valid > 0:
+            logger.info(f"标准化后，{normal_count}/{total_valid} 个数据在正常价格/IOPV比值范围内 (0.1-10)")
         
         # 如果还有异常数据，记录警告
-        still_abnormal = normalized_df[(price_iopv_ratio_after < 0.1) | (price_iopv_ratio_after > 10)]
+        still_abnormal_mask = ((price_iopv_ratio_after < 0.1) | (price_iopv_ratio_after > 10)) & valid_mask_after
+        still_abnormal = normalized_df[still_abnormal_mask]
+        
         if len(still_abnormal) > 0:
             logger.warning(f"标准化后仍有 {len(still_abnormal)} 个数据异常，可能不是单位问题")
-            for _, row in still_abnormal.head(5).iterrows():
-                logger.warning(f"异常数据: ETF {row.get('ETF代码', 'N/A')} 价格={row['市场价格']}, IOPV={row['IOPV']}, 比值={(row['市场价格']/row['IOPV']):.3f}")
+            count = 0
+            for _, row in still_abnormal.iterrows():
+                if count >= 5:  # 只记录前5个异常
+                    break
+                etf_code = row.get('ETF代码', 'N/A')
+                price = row['市场价格']
+                iopv = row['IOPV']
+                if iopv != 0:
+                    ratio = price / iopv
+                    logger.warning(f"异常数据: ETF {etf_code} 价格={price}, IOPV={iopv}, 比值={ratio:.3f}")
+                else:
+                    logger.warning(f"异常数据: ETF {etf_code} 价格={price}, IOPV={iopv} (IOPV为0)")
+                count += 1
     
     return normalized_df
 
@@ -469,7 +507,6 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                     continue
                 
                 content = response.text
-                logger.debug(f"腾讯财经原始返回数据: {content}")
                 
                 if not content or "pv_none_match" in content:
                     continue
@@ -484,7 +521,7 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 current_price = float(parts[3]) if len(parts) > 3 and parts[3] else 0
                 iopv = float(parts[38]) if len(parts) > 38 and parts[38] else current_price  # IOPV在腾讯数据中的位置可能不同
                 
-                if current_price > 0:
+                if current_price > 0 and iopv > 0:
                     all_data.append({
                         "ETF代码": code,
                         "ETF名称": etf_name,
@@ -492,6 +529,16 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                         "IOPV": iopv,
                         "收盘": current_price,  # 添加收盘价列
                         "日期": get_beijing_time().strftime("%Y-%m-%d")  # 添加日期列
+                    })
+                elif current_price > 0:
+                    # 如果IOPV为0，使用当前价格作为IOPV
+                    all_data.append({
+                        "ETF代码": code,
+                        "ETF名称": etf_name,
+                        "市场价格": current_price,
+                        "IOPV": current_price,
+                        "收盘": current_price,
+                        "日期": get_beijing_time().strftime("%Y-%m-%d")
                     })
                 
                 # 避免请求过快
@@ -507,7 +554,12 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
             # 记录样本数据，帮助调试单位问题
             if len(df) > 0:
                 sample = df.iloc[0]
-                logger.info(f"腾讯财经数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
+                price = sample['市场价格']
+                iopv = sample['IOPV']
+                if iopv != 0:
+                    logger.info(f"腾讯财经数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv}, 比值={price/iopv:.3f}")
+                else:
+                    logger.info(f"腾讯财经数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv} (IOPV为0)")
         return df
         
     except Exception as e:
@@ -544,7 +596,6 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 continue
             
             content = response.text
-            logger.debug(f"新浪财经原始返回数据: {content}")
             
             lines = content.split(';')
             
@@ -595,7 +646,12 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
             # 记录样本数据，帮助调试单位问题
             if len(df) > 0:
                 sample = df.iloc[0]
-                logger.info(f"新浪财经数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
+                price = sample['市场价格']
+                iopv = sample['IOPV']
+                if iopv != 0:
+                    logger.info(f"新浪财经数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv}, 比值={price/iopv:.3f}")
+                else:
+                    logger.info(f"新浪财经数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv} (IOPV为0)")
         return df
         
     except Exception as e:
@@ -650,7 +706,12 @@ def _fetch_akshare_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         logger.info(f"东方财富获取成功: {len(df)} 只ETF的实时数据")
         if not df.empty:
             sample = df.iloc[0]
-            logger.info(f"东方财富数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
+            price = sample['市场价格']
+            iopv = sample['IOPV']
+            if iopv != 0:
+                logger.info(f"东方财富数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv}, 比值={price/iopv:.3f}")
+            else:
+                logger.info(f"东方财富数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv} (IOPV为0)")
         return df
         
     except Exception as e:
@@ -709,7 +770,12 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
             # 记录样本数据，帮助调试单位问题
             if len(df) > 0:
                 sample = df.iloc[0]
-                logger.info(f"Yahoo Finance数据样本: ETF代码={sample['ETF代码']}, 价格={sample['市场价格']}, IOPV={sample['IOPV']}, 比值={sample['市场价格']/sample['IOPV']:.3f}")
+                price = sample['市场价格']
+                iopv = sample['IOPV']
+                if iopv != 0:
+                    logger.info(f"Yahoo Finance数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv}, 比值={price/iopv:.3f}")
+                else:
+                    logger.info(f"Yahoo Finance数据样本: ETF代码={sample['ETF代码']}, 价格={price}, IOPV={iopv} (IOPV为0)")
         return df
         
     except Exception as e:
@@ -741,14 +807,27 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # 过滤无效数据
+    # 过滤无效数据 - 修改：允许IOPV为0但价格不为0的数据
     df = df[
         (df["市场价格"] > 0) & 
-        (df["IOPV"] > 0) &
-        (df["收盘"] > 0) &
         (df["ETF代码"].notna()) &
         (df["ETF名称"].notna())
     ].copy()
+    
+    # 对于IOPV为0的数据，将其设置为市场价格（避免后续计算问题）
+    zero_iopv_mask = (df["IOPV"] == 0) | (df["IOPV"].isna())
+    if zero_iopv_mask.any():
+        df.loc[zero_iopv_mask, "IOPV"] = df.loc[zero_iopv_mask, "市场价格"]
+        logger.warning(f"将 {zero_iopv_mask.sum()} 个IOPV为0或NaN的数据设置为市场价格")
+    
+    # 现在确保IOPV>0
+    df = df[df["IOPV"] > 0].copy()
+    
+    # 对于收盘价为0或NaN的数据，设置为市场价格
+    if "收盘" in df.columns:
+        zero_close_mask = (df["收盘"] == 0) | (df["收盘"].isna())
+        if zero_close_mask.any():
+            df.loc[zero_close_mask, "收盘"] = df.loc[zero_close_mask, "市场价格"]
     
     # 【关键修复】在进行任何计算前，先应用单位标准化
     # 注意：这里不重复应用，因为已经在fetch_arbitrage_realtime_data中调用过normalize_etf_data
@@ -783,7 +862,7 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
             avg_discount = df["折价率"].mean()
             logger.info(f"折价率统计 - 最小值: {min_discount:.2f}%, 最大值: {max_discount:.2f}%, 平均值: {avg_discount:.2f}%")
             
-            # 如果出现极端值，发出严重警告
+            # 如果出现极端值，发出警告
             if min_discount < -50 or max_discount > 50:
                 logger.warning("发现极端折溢价率！这可能表明数据源仍有单位问题")
     

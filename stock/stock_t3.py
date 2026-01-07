@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 专业级小市值布林带策略（微信推送适配版）
+stock_t3.py - 小市值布林带策略（带交易记录和汇总）
 
-功能特点：
-1. 收盘后筛选，次日开盘买入的日间波段策略
-2. 小市值(20-50亿)、高换手率(>5%)、布林带下轨策略
-3. 严格的止损(-5%)和止盈(+10%)机制
-4. 每只股票独立评分，按评分分配仓位(20%-25%)
-5. 适配微信推送，每条股票消息间隔3秒
-6. 完全兼容现有项目结构
-
-策略核心：
-- 收盘后筛选，使用确定性的收盘数据
-- 每次持仓3-4只股票，每只25%仓位
-- 明确的买入、止损、止盈价格
-- 详细的技术指标数据展示
+新增功能：
+1. 交易记录保存和读取
+2. 策略执行统计汇总
+3. 买入卖出成本利润计算
 """
 
 import os
@@ -24,123 +15,317 @@ import numpy as np
 import time
 import logging
 import sys
+import json
 from datetime import datetime, timedelta
 from config import Config
 from wechat_push.push import send_wechat_message
 
 # ========== 策略参数配置 ==========
-# 基础筛选条件
-MIN_MARKET_CAP = 20.0  # 最小市值(亿元)
-MAX_MARKET_CAP = 50.0  # 最大市值(亿元)
-MIN_TURNOVER_RATE = 0.05  # 最小换手率(5%)
-MAX_TURNOVER_RATE = 0.20  # 最大换手率(20%)，避免过高换手率的风险
+MIN_MARKET_CAP = 20.0
+MAX_MARKET_CAP = 50.0
+MIN_TURNOVER_RATE = 0.05
+MAX_TURNOVER_RATE = 0.20
 
-# 布林带参数
-BOLLINGER_PERIOD = 20     # 布林带周期
-BOLLINGER_STD = 2.0       # 标准差倍数
-BOLLINGER_THRESHOLD = 0.02  # 接近下轨的阈值(2%)
+BOLLINGER_PERIOD = 20
+BOLLINGER_STD = 2.0
+BOLLINGER_THRESHOLD = 0.02
 
-# 技术指标参数
-RSI_PERIOD = 14           # RSI周期
-RSI_OVERSOLD = 30         # RSI超卖阈值
-VOLUME_MA_PERIOD = 5      # 成交量均线周期
-MIN_VOLUME_RATIO = 0.8    # 最小成交量比率(相对5日均量)
+RSI_PERIOD = 14
+RSI_OVERSOLD = 30
+VOLUME_MA_PERIOD = 5
+MIN_VOLUME_RATIO = 0.8
 
-# 风险控制参数
-STOP_LOSS_PCT = 0.05      # 止损比例(5%)
-TAKE_PROFIT_PCT = 0.10    # 止盈比例(10%)
-MAX_POSITION_PCT = 0.25   # 单只股票最大仓位(25%)
-MIN_POSITION_PCT = 0.20   # 单只股票最小仓位(20%)
+STOP_LOSS_PCT = 0.05
+TAKE_PROFIT_PCT = 0.10
+MAX_POSITION_PCT = 0.25
+MIN_POSITION_PCT = 0.20
 
-# 持仓参数
-TARGET_HOLDINGS = 4       # 目标持仓数量(积极方案)
+TARGET_HOLDINGS = 4
+MAX_HOLD_DAYS = 10
+POSITION_FILE = os.path.join(Config.DATA_DIR, "t3_positions.json")
+TRADE_RECORDS_FILE = os.path.join(Config.DATA_DIR, "t3_trade_records.json")
 
-# 数据要求
-MIN_DATA_DAYS = 60        # 最小数据天数
+MIN_DATA_DAYS = 60
 # ================================
 
-# ========== 初始化日志 ==========
 logger = logging.getLogger(__name__)
 
-def calculate_bollinger_bands(df, period=BOLLINGER_PERIOD, std=BOLLINGER_STD):
-    """计算布林带指标"""
-    try:
-        # 计算中轨(20日移动平均)
-        middle_band = df["收盘"].rolling(window=period).mean()
+class TradeRecorder:
+    """交易记录器"""
+    
+    def __init__(self):
+        self.trade_file = TRADE_RECORDS_FILE
+        self.trades = self.load_trades()
+    
+    def load_trades(self):
+        """加载交易记录"""
+        if os.path.exists(self.trade_file):
+            try:
+                with open(self.trade_file, 'r', encoding='utf-8') as f:
+                    trades = json.load(f)
+                logger.info(f"已加载 {len(trades)} 条交易记录")
+                return trades
+            except Exception as e:
+                logger.error(f"加载交易记录失败: {str(e)}")
+                return []
+        return []
+    
+    def save_trades(self):
+        """保存交易记录"""
+        try:
+            with open(self.trade_file, 'w', encoding='utf-8') as f:
+                json.dump(self.trades, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存交易记录失败: {str(e)}")
+    
+    def record_buy(self, stock_data, buy_price, position_pct):
+        """记录买入交易"""
+        trade = {
+            "type": "buy",
+            "code": stock_data["code"],
+            "name": stock_data["name"],
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "price": buy_price,
+            "position_pct": position_pct,
+            "target_shares": int(100000 * position_pct / buy_price / 100) * 100,
+            "amount": 100000 * position_pct  # 按10万本金计算
+        }
+        self.trades.append(trade)
+        self.save_trades()
+        logger.info(f"记录买入交易: {stock_data['code']} {stock_data['name']}")
+    
+    def record_sell(self, position, reason, sell_price):
+        """记录卖出交易"""
+        trade = {
+            "type": "sell",
+            "code": position["code"],
+            "name": position["name"],
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "buy_date": position["buy_date"],
+            "buy_price": position["buy_price"],
+            "sell_price": sell_price,
+            "reason": reason,
+            "position_pct": position["position_pct"],
+            "pnl_pct": (sell_price / position["buy_price"] - 1) * 100,
+            "pnl_amount": (sell_price - position["buy_price"]) * position.get("target_shares", 0)
+        }
+        self.trades.append(trade)
+        self.save_trades()
+        logger.info(f"记录卖出交易: {position['code']} {position['name']}")
+    
+    def get_trade_summary(self):
+        """获取交易统计汇总"""
+        if not self.trades:
+            return None
         
-        # 计算标准差
-        std_dev = df["收盘"].rolling(window=period).std()
+        # 计算策略开始日期（第一笔交易的日期）
+        start_date = self.trades[0]["date"]
         
-        # 计算上轨和下轨
-        upper_band = middle_band + (std_dev * std)
-        lower_band = middle_band - (std_dev * std)
+        # 统计买入信息
+        buy_trades = [t for t in self.trades if t["type"] == "buy"]
+        sell_trades = [t for t in self.trades if t["type"] == "sell"]
         
-        # 计算带宽和百分比位置
-        bandwidth = (upper_band - lower_band) / middle_band * 100
-        percent_b = (df["收盘"] - lower_band) / (upper_band - lower_band) * 100
+        total_buy_times = len(buy_trades)
+        total_sell_times = len(sell_trades)
+        
+        # 计算总成本和总利润
+        total_cost = sum(t.get("amount", 0) for t in buy_trades)
+        total_profit = sum(t.get("pnl_amount", 0) for t in sell_trades)
         
         return {
-            "upper": upper_band,
-            "middle": middle_band,
-            "lower": lower_band,
-            "bandwidth": bandwidth,
-            "percent_b": percent_b
+            "start_date": start_date,
+            "total_buy_times": total_buy_times,
+            "total_sell_times": total_sell_times,
+            "total_cost": total_cost,
+            "total_profit": total_profit,
+            "profit_rate": (total_profit / total_cost * 100) if total_cost > 0 else 0
+        }
+
+class PositionManager:
+    """持仓管理器"""
+    
+    def __init__(self, trade_recorder):
+        self.positions_file = POSITION_FILE
+        self.trade_recorder = trade_recorder
+        self.positions = self.load_positions()
+    
+    def load_positions(self):
+        """加载持仓记录"""
+        if os.path.exists(self.positions_file):
+            try:
+                with open(self.positions_file, 'r', encoding='utf-8') as f:
+                    positions = json.load(f)
+                logger.info(f"已加载 {len(positions)} 个持仓记录")
+                return positions
+            except Exception as e:
+                logger.error(f"加载持仓文件失败: {str(e)}")
+                return []
+        return []
+    
+    def save_positions(self):
+        """保存持仓记录"""
+        try:
+            with open(self.positions_file, 'w', encoding='utf-8') as f:
+                json.dump(self.positions, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存持仓文件失败: {str(e)}")
+    
+    def update_positions(self, current_date):
+        """更新持仓状态"""
+        updated_positions = []
+        sold_positions = []
+        
+        for position in self.positions:
+            try:
+                code = position["code"]
+                buy_price = position["buy_price"]
+                buy_date = position["buy_date"]
+                
+                # 检查持有天数
+                hold_days = (datetime.strptime(current_date, "%Y-%m-%d") - 
+                            datetime.strptime(buy_date, "%Y-%m-%d")).days
+                
+                # 读取最新价格
+                file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
+                current_price = buy_price  # 默认使用买入价
+                price_read_success = False
+                
+                if os.path.exists(file_path):
+                    try:
+                        df = pd.read_csv(file_path)
+                        if len(df) > 0:
+                            df = df.sort_values("日期").reset_index(drop=True)
+                            current_price = df.iloc[-1]["收盘"]
+                            price_read_success = True
+                            logger.debug(f"成功读取股票 {code} 的最新价格: {current_price}")
+                    except Exception as e:
+                        logger.warning(f"读取股票 {code} 价格失败: {str(e)}")
+                
+                # 更新持仓信息
+                position["current_price"] = current_price
+                position["hold_days"] = hold_days
+                position["price_read_success"] = price_read_success
+                
+                # 检查是否应该卖出（只在成功读取价格时检查）
+                if price_read_success:
+                    stop_loss = buy_price * (1 - STOP_LOSS_PCT)
+                    take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
+                    
+                    sell_reason = None
+                    if current_price <= stop_loss:
+                        sell_reason = "触发止损"
+                    elif current_price >= take_profit:
+                        sell_reason = "触发止盈"
+                    elif hold_days >= MAX_HOLD_DAYS:
+                        sell_reason = f"持有超过{MAX_HOLD_DAYS}天"
+                    
+                    if sell_reason:
+                        # 记录卖出交易
+                        self.trade_recorder.record_sell(position, sell_reason, current_price)
+                        
+                        sold_positions.append({
+                            "code": code,
+                            "name": position["name"],
+                            "reason": sell_reason,
+                            "buy_price": buy_price,
+                            "sell_price": current_price,
+                            "hold_days": hold_days,
+                            "pnl_pct": (current_price / buy_price - 1) * 100
+                        })
+                        continue  # 不再添加到持仓中
+                
+                # 保留持仓
+                updated_positions.append(position)
+                
+            except Exception as e:
+                logger.error(f"更新持仓 {position.get('code')} 失败: {str(e)}")
+                updated_positions.append(position)
+        
+        # 更新持仓列表
+        self.positions = updated_positions
+        self.save_positions()
+        
+        return sold_positions
+    
+    def add_position(self, stock_data, buy_price, position_pct):
+        """添加新持仓并记录买入交易"""
+        new_position = {
+            "code": stock_data["code"],
+            "name": stock_data["name"],
+            "buy_date": datetime.now().strftime("%Y-%m-%d"),
+            "buy_price": buy_price,
+            "stop_loss": buy_price * (1 - STOP_LOSS_PCT),
+            "take_profit": buy_price * (1 + TAKE_PROFIT_PCT),
+            "position_pct": position_pct,
+            "target_shares": int(100000 * position_pct / buy_price / 100) * 100
+        }
+        
+        # 记录买入交易
+        self.trade_recorder.record_buy(stock_data, buy_price, position_pct)
+        
+        self.positions.append(new_position)
+        self.save_positions()
+        logger.info(f"添加新持仓: {stock_data['code']} {stock_data['name']}")
+    
+    def get_current_positions(self):
+        """获取当前持仓"""
+        return self.positions
+    
+    def get_holding_codes(self):
+        """获取持仓股票代码"""
+        return [pos["code"] for pos in self.positions]
+
+# ========== 技术指标函数 ==========
+def calculate_bollinger_bands(df):
+    """计算布林带指标"""
+    try:
+        middle_band = df["收盘"].rolling(window=BOLLINGER_PERIOD).mean()
+        std_dev = df["收盘"].rolling(window=BOLLINGER_PERIOD).std()
+        upper_band = middle_band + (std_dev * BOLLINGER_STD)
+        lower_band = middle_band - (std_dev * BOLLINGER_STD)
+        bandwidth = (upper_band - lower_band) / middle_band * 100
+        percent_b = (df["收盘"] - lower_band) / (upper_band - lower_band) * 100
+        return {
+            "upper": upper_band.iloc[-1],
+            "middle": middle_band.iloc[-1],
+            "lower": lower_band.iloc[-1],
+            "bandwidth": bandwidth.iloc[-1],
+            "percent_b": percent_b.iloc[-1]
         }
     except Exception as e:
         logger.debug(f"计算布林带失败: {str(e)}")
         return None
 
-def calculate_rsi(df, period=RSI_PERIOD):
+def calculate_rsi(df):
     """计算RSI指标"""
     try:
         delta = df["收盘"].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        gain = (delta.where(delta > 0, 0)).rolling(window=RSI_PERIOD).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=RSI_PERIOD).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
-        return rsi
+        return rsi.iloc[-1]
     except Exception as e:
         logger.debug(f"计算RSI失败: {str(e)}")
         return None
 
-def calculate_volume_indicators(df, period=VOLUME_MA_PERIOD):
+def calculate_volume_indicators(df):
     """计算成交量指标"""
     try:
-        volume_ma = df["成交量"].rolling(window=period).mean()
-        volume_ratio = df["成交量"] / volume_ma
-        
-        return {
-            "volume_ma": volume_ma,
-            "volume_ratio": volume_ratio
-        }
+        volume_ma = df["成交量"].rolling(window=VOLUME_MA_PERIOD).mean()
+        volume_ratio = df["成交量"].iloc[-1] / volume_ma.iloc[-1]
+        return volume_ratio
     except Exception as e:
         logger.debug(f"计算成交量指标失败: {str(e)}")
         return None
 
-def calculate_price_change(df, periods=[1, 3, 5, 10]):
-    """计算价格变化率"""
-    changes = {}
-    for period in periods:
-        if len(df) > period:
-            changes[f"change_{period}d"] = (df["收盘"].iloc[-1] / df["收盘"].iloc[-period-1] - 1) * 100
-        else:
-            changes[f"change_{period}d"] = np.nan
-    return changes
-
-def calculate_stock_score(row):
-    """
-    计算股票综合评分(0-100分)
-    评分因素:
-    1. 市值越小分越高(40分)
-    2. 换手率适中分高(20分)
-    3. 布林带位置越低分越高(20分)
-    4. RSI超卖程度(10分)
-    5. 成交量放大程度(10分)
-    """
+def calculate_stock_score(stock_data):
+    """计算股票综合评分"""
     score = 0
     
-    # 1. 市值评分(越小越好)
-    market_cap = row.get("market_cap", 50)
+    market_cap = stock_data.get("market_cap", 50)
     if market_cap <= MIN_MARKET_CAP:
         score += 40
     elif market_cap <= (MIN_MARKET_CAP + MAX_MARKET_CAP) / 2:
@@ -148,8 +333,7 @@ def calculate_stock_score(row):
     elif market_cap <= MAX_MARKET_CAP:
         score += 20
     
-    # 2. 换手率评分(适中为佳)
-    turnover = row.get("turnover_rate", 0)
+    turnover = stock_data.get("turnover_rate", 0)
     if MIN_TURNOVER_RATE <= turnover <= 0.08:
         score += 20
     elif 0.08 < turnover <= 0.12:
@@ -157,8 +341,7 @@ def calculate_stock_score(row):
     elif 0.12 < turnover <= MAX_TURNOVER_RATE:
         score += 10
     
-    # 3. 布林带位置评分(越低越好)
-    percent_b = row.get("percent_b", 50)
+    percent_b = stock_data.get("percent_b", 50)
     if percent_b <= 5:
         score += 20
     elif percent_b <= 15:
@@ -168,8 +351,7 @@ def calculate_stock_score(row):
     elif percent_b <= 35:
         score += 5
     
-    # 4. RSI评分(超卖为佳)
-    rsi = row.get("rsi", 50)
+    rsi = stock_data.get("rsi", 50)
     if rsi <= RSI_OVERSOLD:
         score += 10
     elif rsi <= RSI_OVERSOLD + 10:
@@ -177,8 +359,7 @@ def calculate_stock_score(row):
     elif rsi <= RSI_OVERSOLD + 20:
         score += 4
     
-    # 5. 成交量评分(放量为佳)
-    volume_ratio = row.get("volume_ratio", 1.0)
+    volume_ratio = stock_data.get("volume_ratio", 1.0)
     if volume_ratio >= 1.5:
         score += 10
     elif volume_ratio >= 1.2:
@@ -188,394 +369,328 @@ def calculate_stock_score(row):
     
     return min(score, 100)
 
-def calculate_position_size(score, total_capital=100000):
-    """
-    根据评分计算仓位大小
-    规则:
-    - 最小仓位: MIN_POSITION_PCT * total_capital
-    - 最大仓位: MAX_POSITION_PCT * total_capital
-    - 根据评分线性分配
-    """
-    min_position = total_capital * MIN_POSITION_PCT
-    max_position = total_capital * MAX_POSITION_PCT
+def get_trading_suggestion(position):
+    """根据持仓情况给出操作建议"""
+    buy_price = position["buy_price"]
+    current_price = position.get("current_price", buy_price)
+    hold_days = position.get("hold_days", 0)
     
-    # 线性映射: 0分->min_position, 100分->max_position
-    position = min_position + (max_position - min_position) * (score / 100)
+    pnl_pct = (current_price / buy_price - 1) * 100
     
-    # 计算股票数量(按收盘价估算)
-    close_price = score  # 这里score参数实际上是传入的close_price，需要调整
-    # 注意：这里需要实际传入收盘价，暂时返回固定比例
-    return MAX_POSITION_PCT  # 返回仓位比例
+    # 动态止盈止损
+    dynamic_stop_loss = buy_price * (1 - STOP_LOSS_PCT)
+    dynamic_take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
+    
+    # 给出操作建议
+    if current_price <= dynamic_stop_loss:
+        return "清仓（触发止损）", dynamic_take_profit, dynamic_stop_loss
+    elif current_price >= dynamic_take_profit:
+        return "卖出部分（已达标）", dynamic_take_profit, dynamic_stop_loss
+    elif hold_days >= MAX_HOLD_DAYS:
+        return "清仓（超时）", dynamic_take_profit, dynamic_stop_loss
+    elif pnl_pct >= 5:
+        return "继续持有（已有盈利）", dynamic_take_profit, dynamic_stop_loss
+    else:
+        return "继续持有", dynamic_take_profit, dynamic_stop_loss
 
-def format_stock_message(stock_data):
-    """格式化单只股票的消息"""
-    code = stock_data["code"]
-    name = stock_data["name"]
+def format_position_message(position):
+    """格式化持仓股票消息"""
+    suggestion, take_profit, stop_loss = get_trading_suggestion(position)
+    
+    message = f"""【==原有持仓明细及分析==】
+💰{position['code']} {position['name']}
+📊 持有 {position.get('target_shares', 0):,}股
+
+🎯 交易计划：
+• 买入日期：{position['buy_date']}
+• 已持有{position.get('hold_days', 0)}天
+• 操作建议：{suggestion}
+• 当天计算动态止盈价：{take_profit:.2f}元
+• 当天计算动态止损价：{stop_loss:.2f}元
+"""
+    return message
+
+def format_new_stock_message(stock_data):
+    """格式化新推荐股票消息"""
     score = stock_data["score"]
-    position_pct = stock_data["position_pct"]
-    
-    # 获取今日收盘价作为参考买入价
     close_price = stock_data["close"]
-    
-    # 计算买入、止损、止盈价格
-    buy_price = close_price  # 假设次日以收盘价附近买入
+    buy_price = close_price
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
     
-    # 计算建议买入数量(按10万本金计算)
-    position_value = 100000 * position_pct
-    suggested_shares = int(position_value / buy_price / 100) * 100  # 取整百股
-    
-    lines = [
-        f"【📊 T3策略 - {code} {name}】",
-        f"📅 筛选日期: {datetime.now().strftime('%Y-%m-%d')}",
-        "",
-        "📈 技术指标详情:",
-        f"• 当前价格: {close_price:.2f}元",
-        f"• 市值: {stock_data.get('market_cap', 'N/A'):.1f}亿元",
-        f"• 换手率: {stock_data.get('turnover_rate', 0):.2%}",
-        "",
-        f"• 布林带上轨: {stock_data.get('boll_upper', 0):.2f}元",
-        f"• 布林带中轨: {stock_data.get('boll_middle', 0):.2f}元",
-        f"• 布林带下轨: {stock_data.get('boll_lower', 0):.2f}元",
-        f"• 布林带位置: {stock_data.get('percent_b', 0):.1f}%",
-        f"• 布林带带宽: {stock_data.get('bandwidth', 0):.1f}%",
-        "",
-        f"• RSI({RSI_PERIOD}): {stock_data.get('rsi', 0):.1f}",
-        f"• 成交量比率: {stock_data.get('volume_ratio', 0):.2f}倍",
-        "",
-        "🎯 交易计划:",
-        f"• 建议买入价: {buy_price:.2f}元 (次日开盘附近)",
-        f"• 止损价格: {stop_loss:.2f}元 (-{STOP_LOSS_PCT*100:.0f}%)",
-        f"• 止盈价格: {take_profit:.2f}元 (+{TAKE_PROFIT_PCT*100:.0f}%)",
-        f"• 风险收益比: 1:{TAKE_PROFIT_PCT/STOP_LOSS_PCT:.1f}",
-        "",
-        "💰 仓位管理:",
-        f"• 综合评分: {score:.0f}/100分",
-        f"• 建议仓位: {position_pct:.1%}",
-        f"• 建议股数: {suggested_shares:,}股 (约{position_value:.0f}元)",
-        "",
-        "📋 筛选说明:",
-        f"1. 市值{MIN_MARKET_CAP}-{MAX_MARKET_CAP}亿元",
-        f"2. 换手率>{MIN_TURNOVER_RATE:.0%}",
-        f"3. 收盘价接近布林带下轨(位置<{BOLLINGER_THRESHOLD*100:.0f}%)",
-        f"4. RSI({RSI_PERIOD})<{RSI_OVERSOLD+20}，显示超卖",
-        f"5. 成交量大于{MIN_VOLUME_RATIO}倍5日均量",
-        "",
-        "⚠️ 风险提示:",
-        "• 次日开盘买入，严格执行止损",
-        "• 单只股票仓位不超过25%",
-        "• 总持仓3-4只，分散风险",
-        "• 本策略适合10万本金积极型投资者"
-    ]
-    
-    return "\n".join(lines)
+    message = f"""【====小市值布林带策略====】
+💰{stock_data['code']} {stock_data['name']}
 
-def filter_stocks():
-    """主筛选函数"""
-    # 1. 读取所有股票列表
+🎯 交易计划：
+• 综合评分: {score:.0f}/100分
+• 建议买入价: {buy_price:.2f}元 (次日开盘附近)
+• 止损价格: {stop_loss:.2f}元 (-{STOP_LOSS_PCT*100:.0f}%)
+• 止盈价格: {take_profit:.2f}元 (+{TAKE_PROFIT_PCT*100:.0f}%)
+• 风险收益比: 1:{TAKE_PROFIT_PCT/STOP_LOSS_PCT:.1f}
+
+📈 技术指标详情:
+• 当前价格: {close_price:.2f}元
+• 市值: {stock_data.get('market_cap', 0):.1f}亿元
+• 换手率: {stock_data.get('turnover_rate', 0):.2%}
+
+• 布林带上轨: {stock_data.get('boll_upper', 0):.2f}元
+• 布林带中轨: {stock_data.get('boll_middle', 0):.2f}元
+• 布林带下轨: {stock_data.get('boll_lower', 0):.2f}元
+• 布林带位置: {stock_data.get('percent_b', 0):.1f}%
+• 布林带带宽: {stock_data.get('bandwidth', 0):.1f}%
+
+• RSI({RSI_PERIOD}): {stock_data.get('rsi', 0):.1f}
+• 成交量比率: {stock_data.get('volume_ratio', 0):.2f}倍
+"""
+    return message
+
+def format_trade_summary(summary):
+    """格式化交易汇总消息"""
+    if not summary:
+        return "【交易汇总】\n暂无交易记录"
+    
+    profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
+    
+    message = f"""【====策略交易汇总====】
+
+📅 策略统计周期：
+• 开始日期：{summary['start_date']}
+• 结束日期：{datetime.now().strftime('%Y-%m-%d')}
+• 运行天数：{(datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days}天
+
+📊 交易统计：
+• 累计买入次数：{summary['total_buy_times']}次
+• 累计卖出次数：{summary['total_sell_times']}次
+• 总买入成本：{summary['total_cost']:,.0f}元
+• 总实现利润：{profit_symbol} {summary['total_profit']:+,.0f}元
+• 整体盈利率：{profit_symbol} {summary['profit_rate']:+.2f}%
+
+💰 收益分析：
+• 平均每次买入成本：{summary['total_cost']/summary['total_buy_times']:,.0f}元
+• 平均每次卖出利润：{summary['total_profit']/summary['total_sell_times']:,.0f}元
+• 胜率：{(len([t for t in summary.get('sell_trades', []) if t.get('pnl_amount', 0) > 0])/summary['total_sell_times']*100 if summary['total_sell_times'] > 0 else 0):.1f}%
+
+⚠️ 风险提示：
+• 历史收益不代表未来表现
+• 股市有风险，投资需谨慎
+"""
+    return message
+
+def filter_stocks(exclude_codes=None):
+    """筛选股票"""
+    if exclude_codes is None:
+        exclude_codes = []
+    
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
     if not os.path.exists(basic_info_file):
-        logger.error("股票列表文件all_stocks.csv不存在")
-        error_msg = "【T3策略】\n股票列表文件不存在，无法筛选"
-        send_wechat_message(message=error_msg, message_type="error")
+        logger.error("股票列表文件 all_stocks.csv 不存在")
         return []
     
     try:
         basic_info_df = pd.read_csv(basic_info_file)
-        logger.info(f"成功读取股票列表，共 {len(basic_info_df)} 只股票")
+        logger.info(f"读取股票列表，共 {len(basic_info_df)} 只股票")
     except Exception as e:
-        logger.error(f"读取股票列表文件失败: {str(e)}")
-        error_msg = f"【T3策略】\n读取股票列表文件失败: {str(e)}"
-        send_wechat_message(message=error_msg, message_type="error")
+        logger.error(f"读取股票列表失败: {str(e)}")
         return []
     
     qualified_stocks = []
     
-    # 2. 遍历股票进行筛选
-    total_stocks = len(basic_info_df)
-    processed = 0
-    
     for _, row in basic_info_df.iterrows():
         code = str(row["代码"])
-        name = row["名称"]
         
-        # 检查市值信息
-        market_cap = row.get("总市值", row.get("市值", 0))
-        if market_cap == 0:
-            # 尝试从其他列获取市值
-            market_cap = row.get("流通市值", 0)
-        
-        # 市值筛选
-        if market_cap < MIN_MARKET_CAP * 1e8 or market_cap > MAX_MARKET_CAP * 1e8:
-            processed += 1
+        if code in exclude_codes:
             continue
         
-        # 读取日线数据
+        market_cap = row.get("总市值", row.get("市值", 0))
+        if market_cap == 0:
+            market_cap = row.get("流通市值", 0)
+        
+        if market_cap < MIN_MARKET_CAP * 1e8 or market_cap > MAX_MARKET_CAP * 1e8:
+            continue
+        
         file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
         if not os.path.exists(file_path):
-            processed += 1
             continue
         
         try:
             df = pd.read_csv(file_path)
-            
-            # 检查数据完整性
             if len(df) < MIN_DATA_DAYS:
-                processed += 1
                 continue
             
-            required_columns = ["日期", "收盘", "最高", "最低", "成交量", "换手率"]
+            required_columns = ["日期", "收盘", "成交量", "换手率"]
             if not all(col in df.columns for col in required_columns):
-                processed += 1
                 continue
             
-            # 转换日期格式
-            df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
             df = df.sort_values("日期").reset_index(drop=True)
-            
-            # 获取最新数据
             latest = df.iloc[-1]
+            name = row["名称"]
             
-            # 换手率筛选
             turnover_rate = latest.get("换手率", 0)
             if turnover_rate < MIN_TURNOVER_RATE or turnover_rate > MAX_TURNOVER_RATE:
-                processed += 1
                 continue
             
-            # 计算技术指标
             bollinger = calculate_bollinger_bands(df)
             if bollinger is None:
-                processed += 1
                 continue
             
             rsi = calculate_rsi(df)
-            if rsi is None or len(rsi) < 1:
-                processed += 1
+            if rsi is None:
                 continue
             
-            volume_indicators = calculate_volume_indicators(df)
-            if volume_indicators is None:
-                processed += 1
+            volume_ratio = calculate_volume_indicators(df)
+            if volume_ratio is None or volume_ratio < MIN_VOLUME_RATIO:
                 continue
             
-            # 检查布林带位置
-            percent_b = bollinger["percent_b"].iloc[-1]
-            if percent_b > BOLLINGER_THRESHOLD * 100:
-                processed += 1
+            if bollinger["percent_b"] > BOLLINGER_THRESHOLD * 100:
                 continue
             
-            # 检查RSI超卖
-            current_rsi = rsi.iloc[-1]
-            if current_rsi > RSI_OVERSOLD + 20:  # 稍微放宽条件
-                processed += 1
+            if rsi > RSI_OVERSOLD + 20:
                 continue
             
-            # 检查成交量
-            volume_ratio = volume_indicators["volume_ratio"].iloc[-1]
-            if volume_ratio < MIN_VOLUME_RATIO:
-                processed += 1
-                continue
-            
-            # 计算价格变化
-            price_changes = calculate_price_change(df)
-            
-            # 收集股票数据
             stock_data = {
                 "code": code,
                 "name": name,
                 "close": latest["收盘"],
-                "market_cap": market_cap / 1e8,  # 转换为亿元
+                "market_cap": market_cap / 1e8,
                 "turnover_rate": turnover_rate,
-                "boll_upper": bollinger["upper"].iloc[-1],
-                "boll_middle": bollinger["middle"].iloc[-1],
-                "boll_lower": bollinger["lower"].iloc[-1],
-                "bandwidth": bollinger["bandwidth"].iloc[-1],
-                "percent_b": percent_b,
-                "rsi": current_rsi,
-                "volume_ratio": volume_ratio,
-                "change_1d": price_changes.get("change_1d", np.nan),
-                "change_5d": price_changes.get("change_5d", np.nan),
-                "change_10d": price_changes.get("change_10d", np.nan)
+                "boll_upper": bollinger["upper"],
+                "boll_middle": bollinger["middle"],
+                "boll_lower": bollinger["lower"],
+                "bandwidth": bollinger["bandwidth"],
+                "percent_b": bollinger["percent_b"],
+                "rsi": rsi,
+                "volume_ratio": volume_ratio
             }
             
-            # 计算评分
             stock_data["score"] = calculate_stock_score(stock_data)
-            
             qualified_stocks.append(stock_data)
             
         except Exception as e:
             logger.debug(f"处理股票 {code} 失败: {str(e)}")
-        
-        processed += 1
-        if processed % 100 == 0:
-            logger.info(f"已处理 {processed}/{total_stocks} 只股票，找到 {len(qualified_stocks)} 只符合条件的股票")
+            continue
     
-    logger.info(f"筛选完成，共找到 {len(qualified_stocks)} 只符合条件的股票")
+    qualified_stocks.sort(key=lambda x: x["score"], reverse=True)
+    logger.info(f"筛选完成，找到 {len(qualified_stocks)} 只符合条件的股票")
     return qualified_stocks
 
-def allocate_positions(stocks, target_count=TARGET_HOLDINGS):
-    """分配仓位"""
-    if not stocks:
-        return []
+def send_stock_messages(positions, new_stocks):
+    """发送股票消息"""
+    all_messages = []
     
-    # 按评分排序
-    sorted_stocks = sorted(stocks, key=lambda x: x["score"], reverse=True)
+    # 先添加持仓股票消息
+    for position in positions:
+        all_messages.append(format_position_message(position))
     
-    # 取评分最高的target_count只
-    selected_stocks = sorted_stocks[:min(target_count, len(sorted_stocks))]
+    # 再添加新推荐股票消息
+    for stock in new_stocks:
+        all_messages.append(format_new_stock_message(stock))
     
-    # 计算总分
-    total_score = sum(s["score"] for s in selected_stocks)
+    # 如果没有消息，说明既没有持仓也没有新推荐
+    if not all_messages:
+        no_stock_msg = "今日无股票推荐和持仓"
+        send_wechat_message(message=no_stock_msg, message_type="position")
+        return False
     
-    # 分配仓位比例
-    for stock in selected_stocks:
-        if total_score > 0:
-            # 根据评分比例分配，但保证在最小和最大仓位之间
-            raw_pct = stock["score"] / total_score
-            # 调整到目标仓位范围
-            adjusted_pct = MIN_POSITION_PCT + (MAX_POSITION_PCT - MIN_POSITION_PCT) * (raw_pct / max(1, len(selected_stocks)))
-            stock["position_pct"] = min(adjusted_pct, MAX_POSITION_PCT)
-        else:
-            stock["position_pct"] = MAX_POSITION_PCT / len(selected_stocks)
-    
-    return selected_stocks
-
-def send_stock_messages(stocks):
-    """发送股票消息到微信"""
-    if not stocks:
-        no_signal_msg = """【T3策略 - 小市值布林带策略】
+    # 分条发送，每批最多2条消息
+    total_batches = (len(all_messages) + 1) // 2  # 向上取整
+    for batch_index in range(total_batches):
+        start_idx = batch_index * 2
+        end_idx = min(start_idx + 2, len(all_messages))
+        batch = all_messages[start_idx:end_idx]
         
-📅 日期: {date}
+        # 构建消息
+        message_header = f"==第{batch_index + 1}条/共{total_batches}条消息=="
+        message_body = "\n\n==================\n\n".join(batch)
+        full_message = f"{message_header}\n\n{message_body}"
         
-🔍 筛选结果: 今日未找到符合条件的股票
+        # 发送消息
+        send_wechat_message(message=full_message, message_type="position")
         
-📊 筛选条件:
-1. 市值: {min_cap}-{max_cap}亿元
-2. 换手率: >{min_turnover:.1%}
-3. 布林带位置: <{boll_threshold:.1%}
-4. RSI({rsi_period}): <{rsi_threshold}
-5. 成交量: >{volume_ratio:.1f}倍5日均量
-        
-💡 可能原因:
-• 市场整体处于高位，超卖股票较少
-• 小市值股票普遍换手率不足
-• 今日数据尚未更新完全
-        
-🔄 建议: 保持耐心，等待更好的入场时机"""
-        
-        formatted_msg = no_signal_msg.format(
-            date=datetime.now().strftime("%Y-%m-%d"),
-            min_cap=MIN_MARKET_CAP,
-            max_cap=MAX_MARKET_CAP,
-            min_turnover=MIN_TURNOVER_RATE,
-            boll_threshold=BOLLINGER_THRESHOLD*100,
-            rsi_period=RSI_PERIOD,
-            rsi_threshold=RSI_OVERSOLD+20,
-            volume_ratio=MIN_VOLUME_RATIO
-        )
-        
-        send_wechat_message(message=formatted_msg, message_type="position")
-        logger.info("未找到符合条件的股票，已发送通知")
-        return
+        # 如果不是最后一批，等待2秒
+        if batch_index < total_batches - 1:
+            time.sleep(2)
     
-    # 发送汇总消息
-    summary_msg = f"""【T3策略 - 筛选结果汇总】
-    
-📅 日期: {datetime.now().strftime('%Y-%m-%d')}
-    
-🎯 找到 {len(stocks)} 只符合条件的股票:
-    
-"""
-    
-    for i, stock in enumerate(stocks, 1):
-        summary_msg += f"{i}. {stock['code']} {stock['name']} - 评分: {stock['score']:.0f}/100 - 建议仓位: {stock['position_pct']:.1%}\n"
-    
-    summary_msg += f"""
-📊 策略参数:
-• 目标持仓: {TARGET_HOLDINGS}只
-• 单股仓位: {MIN_POSITION_PCT:.0%}-{MAX_POSITION_PCT:.0%}
-• 止损: -{STOP_LOSS_PCT*100:.0%}%
-• 止盈: +{TAKE_PROFIT_PCT*100:.0%}%
-    
-💡 操作建议:
-1. 次日开盘附近买入
-2. 严格执行止损止盈
-3. 保持总持仓{len(stocks)}-{TARGET_HOLDINGS}只
-4. 定期复盘调整策略"""
-    
-    send_wechat_message(message=summary_msg, message_type="position")
-    time.sleep(2)
-    
-    # 发送每只股票的详细消息
-    for stock in stocks:
-        message = format_stock_message(stock)
-        send_wechat_message(message=message, message_type="position")
-        time.sleep(3)  # 每条消息间隔3秒
-    
-    logger.info(f"已发送 {len(stocks)} 只股票的详细分析到微信")
+    return True
 
 def main():
     """主函数"""
-    logger.info("===== 开始执行T3小市值布林带策略 =====")
+    logger.info("===== 开始执行小市值布林带策略 =====")
     
     try:
-        # 1. 筛选符合条件的股票
-        logger.info("开始筛选股票...")
-        qualified_stocks = filter_stocks()
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        logger.info(f"当前日期: {current_date}")
         
-        # 2. 分配仓位
-        logger.info("分配仓位...")
-        selected_stocks = allocate_positions(qualified_stocks)
+        # 1. 初始化交易记录器和持仓管理器
+        trade_recorder = TradeRecorder()
+        position_manager = PositionManager(trade_recorder)
+        logger.info(f"当前持仓数量: {len(position_manager.positions)}")
         
-        # 3. 发送消息
-        logger.info("发送微信消息...")
-        send_stock_messages(selected_stocks)
+        # 2. 更新持仓状态（检查是否需要卖出）
+        logger.info("更新持仓状态...")
+        sold_positions = position_manager.update_positions(current_date)
         
-        # 4. 生成策略报告
-        if selected_stocks:
-            report_msg = f"""【T3策略 - 执行报告】
+        # 3. 如果有卖出的股票，发送卖出提示
+        if sold_positions:
+            sell_msg = "【⚠️ 卖出提示】\n\n"
+            for pos in sold_positions:
+                pnl_symbol = "🔴" if pos.get('pnl_pct', 0) < 0 else "🟢"
+                sell_msg += f"• {pos['code']} {pos['name']}\n"
+                sell_msg += f"  卖出原因: {pos['reason']}\n"
+                sell_msg += f"  买入价: {pos['buy_price']:.2f}元\n"
+                sell_msg += f"  卖出价: {pos['sell_price']:.2f}元\n"
+                sell_msg += f"  持有天数: {pos['hold_days']}天\n"
+                sell_msg += f"  盈亏: {pnl_symbol} {pos.get('pnl_pct', 0):+.2f}%\n\n"
             
-✅ 策略执行完成
-            
-📈 今日筛选结果:
-• 扫描股票总数: 从all_stocks.csv读取
-• 符合条件股票: {len(qualified_stocks)}只
-• 最终入选股票: {len(selected_stocks)}只
-            
-🎯 风险控制:
-• 最大单股亏损: {STOP_LOSS_PCT*100:.0%}
-• 最小盈利目标: {TAKE_PROFIT_PCT*100:.0%}
-• 风险收益比: 1:{TAKE_PROFIT_PCT/STOP_LOSS_PCT:.1f}
-            
-💰 资金管理(10万本金):
-• 单股投入: {MIN_POSITION_PCT*100:.0f}%-{MAX_POSITION_PCT*100:.0f}%
-• 总持仓比例: {sum(s['position_pct'] for s in selected_stocks):.0%}
-• 剩余现金: {(1 - sum(s['position_pct'] for s in selected_stocks)):.0%}
-            
-⏰ 下一步操作:
-• 等待次日开盘
-• 按建议价格买入
-• 设置止损止盈单
-• 每日收盘后重新筛选
-            
-📊 策略优势:
-1. 收盘后筛选，避免盘中噪音
-2. 小市值股票，弹性空间大
-3. 严格风控，保护本金安全
-4. 微信推送，实时接收信号"""
-            
-            send_wechat_message(message=report_msg, message_type="position")
+            send_wechat_message(message=sell_msg, message_type="position")
+            time.sleep(2)
         
-        logger.info("===== T3策略执行完成 =====")
+        # 4. 获取当前持仓
+        current_positions = position_manager.get_current_positions()
+        logger.info(f"更新后持仓数量: {len(current_positions)}")
+        
+        # 5. 筛选新股票（排除已持仓的）
+        logger.info("筛选新股票...")
+        holding_codes = position_manager.get_holding_codes()
+        logger.info(f"排除持仓股票: {holding_codes}")
+        
+        qualified_stocks = filter_stocks(exclude_codes=holding_codes)
+        
+        # 6. 分配仓位
+        available_slots = max(0, TARGET_HOLDINGS - len(current_positions))
+        logger.info(f"可用仓位数量: {available_slots}")
+        
+        new_stocks = qualified_stocks[:min(available_slots, len(qualified_stocks))]
+        
+        # 7. 添加新持仓记录
+        for stock in new_stocks:
+            position_manager.add_position(stock, stock["close"], MAX_POSITION_PCT)
+        
+        # 8. 重新获取更新后的持仓（包含新添加的）
+        all_positions = position_manager.get_current_positions()
+        
+        # 9. 发送股票消息
+        logger.info("发送股票消息...")
+        logger.info(f"持仓数量: {len(all_positions)}，新推荐数量: {len(new_stocks)}")
+        
+        has_stock_messages = send_stock_messages(all_positions, new_stocks)
+        
+        # 10. 发送交易汇总消息
+        logger.info("发送交易汇总消息...")
+        trade_summary = trade_recorder.get_trade_summary()
+        if trade_summary:
+            summary_msg = format_trade_summary(trade_summary)
+            send_wechat_message(message=summary_msg, message_type="position")
+        else:
+            logger.info("暂无交易记录，不发送汇总消息")
+        
+        logger.info("===== 策略执行完成 =====")
         
     except Exception as e:
-        error_msg = f"【T3策略执行错误】\n错误详情: {str(e)}"
+        error_msg = f"【策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
         send_wechat_message(message=error_msg, message_type="error")
 
 if __name__ == "__main__":
-    # 配置日志
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -585,5 +700,4 @@ if __name__ == "__main__":
         ]
     )
     
-    # 执行策略
     main()

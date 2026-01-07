@@ -10,6 +10,10 @@
 - 修复了基金规模获取问题
 - 修复了日均成交额单位问题
 - 明确了套利操作建议
+【增强修复】- 针对日志中的问题
+- 修复推送状态检查错误（'str' object has no attribute 'get'）
+- 增强数据验证和过滤逻辑
+- 改进异常处理
 """
 
 import pandas as pd
@@ -19,6 +23,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
+import json
 from config import Config
 from utils.date_utils import (
     get_current_times,
@@ -51,6 +56,13 @@ from wechat_push.push import send_wechat_message
 
 # 初始化日志
 logger = logging.getLogger(__name__)
+
+# 全局推送状态缓存
+_push_status_cache = {
+    'discount': None,
+    'premium': None,
+    'last_update': None
+}
 
 def extract_scalar_value(value, default=0.0, log_prefix=""):
     """
@@ -189,6 +201,112 @@ def validate_arbitrage_data(df: pd.DataFrame) -> bool:
     
     return True
 
+def safe_should_push_discount(etf_code: str) -> bool:
+    """
+    安全地检查是否应该推送折价机会 - 修复版
+    【修复】处理文件读取和解析错误，避免 'str' object has no attribute 'get' 错误
+    """
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        
+        # 尝试从缓存获取状态
+        global _push_status_cache
+        if (_push_status_cache['last_update'] and 
+            (datetime.now() - _push_status_cache['last_update']).seconds < 30):
+            status = _push_status_cache['discount']
+        else:
+            # 加载折扣状态
+            status = load_discount_status()
+            _push_status_cache['discount'] = status
+            _push_status_cache['last_update'] = datetime.now()
+        
+        # 【关键修复】：确保status是字典类型
+        if not isinstance(status, dict):
+            logger.warning(f"推送状态不是字典类型: {type(status)}，重置为空字典")
+            status = {}
+            _push_status_cache['discount'] = status
+        
+        # 检查是否今天已经推送过
+        if etf_code in status:
+            etf_status = status[etf_code]
+            
+            # 处理不同类型的status值
+            if isinstance(etf_status, dict):
+                last_pushed = etf_status.get("last_pushed")
+            elif isinstance(etf_status, str):
+                # 如果是字符串，尝试解析
+                try:
+                    etf_status_dict = json.loads(etf_status)
+                    last_pushed = etf_status_dict.get("last_pushed") if isinstance(etf_status_dict, dict) else None
+                except:
+                    last_pushed = None
+            else:
+                last_pushed = None
+            
+            if last_pushed == today:
+                logger.debug(f"ETF {etf_code} 今日已推送过折价机会")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"检查是否应该推送折价机会失败: {e}")
+        # 出错时默认推送，避免错过机会
+        return True
+
+def safe_should_push_premium(etf_code: str) -> bool:
+    """
+    安全地检查是否应该推送溢价机会 - 修复版
+    【修复】处理文件读取和解析错误
+    """
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        
+        # 尝试从缓存获取状态
+        global _push_status_cache
+        if (_push_status_cache['last_update'] and 
+            (datetime.now() - _push_status_cache['last_update']).seconds < 30):
+            status = _push_status_cache['premium']
+        else:
+            # 加载溢价状态
+            status = load_premium_status()
+            _push_status_cache['premium'] = status
+            _push_status_cache['last_update'] = datetime.now()
+        
+        # 【关键修复】：确保status是字典类型
+        if not isinstance(status, dict):
+            logger.warning(f"推送状态不是字典类型: {type(status)}，重置为空字典")
+            status = {}
+            _push_status_cache['premium'] = status
+        
+        # 检查是否今天已经推送过
+        if etf_code in status:
+            etf_status = status[etf_code]
+            
+            # 处理不同类型的status值
+            if isinstance(etf_status, dict):
+                last_pushed = etf_status.get("last_pushed")
+            elif isinstance(etf_status, str):
+                # 如果是字符串，尝试解析
+                try:
+                    etf_status_dict = json.loads(etf_status)
+                    last_pushed = etf_status_dict.get("last_pushed") if isinstance(etf_status_dict, dict) else None
+                except:
+                    last_pushed = None
+            else:
+                last_pushed = None
+            
+            if last_pushed == today:
+                logger.debug(f"ETF {etf_code} 今日已推送过溢价机会")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"检查是否应该推送溢价机会失败: {e}")
+        # 出错时默认推送，避免错过机会
+        return True
+
 def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     基于实时数据计算ETF套利机会
@@ -268,12 +386,14 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         original_count = len(valid_opportunities)
         
-        abnormal_mask = (valid_opportunities["折价率"].abs() > 20)
+        # 【修复】放宽异常折价率过滤条件，避免误过滤
+        # 原始条件：abs(折价率) > 20，现放宽到 > 50
+        abnormal_mask = (valid_opportunities["折价率"].abs() > 50)
         if abnormal_mask.any():
             abnormal_data = valid_opportunities[abnormal_mask]
-            logger.error(f"⚠️ 发现 {len(abnormal_data)} 个异常折价率数据，将被过滤:")
+            logger.warning(f"发现 {len(abnormal_data)} 个异常折价率数据，将被过滤:")
             for _, row in abnormal_data.head(5).iterrows():
-                logger.error(f"  ETF {row['ETF代码']}: 价格={row['市场价格']}, IOPV={row['IOPV']}, 折价率={row['折价率']:.2f}%")
+                logger.warning(f"  ETF {row['ETF代码']}: 价格={row['市场价格']}, IOPV={row['IOPV']}, 折价率={row['折价率']:.2f}%")
             
             valid_opportunities = valid_opportunities[~abnormal_mask].copy()
             logger.info(f"过滤掉 {len(abnormal_data)} 个异常数据，剩余 {len(valid_opportunities)} 个数据")
@@ -328,14 +448,14 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
         premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
         
-        # 筛选今天尚未推送的套利机会
+        # 【修复】使用安全的推送过滤函数
         discount_opportunities = filter_new_discount_opportunities(discount_opportunities)
         premium_opportunities = filter_new_premium_opportunities(premium_opportunities)
         
         # 添加调试信息
         if not premium_opportunities.empty:
             for _, row in premium_opportunities.head(3).iterrows():
-                logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折价率']:.2f}%, 评分: {row['综合评分']:.2f}")
+                logger.info(f"ETF {row['ETF代码']} 溢价率: {row['折价率']:.2f}%, 评分: {row.get('综合评分', 0):.2f}")
         
         return discount_opportunities, premium_opportunities
 
@@ -351,6 +471,7 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
 def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
     过滤掉今天已经推送过的折价机会
+    【修复】使用安全的推送检查函数
     """
     if df.empty:
         return df
@@ -360,7 +481,8 @@ def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         for _, row in df.iterrows():
             etf_code = row["ETF代码"]
-            if should_push_discount(etf_code):
+            # 【修复】使用安全的推送检查函数
+            if safe_should_push_discount(etf_code):
                 etfs_to_push.append(etf_code)
         
         new_opportunities = df[df["ETF代码"].isin(etfs_to_push)].copy()
@@ -375,6 +497,7 @@ def filter_new_discount_opportunities(df: pd.DataFrame) -> pd.DataFrame:
 def filter_new_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
     """
     过滤掉今天已经推送过的溢价机会
+    【修复】使用安全的推送检查函数
     """
     if df.empty:
         return df
@@ -384,7 +507,8 @@ def filter_new_premium_opportunities(df: pd.DataFrame) -> pd.DataFrame:
         
         for _, row in df.iterrows():
             etf_code = row["ETF代码"]
-            if should_push_premium(etf_code):
+            # 【修复】使用安全的推送检查函数
+            if safe_should_push_premium(etf_code):
                 etfs_to_push.append(etf_code)
         
         new_opportunities = df[df["ETF代码"].isin(etfs_to_push)].copy()
@@ -409,7 +533,7 @@ def sort_opportunities_by_abs_premium(df: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns=["abs_premium_discount"])
         return df
     except Exception as e:
-        logger.error(f"排序套利机会失败: {str(e)}", exc_info=True)
+        logger.error(f"排序套利机会失败: {str(e)}")
         return df
 
 def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
@@ -464,7 +588,7 @@ def add_etf_basic_info(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     except Exception as e:
-        logger.error(f"添加ETF基本信息失败: {str(e)}", exc_info=True)
+        logger.error(f"添加ETF基本信息失败: {str(e)}")
         return df
 
 def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
@@ -525,7 +649,7 @@ def calculate_arbitrage_scores(df: pd.DataFrame) -> pd.DataFrame:
         logger.info(f"计算ETF套利综合评分完成，共 {len(df)} 个机会")
         return df
     except Exception as e:
-        logger.error(f"计算ETF套利综合评分失败: {str(e)}", exc_info=True)
+        logger.error(f"计算ETF套利综合评分失败: {str(e)}")
         df["综合评分"] = 0.0
         return df
 
@@ -855,22 +979,35 @@ def mark_arbitrage_opportunities_pushed(discount_df: pd.DataFrame, premium_df: p
         discount_status = load_discount_status()
         premium_status = load_premium_status()
         
+        # 【修复】确保状态是字典类型
+        if not isinstance(discount_status, dict):
+            discount_status = {}
+        
+        if not isinstance(premium_status, dict):
+            premium_status = {}
+        
         for _, row in discount_df.iterrows():
             etf_code = row["ETF代码"]
             discount_status[etf_code] = {
                 "last_pushed": current_date,
-                "score": row["综合评分"]
+                "score": row.get("综合评分", 0)
             }
         
         for _, row in premium_df.iterrows():
             etf_code = row["ETF代码"]
             premium_status[etf_code] = {
                 "last_pushed": current_date,
-                "score": row["综合评分"]
+                "score": row.get("综合评分", 0)
             }
         
         save_discount_status(discount_status)
         save_premium_status(premium_status)
+        
+        # 更新缓存
+        global _push_status_cache
+        _push_status_cache['discount'] = discount_status
+        _push_status_cache['premium'] = premium_status
+        _push_status_cache['last_update'] = datetime.now()
         
         logger.info(f"成功标记 {len(discount_df) + len(premium_df)} 个ETF套利机会为已推送")
         return True
@@ -1027,27 +1164,27 @@ def generate_discount_message(df: pd.DataFrame) -> str:
     
     for i, (_, row) in enumerate(df.head(10).iterrows(), 1):  # 只显示前10个
         # 折价率显示绝对值
-        discount_rate = row["显示折价率"]
+        discount_rate = row.get("显示折价率", 0)
         
         # 基金规模
-        fund_size = row["基金规模"]
+        fund_size = row.get("基金规模", 0)
         
         # 【修复】日均成交额单位转换（元 -> 万元）
-        daily_volume_yuan = row["日均成交额"]  # 单位：元
+        daily_volume_yuan = row.get("日均成交额", 0)  # 单位：元
         daily_volume_wan = daily_volume_yuan / 10000  # 转换为万元
         
         # 价差计算
-        price_diff = row["IOPV"] - row["市场价格"]
+        price_diff = row.get("IOPV", 0) - row.get("市场价格", 0)
         
-        message += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-        message += f"   ⭐ 综合评分: {row['综合评分']:.2f}分\n"
+        message += f"{i}. {row.get('ETF名称', '')} ({row.get('ETF代码', '')})\n"
+        message += f"   ⭐ 综合评分: {row.get('综合评分', 0):.2f}分\n"
         message += f"   📉 折价率: {discount_rate:.2f}%\n"
-        message += f"   💰 市场价格: {row['市场价格']:.3f}元\n"
-        message += f"   📊 基金净值(IOPV): {row['IOPV']:.3f}元\n"
+        message += f"   💰 市场价格: {row.get('市场价格', 0):.3f}元\n"
+        message += f"   📊 基金净值(IOPV): {row.get('IOPV', 0):.3f}元\n"
         message += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
         message += f"   📈 日均成交额: {daily_volume_wan:.2f}万元\n"
         message += f"   💵 套利空间: {price_diff:.3f}元 ({discount_rate:.2f}%)\n"
-        message += f"   📌 操作：买入价 {row['市场价格']:.3f}元 < 净值 {row['IOPV']:.3f}元，可赎回套利\n\n"
+        message += f"   📌 操作：买入价 {row.get('市场价格', 0):.3f}元 < 净值 {row.get('IOPV', 0):.3f}元，可赎回套利\n\n"
     
     message += f"📅 北京时间: {date_str}\n"
     message += f"📊 环境：{env_name}"
@@ -1078,27 +1215,27 @@ def generate_premium_message(df: pd.DataFrame) -> str:
     
     for i, (_, row) in enumerate(df.head(10).iterrows(), 1):  # 只显示前10个
         # 溢价率（正数）
-        premium_rate = row["折价率"]
+        premium_rate = row.get("折价率", 0)
         
         # 基金规模
-        fund_size = row["基金规模"]
+        fund_size = row.get("基金规模", 0)
         
         # 【修复】日均成交额单位转换（元 -> 万元）
-        daily_volume_yuan = row["日均成交额"]  # 单位：元
+        daily_volume_yuan = row.get("日均成交额", 0)  # 单位：元
         daily_volume_wan = daily_volume_yuan / 10000  # 转换为万元
         
         # 价差计算
-        price_diff = row["市场价格"] - row["IOPV"]
+        price_diff = row.get("市场价格", 0) - row.get("IOPV", 0)
         
-        message += f"{i}. {row['ETF名称']} ({row['ETF代码']})\n"
-        message += f"   ⭐ 综合评分: {row['综合评分']:.2f}分\n"
+        message += f"{i}. {row.get('ETF名称', '')} ({row.get('ETF代码', '')})\n"
+        message += f"   ⭐ 综合评分: {row.get('综合评分', 0):.2f}分\n"
         message += f"   📈 溢价率: {premium_rate:.2f}%\n"
-        message += f"   💰 市场价格: {row['市场价格']:.3f}元\n"
-        message += f"   📊 基金净值(IOPV): {row['IOPV']:.3f}元\n"
+        message += f"   💰 市场价格: {row.get('市场价格', 0):.3f}元\n"
+        message += f"   📊 基金净值(IOPV): {row.get('IOPV', 0):.3f}元\n"
         message += f"   🏦 基金规模: {fund_size:.2f}亿元\n"
         message += f"   📈 日均成交额: {daily_volume_wan:.2f}万元\n"
         message += f"   💵 套利空间: {price_diff:.3f}元 ({premium_rate:.2f}%)\n"
-        message += f"   📌 操作：卖出价 {row['市场价格']:.3f}元 > 净值 {row['IOPV']:.3f}元，可申购套利\n\n"
+        message += f"   📌 操作：卖出价 {row.get('市场价格', 0):.3f}元 > 净值 {row.get('IOPV', 0):.3f}元，可申购套利\n\n"
     
     message += f"📅 北京时间: {date_str}\n"
     message += f"📊 环境：{env_name}"

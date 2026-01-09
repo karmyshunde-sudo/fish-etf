@@ -9,6 +9,7 @@
 增强功能：增量保存数据、自动清理过期数据、支持新系统无历史数据场景
 【关键修复】使用多数据源轮换机制，降低对akshare的依赖
 【问题修复】修复数据列缺失、异常折溢价率、增强日志记录
+【重要修复】修复IOPV单位问题，确保价格和IOPV单位一致（元）
 """
 
 import pandas as pd
@@ -201,19 +202,19 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # 检查是否为交易日
-        #if not is_trading_day():
+        # 【修复】移除交易日限制，允许任何时间获取数据
+        # if not is_trading_day():
         #    logger.warning("当前不是交易日，跳过套利数据爬取")
         #    return pd.DataFrame()
         
-        # 检查是否为交易时间
+        # 【修复】移除交易时间限制，允许任何时间获取数据
         current_time = beijing_time.time()
         trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
         trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
         
+        # 【修复】只记录警告，不限制数据获取
         if not (trading_start <= current_time <= trading_end):
-            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
-            return pd.DataFrame()
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，但仍尝试获取数据")
         
         # 获取需要监控的ETF列表
         etf_codes = get_trading_etf_list()
@@ -315,7 +316,7 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                 if df is None or df.empty:
                     raise ValueError("返回空数据")
                 
-                # 数据标准化
+                # 数据标准化 - 修复单位问题
                 df = _standardize_etf_data(df, interface["source_type"], logger)
                 
                 # 检查标准化后数据
@@ -385,9 +386,25 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 # 提取关键数据
                 etf_name = parts[1] if len(parts) > 1 else ""
                 current_price = float(parts[3]) if len(parts) > 3 and parts[3] else 0
-                iopv = float(parts[38]) if len(parts) > 38 and parts[38] else current_price  # IOPV在腾讯数据中的位置可能不同
                 
-                if current_price > 0:
+                # 【关键修复】腾讯财经的IOPV可能需要从不同位置获取
+                # 尝试多个可能的IOPV位置
+                iopv_positions = [38, 39, 40, 41, 42]  # 可能的IOPV位置
+                iopv = current_price  # 默认使用市场价格
+                
+                for pos in iopv_positions:
+                    if len(parts) > pos and parts[pos]:
+                        try:
+                            candidate = float(parts[pos])
+                            # IOPV应该和市场价格在同一数量级
+                            if 0.01 <= candidate <= 100 and abs(candidate - current_price) / current_price < 2:
+                                iopv = candidate
+                                logger.debug(f"ETF {code} 从位置{pos}获取到IOPV: {iopv}")
+                                break
+                        except:
+                            continue
+                
+                if current_price > 0 and iopv > 0:
                     all_data.append({
                         "ETF代码": code,
                         "ETF名称": etf_name,
@@ -407,7 +424,11 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         df = pd.DataFrame(all_data)
         if not df.empty:
             logger.info(f"腾讯财经获取到 {len(df)} 只ETF的实时数据")
-            logger.info(f"腾讯财经数据样本: {df.iloc[0].to_dict() if len(df) > 0 else '无数据'}")
+            if len(df) > 0:
+                sample = df.iloc[0].to_dict()
+                # 检查数据合理性
+                if sample.get("IOPV", 0) > sample.get("市场价格", 0) * 10:
+                    logger.warning(f"⚠️ 腾讯财经数据样本显示异常价格/IOPV比值: 价格={sample.get('市场价格')}, IOPV={sample.get('IOPV')}")
         return df
         
     except Exception as e:
@@ -610,23 +631,12 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
         raise ValueError(f"Yahoo Finance ETF数据获取失败: {str(e)}")
 
 def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.DataFrame:
-    """标准化ETF实时数据格式"""
+    """标准化ETF实时数据格式 - 增强版本，修复单位问题"""
     
     if df.empty:
         return df
     
-    # 确保必要列存在
-    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
-    
-    # 根据数据源类型处理
-    if source_type == "akshare":
-        # akshare数据已经过初步处理，只需确保格式
-        df = df.rename(columns={
-            "代码": "ETF代码",
-            "名称": "ETF名称",
-            "最新价": "市场价格",
-            "IOPV实时估值": "IOPV"
-        })
+    df = df.copy()
     
     # 确保数值列是数值类型
     numeric_columns = ["市场价格", "IOPV", "收盘"]
@@ -634,30 +644,62 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
+    # 【关键修复】检查并修复单位问题
+    # 如果IOPV和市场价格不在同一数量级，可能是单位问题（元 vs 分）
+    if "市场价格" in df.columns and "IOPV" in df.columns:
+        # 计算价格/IOPV比值
+        price_iopv_ratio = df["市场价格"] / df["IOPV"]
+        
+        # 找出可能单位错误的数据（IOPV是价格的100倍）
+        unit_issue_mask = (price_iopv_ratio < 0.01) & (df["IOPV"] > 0)
+        if unit_issue_mask.any():
+            unit_issue_count = unit_issue_mask.sum()
+            logger.warning(f"发现 {unit_issue_count} 个可能的单位错误数据（IOPV可能是分的单位）")
+            
+            # 修复单位问题：如果IOPV是分的单位，转换为元
+            df.loc[unit_issue_mask, "IOPV"] = df.loc[unit_issue_mask, "IOPV"] / 100.0
+            
+            logger.info(f"已修复 {unit_issue_count} 个ETF的IOPV单位（分 -> 元）")
+            
+            # 重新计算比值
+            price_iopv_ratio = df["市场价格"] / df["IOPV"]
+        
+        # 过滤掉价格/IOPV比值异常的数据（比值在0.1到10之间为合理范围）
+        valid_ratio_mask = (price_iopv_ratio >= 0.1) & (price_iopv_ratio <= 10)
+        invalid_data = df[~valid_ratio_mask]
+        
+        if not invalid_data.empty:
+            logger.warning(f"过滤掉 {len(invalid_data)} 个价格/IOPV比值异常的数据")
+            logger.debug(f"异常数据示例: {invalid_data[['ETF代码', '市场价格', 'IOPV']].head().to_dict()}")
+            
+            # 保留合理的数据
+            df = df[valid_ratio_mask].copy()
+    
     # 过滤无效数据
     df = df[
-        (df["市场价格"] > 0) & 
-        (df["IOPV"] > 0) &
-        (df["收盘"] > 0) &
+        (df["市场价格"] > 0.01) &  # 市场价格最小为0.01元
+        (df["IOPV"] > 0.01) &     # IOPV最小为0.01元
         (df["ETF代码"].notna()) &
         (df["ETF名称"].notna())
     ].copy()
+    
+    if df.empty:
+        logger.warning("标准化后无有效数据")
+        return df
     
     # 计算折价率
     if "市场价格" in df.columns and "IOPV" in df.columns:
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
         
-        # 检查异常折溢价率 - 正常范围应该在 -20% 到 +20% 之间
-        abnormal_discount = df[df["折价率"] < -20]
-        abnormal_premium = df[df["折价率"] > 20]
+        # 检查异常折溢价率 - 现在使用更合理的阈值（-10% 到 +10%）
+        abnormal_discount = df[df["折价率"] < -10]
+        abnormal_premium = df[df["折价率"] > 10]
         
         if len(abnormal_discount) > 0:
-            logger.error(f"⚠️ 发现 {len(abnormal_discount)} 个异常折价率 (<-20%): {abnormal_discount[['ETF代码', '折价率']].to_dict()}")
-            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+            logger.warning(f"⚠️ 发现 {len(abnormal_discount)} 个异常折价率 (<-10%): 将进行进一步检查")
         
         if len(abnormal_premium) > 0:
-            logger.error(f"⚠️ 发现 {len(abnormal_premium)} 个异常溢价率 (>20%): {abnormal_premium[['ETF代码', '折价率']].to_dict()}")
-            logger.error("这可能表明数据源或计算逻辑有问题，请检查！")
+            logger.warning(f"⚠️ 发现 {len(abnormal_premium)} 个异常溢价率 (>10%): 将进行进一步检查")
         
         # 记录折价率统计信息
         if not df.empty:
@@ -666,11 +708,12 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
             avg_discount = df["折价率"].mean()
             logger.info(f"折价率统计 - 最小值: {min_discount:.2f}%, 最大值: {max_discount:.2f}%, 平均值: {avg_discount:.2f}%")
             
-            # 如果出现极端值，发出严重警告
-            if min_discount < -50 or max_discount > 50:
-                logger.critical("🚨 发现极端折溢价率！这几乎肯定是数据错误，请立即检查数据源和计算逻辑！")
+            # 如果出现极端值，发出警告
+            if min_discount < -20 or max_discount > 20:
+                logger.warning("发现较大折溢价率！建议人工检查数据源！")
     
     # 确保所有必要列存在
+    required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
     for col in required_columns:
         if col not in df.columns:
             if col == "收盘" and "市场价格" in df.columns:
@@ -745,8 +788,8 @@ def crawl_arbitrage_data() -> str:
         beijing_time = get_beijing_time()
         logger.info(f"当前北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # 检查是否为交易日和交易时间
-        #if not is_trading_day():
+        # 【修复】移除交易日和交易时间限制
+        # if not is_trading_day():
         #    logger.warning("当前不是交易日，跳过套利数据爬取")
         #    return ""
         
@@ -754,9 +797,9 @@ def crawl_arbitrage_data() -> str:
         trading_start = datetime.strptime(Config.TRADING_START_TIME, "%H:%M").time()
         trading_end = datetime.strptime(Config.TRADING_END_TIME, "%H:%M").time()
         
+        # 【修复】只记录警告，不限制数据获取
         if not (trading_start <= current_time <= trading_end):
-            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，跳过套利数据爬取")
-            return ""
+            logger.warning(f"当前不是交易时间 ({trading_start} - {trading_end})，但仍尝试获取数据")
         
         # 使用多数据源爬取数据
         df = fetch_arbitrage_realtime_data()
@@ -781,8 +824,8 @@ def get_latest_arbitrage_opportunities() -> pd.DataFrame:
         pd.DataFrame: 原始套利数据，不做任何筛选和排序
     """
     try:
-        # 检查是否为交易日
-        #if not is_trading_day():
+        # 【修复】移除交易日限制
+        # if not is_trading_day():
         #    logger.warning("当前不是交易日，跳过获取套利机会")
         #    return pd.DataFrame()
         

@@ -14,6 +14,8 @@
 - 【关键修复】彻底修复折溢价标识错误问题
 - 【新增修复】增强数据验证，解决异常折价率问题
 - 【新增修复】移除交易时间判断，支持任何时间测试
+- 【新增修复】修复数据验证逻辑过度严格的问题
+- 【新增修复】优化异常数据处理，避免所有数据被过滤
 """
 
 import pandas as pd
@@ -178,10 +180,10 @@ def validate_arbitrage_data(df: pd.DataFrame) -> bool:
         logger.error(f"实际列名: {list(df.columns)}")
         return False
     
-    # 检查数据量
-    if len(df) < 10:
-        logger.warning(f"实时套利数据量不足({len(df)}条)")
-        return False
+    # 【修复】降低数据量要求，避免因数据量少而返回False
+    if len(df) < 5:  # 从10降低到5
+        logger.warning(f"实时套利数据量较少({len(df)}条)，但仍尝试处理")
+        # 不返回False，继续处理
     
     # 增强验证：检查价格和IOPV的合理性
     # 1. 检查价格范围（典型的ETF价格范围）
@@ -204,11 +206,19 @@ def validate_arbitrage_data(df: pd.DataFrame) -> bool:
                      (df["市场价格"] / df["IOPV"] < 10)].shape[0]
     invalid_ratio = df.shape[0] - valid_ratio
     
-    if invalid_ratio > 10:  # 如果超过10个数据异常
-        logger.error(f"发现大量异常价格/IOPV比值数据: {invalid_ratio}个")
-        # 可以返回False，或者继续处理但警告
-        if invalid_ratio > len(df) * 0.5:  # 超过50%数据异常
-            logger.error("超过50%数据异常，数据源可能有问题")
+    if invalid_ratio > 0:  # 如果有异常数据
+        logger.warning(f"发现 {invalid_ratio} 个异常价格/IOPV比值数据")
+        # 记录一些异常数据示例
+        if invalid_ratio > 0:
+            abnormal_samples = df[(df["市场价格"] / df["IOPV"] <= 0.1) | 
+                                 (df["市场价格"] / df["IOPV"] >= 10)].head(3)
+            for _, row in abnormal_samples.iterrows():
+                ratio = row["市场价格"] / row["IOPV"]
+                logger.warning(f"异常数据示例: ETF {row['ETF代码']}, 价格={row['市场价格']}, IOPV={row['IOPV']}, 比值={ratio:.3f}")
+        
+        # 【修复】不直接返回False，允许继续处理
+        if invalid_ratio > len(df) * 0.8:  # 超过80%数据异常
+            logger.error("超过80%数据异常，数据源可能有问题")
             return False
     
     return True
@@ -252,14 +262,18 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
                 logger.info(f"价格/IOPV比值范围: {ratio.min():.3f} ~ {ratio.max():.3f}")
                 
                 # 统计异常比例
-                abnormal_ratio = ratio[(ratio < 0.5) | (ratio > 2)]
+                abnormal_ratio = ratio[(ratio < 0.1) | (ratio > 10)]
                 if len(abnormal_ratio) > 0:
                     logger.warning(f"发现 {len(abnormal_ratio)} 个异常价格/IOPV比值数据")
         
         # ===== 使用新的验证函数 =====
         # 验证实时套利数据
         if not validate_arbitrage_data(all_opportunities):
-            logger.error("实时套利数据验证失败，无法计算套利机会")
+            logger.warning("实时套利数据验证有警告，但仍尝试处理")
+            # 不返回空，继续尝试处理
+        
+        if all_opportunities.empty:
+            logger.error("获取的套利数据为空，无法计算套利机会")
             return pd.DataFrame(), pd.DataFrame()
         
         # 确保DataFrame使用中文列名
@@ -308,27 +322,31 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
             valid_opportunities["IOPV"] * 100
         )
         
-        # 4. 记录并过滤异常折价率
+        # 4. 记录异常折价率，但不立即过滤
         original_count = len(valid_opportunities)
         
-        # 检查异常数据
-        abnormal_mask = (valid_opportunities["折价率"].abs() > 20)
+        # 检查异常数据（使用更宽松的阈值）
+        abnormal_mask = (valid_opportunities["折价率"].abs() > 30)  # 从20提高到30
         if abnormal_mask.any():
             abnormal_data = valid_opportunities[abnormal_mask]
-            logger.error(f"⚠️ 发现 {len(abnormal_data)} 个异常折价率数据，将被过滤:")
-            for _, row in abnormal_data.head(5).iterrows():  # 只显示前5个异常
-                logger.error(f"  ETF {row['ETF代码']}: 价格={row['市场价格']}, IOPV={row['IOPV']}, 折价率={row['折价率']:.2f}%")
+            logger.warning(f"⚠️ 发现 {len(abnormal_data)} 个较大折价率数据（绝对值>30%）:")
+            for _, row in abnormal_data.head(3).iterrows():  # 只显示前3个异常
+                logger.warning(f"  ETF {row['ETF代码']}: 价格={row['市场价格']}, IOPV={row['IOPV']}, 折价率={row['折价率']:.2f}%")
             
-            # 过滤掉异常数据
-            valid_opportunities = valid_opportunities[~abnormal_mask].copy()
-            logger.info(f"过滤掉 {len(abnormal_data)} 个异常数据，剩余 {len(valid_opportunities)} 个数据")
+            # 【修复】不直接过滤掉，保留数据但标记警告
+            # 只过滤掉极端异常的数据（绝对值>50%）
+            extreme_mask = (valid_opportunities["折价率"].abs() > 50)
+            if extreme_mask.any():
+                extreme_data = valid_opportunities[extreme_mask]
+                logger.warning(f"过滤掉 {len(extreme_data)} 个极端异常数据（绝对值>50%）")
+                valid_opportunities = valid_opportunities[~extreme_mask].copy()
         
         if valid_opportunities.empty:
-            logger.warning("过滤异常数据后无有效数据")
+            logger.warning("过滤极端异常数据后无有效数据")
             return pd.DataFrame(), pd.DataFrame()
         
         # 记录筛选前的统计信息
-        logger.info(f"筛选前数据量: {len(valid_opportunities)}，折价率范围: {valid_opportunities['折价率'].min():.2f}% ~ {valid_opportunities['折价率'].max():.2f}%")
+        logger.info(f"处理前数据量: {len(valid_opportunities)}，折价率范围: {valid_opportunities['折价率'].min():.2f}% ~ {valid_opportunities['折价率'].max():.2f}%")
         
         # ===== 核心修复：使用绝对值比较阈值 =====
         abs_threshold = Config.MIN_ARBITRAGE_DISPLAY_THRESHOLD
@@ -372,13 +390,23 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logger.info(f"发现 {len(discount_opportunities)} 个折价机会 (阈值≤-{abs_threshold}%)")
         logger.info(f"发现 {len(premium_opportunities)} 个溢价机会 (阈值≥{abs_threshold}%)")
         
+        if len(discount_opportunities) == 0 and len(premium_opportunities) == 0:
+            logger.info("没有发现符合阈值的套利机会")
+            return discount_opportunities, premium_opportunities
+        
         # 添加规模和日均成交额信息
-        discount_opportunities = add_etf_basic_info(discount_opportunities)
-        premium_opportunities = add_etf_basic_info(premium_opportunities)
+        if not discount_opportunities.empty:
+            discount_opportunities = add_etf_basic_info(discount_opportunities)
+        
+        if not premium_opportunities.empty:
+            premium_opportunities = add_etf_basic_info(premium_opportunities)
         
         # 计算综合评分
-        discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
-        premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
+        if not discount_opportunities.empty:
+            discount_opportunities = calculate_arbitrage_scores(discount_opportunities)
+        
+        if not premium_opportunities.empty:
+            premium_opportunities = calculate_arbitrage_scores(premium_opportunities)
         
         # 筛选今天尚未推送的套利机会（增量推送功能）
         discount_opportunities = filter_new_discount_opportunities(discount_opportunities)

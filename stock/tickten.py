@@ -4,6 +4,7 @@
 【每版块8只股票MA20】趋势策略 (TickTen)
 严格使用中文列名，与日线数据文件格式保持一致
 直接使用仓库中已有的数据，不进行任何自动补全
+消息保存功能：所有微信推送自动保存到 data/stock，并提交 Git
 """
 import os
 import logging
@@ -11,6 +12,8 @@ import pandas as pd
 import time
 import random
 import numpy as np
+import hashlib
+import re
 from datetime import datetime, timedelta
 from config import Config
 from utils.date_utils import get_beijing_time
@@ -38,6 +41,62 @@ MAX_AGE_DAYS = 7  # 基础信息文件最大有效天数
 
 # 全局变量：市值过滤开关
 ENABLE_MARKET_VALUE_FILTER = True
+
+# ========== 新增：消息保存函数（与macd_ma_strategy风格一致） ==========
+def extract_title_from_message(message):
+    """从消息内容中提取第一行作为标题"""
+    lines = message.strip().split('\n')
+    if lines:
+        title = lines[0].strip()
+        # 去除特殊符号，保留中文、英文、数字，用下划线替换其他字符
+        title = re.sub(r'[^\w\u4e00-\u9fff]+', '_', title)
+        if len(title) > 30:
+            title = title[:30]
+        return title
+    return "未知信号"
+
+def save_message_to_file(message, message_type):
+    """
+    保存微信消息内容到txt文件，并提交到Git仓库（立即提交）。
+    文件保存到 data/stock 目录，文件名格式：tick_{标题}_{时间戳}_{哈希}.txt
+    如果文件已存在（基于内容哈希），则跳过保存，避免重复。
+    """
+    try:
+        stock_dir = os.path.join(DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+
+        message_hash = hashlib.md5(message.encode('utf-8')).hexdigest()[:8]
+        now = get_beijing_time()
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
+        title = extract_title_from_message(message)
+        
+        filename = f"tick_{title}_{timestamp}_{message_hash}.txt"
+        file_path = os.path.join(stock_dir, filename)
+
+        if os.path.exists(file_path):
+            logger.info(f"消息文件已存在，跳过保存: {file_path}")
+            return False
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(message)
+
+        logger.info(f"✅ 已保存微信消息到文件: {file_path}")
+        success = commit_files_in_batches(file_path, "LAST_FILE")
+        if success:
+            logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
+        else:
+            logger.error(f"❌ 提交消息文件到Git仓库失败: {file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ 保存微信消息文件失败: {str(e)}", exc_info=True)
+        return False
+
+def send_and_save_wechat_message(message, message_type="position"):
+    """发送微信消息并保存内容到文件"""
+    send_wechat_message(message=message, message_type=message_type)
+    save_message_to_file(message, message_type)
+# ===============================================================
 
 def ensure_directory_exists():
     """确保数据目录存在"""
@@ -923,7 +982,7 @@ def save_and_commit_stock_codes(top_stocks):
             logger.info(f"暂存区差异:\n{git_diff.stdout}")
             # 发送错误通知
             error_msg = f"❌ 股票筛选结果文件提交失败: {filename}\n请立即检查系统"
-            send_wechat_message(message=error_msg, message_type="error")
+            send_and_save_wechat_message(error_msg, "error")
         
         # 【新增】返回文件路径
         return file_path
@@ -931,7 +990,7 @@ def save_and_commit_stock_codes(top_stocks):
     except Exception as e:
         logger.error(f"❌ 保存股票代码文件失败: {str(e)}", exc_info=True)
         error_msg = f"❌ 股票筛选结果文件保存失败: {str(e)}"
-        send_wechat_message(message=error_msg, message_type="error")
+        send_and_save_wechat_message(error_msg, "error")
         return None
 
 def generate_strategy_report():
@@ -953,7 +1012,7 @@ def generate_strategy_report():
                 f"  • 市值过滤条件过于严格\n"
                 f"  • 数据完整性不足\n"
             )
-            send_wechat_message(status_message)
+            send_and_save_wechat_message(status_message)
             return
         
         # 【关键修改】在推送消息前，保存股票代码到txt文件
@@ -986,11 +1045,11 @@ def generate_strategy_report():
                     report.append(signal_msg)                
                 section_messages.append("\n".join(report))
         
-        # 【关键修改】分别发送每个板块的消息
+        # 【关键修改】分别发送每个板块的消息，使用保存版发送函数
         if section_messages:
             for i, message in enumerate(section_messages):
                 logger.info(f"推送【每版块8只股票MA20】报告 - 板块 {i+1}/{len(section_messages)}")
-                send_wechat_message(message)
+                send_and_save_wechat_message(message)
                 # 添加延时避免消息发送过快
                 time.sleep(3)
         else:
@@ -999,18 +1058,24 @@ def generate_strategy_report():
                 f"=== 【每版块8只股票MA20】报告 ===\n"
                 f"今日无符合【每版块8只股票MA20】趋势条件的股票"
             )
-            send_wechat_message(default_message)
+            send_and_save_wechat_message(default_message)
         
         # ======  直接调用push.py中的send_txt_file函数发送文件内容  =======
         if file_path and os.path.exists(file_path):
             logger.info("=== 发送股票代码文件内容 ===")
             title = "【每版块8只股票MA20】股票代码清单"
             send_txt_file(file_path, title, "position")
+            # 额外保存该文件内容消息（避免重复发送，仅保存）
+            with open(file_path, 'r', encoding='ascii') as f:
+                file_content = f.read().strip()
+            file_message = f"{title}\n\n{file_content}"
+            save_message_to_file(file_message, "position")
             
         logger.info("【每版块8只股票MA20】执行完成")
     except Exception as e:
         logger.error(f"生成MA20策略报告失败: {str(e)}", exc_info=True)
-        send_wechat_message(f"❌ 【每版块8只股票MA20】执行失败: {str(e)}")
+        error_msg = f"❌ 【每版块8只股票MA20】执行失败: {str(e)}"
+        send_and_save_wechat_message(error_msg, "error")
 
 def main():
     """主函数：执行【每版块8只股票MA20】趋势策略"""

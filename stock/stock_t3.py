@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（优化消息版）
+stock_t3.py - 小市值布林带策略（优化消息版 + 消息保存）
 
 优化：
 1. 无股票时显示格式化的消息
 2. 修正布林带位置显示错误
 3. 简化消息格式，确保可读性
+4. 所有推送到微信的消息自动保存到 data/stock 并提交到 Git 仓库
 """
 
 import os
@@ -16,9 +17,13 @@ import time
 import logging
 import sys
 import json
+import hashlib
+import re
 from datetime import datetime, timedelta
 from config import Config
-from wechat_push.push import send_wechat_message
+from wechat_push.push import send_wechat_message, send_txt_file
+from utils.date_utils import get_beijing_time
+from utils.git_utils import commit_files_in_batches
 
 # ========== 策略参数配置 ==========
 MIN_MARKET_CAP = 20.0
@@ -49,6 +54,62 @@ MIN_DATA_DAYS = 60
 # ================================
 
 logger = logging.getLogger(__name__)
+
+# ========== 消息保存函数（与 macd_ma_strategy.py 风格一致）==========
+def extract_title_from_message(message):
+    """从消息内容中提取第一行作为标题"""
+    lines = message.strip().split('\n')
+    if lines:
+        title = lines[0].strip()
+        # 去除特殊符号，保留中文、英文、数字，用下划线替换其他字符
+        title = re.sub(r'[^\w\u4e00-\u9fff]+', '_', title)
+        if len(title) > 30:
+            title = title[:30]
+        return title
+    return "未知信号"
+
+def save_message_to_file(message, message_type):
+    """
+    保存微信消息内容到txt文件，并提交到Git仓库（立即提交）。
+    文件保存到 data/stock 目录，文件名格式：t3_{标题}_{时间戳}_{哈希}.txt
+    如果文件已存在（基于内容哈希），则跳过保存，避免重复。
+    """
+    try:
+        stock_dir = os.path.join(Config.DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+
+        message_hash = hashlib.md5(message.encode('utf-8')).hexdigest()[:8]
+        now = get_beijing_time()
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
+        title = extract_title_from_message(message)
+        
+        filename = f"t3_{title}_{timestamp}_{message_hash}.txt"
+        file_path = os.path.join(stock_dir, filename)
+
+        if os.path.exists(file_path):
+            logger.info(f"消息文件已存在，跳过保存: {file_path}")
+            return False
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(message)
+
+        logger.info(f"✅ 已保存微信消息到文件: {file_path}")
+        success = commit_files_in_batches(file_path, "LAST_FILE")
+        if success:
+            logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
+        else:
+            logger.error(f"❌ 提交消息文件到Git仓库失败: {file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ 保存微信消息文件失败: {str(e)}", exc_info=True)
+        return False
+
+def send_and_save_wechat_message(message, message_type):
+    """发送微信消息并保存内容到文件"""
+    send_wechat_message(message=message, message_type=message_type)
+    save_message_to_file(message, message_type)
+# ============================================================
 
 class TradeRecorder:
     """交易记录器"""
@@ -558,7 +619,7 @@ def filter_stocks(exclude_codes=None):
     return qualified_stocks
 
 def send_stock_messages(positions, new_stocks):
-    """发送股票消息"""
+    """发送股票消息（每条消息都会保存到文件）"""
     all_messages = []
     
     # 先添加持仓股票消息
@@ -584,7 +645,8 @@ def send_stock_messages(positions, new_stocks):
         message_body = "\n\n==================\n\n".join(batch)
         full_message = f"{message_header}\n\n{message_body}"
         
-        send_wechat_message(message=full_message, message_type="position")
+        # 使用新函数发送并保存
+        send_and_save_wechat_message(full_message, "position")
         
         if batch_index < total_batches - 1:
             time.sleep(2)
@@ -605,12 +667,12 @@ def main():
         # 2. 更新持仓状态
         sold_positions = position_manager.update_positions(current_date)
         
-        # 3. 如果有卖出的股票，发送卖出提示
+        # 3. 如果有卖出的股票，发送卖出提示（保存）
         if sold_positions:
             sell_msg = "【⚠️ 卖出提示】\n\n"
             for pos in sold_positions:
                 sell_msg += f"• {pos['code']} {pos['name']} - {pos['reason']}\n"
-            send_wechat_message(message=sell_msg, message_type="position")
+            send_and_save_wechat_message(sell_msg, "position")
             time.sleep(2)
         
         # 4. 获取当前持仓
@@ -639,19 +701,19 @@ def main():
         else:
             # 没有持仓也没有新推荐，发送无股票消息
             no_stock_msg = format_no_stock_message()
-            send_wechat_message(message=no_stock_msg, message_type="position")
+            send_and_save_wechat_message(no_stock_msg, "position")
         
         # 10. 发送交易汇总消息
         trade_summary = trade_recorder.get_trade_summary()
         summary_msg = format_trade_summary(trade_summary)
-        send_wechat_message(message=summary_msg, message_type="position")
+        send_and_save_wechat_message(summary_msg, "position")
         
         logger.info("===== 策略执行完成 =====")
         
     except Exception as e:
         error_msg = f"【策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
-        send_wechat_message(message=error_msg, message_type="error")
+        send_and_save_wechat_message(error_msg, "error")
 
 if __name__ == "__main__":
     logging.basicConfig(

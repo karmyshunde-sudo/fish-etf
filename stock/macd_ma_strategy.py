@@ -22,6 +22,8 @@ import time
 from datetime import datetime
 import logging
 import sys
+import hashlib
+import re
 from config import Config
 from utils.date_utils import is_file_outdated, get_beijing_time
 from wechat_push.push import send_wechat_message, send_txt_file  # 确保正确导入推送模块
@@ -81,6 +83,81 @@ logger = logging.getLogger(__name__)
 # formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 # handler.setFormatter(formatter)
 # logger.addHandler(handler)
+
+# ========== 新增：保存微信消息到文件并提交到仓库（保存到 data/stock，文件名格式 macd_{标题}_{时间戳}_{哈希}.txt） ==========
+def extract_title_from_message(message):
+    """从消息内容中提取第一行作为标题"""
+    lines = message.strip().split('\n')
+    if lines:
+        # 取第一行，去除可能的【】和空格，保留核心文字
+        title = lines[0].strip()
+        # 去除特殊符号，保留中文、英文、数字，用下划线替换其他字符
+        title = re.sub(r'[^\w\u4e00-\u9fff]+', '_', title)
+        # 限制长度
+        if len(title) > 30:
+            title = title[:30]
+        return title
+    return "未知信号"
+
+def save_message_to_file(message, message_type):
+    """
+    保存微信消息内容到txt文件，并提交到Git仓库。
+    文件保存到 data/stock 目录，文件名格式：macd_{标题}_{时间戳}_{哈希}.txt
+    如果文件已存在（基于内容哈希），则跳过保存，避免重复。
+    """
+    try:
+        # 创建保存目录（使用 data/stock）
+        stock_dir = os.path.join(Config.DATA_DIR, "stock")
+        if not os.path.exists(stock_dir):
+            os.makedirs(stock_dir, exist_ok=True)
+
+        # 计算消息内容的哈希值作为唯一标识
+        message_hash = hashlib.md5(message.encode('utf-8')).hexdigest()[:8]
+        # 使用北京时间生成时间戳
+        now = get_beijing_time()
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
+        
+        # 从消息中提取标题
+        title = extract_title_from_message(message)
+        
+        # 生成文件名：macd_{标题}_{时间戳}_{哈希}.txt
+        filename = f"macd_{title}_{timestamp}_{message_hash}.txt"
+        file_path = os.path.join(stock_dir, filename)
+
+        # 检查文件是否已存在（理论上哈希冲突概率极低）
+        if os.path.exists(file_path):
+            logger.info(f"消息文件已存在，跳过保存: {file_path}")
+            return False
+
+        # 写入文件
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(message)
+
+        logger.info(f"✅ 已保存微信消息到文件: {file_path}")
+
+        # 提交到Git仓库（使用普通文件标记，批量提交）
+        success = commit_files_in_batches(file_path, "NORMAL_FILE")
+        if success:
+            logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
+        else:
+            logger.error(f"❌ 提交消息文件到Git仓库失败: {file_path}")
+
+        return True
+    except Exception as e:
+        logger.error(f"❌ 保存微信消息文件失败: {str(e)}", exc_info=True)
+        return False
+
+# 封装发送微信消息并自动保存到文件的函数
+def send_and_save_wechat_message(message, message_type):
+    """发送微信消息并保存内容到文件"""
+    # 先发送消息
+    send_wechat_message(message=message, message_type=message_type)
+    # 再保存到文件
+    save_message_to_file(message, message_type)
+
+# ========== 原有函数保持不变（仅省略中间部分以节省篇幅，实际应完整保留）==========
+# 注意：以下为省略的函数定义，实际代码中需完整保留所有原有函数（如 get_category_name、calc_ma、check_ma_signal 等）
+# 由于篇幅限制，此处仅展示修改部分，完整代码请参考最终输出。
 
 def get_category_name(category):
     """获取指标类别名称"""
@@ -803,7 +880,7 @@ def main():
     if not os.path.exists(basic_info_file):
         logger.error("股票列表文件all_stocks.csv不存在")
         error_msg = "【📋指标共振 - 多指标共振策略】\n股票列表文件不存在，无法生成交易信号"
-        send_wechat_message(message=error_msg, message_type="error")
+        send_and_save_wechat_message(error_msg, "error")
         return
     
     try:
@@ -812,7 +889,7 @@ def main():
     except Exception as e:
         logger.error(f"读取股票列表文件失败: {str(e)}")
         error_msg = f"【📋指标共振 - 多指标共振策略】\n读取股票列表文件失败，无法生成交易信号: {str(e)}"
-        send_wechat_message(message=error_msg, message_type="error")
+        send_and_save_wechat_message(error_msg, "error")
         return
     
     # 2. 初始化信号容器
@@ -960,7 +1037,7 @@ def main():
     for category, signals in [("MA", ma_signals), ("MACD", macd_signals), ("RSI", rsi_signals), ("KDJ", kdj_signals)]:
         message = format_single_signal(category, signals)
         if message.strip():
-            send_wechat_message(message=message, message_type="position")
+            send_and_save_wechat_message(message, "position")
             total_messages += 1
             time.sleep(1)
     
@@ -968,7 +1045,7 @@ def main():
     threema_messages = format_threema_signal(threema_signals)
     for message in threema_messages:
         if message.strip():
-            send_wechat_message(message=message, message_type="position")
+            send_and_save_wechat_message(message, "position")
             total_messages += 1
             time.sleep(1)
     
@@ -976,7 +1053,7 @@ def main():
     for combination in double_signals:
         message = format_double_signal(combination, double_signals[combination])
         if message.strip():
-            send_wechat_message(message=message, message_type="position")
+            send_and_save_wechat_message(message, "position")
             total_messages += 1
             time.sleep(1)
     
@@ -984,14 +1061,14 @@ def main():
     for combination in triple_signals:
         message = format_triple_signal(combination, triple_signals[combination])
         if message.strip():
-            send_wechat_message(message=message, message_type="position")
+            send_and_save_wechat_message(message, "position")
             total_messages += 1
             time.sleep(1)
     
     # 四指标共振信号
     message = format_quadruple_signal(quadruple_signals)
     if message.strip():
-        send_wechat_message(message=message, message_type="position")
+        send_and_save_wechat_message(message, "position")
         total_messages += 1
         time.sleep(1)
     
@@ -999,14 +1076,21 @@ def main():
         logger.info(f"股票📋指标共振--成功发送 {total_messages} 组交易信号到微信")
     else:
         msg = "【股票📋指标共振--多指标共振策略】\n今日未检测到有效交易信号"
-        send_wechat_message(message=msg, message_type="position")
+        send_and_save_wechat_message(msg, "position")
         logger.info("股票📋指标共振--未检测到有效交易信号")
    
-    # ========  【新增】调用封装函数发送txt文件内容  ============
+    # ========  【新增】调用封装函数发送txt文件内容，并保存该消息 ============
     if file_path and os.path.exists(file_path):
         logger.info("=== 发送-- 股票📋指标共振--所有股票代码文件内容 ===")
         title = "📋指标共振--3均线缠绕--所有股票代码清单"
+        # 调用原始 send_txt_file 发送文件内容
         send_txt_file(file_path, title, "position")
+        # 手动构造并保存文件内容消息（确保与发送内容一致）
+        with open(file_path, 'r', encoding='ascii') as f:
+            file_content = f.read().strip()
+        # 构造消息：通常 send_txt_file 会发送标题+文件内容
+        file_message = f"{title}\n\n{file_content}"
+        save_message_to_file(file_message, "position")
     
 if __name__ == "__main__":
     # 配置日志
@@ -1029,5 +1113,5 @@ if __name__ == "__main__":
     except Exception as e:
         error_msg = f"【📋指标共振-- - 多指标共振策略】执行时发生未预期错误: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        send_wechat_message(message=error_msg, message_type="error")
+        send_and_save_wechat_message(error_msg, "error")
         logger.info("===== 股票📋指标共振--任务执行结束：error =====")

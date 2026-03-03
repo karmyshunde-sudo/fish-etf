@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（优化消息版 + 消息保存）
+stock_t3.py - 小市值布林带策略（优化消息版 + 消息保存 + 核心标题优化）
 
 优化：
 1. 无股票时显示格式化的消息
 2. 修正布林带位置显示错误
 3. 简化消息格式，确保可读性
 4. 所有推送到微信的消息自动保存到 data/stock 并提交到 Git 仓库
+5. 消息标题统一添加“小市值布林带”核心提示，便于识别
 """
 
 import os
@@ -403,7 +404,7 @@ def calculate_stock_score(stock_data):
     return min(score, 100)
 
 def format_position_message(position):
-    """格式化持仓股票消息"""
+    """格式化持仓股票消息（第一行已添加策略核心提示）"""
     buy_price = position["buy_price"]
     current_price = position.get("current_price", buy_price)
     hold_days = position.get("hold_days", 0)
@@ -425,7 +426,7 @@ def format_position_message(position):
     else:
         suggestion = "继续持有"
     
-    message = f"""【==原有持仓明细及分析==】
+    message = f"""【小市值布林带 - 原有持仓明细】
 💰{position['code']} {position['name']}
 📊 持有 {position.get('target_shares', 0):,}股
 
@@ -439,14 +440,14 @@ def format_position_message(position):
     return message
 
 def format_new_stock_message(stock_data):
-    """格式化新推荐股票消息"""
+    """格式化新推荐股票消息（第一行已包含策略核心）"""
     score = stock_data["score"]
     close_price = stock_data["close"]
     buy_price = close_price
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
     
-    message = f"""【====小市值布林带策略====】
+    message = f"""【小市值布林带 - 新推荐股票】
 💰{stock_data['code']} {stock_data['name']}
 
 🎯 交易计划：
@@ -473,10 +474,10 @@ def format_new_stock_message(stock_data):
     return message
 
 def format_no_stock_message():
-    """格式化无股票消息"""
+    """格式化无股票消息（第一行已添加策略核心）"""
     current_date = datetime.now().strftime("%Y-%m-%d")
     
-    message = f"""【T3策略 - 小市值布林带策略】
+    message = f"""【小市值布林带 - 暂无符合条件的股票】
         
 📅 日期: {current_date}
         
@@ -499,9 +500,9 @@ def format_no_stock_message():
     return message
 
 def format_trade_summary(summary):
-    """格式化交易汇总消息"""
+    """格式化交易汇总消息（第一行已添加策略核心）"""
     if not summary:
-        return """【====策略交易汇总====】
+        return """【小市值布林带 - 策略交易汇总】
 
 📊 交易统计:
 • 暂无交易记录
@@ -510,7 +511,7 @@ def format_trade_summary(summary):
     
     profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
     
-    message = f"""【====策略交易汇总====】
+    message = f"""【小市值布林带 - 策略交易汇总】
 
 📅 策略统计周期:
 • 开始日期: {summary['start_date']}
@@ -667,9 +668,9 @@ def main():
         # 2. 更新持仓状态
         sold_positions = position_manager.update_positions(current_date)
         
-        # 3. 如果有卖出的股票，发送卖出提示（保存）
+        # 3. 如果有卖出的股票，发送卖出提示（第一行已添加策略核心）
         if sold_positions:
-            sell_msg = "【⚠️ 卖出提示】\n\n"
+            sell_msg = "【小市值布林带 - 卖出提示】\n\n"
             for pos in sold_positions:
                 sell_msg += f"• {pos['code']} {pos['name']} - {pos['reason']}\n"
             send_and_save_wechat_message(sell_msg, "position")
@@ -711,7 +712,7 @@ def main():
         logger.info("===== 策略执行完成 =====")
         
     except Exception as e:
-        error_msg = f"【策略执行错误】\n错误详情：{str(e)}"
+        error_msg = f"【小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
         send_and_save_wechat_message(error_msg, "error")
 

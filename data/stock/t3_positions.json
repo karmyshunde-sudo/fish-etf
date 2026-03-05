@@ -8,5 +8,15 @@
     "take_profit": 3.927,
     "position_pct": 0.25,
     "target_shares": 7000
+  },
+  {
+    "code": "300840",
+    "name": "酷特智能",
+    "buy_date": "2026-03-05",
+    "buy_price": 18.29,
+    "stop_loss": 17.3755,
+    "take_profit": 20.119,
+    "position_pct": 0.25,
+    "target_shares": 1300
   }
 ]

@@ -8,5 +8,15 @@
     "position_pct": 0.25,
     "target_shares": 7000,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "300840",
+    "name": "酷特智能",
+    "date": "2026-03-05",
+    "price": 18.29,
+    "position_pct": 0.25,
+    "target_shares": 1300,
+    "amount": 25000.0
   }
 ]

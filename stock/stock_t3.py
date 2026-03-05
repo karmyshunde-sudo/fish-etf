@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（终极增强版：路径显示 + 写入验证）
-
-【重要说明】
-- 状态消息中会显示持仓文件和交易记录文件的完整路径，方便您检查文件位置。
-- 每次保存文件后，程序会验证文件是否成功写入，若失败则记录错误日志。
-- 完全兼容原项目结构，不修改 Config.DATA_DIR 等配置。
-
-如果遇到“持仓文件不存在”的问题，请根据消息中显示的路径，检查：
-1. 该路径所在的目录是否存在（程序会自动创建，但可能因权限问题失败）。
-2. 运行环境（如 Docker、CI）是否保留了该目录的内容（挂载卷/缓存）。
-3. 文件写入权限是否正确。
+stock_t3.py - 小市值布林带策略（终极版：消息保存 + Git提交 + 状态消息优化）
 """
 
 import os
@@ -63,7 +53,7 @@ logger = logging.getLogger(__name__)
 os.makedirs(Config.DATA_DIR, exist_ok=True)
 os.makedirs(os.path.join(Config.DATA_DIR, "stock"), exist_ok=True)
 
-# ========== 消息保存函数 ==========
+# ========== 消息保存函数（确保每条消息都保存到 data/stock 并提交 Git）==========
 def extract_title_from_message(message):
     """从消息内容中提取第一行作为标题"""
     lines = message.strip().split('\n')
@@ -102,6 +92,7 @@ def save_message_to_file(message, message_type):
             f.write(message)
 
         logger.info(f"✅ 已保存微信消息到文件: {file_path}")
+        # 提交到Git仓库
         success = commit_files_in_batches(file_path, "LAST_FILE")
         if success:
             logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
@@ -166,21 +157,17 @@ class TradeRecorder:
     
     def load_trades_with_backup(self):
         """加载交易记录，主文件失败时尝试从备份恢复"""
-        # 先尝试主文件
         trades = self._load_from_file(self.trade_file)
         if trades is not None:
             return trades
         
-        # 主文件失败，尝试备份
         logger.warning("主交易记录文件加载失败，尝试从备份恢复...")
         trades = self._load_from_file(self.backup_file)
         if trades is not None:
             logger.info("✅ 成功从备份恢复交易记录")
-            # 将恢复的数据写回主文件
             self._save_to_file(trades, self.trade_file)
             return trades
         
-        # 都失败，返回空列表
         logger.error("❌ 无法加载任何交易记录，将初始化空列表。")
         return []
     
@@ -188,7 +175,6 @@ class TradeRecorder:
         """保存交易记录到主文件和备份"""
         success = self._save_to_file(self.trades, self.trade_file)
         if success:
-            # 同时写入备份
             self._save_to_file(self.trades, self.backup_file)
             logger.info(f"交易记录已保存，当前共 {len(self.trades)} 条记录")
         else:
@@ -233,16 +219,13 @@ class TradeRecorder:
         """获取交易统计汇总"""
         if not self.trades:
             return None
-        
         start_date = self.trades[0]["date"]
         buy_trades = [t for t in self.trades if t["type"] == "buy"]
         sell_trades = [t for t in self.trades if t["type"] == "sell"]
-        
         total_buy_times = len(buy_trades)
         total_sell_times = len(sell_trades)
         total_cost = sum(t.get("amount", 0) for t in buy_trades)
         total_profit = sum(t.get("pnl_amount", 0) for t in sell_trades)
-        
         return {
             "start_date": start_date,
             "total_buy_times": total_buy_times,
@@ -288,7 +271,6 @@ class PositionManager:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            # 验证文件是否成功写入
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                 logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
                 return True
@@ -328,7 +310,6 @@ class PositionManager:
         """更新持仓状态"""
         updated_positions = []
         sold_positions = []
-        
         for position in self.positions:
             try:
                 code = position["code"]
@@ -340,7 +321,6 @@ class PositionManager:
                 
                 file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
                 current_price = buy_price
-                
                 if os.path.exists(file_path):
                     try:
                         df = pd.read_csv(file_path)
@@ -377,7 +357,6 @@ class PositionManager:
                     continue
                 
                 updated_positions.append(position)
-                
             except Exception as e:
                 logger.error(f"更新持仓 {position.get('code')} 失败: {str(e)}")
                 updated_positions.append(position)
@@ -398,7 +377,6 @@ class PositionManager:
             "position_pct": position_pct,
             "target_shares": int(100000 * position_pct / buy_price / 100) * 100
         }
-        
         self.trade_recorder.record_buy(stock_data, buy_price, position_pct)
         self.positions.append(new_position)
         self.save_positions()
@@ -411,9 +389,8 @@ class PositionManager:
         """获取持仓股票代码"""
         return [pos["code"] for pos in self.positions]
 
-# ========== 技术指标函数 ==========
+# ========== 技术指标函数（与原代码相同）==========
 def calculate_bollinger_bands(df):
-    """计算布林带指标"""
     try:
         middle_band = df["收盘"].rolling(window=BOLLINGER_PERIOD).mean()
         std_dev = df["收盘"].rolling(window=BOLLINGER_PERIOD).std()
@@ -433,7 +410,6 @@ def calculate_bollinger_bands(df):
         return None
 
 def calculate_rsi(df):
-    """计算RSI指标"""
     try:
         delta = df["收盘"].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=RSI_PERIOD).mean()
@@ -446,7 +422,6 @@ def calculate_rsi(df):
         return None
 
 def calculate_volume_indicators(df):
-    """计算成交量指标"""
     try:
         volume_ma = df["成交量"].rolling(window=VOLUME_MA_PERIOD).mean()
         volume_ratio = df["成交量"].iloc[-1] / volume_ma.iloc[-1]
@@ -456,9 +431,7 @@ def calculate_volume_indicators(df):
         return None
 
 def calculate_stock_score(stock_data):
-    """计算股票综合评分"""
     score = 0
-    
     market_cap = stock_data.get("market_cap", 50)
     if market_cap <= MIN_MARKET_CAP:
         score += 40
@@ -504,15 +477,12 @@ def calculate_stock_score(stock_data):
     return min(score, 100)
 
 def filter_stocks(exclude_codes=None):
-    """筛选股票"""
     if exclude_codes is None:
         exclude_codes = []
-    
     basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
     if not os.path.exists(basic_info_file):
         logger.error("股票列表文件不存在")
         return []
-    
     try:
         basic_info_df = pd.read_csv(basic_info_file)
         logger.info(f"读取股票列表，共 {len(basic_info_df)} 只股票")
@@ -521,55 +491,41 @@ def filter_stocks(exclude_codes=None):
         return []
     
     qualified_stocks = []
-    
     for _, row in basic_info_df.iterrows():
         code = str(row["代码"])
-        
         if code in exclude_codes:
             continue
-        
         market_cap = row.get("总市值", row.get("市值", 0))
         if market_cap == 0:
             market_cap = row.get("流通市值", 0)
-        
         if market_cap < MIN_MARKET_CAP * 1e8 or market_cap > MAX_MARKET_CAP * 1e8:
             continue
-        
         file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
         if not os.path.exists(file_path):
             continue
-        
         try:
             df = pd.read_csv(file_path)
             if len(df) < MIN_DATA_DAYS:
                 continue
-            
             df = df.sort_values("日期").reset_index(drop=True)
             latest = df.iloc[-1]
             name = row["名称"]
-            
             turnover_rate = latest.get("换手率", 0)
             if turnover_rate < MIN_TURNOVER_RATE or turnover_rate > MAX_TURNOVER_RATE:
                 continue
-            
             bollinger = calculate_bollinger_bands(df)
             if bollinger is None:
                 continue
-            
             rsi = calculate_rsi(df)
             if rsi is None:
                 continue
-            
             volume_ratio = calculate_volume_indicators(df)
             if volume_ratio is None or volume_ratio < MIN_VOLUME_RATIO:
                 continue
-            
             if bollinger["percent_b"] > BOLLINGER_THRESHOLD * 100:
                 continue
-            
             if rsi > RSI_OVERSOLD + 20:
                 continue
-            
             stock_data = {
                 "code": code,
                 "name": name,
@@ -584,29 +540,22 @@ def filter_stocks(exclude_codes=None):
                 "rsi": rsi,
                 "volume_ratio": volume_ratio
             }
-            
             stock_data["score"] = calculate_stock_score(stock_data)
             qualified_stocks.append(stock_data)
-            
         except Exception as e:
             logger.error(f"处理股票 {code} 时出错: {str(e)}")
             continue
-    
     qualified_stocks.sort(key=lambda x: x["score"], reverse=True)
     logger.info(f"筛选完成，找到 {len(qualified_stocks)} 只符合条件的股票")
     return qualified_stocks
 
 def format_position_message(position):
-    """格式化持仓股票消息"""
     buy_price = position["buy_price"]
     current_price = position.get("current_price", buy_price)
     hold_days = position.get("hold_days", 0)
-    
     pnl_pct = (current_price / buy_price - 1) * 100
-    
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
-    
     if current_price <= stop_loss:
         suggestion = "清仓"
     elif current_price >= take_profit:
@@ -617,7 +566,6 @@ def format_position_message(position):
         suggestion = "继续持有（已有盈利）"
     else:
         suggestion = "继续持有"
-    
     message = f"""【小市值布林带 - 当前持仓明细】
 💰{position['code']} {position['name']}
 📊 持有 {position.get('target_shares', 0):,}股
@@ -632,13 +580,11 @@ def format_position_message(position):
     return message
 
 def format_new_stock_message(stock_data):
-    """格式化新推荐股票消息"""
     score = stock_data["score"]
     close_price = stock_data["close"]
     buy_price = close_price
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
-    
     message = f"""【小市值布林带 - 新推荐股票】
 💰{stock_data['code']} {stock_data['name']}
 
@@ -664,9 +610,7 @@ def format_new_stock_message(stock_data):
     return message
 
 def format_no_stock_message():
-    """格式化无股票消息"""
     current_date = datetime.now().strftime("%Y-%m-%d")
-    
     message = f"""【小市值布林带 - 暂无符合条件的股票】
         
 📅 日期: {current_date}
@@ -686,11 +630,9 @@ def format_no_stock_message():
 • 今日数据尚未更新完全
         
 🔄 建议: 保持耐心，等待更好的入场时机"""
-    
     return message
 
 def format_trade_summary(summary):
-    """格式化交易汇总消息"""
     if not summary:
         return """【小市值布林带 - 策略交易汇总】
 
@@ -698,9 +640,7 @@ def format_trade_summary(summary):
 • 暂无交易记录
 • 策略处于初始化阶段
 • 等待符合条件的股票出现"""
-    
     profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
-    
     message = f"""【小市值布林带 - 策略交易汇总】
 
 📅 策略统计周期:
@@ -714,7 +654,6 @@ def format_trade_summary(summary):
 • 总买入成本: {summary['total_cost']:,.0f}元
 • 总实现利润: {profit_symbol} {summary['total_profit']:+,.0f}元
 • 整体盈利率: {profit_symbol} {summary['profit_rate']:+.2f}%"""
-    
     return message
 
 def format_status_message(history_positions_count, new_stocks_count, start_date,
@@ -754,41 +693,27 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
 def send_stock_messages(positions, new_stocks):
     """发送股票消息（每条消息都会保存到文件）"""
     all_messages = []
-    
-    # 先添加持仓股票消息
     for position in positions:
         all_messages.append(format_position_message(position))
-    
-    # 再添加新推荐股票消息
     for stock in new_stocks:
         all_messages.append(format_new_stock_message(stock))
-    
-    # 如果没有消息，返回False
     if not all_messages:
         return False
-    
-    # 分条发送，每批最多2条消息
     total_batches = (len(all_messages) + 1) // 2
     for batch_index in range(total_batches):
         start_idx = batch_index * 2
         end_idx = min(start_idx + 2, len(all_messages))
         batch = all_messages[start_idx:end_idx]
-        
         message_header = f"==第{batch_index + 1}条/共{total_batches}条消息=="
         message_body = "\n\n==================\n\n".join(batch)
         full_message = f"{message_header}\n\n{message_body}"
-        
         send_and_save_wechat_message(full_message, "position")
-        
         if batch_index < total_batches - 1:
             time.sleep(2)
-    
     return True
 
 def main():
-    """主函数"""
     logger.info("===== 开始执行小市值布林带策略 =====")
-    
     try:
         current_date = datetime.now().strftime("%Y-%m-%d")
         
@@ -796,18 +721,7 @@ def main():
         trade_recorder = TradeRecorder()
         position_manager = PositionManager(trade_recorder)
         
-        # 2. 收集文件状态信息（用于状态消息）
-        positions_file_exists = os.path.exists(POSITION_FILE)
-        positions_file_empty = False
-        positions_file_size = 0
-        if positions_file_exists:
-            positions_file_size = os.path.getsize(POSITION_FILE)
-            positions_file_empty = (positions_file_size == 0)
-        
-        trades_file_exists = os.path.exists(TRADE_RECORDS_FILE)
-        trades_count = len(trade_recorder.trades)  # 从加载的记录中获取
-        
-        # 记录历史持仓数量（加载后的原始数量）
+        # 2. 记录历史持仓数量（加载后的原始数量）
         history_positions_count = len(position_manager.positions)
         
         # 3. 更新持仓状态
@@ -832,7 +746,7 @@ def main():
         available_slots = max(0, TARGET_HOLDINGS - len(current_positions))
         new_stocks = qualified_stocks[:min(available_slots, len(qualified_stocks))]
         
-        # 8. 添加新持仓记录
+        # 8. 添加新持仓记录（这一步会创建/更新文件）
         for stock in new_stocks:
             position_manager.add_position(stock, stock["close"], MAX_POSITION_PCT)
         
@@ -843,7 +757,19 @@ def main():
         trade_summary = trade_recorder.get_trade_summary()
         start_date = trade_summary['start_date'] if trade_summary else None
         
-        # 11. 发送策略状态消息（第一条），包含文件路径
+        # ========== 在买入操作后重新检查文件状态 ==========
+        positions_file_exists = os.path.exists(POSITION_FILE)
+        positions_file_empty = False
+        positions_file_size = 0
+        if positions_file_exists:
+            positions_file_size = os.path.getsize(POSITION_FILE)
+            positions_file_empty = (positions_file_size == 0)
+        
+        trades_file_exists = os.path.exists(TRADE_RECORDS_FILE)
+        trades_count = len(trade_recorder.trades)  # 从加载的记录中获取
+        # ==============================================
+        
+        # 11. 发送策略状态消息（第一条），此时文件应该已创建
         status_msg = format_status_message(
             history_positions_count=history_positions_count,
             new_stocks_count=len(new_stocks),
@@ -872,7 +798,6 @@ def main():
         send_and_save_wechat_message(summary_msg, "position")
         
         logger.info("===== 策略执行完成 =====")
-        
     except Exception as e:
         error_msg = f"【小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -887,5 +812,4 @@ if __name__ == "__main__":
             logging.FileHandler(os.path.join(Config.LOG_DIR, "stock_t3_strategy.log"))
         ]
     )
-    
     main()

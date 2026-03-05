@@ -1,0 +1,12 @@
+[
+  {
+    "type": "buy",
+    "code": "600082",
+    "name": "海泰发展",
+    "date": "2026-03-05",
+    "price": 3.57,
+    "position_pct": 0.25,
+    "target_shares": 7000,
+    "amount": 25000.0
+  }
+]

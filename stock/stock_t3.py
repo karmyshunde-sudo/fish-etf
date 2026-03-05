@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（生产级增强版：带详细状态消息 + 备份恢复）
+stock_t3.py - 小市值布林带策略（终极增强版：路径显示 + 写入验证）
 
 【重要说明】
-- 本代码不修改原有 Config.DATA_DIR 等配置，完全兼容原项目结构。
-- 添加了详细的策略状态消息，帮助诊断历史持仓加载问题。
-- 增加了备份恢复机制，防止文件损坏导致数据丢失。
-- 所有文件操作均有详细日志输出，便于排查。
+- 状态消息中会显示持仓文件和交易记录文件的完整路径，方便您检查文件位置。
+- 每次保存文件后，程序会验证文件是否成功写入，若失败则记录错误日志。
+- 完全兼容原项目结构，不修改 Config.DATA_DIR 等配置。
 
-如果遇到历史持仓加载为0的情况，请查看状态消息中关于持仓文件的详细信息：
-- 若文件不存在：说明持久化存储未保留（检查运行环境是否重置了 data 目录）。
-- 若文件存在但为空：说明上次运行没有成功写入持仓。
-- 若文件存在且非空但加载为0：可能是文件损坏，备份恢复机制应自动处理。
-
-请确保您的运行环境（如 Docker、CI）正确挂载/缓存了 data 目录。
+如果遇到“持仓文件不存在”的问题，请根据消息中显示的路径，检查：
+1. 该路径所在的目录是否存在（程序会自动创建，但可能因权限问题失败）。
+2. 运行环境（如 Docker、CI）是否保留了该目录的内容（挂载卷/缓存）。
+3. 文件写入权限是否正确。
 """
 
 import os
@@ -66,7 +63,7 @@ logger = logging.getLogger(__name__)
 os.makedirs(Config.DATA_DIR, exist_ok=True)
 os.makedirs(os.path.join(Config.DATA_DIR, "stock"), exist_ok=True)
 
-# ========== 消息保存函数（与原代码一致）==========
+# ========== 消息保存函数 ==========
 def extract_title_from_message(message):
     """从消息内容中提取第一行作为标题"""
     lines = message.strip().split('\n')
@@ -122,7 +119,7 @@ def send_and_save_wechat_message(message, message_type):
 # ============================================================
 
 class TradeRecorder:
-    """交易记录器（增强版：支持备份和恢复）"""
+    """交易记录器（增强版：支持备份和恢复 + 写入验证）"""
     
     def __init__(self):
         self.trade_file = TRADE_RECORDS_FILE
@@ -151,13 +148,18 @@ class TradeRecorder:
             return None
     
     def _save_to_file(self, data, filepath):
-        """保存数据到指定文件"""
+        """保存数据到指定文件，并验证写入是否成功"""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.debug(f"数据已保存到 {filepath}")
-            return True
+            # 验证文件是否成功写入
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
+                return True
+            else:
+                logger.error(f"文件保存后验证失败: {filepath} 不存在或大小为0")
+                return False
         except Exception as e:
             logger.error(f"保存文件 {filepath} 失败: {str(e)}")
             return False
@@ -251,7 +253,7 @@ class TradeRecorder:
         }
 
 class PositionManager:
-    """持仓管理器（增强版：支持备份和恢复）"""
+    """持仓管理器（增强版：支持备份和恢复 + 写入验证）"""
     
     def __init__(self, trade_recorder):
         self.positions_file = POSITION_FILE
@@ -281,13 +283,18 @@ class PositionManager:
             return None
     
     def _save_to_file(self, data, filepath):
-        """保存数据到指定文件"""
+        """保存数据到指定文件，并验证写入是否成功"""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.debug(f"数据已保存到 {filepath}")
-            return True
+            # 验证文件是否成功写入
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
+                return True
+            else:
+                logger.error(f"文件保存后验证失败: {filepath} 不存在或大小为0")
+                return False
         except Exception as e:
             logger.error(f"保存文件 {filepath} 失败: {str(e)}")
             return False
@@ -712,23 +719,24 @@ def format_trade_summary(summary):
 
 def format_status_message(history_positions_count, new_stocks_count, start_date,
                           positions_file_exists, positions_file_empty, positions_file_size,
-                          trades_file_exists, trades_count):
+                          trades_file_exists, trades_count,
+                          positions_file_path, trades_file_path):
     """
-    生成详细的策略状态消息，包含持仓文件和交易记录文件的详细信息。
+    生成详细的策略状态消息，包含文件路径信息。
     """
     # 处理持仓文件状态描述
     if not positions_file_exists:
-        positions_status = "❌ 不存在"
+        positions_status = f"❌ 不存在 (期望路径: {positions_file_path})"
     elif positions_file_empty:
-        positions_status = "⚠️ 存在但为空 (0字节)"
+        positions_status = f"⚠️ 存在但为空 (0字节) - {positions_file_path}"
     else:
-        positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录)"
+        positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录) - {positions_file_path}"
     
     # 处理交易记录文件状态描述
     if not trades_file_exists:
-        trades_status = "❌ 不存在"
+        trades_status = f"❌ 不存在 (期望路径: {trades_file_path})"
     else:
-        trades_status = f"✅ 存在 (含 {trades_count} 条记录)"
+        trades_status = f"✅ 存在 (含 {trades_count} 条记录) - {trades_file_path}"
     
     # 累计起始日期
     start_date_str = start_date if start_date else "无历史记录"
@@ -835,7 +843,7 @@ def main():
         trade_summary = trade_recorder.get_trade_summary()
         start_date = trade_summary['start_date'] if trade_summary else None
         
-        # 11. 发送策略状态消息（第一条）
+        # 11. 发送策略状态消息（第一条），包含文件路径
         status_msg = format_status_message(
             history_positions_count=history_positions_count,
             new_stocks_count=len(new_stocks),
@@ -844,7 +852,9 @@ def main():
             positions_file_empty=positions_file_empty,
             positions_file_size=positions_file_size,
             trades_file_exists=trades_file_exists,
-            trades_count=trades_count
+            trades_count=trades_count,
+            positions_file_path=POSITION_FILE,
+            trades_file_path=TRADE_RECORDS_FILE
         )
         send_and_save_wechat_message(status_msg, "position")
         time.sleep(2)

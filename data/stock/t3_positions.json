@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "code": "600082",
+    "name": "海泰发展",
+    "buy_date": "2026-03-05",
+    "buy_price": 3.57,
+    "stop_loss": 3.3914999999999997,
+    "take_profit": 3.927,
+    "position_pct": 0.25,
+    "target_shares": 7000
+  }
+]

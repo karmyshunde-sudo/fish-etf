@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（终极版：统一 stock 目录 + Git诊断）
+stock_t3.py - 小市值布林带策略（终极版：持仓写入验证 + Git提交 + 详细诊断）
 """
 
 import os
@@ -58,10 +58,8 @@ os.makedirs(STOCK_DATA_DIR, exist_ok=True)
 
 # ========== Git 状态检查辅助函数 ==========
 def is_file_tracked_by_git(file_path):
-    """检查文件是否已被Git跟踪（在当前工作目录的Git仓库中）"""
     try:
         dir_path = os.path.dirname(file_path) or '.'
-        # 切换到文件所在目录执行 git ls-files
         result = subprocess.run(
             ['git', 'ls-files', '--error-unmatch', os.path.basename(file_path)],
             cwd=dir_path,
@@ -70,15 +68,10 @@ def is_file_tracked_by_git(file_path):
             timeout=5
         )
         return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        logger.error(f"检查Git跟踪状态超时: {file_path}")
-        return False
-    except Exception as e:
-        logger.error(f"检查Git跟踪状态异常: {e}")
+    except:
         return False
 
 def log_git_status(file_path, action_desc):
-    """记录文件的Git状态（是否被跟踪）"""
     tracked = is_file_tracked_by_git(file_path)
     if tracked:
         logger.info(f"✅ {action_desc} 后，文件已被Git跟踪: {file_path}")
@@ -87,7 +80,7 @@ def log_git_status(file_path, action_desc):
     return tracked
 # ========================================
 
-# ========== 消息保存函数（增强Git诊断）==========
+# ========== 消息保存函数（与 tickten.py 风格一致）==========
 def extract_title_from_message(message):
     lines = message.strip().split('\n')
     if lines:
@@ -99,12 +92,8 @@ def extract_title_from_message(message):
     return "未知信号"
 
 def save_message_to_file(message, message_type):
-    """
-    保存微信消息内容到txt文件，并提交到Git仓库（立即提交）。
-    文件保存到 data/stock 目录，文件名格式：t3_{标题}_{时间戳}_{哈希}.txt
-    """
     try:
-        stock_dir = STOCK_DATA_DIR  # 已确保存在
+        stock_dir = STOCK_DATA_DIR
         message_hash = hashlib.md5(message.encode('utf-8')).hexdigest()[:8]
         now = get_beijing_time()
         timestamp = now.strftime("%Y%m%d_%H%M%S")
@@ -121,14 +110,12 @@ def save_message_to_file(message, message_type):
             f.write(message)
 
         logger.info(f"✅ 已保存微信消息到文件: {file_path}")
-        # 提交到Git仓库
         success = commit_files_in_batches(file_path, "LAST_FILE")
         if success:
             logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
         else:
             logger.error(f"❌ 提交消息文件到Git仓库失败: {file_path}")
         
-        # 诊断：检查Git跟踪状态
         log_git_status(file_path, "保存消息文件")
         return True
     except Exception as e:
@@ -136,13 +123,12 @@ def save_message_to_file(message, message_type):
         return False
 
 def send_and_save_wechat_message(message, message_type):
-    """发送微信消息并保存内容到文件"""
     send_wechat_message(message=message, message_type=message_type)
     save_message_to_file(message, message_type)
 # ============================================================
 
 class TradeRecorder:
-    """交易记录器（增强版：支持备份和恢复 + 写入验证）"""
+    """交易记录器（增强版：支持备份和恢复 + 写入验证 + Git提交）"""
     
     def __init__(self):
         self.trade_file = TRADE_RECORDS_FILE
@@ -175,8 +161,15 @@ class TradeRecorder:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
-                return True
+                # 验证写入的内容是否与原始数据一致
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if loaded == data:
+                    logger.debug(f"数据已保存并验证通过: {filepath} (大小: {os.path.getsize(filepath)} 字节)")
+                    return True
+                else:
+                    logger.error(f"文件内容验证失败: {filepath} 内容与原始数据不符")
+                    return False
             else:
                 logger.error(f"文件保存后验证失败: {filepath} 不存在或大小为0")
                 return False
@@ -204,7 +197,12 @@ class TradeRecorder:
         if success:
             self._save_to_file(self.trades, self.backup_file)
             logger.info(f"交易记录已保存，当前共 {len(self.trades)} 条记录")
-            # 诊断：检查Git跟踪状态
+            # 模仿 tickten.py：提交到Git仓库
+            commit_success = commit_files_in_batches(self.trade_file, "LAST_FILE")
+            if commit_success:
+                logger.info(f"✅ 成功提交交易记录文件到Git仓库: {self.trade_file}")
+            else:
+                logger.error(f"❌ 提交交易记录文件到Git仓库失败: {self.trade_file}")
             log_git_status(self.trade_file, "保存交易记录")
         else:
             logger.error("交易记录保存失败！")
@@ -262,13 +260,14 @@ class TradeRecorder:
         }
 
 class PositionManager:
-    """持仓管理器（增强版：支持备份和恢复 + 写入验证）"""
+    """持仓管理器（增强版：支持备份和恢复 + 写入验证 + Git提交 + 内容诊断）"""
     
     def __init__(self, trade_recorder):
         self.positions_file = POSITION_FILE
         self.backup_file = POSITION_FILE + ".bak"
         self.trade_recorder = trade_recorder
         self.positions = self.load_positions_with_backup()
+        logger.info(f"初始化持仓管理器，加载到 {len(self.positions)} 个持仓")
     
     def _load_from_file(self, filepath):
         if not os.path.exists(filepath):
@@ -296,13 +295,26 @@ class PositionManager:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
-                return True
+                # 验证内容一致性
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if loaded == data:
+                    logger.debug(f"持仓数据已保存并验证通过: {filepath} (大小: {os.path.getsize(filepath)} 字节, 含 {len(data)} 条记录)")
+                    return True
+                else:
+                    logger.error(f"持仓文件内容验证失败: {filepath}")
+                    # 记录错误详情
+                    logger.error(f"内存数据长度: {len(data)}, 文件数据长度: {len(loaded)}")
+                    if data and len(data) > 0:
+                        logger.error(f"内存第一条: {data[0]}")
+                    if loaded and len(loaded) > 0:
+                        logger.error(f"文件第一条: {loaded[0]}")
+                    return False
             else:
-                logger.error(f"文件保存后验证失败: {filepath} 不存在或大小为0")
+                logger.error(f"持仓文件保存后验证失败: {filepath} 不存在或大小为0")
                 return False
         except Exception as e:
-            logger.error(f"保存文件 {filepath} 失败: {str(e)}")
+            logger.error(f"保存持仓文件 {filepath} 失败: {str(e)}")
             return False
     
     def load_positions_with_backup(self):
@@ -321,11 +333,24 @@ class PositionManager:
         return []
     
     def save_positions(self):
+        """保存持仓到主文件和备份，并提交到Git"""
+        logger.info(f"准备保存持仓，当前内存中持仓数量: {len(self.positions)}")
+        if self.positions:
+            sample = self.positions[0] if self.positions else {}
+            logger.info(f"持仓示例: {sample.get('code', 'N/A')} {sample.get('name', 'N/A')}")
         success = self._save_to_file(self.positions, self.positions_file)
         if success:
+            # 保存备份
             self._save_to_file(self.positions, self.backup_file)
             logger.info(f"持仓已保存，当前共 {len(self.positions)} 个持仓")
-            # 诊断：检查Git跟踪状态
+            
+            # 模仿 tickten.py：提交到Git仓库
+            commit_success = commit_files_in_batches(self.positions_file, "LAST_FILE")
+            if commit_success:
+                logger.info(f"✅ 成功提交持仓文件到Git仓库: {self.positions_file}")
+            else:
+                logger.error(f"❌ 提交持仓文件到Git仓库失败: {self.positions_file}")
+            
             log_git_status(self.positions_file, "保存持仓")
         else:
             logger.error("持仓保存失败！")
@@ -401,6 +426,10 @@ class PositionManager:
         }
         self.trade_recorder.record_buy(stock_data, buy_price, position_pct)
         self.positions.append(new_position)
+        logger.info(f"添加新持仓后，内存持仓数: {len(self.positions)}")
+        # 输出前几个持仓的代码，便于调试
+        codes = [p['code'] for p in self.positions[-5:]]
+        logger.info(f"最近持仓代码: {codes}")
         self.save_positions()
     
     def get_current_positions(self):
@@ -680,9 +709,6 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
                           positions_file_exists, positions_file_empty, positions_file_size,
                           trades_file_exists, trades_count,
                           positions_file_path, trades_file_path):
-    """
-    生成详细的策略状态消息，包含文件路径信息。
-    """
     if not positions_file_exists:
         positions_status = f"❌ 不存在 (期望路径: {positions_file_path})"
     elif positions_file_empty:

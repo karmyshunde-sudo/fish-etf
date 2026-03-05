@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（终极版：消息保存 + Git提交 + 状态消息优化）
+stock_t3.py - 小市值布林带策略（终极版：统一 stock 目录 + Git诊断）
 """
 
 import os
@@ -13,6 +13,7 @@ import sys
 import json
 import hashlib
 import re
+import subprocess
 from datetime import datetime, timedelta
 from config import Config
 from wechat_push.push import send_wechat_message, send_txt_file
@@ -41,21 +42,53 @@ MIN_POSITION_PCT = 0.20
 
 TARGET_HOLDINGS = 4
 MAX_HOLD_DAYS = 10
-POSITION_FILE = os.path.join(Config.DATA_DIR, "t3_positions.json")
-TRADE_RECORDS_FILE = os.path.join(Config.DATA_DIR, "t3_trade_records.json")
+
+# ===== 统一使用 stock 子目录存储所有策略相关文件 =====
+STOCK_DATA_DIR = os.path.join(Config.DATA_DIR, "stock")
+POSITION_FILE = os.path.join(STOCK_DATA_DIR, "t3_positions.json")
+TRADE_RECORDS_FILE = os.path.join(STOCK_DATA_DIR, "t3_trade_records.json")
 
 MIN_DATA_DAYS = 60
 # ================================
 
 logger = logging.getLogger(__name__)
 
-# 确保数据目录存在
-os.makedirs(Config.DATA_DIR, exist_ok=True)
-os.makedirs(os.path.join(Config.DATA_DIR, "stock"), exist_ok=True)
+# 确保 stock 子目录存在
+os.makedirs(STOCK_DATA_DIR, exist_ok=True)
 
-# ========== 消息保存函数（确保每条消息都保存到 data/stock 并提交 Git）==========
+# ========== Git 状态检查辅助函数 ==========
+def is_file_tracked_by_git(file_path):
+    """检查文件是否已被Git跟踪（在当前工作目录的Git仓库中）"""
+    try:
+        dir_path = os.path.dirname(file_path) or '.'
+        # 切换到文件所在目录执行 git ls-files
+        result = subprocess.run(
+            ['git', 'ls-files', '--error-unmatch', os.path.basename(file_path)],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"检查Git跟踪状态超时: {file_path}")
+        return False
+    except Exception as e:
+        logger.error(f"检查Git跟踪状态异常: {e}")
+        return False
+
+def log_git_status(file_path, action_desc):
+    """记录文件的Git状态（是否被跟踪）"""
+    tracked = is_file_tracked_by_git(file_path)
+    if tracked:
+        logger.info(f"✅ {action_desc} 后，文件已被Git跟踪: {file_path}")
+    else:
+        logger.warning(f"⚠️ {action_desc} 后，文件未被Git跟踪: {file_path}")
+    return tracked
+# ========================================
+
+# ========== 消息保存函数（增强Git诊断）==========
 def extract_title_from_message(message):
-    """从消息内容中提取第一行作为标题"""
     lines = message.strip().split('\n')
     if lines:
         title = lines[0].strip()
@@ -69,13 +102,9 @@ def save_message_to_file(message, message_type):
     """
     保存微信消息内容到txt文件，并提交到Git仓库（立即提交）。
     文件保存到 data/stock 目录，文件名格式：t3_{标题}_{时间戳}_{哈希}.txt
-    如果文件已存在（基于内容哈希），则跳过保存，避免重复。
     """
     try:
-        stock_dir = os.path.join(Config.DATA_DIR, "stock")
-        if not os.path.exists(stock_dir):
-            os.makedirs(stock_dir, exist_ok=True)
-
+        stock_dir = STOCK_DATA_DIR  # 已确保存在
         message_hash = hashlib.md5(message.encode('utf-8')).hexdigest()[:8]
         now = get_beijing_time()
         timestamp = now.strftime("%Y%m%d_%H%M%S")
@@ -98,6 +127,9 @@ def save_message_to_file(message, message_type):
             logger.info(f"✅ 成功提交消息文件到Git仓库: {file_path}")
         else:
             logger.error(f"❌ 提交消息文件到Git仓库失败: {file_path}")
+        
+        # 诊断：检查Git跟踪状态
+        log_git_status(file_path, "保存消息文件")
         return True
     except Exception as e:
         logger.error(f"❌ 保存微信消息文件失败: {str(e)}", exc_info=True)
@@ -118,7 +150,6 @@ class TradeRecorder:
         self.trades = self.load_trades_with_backup()
     
     def _load_from_file(self, filepath):
-        """从指定文件加载交易记录，失败返回None"""
         if not os.path.exists(filepath):
             logger.debug(f"交易记录文件不存在: {filepath}")
             return None
@@ -139,12 +170,10 @@ class TradeRecorder:
             return None
     
     def _save_to_file(self, data, filepath):
-        """保存数据到指定文件，并验证写入是否成功"""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            # 验证文件是否成功写入
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                 logger.debug(f"数据已保存到 {filepath} (大小: {os.path.getsize(filepath)} 字节)")
                 return True
@@ -156,7 +185,6 @@ class TradeRecorder:
             return False
     
     def load_trades_with_backup(self):
-        """加载交易记录，主文件失败时尝试从备份恢复"""
         trades = self._load_from_file(self.trade_file)
         if trades is not None:
             return trades
@@ -172,16 +200,16 @@ class TradeRecorder:
         return []
     
     def save_trades(self):
-        """保存交易记录到主文件和备份"""
         success = self._save_to_file(self.trades, self.trade_file)
         if success:
             self._save_to_file(self.trades, self.backup_file)
             logger.info(f"交易记录已保存，当前共 {len(self.trades)} 条记录")
+            # 诊断：检查Git跟踪状态
+            log_git_status(self.trade_file, "保存交易记录")
         else:
             logger.error("交易记录保存失败！")
     
     def record_buy(self, stock_data, buy_price, position_pct):
-        """记录买入交易"""
         trade = {
             "type": "buy",
             "code": stock_data["code"],
@@ -197,7 +225,6 @@ class TradeRecorder:
         logger.info(f"记录买入交易: {stock_data['code']} {stock_data['name']}")
     
     def record_sell(self, position, reason, sell_price):
-        """记录卖出交易"""
         trade = {
             "type": "sell",
             "code": position["code"],
@@ -216,7 +243,6 @@ class TradeRecorder:
         logger.info(f"记录卖出交易: {position['code']} {position['name']}")
     
     def get_trade_summary(self):
-        """获取交易统计汇总"""
         if not self.trades:
             return None
         start_date = self.trades[0]["date"]
@@ -245,7 +271,6 @@ class PositionManager:
         self.positions = self.load_positions_with_backup()
     
     def _load_from_file(self, filepath):
-        """从指定文件加载持仓，失败返回None"""
         if not os.path.exists(filepath):
             logger.debug(f"持仓文件不存在: {filepath}")
             return None
@@ -266,7 +291,6 @@ class PositionManager:
             return None
     
     def _save_to_file(self, data, filepath):
-        """保存数据到指定文件，并验证写入是否成功"""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -282,7 +306,6 @@ class PositionManager:
             return False
     
     def load_positions_with_backup(self):
-        """加载持仓，主文件失败时尝试从备份恢复"""
         positions = self._load_from_file(self.positions_file)
         if positions is not None:
             return positions
@@ -298,16 +321,16 @@ class PositionManager:
         return []
     
     def save_positions(self):
-        """保存持仓到主文件和备份"""
         success = self._save_to_file(self.positions, self.positions_file)
         if success:
             self._save_to_file(self.positions, self.backup_file)
             logger.info(f"持仓已保存，当前共 {len(self.positions)} 个持仓")
+            # 诊断：检查Git跟踪状态
+            log_git_status(self.positions_file, "保存持仓")
         else:
             logger.error("持仓保存失败！")
     
     def update_positions(self, current_date):
-        """更新持仓状态"""
         updated_positions = []
         sold_positions = []
         for position in self.positions:
@@ -366,7 +389,6 @@ class PositionManager:
         return sold_positions
     
     def add_position(self, stock_data, buy_price, position_pct):
-        """添加新持仓"""
         new_position = {
             "code": stock_data["code"],
             "name": stock_data["name"],
@@ -382,11 +404,9 @@ class PositionManager:
         self.save_positions()
     
     def get_current_positions(self):
-        """获取当前持仓"""
         return self.positions
     
     def get_holding_codes(self):
-        """获取持仓股票代码"""
         return [pos["code"] for pos in self.positions]
 
 # ========== 技术指标函数（与原代码相同）==========
@@ -663,7 +683,6 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
     """
     生成详细的策略状态消息，包含文件路径信息。
     """
-    # 处理持仓文件状态描述
     if not positions_file_exists:
         positions_status = f"❌ 不存在 (期望路径: {positions_file_path})"
     elif positions_file_empty:
@@ -671,13 +690,11 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
     else:
         positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录) - {positions_file_path}"
     
-    # 处理交易记录文件状态描述
     if not trades_file_exists:
         trades_status = f"❌ 不存在 (期望路径: {trades_file_path})"
     else:
         trades_status = f"✅ 存在 (含 {trades_count} 条记录) - {trades_file_path}"
     
-    # 累计起始日期
     start_date_str = start_date if start_date else "无历史记录"
     
     message = f"""【小市值布林带 - 策略状态】
@@ -691,7 +708,6 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
     return message
 
 def send_stock_messages(positions, new_stocks):
-    """发送股票消息（每条消息都会保存到文件）"""
     all_messages = []
     for position in positions:
         all_messages.append(format_position_message(position))
@@ -721,13 +737,13 @@ def main():
         trade_recorder = TradeRecorder()
         position_manager = PositionManager(trade_recorder)
         
-        # 2. 记录历史持仓数量（加载后的原始数量）
+        # 2. 记录历史持仓数量
         history_positions_count = len(position_manager.positions)
         
         # 3. 更新持仓状态
         sold_positions = position_manager.update_positions(current_date)
         
-        # 4. 如果有卖出的股票，发送卖出提示
+        # 4. 发送卖出提示
         if sold_positions:
             sell_msg = "【小市值布林带 - 卖出提示】\n\n"
             for pos in sold_positions:
@@ -746,18 +762,18 @@ def main():
         available_slots = max(0, TARGET_HOLDINGS - len(current_positions))
         new_stocks = qualified_stocks[:min(available_slots, len(qualified_stocks))]
         
-        # 8. 添加新持仓记录（这一步会创建/更新文件）
+        # 8. 添加新持仓记录
         for stock in new_stocks:
             position_manager.add_position(stock, stock["close"], MAX_POSITION_PCT)
         
         # 9. 重新获取持仓
         all_positions = position_manager.get_current_positions()
         
-        # 10. 获取交易汇总（用于获取开始日期）
+        # 10. 获取交易汇总
         trade_summary = trade_recorder.get_trade_summary()
         start_date = trade_summary['start_date'] if trade_summary else None
         
-        # ========== 在买入操作后重新检查文件状态 ==========
+        # 11. 检查文件状态（此时文件应该已创建）
         positions_file_exists = os.path.exists(POSITION_FILE)
         positions_file_empty = False
         positions_file_size = 0
@@ -766,10 +782,9 @@ def main():
             positions_file_empty = (positions_file_size == 0)
         
         trades_file_exists = os.path.exists(TRADE_RECORDS_FILE)
-        trades_count = len(trade_recorder.trades)  # 从加载的记录中获取
-        # ==============================================
+        trades_count = len(trade_recorder.trades)
         
-        # 11. 发送策略状态消息（第一条），此时文件应该已创建
+        # 12. 发送策略状态消息
         status_msg = format_status_message(
             history_positions_count=history_positions_count,
             new_stocks_count=len(new_stocks),
@@ -785,7 +800,7 @@ def main():
         send_and_save_wechat_message(status_msg, "position")
         time.sleep(2)
         
-        # 12. 发送持仓/推荐消息
+        # 13. 发送持仓/推荐消息
         if all_positions or new_stocks:
             send_stock_messages(all_positions, new_stocks)
             time.sleep(2)
@@ -793,7 +808,7 @@ def main():
             no_stock_msg = format_no_stock_message()
             send_and_save_wechat_message(no_stock_msg, "position")
         
-        # 13. 发送交易汇总消息
+        # 14. 发送交易汇总消息
         summary_msg = format_trade_summary(trade_summary)
         send_and_save_wechat_message(summary_msg, "position")
         

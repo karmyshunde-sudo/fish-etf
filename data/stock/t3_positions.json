@@ -7,7 +7,9 @@
     "stop_loss": 3.3914999999999997,
     "take_profit": 3.927,
     "position_pct": 0.25,
-    "target_shares": 7000
+    "target_shares": 7000,
+    "current_price": 3.68,
+    "hold_days": 1
   },
   {
     "code": "300840",
@@ -17,7 +19,9 @@
     "stop_loss": 17.3755,
     "take_profit": 20.119,
     "position_pct": 0.25,
-    "target_shares": 1300
+    "target_shares": 1300,
+    "current_price": 18.85,
+    "hold_days": 1
   },
   {
     "code": "301328",
@@ -27,7 +31,9 @@
     "stop_loss": 48.449999999999996,
     "take_profit": 56.1,
     "position_pct": 0.25,
-    "target_shares": 400
+    "target_shares": 400,
+    "current_price": 50.6,
+    "hold_days": 1
   },
   {
     "code": "688727",
@@ -37,6 +43,8 @@
     "stop_loss": 48.449999999999996,
     "take_profit": 56.1,
     "position_pct": 0.25,
-    "target_shares": 400
+    "target_shares": 400,
+    "current_price": 51.26,
+    "hold_days": 1
   }
 ]

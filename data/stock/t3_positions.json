@@ -8,8 +8,8 @@
     "take_profit": 3.927,
     "position_pct": 0.25,
     "target_shares": 7000,
-    "current_price": 3.89,
-    "hold_days": 6
+    "current_price": 3.85,
+    "hold_days": 7
   },
   {
     "code": "300840",
@@ -21,7 +21,7 @@
     "position_pct": 0.25,
     "target_shares": 1300,
     "current_price": 18.8,
-    "hold_days": 6
+    "hold_days": 7
   },
   {
     "code": "301328",
@@ -32,8 +32,8 @@
     "take_profit": 56.1,
     "position_pct": 0.25,
     "target_shares": 400,
-    "current_price": 52.77,
-    "hold_days": 6
+    "current_price": 53.12,
+    "hold_days": 7
   },
   {
     "code": "688727",
@@ -44,7 +44,7 @@
     "take_profit": 56.1,
     "position_pct": 0.25,
     "target_shares": 400,
-    "current_price": 52.39,
-    "hold_days": 6
+    "current_price": 51.42,
+    "hold_days": 7
   }
 ]

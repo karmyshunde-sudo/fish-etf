@@ -18,5 +18,15 @@
     "take_profit": 42.438,
     "position_pct": 0.25,
     "target_shares": 600
+  },
+  {
+    "code": "603681",
+    "name": "永冠新材",
+    "buy_date": "2026-03-16",
+    "buy_price": 19.42,
+    "stop_loss": 18.449,
+    "take_profit": 21.362000000000002,
+    "position_pct": 0.25,
+    "target_shares": 1200
   }
 ]

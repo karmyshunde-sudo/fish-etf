@@ -64,5 +64,18 @@
     "position_pct": 0.25,
     "pnl_pct": 0.27337342810278553,
     "pnl_amount": 65.00000000000092
+  },
+  {
+    "type": "sell",
+    "code": "301328",
+    "name": "维峰电子",
+    "date": "2026-03-16",
+    "buy_date": "2026-03-05",
+    "buy_price": 51.0,
+    "sell_price": 51.87,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 1.7058823529411793,
+    "pnl_amount": 347.999999999999
   }
 ]

@@ -77,5 +77,18 @@
     "position_pct": 0.25,
     "pnl_pct": 1.7058823529411793,
     "pnl_amount": 347.999999999999
+  },
+  {
+    "type": "sell",
+    "code": "688727",
+    "name": "恒坤新材",
+    "date": "2026-03-16",
+    "buy_date": "2026-03-05",
+    "buy_price": 51.0,
+    "sell_price": 50.98,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": -0.039215686274518546,
+    "pnl_amount": -8.00000000000125
   }
 ]

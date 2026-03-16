@@ -51,5 +51,18 @@
     "position_pct": 0.25,
     "pnl_pct": 7.282913165266103,
     "pnl_amount": 1820.0000000000016
+  },
+  {
+    "type": "sell",
+    "code": "300840",
+    "name": "酷特智能",
+    "date": "2026-03-16",
+    "buy_date": "2026-03-05",
+    "buy_price": 18.29,
+    "sell_price": 18.34,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 0.27337342810278553,
+    "pnl_amount": 65.00000000000092
   }
 ]

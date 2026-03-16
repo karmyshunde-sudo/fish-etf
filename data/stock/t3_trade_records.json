@@ -110,5 +110,15 @@
     "position_pct": 0.25,
     "target_shares": 600,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "603681",
+    "name": "永冠新材",
+    "date": "2026-03-16",
+    "price": 19.42,
+    "position_pct": 0.25,
+    "target_shares": 1200,
+    "amount": 25000.0
   }
 ]

@@ -8,5 +8,15 @@
     "take_profit": 59.686,
     "position_pct": 0.25,
     "target_shares": 400
+  },
+  {
+    "code": "301079",
+    "name": "邵阳液压",
+    "buy_date": "2026-03-16",
+    "buy_price": 38.58,
+    "stop_loss": 36.650999999999996,
+    "take_profit": 42.438,
+    "position_pct": 0.25,
+    "target_shares": 600
   }
 ]

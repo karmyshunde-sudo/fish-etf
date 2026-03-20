@@ -189,5 +189,15 @@
     "position_pct": 0.25,
     "target_shares": 1300,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "603162",
+    "name": "海通发展",
+    "date": "2026-03-20",
+    "price": 12.68,
+    "position_pct": 0.25,
+    "target_shares": 1900,
+    "amount": 25000.0
   }
 ]

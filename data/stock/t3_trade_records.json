@@ -166,5 +166,18 @@
     "position_pct": 0.25,
     "pnl_pct": -6.56100258016955,
     "pnl_amount": -1423.9999999999982
+  },
+  {
+    "type": "sell",
+    "code": "301468",
+    "name": "博盈特焊",
+    "date": "2026-03-20",
+    "buy_date": "2026-03-16",
+    "buy_price": 53.78,
+    "sell_price": 50.97,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -5.2249907028635185,
+    "pnl_amount": -1124.000000000001
   }
 ]

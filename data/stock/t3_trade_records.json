@@ -153,5 +153,18 @@
     "position_pct": 0.25,
     "target_shares": 400,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "301141",
+    "name": "中科磁业",
+    "date": "2026-03-20",
+    "buy_date": "2026-03-16",
+    "buy_price": 54.26,
+    "sell_price": 50.7,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -6.56100258016955,
+    "pnl_amount": -1423.9999999999982
   }
 ]

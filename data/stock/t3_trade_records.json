@@ -212,5 +212,18 @@
     "position_pct": 0.25,
     "pnl_pct": -5.5469155002592085,
     "pnl_amount": -1284.0000000000005
+  },
+  {
+    "type": "sell",
+    "code": "688448",
+    "name": "磁谷科技",
+    "date": "2026-03-23",
+    "buy_date": "2026-03-17",
+    "buy_price": 57.41,
+    "sell_price": 52.9,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -7.8557742553562075,
+    "pnl_amount": -1803.999999999999
   }
 ]

@@ -235,5 +235,15 @@
     "position_pct": 0.25,
     "target_shares": 3500,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "301556",
+    "name": "托普云农",
+    "date": "2026-03-23",
+    "price": 86.16,
+    "position_pct": 0.25,
+    "target_shares": 200,
+    "amount": 25000.0
   }
 ]

@@ -22,5 +22,15 @@
     "target_shares": 1900,
     "current_price": 12.59,
     "hold_days": 3
+  },
+  {
+    "code": "300107",
+    "name": "建新股份",
+    "buy_date": "2026-03-23",
+    "buy_price": 7.09,
+    "stop_loss": 6.735499999999999,
+    "take_profit": 7.799,
+    "position_pct": 0.25,
+    "target_shares": 3500
   }
 ]

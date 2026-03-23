@@ -199,5 +199,18 @@
     "position_pct": 0.25,
     "target_shares": 1900,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "301079",
+    "name": "邵阳液压",
+    "date": "2026-03-23",
+    "buy_date": "2026-03-16",
+    "buy_price": 38.58,
+    "sell_price": 36.44,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -5.5469155002592085,
+    "pnl_amount": -1284.0000000000005
   }
 ]

@@ -225,5 +225,15 @@
     "position_pct": 0.25,
     "pnl_pct": -7.8557742553562075,
     "pnl_amount": -1803.999999999999
+  },
+  {
+    "type": "buy",
+    "code": "300107",
+    "name": "建新股份",
+    "date": "2026-03-23",
+    "price": 7.09,
+    "position_pct": 0.25,
+    "target_shares": 3500,
+    "amount": 25000.0
   }
 ]

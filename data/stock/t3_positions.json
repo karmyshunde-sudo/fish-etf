@@ -1,29 +1,5 @@
 [
   {
-    "code": "301079",
-    "name": "邵阳液压",
-    "buy_date": "2026-03-16",
-    "buy_price": 38.58,
-    "stop_loss": 36.650999999999996,
-    "take_profit": 42.438,
-    "position_pct": 0.25,
-    "target_shares": 600,
-    "current_price": 38.0,
-    "hold_days": 4
-  },
-  {
-    "code": "688448",
-    "name": "磁谷科技",
-    "buy_date": "2026-03-17",
-    "buy_price": 57.41,
-    "stop_loss": 54.5395,
-    "take_profit": 63.151,
-    "position_pct": 0.25,
-    "target_shares": 400,
-    "current_price": 55.5,
-    "hold_days": 3
-  },
-  {
     "code": "300774",
     "name": "倍杰特",
     "buy_date": "2026-03-20",
@@ -31,7 +7,9 @@
     "stop_loss": 17.508499999999998,
     "take_profit": 20.273,
     "position_pct": 0.25,
-    "target_shares": 1300
+    "target_shares": 1300,
+    "current_price": 18.01,
+    "hold_days": 3
   },
   {
     "code": "603162",
@@ -41,6 +19,8 @@
     "stop_loss": 12.046,
     "take_profit": 13.948,
     "position_pct": 0.25,
-    "target_shares": 1900
+    "target_shares": 1900,
+    "current_price": 12.59,
+    "hold_days": 3
   }
 ]

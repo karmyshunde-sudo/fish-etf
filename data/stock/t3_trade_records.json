@@ -245,5 +245,18 @@
     "position_pct": 0.25,
     "target_shares": 200,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "300774",
+    "name": "倍杰特",
+    "date": "2026-03-26",
+    "buy_date": "2026-03-20",
+    "buy_price": 18.43,
+    "sell_price": 17.29,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -6.185567010309279,
+    "pnl_amount": -1482.0000000000007
   }
 ]

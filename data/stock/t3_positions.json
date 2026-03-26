@@ -34,5 +34,15 @@
     "target_shares": 200,
     "current_price": 83.14,
     "hold_days": 3
+  },
+  {
+    "code": "603322",
+    "name": "超讯通信",
+    "buy_date": "2026-03-26",
+    "buy_price": 29.9,
+    "stop_loss": 28.404999999999998,
+    "take_profit": 32.89,
+    "position_pct": 0.25,
+    "target_shares": 800
   }
 ]

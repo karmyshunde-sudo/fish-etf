@@ -1,17 +1,5 @@
 [
   {
-    "code": "300774",
-    "name": "倍杰特",
-    "buy_date": "2026-03-20",
-    "buy_price": 18.43,
-    "stop_loss": 17.508499999999998,
-    "take_profit": 20.273,
-    "position_pct": 0.25,
-    "target_shares": 1300,
-    "current_price": 18.01,
-    "hold_days": 5
-  },
-  {
     "code": "603162",
     "name": "海通发展",
     "buy_date": "2026-03-20",
@@ -21,7 +9,7 @@
     "position_pct": 0.25,
     "target_shares": 1900,
     "current_price": 13.14,
-    "hold_days": 5
+    "hold_days": 6
   },
   {
     "code": "300107",
@@ -32,8 +20,8 @@
     "take_profit": 7.799,
     "position_pct": 0.25,
     "target_shares": 3500,
-    "current_price": 7.08,
-    "hold_days": 2
+    "current_price": 7.16,
+    "hold_days": 3
   },
   {
     "code": "301556",
@@ -44,7 +32,7 @@
     "take_profit": 94.77600000000001,
     "position_pct": 0.25,
     "target_shares": 200,
-    "current_price": 86.16,
-    "hold_days": 2
+    "current_price": 83.14,
+    "hold_days": 3
   }
 ]

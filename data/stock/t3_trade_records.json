@@ -258,5 +258,15 @@
     "position_pct": 0.25,
     "pnl_pct": -6.185567010309279,
     "pnl_amount": -1482.0000000000007
+  },
+  {
+    "type": "buy",
+    "code": "603322",
+    "name": "超讯通信",
+    "date": "2026-03-26",
+    "price": 29.9,
+    "position_pct": 0.25,
+    "target_shares": 800,
+    "amount": 25000.0
   }
 ]

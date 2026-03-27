@@ -281,5 +281,15 @@
     "position_pct": 0.25,
     "pnl_pct": -6.070102135561739,
     "pnl_amount": -1045.999999999998
+  },
+  {
+    "type": "buy",
+    "code": "300543",
+    "name": "朗科智能",
+    "date": "2026-03-27",
+    "price": 9.81,
+    "position_pct": 0.25,
+    "target_shares": 2500,
+    "amount": 25000.0
   }
 ]

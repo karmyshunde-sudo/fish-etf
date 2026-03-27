@@ -34,5 +34,15 @@
     "target_shares": 800,
     "current_price": 30.42,
     "hold_days": 1
+  },
+  {
+    "code": "300543",
+    "name": "朗科智能",
+    "buy_date": "2026-03-27",
+    "buy_price": 9.81,
+    "stop_loss": 9.3195,
+    "take_profit": 10.791000000000002,
+    "position_pct": 0.25,
+    "target_shares": 2500
   }
 ]

@@ -291,5 +291,18 @@
     "position_pct": 0.25,
     "target_shares": 2500,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "603162",
+    "name": "海通发展",
+    "date": "2026-03-30",
+    "buy_date": "2026-03-20",
+    "buy_price": 12.68,
+    "sell_price": 13.31,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 4.968454258675092,
+    "pnl_amount": 1197.0000000000016
   }
 ]

@@ -304,5 +304,15 @@
     "position_pct": 0.25,
     "pnl_pct": 4.968454258675092,
     "pnl_amount": 1197.0000000000016
+  },
+  {
+    "type": "buy",
+    "code": "300172",
+    "name": "中电环保",
+    "date": "2026-04-01",
+    "price": 5.48,
+    "position_pct": 0.25,
+    "target_shares": 4500,
+    "amount": 25000.0
   }
 ]

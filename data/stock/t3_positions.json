@@ -34,5 +34,15 @@
     "target_shares": 2500,
     "current_price": 9.59,
     "hold_days": 5
+  },
+  {
+    "code": "300172",
+    "name": "中电环保",
+    "buy_date": "2026-04-01",
+    "buy_price": 5.48,
+    "stop_loss": 5.206,
+    "take_profit": 6.028000000000001,
+    "position_pct": 0.25,
+    "target_shares": 4500
   }
 ]

@@ -36,13 +36,14 @@ BAOSTOCK_CONFIG = {
 
 # ===== 优先级配置（硬编码，按稳定性排序）=====
 # 格式: (数据源索引, 接口索引, 优先级分数)
-# 分数越低越优先（1=最稳定，5=最不稳定）
+# 分数越低越优先（1=最稳定，6=最不稳定）
 SOURCE_PRIORITY = [
-    (0, 0, 1),  # Baostock - A股日线数据（最稳定）
-    (1, 0, 2),  # AKShare - 东方财富日线
-    (2, 0, 3),  # Tencent Finance - A股日线数据
-    (3, 0, 4),  # Sina Finance - A股日线数据
-    (4, 0, 5),  # Yahoo Finance（最不稳定）
+    (0, 0, 1),  # EasyMoney - A股日线数据（新增，最稳定）
+    (1, 0, 2),  # Baostock - A股日线数据
+    (2, 0, 3),  # AKShare - 东方财富日线
+    (3, 0, 4),  # Tencent Finance - A股日线数据
+    (4, 0, 5),  # Sina Finance - A股日线数据
+    (5, 0, 6),  # Yahoo Finance（最不稳定）
 ]
 
 # ===== 模块级全局状态 =====
@@ -116,7 +117,22 @@ def get_stock_daily_data_from_sources(stock_code: str,
         
         # ===== 4. 定义数据源配置 =====
         DATA_SOURCES = [
-            # 数据源0：Baostock（最高优先级）
+            # 数据源0：EasyMoney（新增，最高优先级）
+            {
+                "name": "EasyMoney",
+                "interfaces": [
+                    {
+                        "name": "A股日线数据",
+                        "func": _fetch_easymoney_data,
+                        "params": {
+                            "period": "d"
+                        },
+                        "delay_range": (0.8, 1.5),
+                        "source_type": "easymoney"
+                    }
+                ]
+            },
+            # 数据源1：Baostock
             {
                 "name": "Baostock",
                 "interfaces": [
@@ -132,7 +148,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     }
                 ]
             },
-            # 数据源1：AKShare
+            # 数据源3：AKShare
             {
                 "name": "AKShare",
                 "interfaces": [
@@ -148,7 +164,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     }
                 ]
             },
-            # 数据源2：Tencent Finance
+            # 数据源4：Tencent Finance
             {
                 "name": "Tencent Finance",
                 "interfaces": [
@@ -163,7 +179,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     }
                 ]
             },
-            # 数据源3：Sina Finance
+            # 数据源5：Sina Finance
             {
                 "name": "Sina Finance",
                 "interfaces": [
@@ -178,7 +194,7 @@ def get_stock_daily_data_from_sources(stock_code: str,
                     }
                 ]
             },
-            # 数据源4：Yahoo Finance
+            # 数据源6：Yahoo Finance
             {
                 "name": "Yahoo Finance",
                 "interfaces": [
@@ -335,6 +351,76 @@ def get_stock_daily_data_from_sources(stock_code: str,
     except Exception as e:
         logger.error(f"获取股票 {stock_code} 日线数据时发生异常: {str(e)}", exc_info=True)
         return pd.DataFrame()
+
+def _fetch_easymoney_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
+    """封装EasyMoney的API调用 - 新增数据源"""
+    logger = logging.getLogger("StockCrawler")
+    
+    try:
+        import emfinance as em
+        
+        logger.info(f"尝试使用EasyMoney获取 {symbol} 数据（日期范围: {start_date} 到 {end_date}）")
+        
+        # 确定市场
+        if symbol.startswith('6'):
+            market = "SH"
+        elif symbol.startswith(('00', '30')):
+            market = "SZ"
+        elif symbol.startswith('8'):
+            market = "BJ"
+        else:
+            market = "SH"
+        
+        # 获取历史数据
+        df = em.fetch_history_data(
+            stock_code=symbol,
+            market=market,
+            start_date=start_date.replace("-", ""),
+            end_date=end_date.replace("-", ""),
+            data_type="stock"
+        )
+        
+        if df is None or df.empty:
+            logger.warning("EasyMoney返回空数据")
+            raise ValueError("EasyMoney返回空数据")
+        
+        # 列名标准化
+        column_mapping = {
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量',
+            'amount': '成交额'
+        }
+        
+        # 尝试多种可能的列名
+        possible_columns = {
+            '日期': ['date', 'Date', 'datetime', 'time', '交易日'],
+            '开盘': ['open', 'Open', '开盘价'],
+            '最高': ['high', 'High', '最高价'],
+            '最低': ['low', 'Low', '最低价'],
+            '收盘': ['close', 'Close', '收盘价'],
+            '成交量': ['volume', 'Volume', 'vol', '成交量'],
+            '成交额': ['amount', 'Amount', 'turnover', '成交额', '成交金额']
+        }
+        
+        for cn_col, possible_names in possible_columns.items():
+            for name in possible_names:
+                if name in df.columns and cn_col not in df.columns:
+                    df[cn_col] = df[name]
+                    break
+        
+        logger.info(f"EasyMoney获取成功: {len(df)} 条数据")
+        return df
+        
+    except ImportError:
+        logger.warning("EasyMoney (emfinance) 未安装，跳过此数据源")
+        raise ValueError("EasyMoney未安装")
+    except Exception as e:
+        logger.error(f"EasyMoney获取失败: {str(e)}", exc_info=True)
+        raise ValueError(f"EasyMoney获取失败: {str(e)}")
 
 def _fetch_baostock_data(symbol: str, start_date: str, end_date: str, data_days: int, **kwargs) -> pd.DataFrame:
     """封装Baostock的API调用 - 严格遵循官方示例"""
@@ -608,7 +694,39 @@ def _standardize_data(df: pd.DataFrame, source_type: str, stock_code: str, logge
     }
     
     # 根据数据源类型处理
-    if source_type == "baostock":
+    if source_type == "easymoney":
+        # EasyMoney处理 - 新增数据源
+        # 列名已经在_fetch_easymoney_data中处理，这里主要做数据类型转换和计算
+        
+        # 确保数值列是数值类型
+        numeric_cols = ["开盘", "最高", "最低", "收盘", "成交量", "成交额"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 计算前收盘、涨跌幅、振幅、涨跌额
+        df = df.sort_values('日期')
+        df['前收盘'] = df['收盘'].shift(1)
+        
+        # 计算涨跌幅
+        if '前收盘' in df.columns and '收盘' in df.columns:
+            df['涨跌幅'] = (df['收盘'] - df['前收盘']) / df['前收盘'] * 100
+        
+        # 计算振幅
+        if '前收盘' in df.columns and '最高' in df.columns and '最低' in df.columns:
+            df['振幅'] = (df['最高'] - df['最低']) / df['前收盘'] * 100
+        
+        # 计算涨跌额
+        if '前收盘' in df.columns and '收盘' in df.columns:
+            df['涨跌额'] = df['收盘'] - df['前收盘']
+        
+        # 补充其他字段为NaN
+        extra_fields = ["换手率", "复权状态", "交易状态", "动态市盈率", "动态市销率", "动态市现率", "动态市净率", "是否ST"]
+        for field in extra_fields:
+            if field not in df.columns:
+                df[field] = np.nan
+    
+    elif source_type == "baostock":
         # Baostock处理 - 严格映射所有列（包含19列）
         df = df.rename(columns={
             "date": "日期",

@@ -318,9 +318,10 @@ def calculate_arbitrage_opportunity() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         # 3. 重新计算折价率
         valid_opportunities["折价率"] = (
-            (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) / 
+            (valid_opportunities["市场价格"] - valid_opportunities["IOPV"]) /
             valid_opportunities["IOPV"] * 100
         )
+        valid_opportunities["折溢价率"] = valid_opportunities["折价率"]  # 保持列名兼容
         
         # 4. 记录异常折价率，但不立即过滤
         original_count = len(valid_opportunities)
@@ -1010,6 +1011,7 @@ def get_latest_arbitrage_opportunities(max_retry: int = 3) -> pd.DataFrame:
         # 结果为正：溢价（市场价格 > IOPV）
         # 结果为负：折价（市场价格 < IOPV）
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+        df["折溢价率"] = df["折价率"]  # 保持列名兼容
         
         # 记录筛选前的统计信息
         logger.info(f"筛选前数据量: {len(df)}，折价率范围: {df['折价率'].min():.2f}% ~ {df['折价率'].max():.2f}%")
@@ -1047,6 +1049,7 @@ def load_latest_valid_arbitrage_data(days_back: int = 7) -> pd.DataFrame:
                 if all(col in df.columns for col in required_columns):
                     # 修复：在加载历史数据时也计算正确的折价率
                     df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+                    df["折溢价率"] = df["折价率"]  # 保持列名兼容
                     
                     logger.info(f"找到有效历史套利数据: {date}, 共 {len(df)} 个机会")
                     # 记录历史数据的折价率范围

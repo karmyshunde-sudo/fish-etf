@@ -394,11 +394,6 @@ def _format_discount_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
-        # 兼容两种列名：如果只有"折价率"列，则添加"折溢价率"列
-        if "折价率" in df.columns and "折溢价率" not in df.columns:
-            df = df.copy()
-            df["折溢价率"] = df["折价率"]
-        
         # 按折价率降序排序（最高折价优先）
         df = df.sort_values(by='折溢价率', ascending=True).reset_index(drop=True)
         
@@ -494,11 +489,6 @@ def _format_premium_message(df: pd.DataFrame) -> List[str]:
         List[str]: 分页后的消息列表
     """
     try:
-        # 兼容两种列名：如果只有"折价率"列，则添加"折溢价率"列
-        if "折价率" in df.columns and "折溢价率" not in df.columns:
-            df = df.copy()
-            df["折溢价率"] = df["折价率"]
-        
         # 按溢价率降序排序（最高溢价优先）
         df = df.sort_values(by='折溢价率', ascending=False).reset_index(drop=True)
         
@@ -798,15 +788,9 @@ def _format_dataframe_as_string(df: pd.DataFrame) -> List[str]:
         
         # 检查是否包含ETF特定列
         has_etf_info = "ETF代码" in df.columns and "ETF名称" in df.columns
-        # 兼容两种列名：折溢价率 和 折价率
-        has_premium_discount = "折溢价率" in df.columns or "折价率" in df.columns
+        has_premium_discount = "折溢价率" in df.columns
         
         if has_etf_info and has_premium_discount:
-            # 统一列名：如果只有"折价率"列，则重命名为"折溢价率"
-            if "折价率" in df.columns and "折溢价率" not in df.columns:
-                df = df.copy()
-                df["折溢价率"] = df["折价率"]
-            
             # 直接调用已定义的专用格式化函数
             if df["折溢价率"].min() < 0:
                 return _format_discount_message(df)

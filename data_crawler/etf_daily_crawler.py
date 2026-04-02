@@ -211,31 +211,8 @@ def normalize_etf_df(df: pd.DataFrame, etf_code: str, etf_name: str) -> pd.DataF
 
 
 def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-    """使用多数据源爬取 ETF 日线数据（优先使用多数据源，失败后降级到 yfinance）"""
+    """使用 yfinance 爬取 ETF 日线数据"""
     try:
-        # 尝试使用多数据源方案
-        try:
-            from data_crawler.multi_source_daily_crawler import fetch_etf_daily_data, normalize_etf_dataframe
-            
-            logger.info(f"[多数据源] 尝试获取 ETF {etf_code} 数据")
-            
-            # 使用多数据源获取数据
-            df = fetch_etf_daily_data(etf_code, start_date, end_date)
-            
-            if df is not None and not df.empty:
-                # 规范化数据结构
-                etf_name = get_etf_name(etf_code)
-                df = normalize_etf_dataframe(df, etf_code, etf_name)
-                logger.info(f"[多数据源] ✅ ETF {etf_code} 成功获取 {len(df)} 条数据")
-                return df
-            else:
-                logger.warning(f"[多数据源] ❌ ETF {etf_code} 所有数据源均失败，降级到 yfinance")
-        except ImportError as e:
-            logger.warning(f"[多数据源] 模块导入失败：{str(e)}，降级到 yfinance")
-        except Exception as e:
-            logger.error(f"[多数据源] ETF {etf_code} 获取失败：{str(e)}，降级到 yfinance")
-        
-        # 降级到 yfinance（向后兼容）
         if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
             logger.error(f"ETF {etf_code} 日期参数类型错误，应为datetime类型")
             return pd.DataFrame()
@@ -248,7 +225,7 @@ def crawl_etf_data(etf_code: str, start_date: datetime, end_date: datetime) -> p
         else:
             symbol = f"{etf_code}.SZ"
         
-        logger.info(f"[yfinance] 尝试获取 ETF {etf_code} 数据，符号：{symbol}")
+        logger.info(f"尝试获取ETF {etf_code} 数据，符号: {symbol}")
         
         etf_ticker = yf.Ticker(symbol)
         df = etf_ticker.history(

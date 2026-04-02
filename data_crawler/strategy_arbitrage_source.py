@@ -690,6 +690,7 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     # 计算折价率
     if "市场价格" in df.columns and "IOPV" in df.columns:
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
+        df["折溢价率"] = df["折价率"]  # 保持两个列名都能使用
         
         # 检查异常折溢价率 - 现在使用更合理的阈值（-10% 到 +10%）
         abnormal_discount = df[df["折价率"] < -10]

@@ -1,6 +1,6 @@
 yfinance==0.2.66
 akshare>=1.17.71  # 主数据源
-emfinance>=0.0.5  # EasyMoney 数据源（新增备用）
+efinance>=0.5.8    # efinance 数据源（东方财富，支持ETF和股票）
 pandas>=1.5.3     # 数据处理
 numpy>=1.21.0     # 数值计算
 requests>=2.26.0  # 网络请求（新浪数据源 + 微信推送）

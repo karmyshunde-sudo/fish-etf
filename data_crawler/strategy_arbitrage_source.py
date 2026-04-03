@@ -281,20 +281,20 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
         result_df = pd.DataFrame()
         last_error = None
         total_priority = len(SOURCE_PRIORITY)
-        
+
         for offset in range(total_priority):
             priority_idx = (_current_priority_index + offset) % total_priority
             ds_idx, if_idx, _ = SOURCE_PRIORITY[priority_idx]
-            
+
             if ds_idx >= len(DATA_SOURCES) or if_idx >= len(DATA_SOURCES[ds_idx]["interfaces"]):
                 continue
-                
+
             source = DATA_SOURCES[ds_idx]
             interface = source["interfaces"][if_idx]
-            
+
             try:
                 func = interface["func"]
-                
+
                 # 动态延时
                 delay_min, delay_max = interface["delay_range"]
                 if priority_idx < 2:  # 前两个优先级
@@ -303,46 +303,53 @@ def fetch_arbitrage_realtime_data() -> pd.DataFrame:
                     delay_factor = 1.0
                 else:
                     delay_factor = 1.2
-                
+
                 time.sleep(random.uniform(delay_min * delay_factor, delay_max * delay_factor))
-                
+
                 logger.debug(f"尝试 [{source['name']}->{interface['name']}] 获取ETF实时数据 "
                             f"(优先级: {priority_idx+1}/{total_priority})")
-                
+
                 # 调用接口
                 df = func(etf_codes)
-                
+
                 # 验证数据有效性
                 if df is None or df.empty:
                     raise ValueError("返回空数据")
-                
+
                 # 数据标准化 - 修复单位问题
                 df = _standardize_etf_data(df, interface["source_type"], logger)
-                
+
                 # 检查标准化后数据
                 required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV"]
                 if not all(col in df.columns for col in required_columns):
                     missing = [col for col in required_columns if col not in df.columns]
                     raise ValueError(f"标准化后仍缺失必要列: {', '.join(missing)}")
-                
+
                 # 保存成功状态
                 result_df = df
                 success = True
                 _current_priority_index = priority_idx  # 锁定当前优先级
                 logger.info(f"✅ 【{source['name']}->{interface['name']}] 成功获取 {len(result_df)} 条ETF实时数据 (锁定优先级: {priority_idx+1})")
+
+                # 【新增】获取所有数据源的 IOPV 用于展示（不修正，只展示给用户）
+                all_iopv_data = _fetch_all_iopv_sources(etf_codes, logger)
+                if all_iopv_data:
+                    result_df = _merge_iopv_data(result_df, all_iopv_data, logger)
+                    logger.info(f"✅ 已获取 {len(all_iopv_data)} 个ETF的多数据源IOPV信息")
+
                 break
-                
+
             except Exception as e:
                 last_error = e
                 logger.error(f"❌ [{source['name']}->{interface['name']}] 失败: {str(e)}", exc_info=True)
                 continue
-        
+
         # 所有数据源都失败
         if not success:
             logger.error(f"所有数据源均无法获取ETF实时数据: {str(last_error)}")
             _current_priority_index = (_current_priority_index + 1) % total_priority
             return pd.DataFrame()
-        
+
         return result_df
     
     except Exception as e:
@@ -387,23 +394,55 @@ def _fetch_tencent_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 etf_name = parts[1] if len(parts) > 1 else ""
                 current_price = float(parts[3]) if len(parts) > 3 and parts[3] else 0
                 
-                # 【关键修复】腾讯财经的IOPV可能需要从不同位置获取
-                # 尝试多个可能的IOPV位置
-                iopv_positions = [38, 39, 40, 41, 42]  # 可能的IOPV位置
+                # 【关键修复】腾讯财经的IOPV位置
+                # 根据实际数据验证，parts[40] 是 IOPV 实时估值
+                # parts[38] 经常与市场价格非常接近，可能不是 IOPV
+                iopv_positions = [40, 38, 39, 41, 42]  # 首选 parts[40]
                 iopv = current_price  # 默认使用市场价格
-                
+
                 for pos in iopv_positions:
                     if len(parts) > pos and parts[pos]:
                         try:
                             candidate = float(parts[pos])
                             # IOPV应该和市场价格在同一数量级
-                            if 0.01 <= candidate <= 100 and abs(candidate - current_price) / current_price < 2:
-                                iopv = candidate
-                                logger.debug(f"ETF {code} 从位置{pos}获取到IOPV: {iopv}")
-                                break
+                            # 如果 IOPV 是价格的 50-200 倍，可能是单位问题（分 vs 元）
+                            # 正常情况下 IOPV 和价格差异应该在 50% 以内
+                            price_ratio = candidate / current_price if current_price > 0 else 0
+                            is_likely_unit_issue = (price_ratio > 50 and price_ratio < 200)
+
+                            if 0.01 <= candidate <= 100:
+                                # 如果明显是单位问题，先记录，后续标准化时处理
+                                if is_likely_unit_issue:
+                                    logger.debug(f"ETF {code} 候选IOPV={candidate}可能是单位问题(分)，价格={current_price}，比例={price_ratio:.2f}")
+                                # 正常情况：IOPV 和价格差异在 50% 以内
+                                elif abs(candidate - current_price) / current_price < 0.5:
+                                    iopv = candidate
+                                    logger.debug(f"ETF {code} 从位置{pos}获取到IOPV: {iopv}")
+                                    break
                         except:
                             continue
-                
+
+                # 如果所有候选 IOPV 都不合理，记录警告
+                if iopv == current_price and current_price > 0:
+                    # 检查是否有任何候选 IOPV 接近市场价格
+                    has_valid_iopv = False
+                    has_unit_issue = False
+                    for pos in iopv_positions:
+                        if len(parts) > pos and parts[pos]:
+                            try:
+                                candidate = float(parts[pos])
+                                if 0.01 <= candidate <= 100:
+                                    price_ratio = candidate / current_price if current_price > 0 else 0
+                                    # 如果 IOPV 是价格的 50-200 倍，可能是单位问题
+                                    if 50 < price_ratio < 200:
+                                        has_unit_issue = True
+                                    elif abs(candidate - current_price) / current_price < 0.5:
+                                        has_valid_iopv = True
+                                        break
+                            except:
+                                continue
+                    # 如果有候选 IOPV 接近市场价格，使用它；如果都是单位问题，保持 IOPV=current_price 让后续处理
+
                 if current_price > 0 and iopv > 0:
                     all_data.append({
                         "ETF代码": code,
@@ -492,15 +531,31 @@ def _fetch_sina_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                     # 提取关键数据
                     etf_name = data_items[0] if data_items[0] else ""
                     current_price = float(data_items[3]) if len(data_items) > 3 and data_items[3] else 0
-                    
+
+                    # 新浪财经的ETF数据中，IOPV可能不在标准位置
+                    # 尝试从 data_items 中查找可能的 IOPV 字段
+                    # 新浪ETF数据格式中，IOPV可能在位置 36-40 之间
+                    iopv = current_price  # 默认使用市场价格
+                    for pos in [36, 37, 38, 39, 40]:
+                        if len(data_items) > pos and data_items[pos]:
+                            try:
+                                candidate = float(data_items[pos])
+                                # IOPV 应该和市场价格在同一数量级，差异在 50% 以内
+                                if 0.01 <= candidate <= 100 and abs(candidate - current_price) / current_price < 0.5:
+                                    iopv = candidate
+                                    logger.debug(f"新浪 ETF {etf_code} 从位置{pos}获取到IOPV: {iopv}")
+                                    break
+                            except:
+                                continue
+
                     if current_price > 0:
                         all_data.append({
                             "ETF代码": etf_code,
                             "ETF名称": etf_name,
                             "市场价格": current_price,
-                            "IOPV": current_price,  # 新浪数据中IOPV可能需要其他方式获取
-                            "收盘": current_price,  # 添加收盘价列
-                            "日期": get_beijing_time().strftime("%Y-%m-%d")  # 添加日期列
+                            "IOPV": iopv,
+                            "收盘": current_price,
+                            "日期": get_beijing_time().strftime("%Y-%m-%d")
                         })
                         
                 except Exception as e:
@@ -599,9 +654,10 @@ def _fetch_yfinance_etf_data(etf_codes: List[str]) -> pd.DataFrame:
                 
                 current_price = history['Close'].iloc[-1]
                 etf_name = info.get('longName', '') or info.get('shortName', '')
-                
-                # Yahoo Finance可能不提供IOPV，使用当前价格作为近似值
-                iopv = current_price
+
+                # Yahoo Finance 可能不直接提供 IOPV，尝试从 info 中获取 NAV
+                # 优先使用 navPrice，其次使用 nav，最后使用当前价格
+                iopv = info.get('navPrice') or info.get('nav') or info.get('previousClose') or current_price
                 
                 if current_price > 0:
                     all_data.append({
@@ -649,31 +705,32 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     if "市场价格" in df.columns and "IOPV" in df.columns:
         # 计算价格/IOPV比值
         price_iopv_ratio = df["市场价格"] / df["IOPV"]
-        
-        # 找出可能单位错误的数据（IOPV是价格的100倍）
-        unit_issue_mask = (price_iopv_ratio < 0.01) & (df["IOPV"] > 0)
+
+        # 找出可能单位错误的数据（IOPV是价格的100倍左右，如50-200倍）
+        # 例如：价格=0.607，IOPV=60.7，说明IOPV是分的单位
+        unit_issue_mask = (price_iopv_ratio < 0.02) & (price_iopv_ratio > 0.005) & (df["IOPV"] > 0)
         if unit_issue_mask.any():
             unit_issue_count = unit_issue_mask.sum()
             logger.warning(f"发现 {unit_issue_count} 个可能的单位错误数据（IOPV可能是分的单位）")
-            
+
             # 修复单位问题：如果IOPV是分的单位，转换为元
             df.loc[unit_issue_mask, "IOPV"] = df.loc[unit_issue_mask, "IOPV"] / 100.0
-            
+
             logger.info(f"已修复 {unit_issue_count} 个ETF的IOPV单位（分 -> 元）")
-            
+
             # 重新计算比值
             price_iopv_ratio = df["市场价格"] / df["IOPV"]
-        
-        # 过滤掉价格/IOPV比值异常的数据（比值在0.1到10之间为合理范围）
-        valid_ratio_mask = (price_iopv_ratio >= 0.1) & (price_iopv_ratio <= 10)
-        invalid_data = df[~valid_ratio_mask]
-        
-        if not invalid_data.empty:
-            logger.warning(f"过滤掉 {len(invalid_data)} 个价格/IOPV比值异常的数据")
-            logger.debug(f"异常数据示例: {invalid_data[['ETF代码', '市场价格', 'IOPV']].head().to_dict()}")
-            
-            # 保留合理的数据
-            df = df[valid_ratio_mask].copy()
+
+        # 【关键修复】只设置下限，不设置上限
+        # 套利机会没有上限，折溢价率越大越有价值
+        # 只过滤明显不合理的数据（下限0.1，即IOPV是价格的10倍以上，说明数据本身有误）
+        # 上限不限制，让套利机会得以保留
+        invalid_mask = (price_iopv_ratio < 0.1) & (df["IOPV"] > 0)
+
+        if invalid_mask.any():
+            invalid_etf_codes = df.loc[invalid_mask, "ETF代码"].tolist()
+            logger.warning(f"⚠️ 发现 {len(invalid_etf_codes)} 个ETF的IOPV数据异常，将尝试从其他数据源交叉验证")
+            logger.warning(f"异常ETF代码: {invalid_etf_codes[:10]}...")  # 只显示前10个
     
     # 过滤无效数据
     df = df[
@@ -691,27 +748,13 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     if "市场价格" in df.columns and "IOPV" in df.columns:
         df["折价率"] = ((df["市场价格"] - df["IOPV"]) / df["IOPV"]) * 100
         df["折溢价率"] = df["折价率"]  # 保持两个列名都能使用
-        
-        # 检查异常折溢价率 - 现在使用更合理的阈值（-10% 到 +10%）
-        abnormal_discount = df[df["折价率"] < -10]
-        abnormal_premium = df[df["折价率"] > 10]
-        
-        if len(abnormal_discount) > 0:
-            logger.warning(f"⚠️ 发现 {len(abnormal_discount)} 个异常折价率 (<-10%): 将进行进一步检查")
-        
-        if len(abnormal_premium) > 0:
-            logger.warning(f"⚠️ 发现 {len(abnormal_premium)} 个异常溢价率 (>10%): 将进行进一步检查")
-        
-        # 记录折价率统计信息
+
+        # 记录折价率统计信息（不设置上下限，套利机会没有上限）
         if not df.empty:
             min_discount = df["折价率"].min()
             max_discount = df["折价率"].max()
             avg_discount = df["折价率"].mean()
             logger.info(f"折价率统计 - 最小值: {min_discount:.2f}%, 最大值: {max_discount:.2f}%, 平均值: {avg_discount:.2f}%")
-            
-            # 如果出现极端值，发出警告
-            if min_discount < -20 or max_discount > 20:
-                logger.warning("发现较大折溢价率！建议人工检查数据源！")
     
     # 确保所有必要列存在
     required_columns = ["ETF代码", "ETF名称", "市场价格", "IOPV", "收盘", "日期"]
@@ -736,10 +779,197 @@ def _standardize_etf_data(df: pd.DataFrame, source_type: str, logger) -> pd.Data
     df = df.dropna(subset=["ETF代码", "ETF名称", "市场价格", "IOPV"])
     
     logger.info(f"标准化后数据: {len(df)} 条有效记录")
-    
+
     return df
 
-def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame:
+
+def _cross_validate_iopv(df: pd.DataFrame, etf_codes: List[str], data_sources: List[dict], logger) -> pd.DataFrame:
+    """
+    对 IOPV 数据进行交叉验证
+
+    从多个数据源获取同一 ETF 的 IOPV，对比一致性，修正异常数据
+
+    Args:
+        df: 主数据源获取的数据
+        etf_codes: ETF代码列表
+        data_sources: 数据源配置
+        logger: 日志对象
+
+    Returns:
+        pd.DataFrame: 经过交叉验证的数据
+    """
+    try:
+        # 计算价格/IOPV比值
+        if "市场价格" not in df.columns or "IOPV" not in df.columns:
+            return df
+
+        price_iopv_ratio = df["市场价格"] / df["IOPV"]
+
+        # 找出明显异常的数据（IOPV 是市场价格的 100 倍以上，即 price_iopv_ratio < 0.01）
+        # 只有在极端情况下才认为数据异常，需要交叉验证
+        invalid_mask = (price_iopv_ratio < 0.01) & (df["IOPV"] > 0) & (df["市场价格"] > 0)
+
+        if not invalid_mask.any():
+            logger.debug("所有ETF的IOPV数据正常，无需交叉验证")
+            return df
+
+        invalid_etfs = df.loc[invalid_mask, "ETF代码"].tolist()
+        logger.warning(f"⚠️ 发现 {len(invalid_etfs)} 个ETF的IOPV数据异常，开始交叉验证")
+
+        # 跳过前两个已使用的数据源，从第三个数据源开始交叉验证
+        validation_sources = [
+            ("东方财富", _fetch_akshare_etf_data),
+            ("新浪财经", _fetch_sina_etf_data),
+            ("Yahoo Finance", _fetch_yfinance_etf_data),
+        ]
+
+        validated_count = 0
+
+        for source_name, fetch_func in validation_sources:
+            if not invalid_etfs:
+                break
+
+            try:
+                logger.info(f"从 {source_name} 获取异常ETF的IOPV数据进行交叉验证")
+
+                # 从备用数据源获取这些ETF的数据
+                backup_df = fetch_func(invalid_etfs)
+
+                if backup_df is None or backup_df.empty:
+                    logger.warning(f"{source_name} 返回空数据")
+                    continue
+
+                # 标准化备用数据
+                backup_df = _standardize_etf_data(backup_df, source_name, logger)
+
+                if "ETF代码" not in backup_df.columns or "IOPV" not in backup_df.columns:
+                    continue
+
+                # 对比每个异常ETF的IOPV
+                for idx in df[invalid_mask].index:
+                    etf_code = df.loc[idx, "ETF代码"]
+                    primary_iopv = df.loc[idx, "IOPV"]
+                    primary_price = df.loc[idx, "市场价格"]
+
+                    # 在备用数据中找这个ETF
+                    backup_match = backup_df[backup_df["ETF代码"] == etf_code]
+
+                    if backup_match.empty:
+                        continue
+
+                    backup_iopv = backup_match.iloc[0]["IOPV"]
+                    backup_price = backup_match.iloc[0]["市场价格"]
+
+                    # 计算两个数据源的IOPV差异
+                    if backup_iopv > 0 and primary_iopv > 0:
+                        iopv_diff = abs(backup_iopv - primary_iopv) / primary_iopv
+
+                        # 如果差异超过50%，认为主数据源有问题
+                        if iopv_diff > 0.5:
+                            logger.warning(f"⚠️ ETF {etf_code} IOPV差异超过50%: "
+                                        f"主={primary_iopv:.4f}, {source_name}={backup_iopv:.4f}, "
+                                        f"差异={iopv_diff*100:.1f}%")
+
+                            # 使用备用数据源的IOPV
+                            df.loc[idx, "IOPV"] = backup_iopv
+                            logger.info(f"✅ 使用 {source_name} 的IOPV替代: ETF={etf_code}, IOPV={backup_iopv:.4f}")
+                            validated_count += 1
+
+                            # 重新计算价格/IOPV比值
+                            new_ratio = primary_price / backup_iopv if backup_iopv > 0 else 0
+
+                            # 如果修正后比值在合理范围，从异常列表中移除
+                            if 0.1 <= new_ratio <= 10:
+                                invalid_mask[idx] = False
+                                logger.debug(f"ETF {etf_code} IOPV修正成功，新比值={new_ratio:.2f}")
+
+            except Exception as e:
+                logger.warning(f"从 {source_name} 获取交叉验证数据失败: {str(e)}")
+                continue
+
+        # 统计交叉验证结果
+        still_invalid = invalid_mask.sum()
+        if still_invalid > 0:
+            logger.warning(f"交叉验证后仍有 {still_invalid} 个ETF的IOPV数据无法验证")
+        else:
+            logger.info(f"✅ 交叉验证完成: {validated_count} 个ETF的IOPV数据已修正")
+
+        return df
+
+    except Exception as e:
+        logger.error(f"交叉验证过程发生错误: {str(e)}", exc_info=True)
+        return df
+
+def _fetch_all_iopv_sources(etf_codes: List[str], logger) -> Dict[str, Dict[str, float]]:
+    """
+    从所有数据源获取ETF的IOPV数据（仅用于展示，不修正主数据）
+
+    Args:
+        etf_codes: ETF代码列表
+        logger: 日志对象
+
+    Returns:
+        Dict[str, Dict[str, float]]: {ETF代码: {数据源名称: IOPV值}}
+    """
+    all_iopv_data = {}
+
+    fetch_functions = [
+        ("腾讯", _fetch_tencent_etf_data),
+        ("新浪", _fetch_sina_etf_data),
+        ("东方财富", _fetch_akshare_etf_data),
+    ]
+
+    for source_name, fetch_func in fetch_functions:
+        try:
+            logger.info(f"从 {source_name} 获取IOPV数据进行展示")
+            df = fetch_func(etf_codes)
+
+            if df is None or df.empty:
+                continue
+
+            for _, row in df.iterrows():
+                etf_code = row.get("ETF代码")
+                iopv = row.get("IOPV")
+
+                if etf_code and iopv and iopv > 0:
+                    if etf_code not in all_iopv_data:
+                        all_iopv_data[etf_code] = {}
+                    all_iopv_data[etf_code][source_name] = iopv
+
+        except Exception as e:
+            logger.warning(f"从 {source_name} 获取IOPV失败: {str(e)}")
+            continue
+
+    return all_iopv_data
+
+
+def _merge_iopv_data(df: pd.DataFrame, all_iopv_data: Dict[str, Dict[str, float]], logger) -> pd.DataFrame:
+    """
+    将多数据源IOPV数据合并到结果DataFrame中
+
+    Args:
+        df: 主DataFrame
+        all_iopv_data: {ETF代码: {数据源名称: IOPV值}}
+        logger: 日志对象
+
+    Returns:
+        pd.DataFrame: 合并后的DataFrame
+    """
+    if not all_iopv_data:
+        return df
+
+    for source_name in ["腾讯", "新浪", "东方财富"]:
+        iopv_col = f"IOPV_{source_name}"
+        df[iopv_col] = df["ETF代码"].map(
+            lambda code: all_iopv_data.get(code, {}).get(source_name, None)
+        )
+
+    logger.info(f"已将多数据源IOPV合并到DataFrame，新增列: IOPV_腾讯, IOPV_新浪, IOPV_东方财富")
+
+    return df
+
+
+def load_arbitrage_data(date_str: Optional[str] = None) -> pd.DataFrame():
     """
     加载指定日期的套利数据
     

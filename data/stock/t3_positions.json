@@ -1,17 +1,5 @@
 [
   {
-    "code": "300107",
-    "name": "建新股份",
-    "buy_date": "2026-03-23",
-    "buy_price": 7.09,
-    "stop_loss": 6.735499999999999,
-    "take_profit": 7.799,
-    "position_pct": 0.25,
-    "target_shares": 3500,
-    "current_price": 7.0,
-    "hold_days": 9
-  },
-  {
     "code": "603322",
     "name": "超讯通信",
     "buy_date": "2026-03-26",
@@ -21,7 +9,7 @@
     "position_pct": 0.25,
     "target_shares": 800,
     "current_price": 30.42,
-    "hold_days": 6
+    "hold_days": 8
   },
   {
     "code": "300543",
@@ -32,8 +20,8 @@
     "take_profit": 10.791000000000002,
     "position_pct": 0.25,
     "target_shares": 2500,
-    "current_price": 9.59,
-    "hold_days": 5
+    "current_price": 9.38,
+    "hold_days": 7
   },
   {
     "code": "300172",
@@ -43,6 +31,8 @@
     "stop_loss": 5.206,
     "take_profit": 6.028000000000001,
     "position_pct": 0.25,
-    "target_shares": 4500
+    "target_shares": 4500,
+    "current_price": 5.32,
+    "hold_days": 2
   }
 ]

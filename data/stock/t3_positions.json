@@ -34,5 +34,15 @@
     "target_shares": 4500,
     "current_price": 5.32,
     "hold_days": 2
+  },
+  {
+    "code": "301083",
+    "name": "百胜智能",
+    "buy_date": "2026-04-03",
+    "buy_price": 16.59,
+    "stop_loss": 15.760499999999999,
+    "take_profit": 18.249000000000002,
+    "position_pct": 0.25,
+    "target_shares": 1500
   }
 ]

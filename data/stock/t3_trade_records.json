@@ -327,5 +327,15 @@
     "position_pct": 0.25,
     "pnl_pct": -0.42313117066290484,
     "pnl_amount": -105.00000000000087
+  },
+  {
+    "type": "buy",
+    "code": "301083",
+    "name": "百胜智能",
+    "date": "2026-04-03",
+    "price": 16.59,
+    "position_pct": 0.25,
+    "target_shares": 1500,
+    "amount": 25000.0
   }
 ]

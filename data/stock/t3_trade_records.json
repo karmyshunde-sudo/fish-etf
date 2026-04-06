@@ -376,5 +376,15 @@
     "position_pct": 0.25,
     "pnl_pct": -6.569343065693434,
     "pnl_amount": -1620.0000000000014
+  },
+  {
+    "type": "buy",
+    "code": "300062",
+    "name": "中能电气",
+    "date": "2026-04-06",
+    "price": 7.28,
+    "position_pct": 0.25,
+    "target_shares": 3400,
+    "amount": 25000.0
   }
 ]

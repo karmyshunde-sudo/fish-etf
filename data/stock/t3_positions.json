@@ -30,5 +30,15 @@
     "take_profit": 19.679000000000002,
     "position_pct": 0.25,
     "target_shares": 1300
+  },
+  {
+    "code": "300890",
+    "name": "翔丰华",
+    "buy_date": "2026-04-06",
+    "buy_price": 28.92,
+    "stop_loss": 27.474,
+    "take_profit": 31.812000000000005,
+    "position_pct": 0.25,
+    "target_shares": 800
   }
 ]

@@ -1,0 +1,11 @@
+yfinance==0.2.66
+akshare>=1.17.71  # 主数据源
+efinance>=0.5.8    # efinance 数据源（东方财富，支持ETF和股票）
+pandas>=1.5.3     # 数据处理
+numpy>=1.21.0     # 数值计算
+requests>=2.26.0  # 网络请求（新浪数据源 + 微信推送）
+retrying==1.3.3   # 接口重试（解决网络波动）
+pytz>=2023.3      # 时区处理（北京时间）
+python-dotenv>=1.0.0  # 环境变量管理
+GitPython==3.1.43
+baostock==0.8.9   # 修正为实际存在的最高版本

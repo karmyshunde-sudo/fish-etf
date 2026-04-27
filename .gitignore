@@ -1,0 +1,35 @@
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 日志文件
+*.log
+
+# 本地环境配置
+.env
+.local
+
+# 临时文件
+tmp/
+temp/
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
+# 若之前有忽略，添加以下行强制包含：
+!data/etf_daily/  
+!data/etf_daily/*.csv  
+!data/etf_daily/*.txt
+!data/arbitrage/
+!data/arbitrage/*.csv
+!data/flags/
+!data/flags/*.txt
+!data/debug/
+!data/debug/.csv
+!data/stock/
+!data/stock/*.txt
+!data/etf/daily/
+!data/etf/daily/*.csv

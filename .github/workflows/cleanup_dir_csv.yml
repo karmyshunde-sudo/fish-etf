@@ -1,0 +1,105 @@
+name: 8-清理自定义路径CSV文件
+on:
+  workflow_dispatch:
+    inputs:
+      target_path:
+        description: '填充清理路径（例如：data/daily）常用路径：data/daily → 删除所有股票日线CSV文件；data/etf_daily → 删除所有ETF日线CSV文件；data/arbitrage → 删除所有套利数据CSV文件'
+        required: true
+        type: string
+        default: 'data/arbitrage'
+
+jobs:
+  manual-clean-custom-path:
+    name: 手动清理自定义路径CSV文件
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H:%M:%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S' CST)"
+      
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 验证路径安全
+        run: |
+          TARGET_PATH="${{ inputs.target_path }}"
+          
+          # 确保路径在仓库内
+          if [[ "$TARGET_PATH" == /* ]]; then
+            echo "❌ 错误: 路径不能是绝对路径"
+            exit 1
+          fi
+          
+          # 确保路径在data目录下
+          if [[ ! "$TARGET_PATH" =~ ^data/ ]]; then
+            echo "❌ 错误: 路径必须在data目录下"
+            exit 1
+          fi
+          
+          # 确保路径存在
+          if [ ! -d "$TARGET_PATH" ]; then
+            echo "❌ 错误: 路径 $TARGET_PATH 不存在"
+            exit 1
+          fi
+          
+          echo "TARGET_PATH=$TARGET_PATH" >> $GITHUB_ENV
+
+      - name: 清理CSV文件
+        run: |
+          echo "删除 ${{ env.TARGET_PATH }}/*.csv"
+          
+          # 查找CSV文件并使用git rm删除
+          find ${{ env.TARGET_PATH }} -maxdepth 1 -name "*.csv" -type f | while IFS= read -r file; do
+            echo "删除: $file"
+            # 【关键修改】使用git rm而不是rm
+            git rm -f "$file"
+          done
+          
+          # 保存删除计数
+          DELETED_COUNT=$(git status --porcelain ${{ env.TARGET_PATH }} | grep '^D' | wc -l)
+          echo "DELETED_COUNT=$DELETED_COUNT" >> $GITHUB_ENV
+
+      - name: 提交清理变更
+        if: env.DELETED_COUNT > 0
+        run: |
+          git config user.name "GitHub Actions" && git config user.email "actions@github.com"
+          
+          # 提交删除操作
+          git commit -m "【手动清理】清除$DELETED_COUNT个CSV文件"
+          
+          # 推送变更
+          git push origin main
+
+      - name: 验证文件是否真正删除
+        run: |
+          # 检查远程仓库中是否还有这些文件
+          git fetch origin main
+          git checkout origin/main -- ${{ env.TARGET_PATH }} || true
+          
+          REMAINING_COUNT=$(find ${{ env.TARGET_PATH }} -name "*.csv" -type f | wc -l)
+          echo "REMAINING_COUNT=$REMAINING_COUNT" >> $GITHUB_ENV
+          echo "✅ 已从远程仓库删除 $((DELETED_COUNT - REMAINING_COUNT)) 个CSV文件"
+          
+          # 验证剩余文件
+          if [ "$REMAINING_COUNT" -gt 0 ]; then
+            echo "⚠️ 注意: 还有 $REMAINING_COUNT 个CSV文件未删除"
+            find ${{ env.TARGET_PATH }} -name "*.csv" -type f | while IFS= read -r file; do
+              echo "未删除: $file"
+            done
+          fi
+
+      - name: 发送清理通知
+        if: env.WECOM_WEBHOOK
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          DELETED_COUNT=${{ env.DELETED_COUNT }}
+          REMAINING_COUNT=${{ env.REMAINING_COUNT }}
+          curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
+            -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"✅ 【手动清理】路径 ${{ env.TARGET_PATH }} 已清理完成\n删除了 ${DELETED_COUNT} 个CSV文件\n剩余 ${REMAINING_COUNT} 个CSV文件\n北京时间: ${BEIJING_TIME}\"}}"

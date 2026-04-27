@@ -19,11 +19,3 @@ temp/
 .vscode/
 *.swp
 *.swo
-
-# 忽略data目录中的大量文件
-data/etf_daily/
-data/arbitrage/
-data/flags/
-data/debug/
-data/saveapi/
-data/stock/

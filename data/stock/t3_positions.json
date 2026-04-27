@@ -1,0 +1,48 @@
+[
+  {
+    "code": "600082",
+    "name": "海泰发展",
+    "buy_date": "2026-04-21",
+    "buy_price": 2.92,
+    "stop_loss": 2.774,
+    "take_profit": 3.212,
+    "position_pct": 0.25,
+    "target_shares": 8500,
+    "current_price": 2.93,
+    "hold_days": 3
+  },
+  {
+    "code": "688201",
+    "name": "信安世纪",
+    "buy_date": "2026-04-21",
+    "buy_price": 12.63,
+    "stop_loss": 11.9985,
+    "take_profit": 13.893000000000002,
+    "position_pct": 0.25,
+    "target_shares": 1900,
+    "current_price": 12.63,
+    "hold_days": 3
+  },
+  {
+    "code": "605003",
+    "name": "众望布艺",
+    "buy_date": "2026-04-23",
+    "buy_price": 27.61,
+    "stop_loss": 26.229499999999998,
+    "take_profit": 30.371000000000002,
+    "position_pct": 0.25,
+    "target_shares": 900,
+    "current_price": 27.32,
+    "hold_days": 1
+  },
+  {
+    "code": "300452",
+    "name": "山河药辅",
+    "buy_date": "2026-04-24",
+    "buy_price": 13.81,
+    "stop_loss": 13.1195,
+    "take_profit": 15.191000000000003,
+    "position_pct": 0.25,
+    "target_shares": 1800
+  }
+]

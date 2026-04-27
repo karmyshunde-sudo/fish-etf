@@ -1,0 +1,7 @@
+【小市值布林带 - 策略状态】
+• 历史持仓加载: 4 只
+• 持仓文件: ✅ 存在 (902 字节, 含 4 条记录) - /home/runner/work/fish-etf/fish-etf/data/stock/t3_positions.json
+• 今日新买入: 4 只
+• 📅 累计交易起始: 2026-03-05
+• 交易记录文件: ✅ 存在 (含 12 条记录) - /home/runner/work/fish-etf/fish-etf/data/stock/t3_trade_records.json
+• 运行环境: unknown

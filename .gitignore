@@ -1,6 +1,40 @@
-# Ignore everything except data/daily
+# 忽略默认的所有文件
 *
+
+# 但包含以下文件和目录
 !.gitignore
-!data/
+
+# 项目根目录文件
+!README.md
+!config.py
+!index_yesno.py
+!main.py
+!requirements.txt
+!test_apis.py
+!test_fetch_iopv.py
+!test_iopv_fix.py
+
+# 项目目录
+!data_crawler/
+!stock/
+!strategy/
+!utils/
+!wechat_push/
+!.github/
+
+# 数据文件
+!data/all_stocks.csv
+!data/all_etfs.csv
 !data/daily/
 !data/daily/*.csv
+!data/etf/
+!data/etf/daily/
+!data/etf/daily/*.csv
+
+# 忽略data目录中的大量文件
+data/stock/
+data/etf_daily/
+data/arbitrage/
+data/flags/
+data/debug/
+data/saveapi/

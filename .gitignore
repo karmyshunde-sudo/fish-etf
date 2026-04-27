@@ -1,40 +1,29 @@
-# 忽略默认的所有文件
-*
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
 
-# 但包含以下文件和目录
-!.gitignore
+# 日志文件
+*.log
 
-# 项目根目录文件
-!README.md
-!config.py
-!index_yesno.py
-!main.py
-!requirements.txt
-!test_apis.py
-!test_fetch_iopv.py
-!test_iopv_fix.py
+# 本地环境配置
+.env
+.local
 
-# 项目目录
-!data_crawler/
-!stock/
-!strategy/
-!utils/
-!wechat_push/
-!.github/
+# 临时文件
+tmp/
+temp/
 
-# 数据文件
-!data/all_stocks.csv
-!data/all_etfs.csv
-!data/daily/
-!data/daily/*.csv
-!data/etf/
-!data/etf/daily/
-!data/etf/daily/*.csv
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # 忽略data目录中的大量文件
-data/stock/
 data/etf_daily/
 data/arbitrage/
 data/flags/
 data/debug/
 data/saveapi/
+data/stock/

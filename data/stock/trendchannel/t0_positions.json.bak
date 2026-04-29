@@ -9,11 +9,11 @@
     "target": 7.673,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 6.3385,
-    "upper": 6.62575,
-    "lower": 6.05125,
-    "current_price": 7.29,
-    "hold_days": 3
+    "middle": 6.4174999999999995,
+    "upper": 6.741499999999999,
+    "lower": 6.0935,
+    "current_price": 6.93,
+    "hold_days": 4
   },
   {
     "code": "688101",
@@ -25,11 +25,11 @@
     "target": 18.900000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.3585,
-    "upper": 17.086,
-    "lower": 15.630999999999998,
-    "current_price": 17.93,
-    "hold_days": 3
+    "middle": 16.7365,
+    "upper": 17.6815,
+    "lower": 15.7915,
+    "current_price": 20.62,
+    "hold_days": 4
   },
   {
     "code": "300590",
@@ -41,11 +41,11 @@
     "target": 14.949,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 12.0545,
-    "upper": 12.7565,
-    "lower": 11.352500000000001,
-    "current_price": 14.57,
-    "hold_days": 3
+    "middle": 12.221,
+    "upper": 12.95,
+    "lower": 11.492,
+    "current_price": 14.73,
+    "hold_days": 4
   },
   {
     "code": "301510",
@@ -57,26 +57,26 @@
     "target": 37.898,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 31.4575,
-    "upper": 33.39475,
-    "lower": 29.520249999999997,
-    "current_price": 39.74,
-    "hold_days": 3
+    "middle": 31.8265,
+    "upper": 33.8815,
+    "lower": 29.7715,
+    "current_price": 37.7,
+    "hold_days": 4
   },
   {
-    "code": "600633",
-    "name": "浙数文化",
+    "code": "601177",
+    "name": "杭齿前进",
     "direction": "long",
-    "buy_date": "2026-04-25",
-    "buy_price": 15.09,
-    "stop_loss": 12.7675,
-    "target": 15.971,
+    "buy_date": "2026-04-29",
+    "buy_price": 16.25,
+    "stop_loss": 14.635,
+    "target": 16.972,
     "position_pct": 0.1,
-    "score": 97,
-    "middle": 12.767500000000002,
-    "upper": 13.428250000000002,
-    "lower": 12.106750000000002,
-    "current_price": 15.09,
-    "hold_days": 3
+    "score": 100,
+    "middle": 14.635,
+    "upper": 15.176499999999999,
+    "lower": 14.0935,
+    "current_price": 16.25,
+    "hold_days": 0
   }
 ]

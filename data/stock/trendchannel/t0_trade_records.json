@@ -58,5 +58,17 @@
     "stop_loss": 12.7675,
     "target": 15.971,
     "score": 97
+  },
+  {
+    "type": "sell",
+    "code": "600633",
+    "name": "浙数文化",
+    "date": "2026-04-29",
+    "buy_date": "2026-04-25",
+    "buy_price": 15.09,
+    "sell_price": 13.18,
+    "direction": "long",
+    "reason": "触发移动止损（14.34）",
+    "pnl_pct": -12.65738899933731
   }
 ]

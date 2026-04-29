@@ -62,5 +62,21 @@
     "lower": 29.7715,
     "current_price": 37.7,
     "hold_days": 4
+  },
+  {
+    "code": "601177",
+    "name": "杭齿前进",
+    "direction": "long",
+    "buy_date": "2026-04-29",
+    "buy_price": 16.25,
+    "stop_loss": 14.635,
+    "target": 16.972,
+    "position_pct": 0.1,
+    "score": 100,
+    "middle": 14.635,
+    "upper": 15.176499999999999,
+    "lower": 14.0935,
+    "current_price": 16.25,
+    "hold_days": 0
   }
 ]

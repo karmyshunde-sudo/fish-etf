@@ -82,5 +82,17 @@
     "stop_loss": 14.635,
     "target": 16.972,
     "score": 100
+  },
+  {
+    "type": "sell",
+    "code": "603060",
+    "name": "国检集团",
+    "date": "2026-05-01",
+    "buy_date": "2026-04-25",
+    "buy_price": 7.29,
+    "sell_price": 6.68,
+    "direction": "long",
+    "reason": "触发移动止损（6.93）",
+    "pnl_pct": -8.367626886145409
   }
 ]

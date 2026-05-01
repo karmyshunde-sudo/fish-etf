@@ -603,5 +603,15 @@
     "position_pct": 0.25,
     "target_shares": 1800,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "301016",
+    "name": "雷尔伟",
+    "date": "2026-05-01",
+    "price": 16.29,
+    "position_pct": 0.25,
+    "target_shares": 1500,
+    "amount": 25000.0
   }
 ]

@@ -62,5 +62,21 @@
     "lower": 14.20075,
     "current_price": 15.93,
     "hold_days": 2
+  },
+  {
+    "code": "688236",
+    "name": "春立医疗",
+    "direction": "short",
+    "buy_date": "2026-05-01",
+    "buy_price": 17.3,
+    "stop_loss": 20.023,
+    "target": 15.999000000000002,
+    "position_pct": 0.1,
+    "score": 100,
+    "middle": 20.023,
+    "upper": 20.998749999999998,
+    "lower": 19.047250000000002,
+    "current_price": 17.3,
+    "hold_days": 0
   }
 ]

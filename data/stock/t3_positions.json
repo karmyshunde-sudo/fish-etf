@@ -1,29 +1,5 @@
 [
   {
-    "code": "600082",
-    "name": "海泰发展",
-    "buy_date": "2026-04-21",
-    "buy_price": 2.92,
-    "stop_loss": 2.774,
-    "take_profit": 3.212,
-    "position_pct": 0.25,
-    "target_shares": 8500,
-    "current_price": 3.18,
-    "hold_days": 9
-  },
-  {
-    "code": "688201",
-    "name": "信安世纪",
-    "buy_date": "2026-04-21",
-    "buy_price": 12.63,
-    "stop_loss": 11.9985,
-    "take_profit": 13.893000000000002,
-    "position_pct": 0.25,
-    "target_shares": 1900,
-    "current_price": 12.63,
-    "hold_days": 9
-  },
-  {
     "code": "605003",
     "name": "众望布艺",
     "buy_date": "2026-04-23",
@@ -32,8 +8,8 @@
     "take_profit": 30.371000000000002,
     "position_pct": 0.25,
     "target_shares": 900,
-    "current_price": 28.42,
-    "hold_days": 7
+    "current_price": 29.75,
+    "hold_days": 8
   },
   {
     "code": "300452",
@@ -45,6 +21,6 @@
     "position_pct": 0.25,
     "target_shares": 1800,
     "current_price": 14.11,
-    "hold_days": 6
+    "hold_days": 7
   }
 ]

@@ -580,5 +580,18 @@
     "position_pct": 0.25,
     "pnl_pct": 14.383561643835607,
     "pnl_amount": 3569.9999999999995
+  },
+  {
+    "type": "sell",
+    "code": "688201",
+    "name": "信安世纪",
+    "date": "2026-05-01",
+    "buy_date": "2026-04-21",
+    "buy_price": 12.63,
+    "sell_price": 12.63,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 0.0,
+    "pnl_amount": 0.0
   }
 ]

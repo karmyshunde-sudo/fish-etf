@@ -32,5 +32,15 @@
     "take_profit": 15.257,
     "position_pct": 0.25,
     "target_shares": 1800
+  },
+  {
+    "code": "301016",
+    "name": "雷尔伟",
+    "buy_date": "2026-05-01",
+    "buy_price": 16.29,
+    "stop_loss": 15.475499999999998,
+    "take_profit": 17.919,
+    "position_pct": 0.25,
+    "target_shares": 1500
   }
 ]

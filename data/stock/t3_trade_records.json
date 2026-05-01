@@ -593,5 +593,15 @@
     "position_pct": 0.25,
     "pnl_pct": 0.0,
     "pnl_amount": 0.0
+  },
+  {
+    "type": "buy",
+    "code": "300994",
+    "name": "久祺股份",
+    "date": "2026-05-01",
+    "price": 13.87,
+    "position_pct": 0.25,
+    "target_shares": 1800,
+    "amount": 25000.0
   }
 ]

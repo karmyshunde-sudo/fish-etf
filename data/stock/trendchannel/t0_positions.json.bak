@@ -1,21 +1,5 @@
 [
   {
-    "code": "603060",
-    "name": "国检集团",
-    "direction": "long",
-    "buy_date": "2026-04-25",
-    "buy_price": 7.29,
-    "stop_loss": 6.338500000000001,
-    "target": 7.673,
-    "position_pct": 0.1,
-    "score": 100,
-    "middle": 6.4174999999999995,
-    "upper": 6.741499999999999,
-    "lower": 6.0935,
-    "current_price": 6.93,
-    "hold_days": 4
-  },
-  {
     "code": "688101",
     "name": "三达膜",
     "direction": "long",
@@ -25,11 +9,11 @@
     "target": 18.900000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.7365,
-    "upper": 17.6815,
-    "lower": 15.7915,
-    "current_price": 20.62,
-    "hold_days": 4
+    "middle": 17.325499999999998,
+    "upper": 18.49925,
+    "lower": 16.151749999999996,
+    "current_price": 21.92,
+    "hold_days": 6
   },
   {
     "code": "300590",
@@ -41,11 +25,11 @@
     "target": 14.949,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 12.221,
-    "upper": 12.95,
-    "lower": 11.492,
-    "current_price": 14.73,
-    "hold_days": 4
+    "middle": 12.5645,
+    "upper": 13.3445,
+    "lower": 11.784500000000001,
+    "current_price": 14.67,
+    "hold_days": 6
   },
   {
     "code": "301510",
@@ -57,11 +41,11 @@
     "target": 37.898,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 31.8265,
-    "upper": 33.8815,
-    "lower": 29.7715,
-    "current_price": 37.7,
-    "hold_days": 4
+    "middle": 32.62050000000001,
+    "upper": 34.801500000000004,
+    "lower": 30.439500000000006,
+    "current_price": 38.66,
+    "hold_days": 6
   },
   {
     "code": "601177",
@@ -73,10 +57,26 @@
     "target": 16.972,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 14.635,
-    "upper": 15.176499999999999,
-    "lower": 14.0935,
-    "current_price": 16.25,
+    "middle": 14.7835,
+    "upper": 15.36625,
+    "lower": 14.20075,
+    "current_price": 15.93,
+    "hold_days": 2
+  },
+  {
+    "code": "688236",
+    "name": "春立医疗",
+    "direction": "short",
+    "buy_date": "2026-05-01",
+    "buy_price": 17.3,
+    "stop_loss": 20.023,
+    "target": 15.999000000000002,
+    "position_pct": 0.1,
+    "score": 100,
+    "middle": 20.023,
+    "upper": 20.998749999999998,
+    "lower": 19.047250000000002,
+    "current_price": 17.3,
     "hold_days": 0
   }
 ]

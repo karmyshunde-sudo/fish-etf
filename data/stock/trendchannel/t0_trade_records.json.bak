@@ -82,5 +82,29 @@
     "stop_loss": 14.635,
     "target": 16.972,
     "score": 100
+  },
+  {
+    "type": "sell",
+    "code": "603060",
+    "name": "国检集团",
+    "date": "2026-05-01",
+    "buy_date": "2026-04-25",
+    "buy_price": 7.29,
+    "sell_price": 6.68,
+    "direction": "long",
+    "reason": "触发移动止损（6.93）",
+    "pnl_pct": -8.367626886145409
+  },
+  {
+    "type": "buy",
+    "code": "688236",
+    "name": "春立医疗",
+    "date": "2026-05-01",
+    "price": 17.3,
+    "direction": "short",
+    "position_pct": 0.1,
+    "stop_loss": 20.023,
+    "target": 15.999000000000002,
+    "score": 100
   }
 ]

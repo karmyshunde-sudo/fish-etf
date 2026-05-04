@@ -626,5 +626,18 @@
     "position_pct": 0.25,
     "pnl_pct": 7.750814922129656,
     "pnl_amount": 1926.0000000000005
+  },
+  {
+    "type": "sell",
+    "code": "300452",
+    "name": "山河药辅",
+    "date": "2026-05-04",
+    "buy_date": "2026-04-24",
+    "buy_price": 13.81,
+    "sell_price": 14.11,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 2.172338884866032,
+    "pnl_amount": 539.9999999999981
   }
 ]

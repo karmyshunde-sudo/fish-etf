@@ -22,5 +22,15 @@
     "target_shares": 1500,
     "current_price": 16.29,
     "hold_days": 3
+  },
+  {
+    "code": "301257",
+    "name": "普蕊斯",
+    "buy_date": "2026-05-04",
+    "buy_price": 52.4,
+    "stop_loss": 49.779999999999994,
+    "take_profit": 57.64,
+    "position_pct": 0.25,
+    "target_shares": 400
   }
 ]

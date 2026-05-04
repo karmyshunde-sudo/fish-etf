@@ -613,5 +613,18 @@
     "position_pct": 0.25,
     "target_shares": 1500,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "605003",
+    "name": "众望布艺",
+    "date": "2026-05-04",
+    "buy_date": "2026-04-23",
+    "buy_price": 27.61,
+    "sell_price": 29.75,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 7.750814922129656,
+    "pnl_amount": 1926.0000000000005
   }
 ]

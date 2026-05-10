@@ -192,27 +192,27 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     - dynamic_pe: 动态市盈率
     - net_profit: 净利润
     返回：
-    - bool: 是否通过所有财务条件
+    - bool: 是否通过所有财务条件（数据获取失败时返回 True，保留股票）
     """
     # 检查动态市盈率
     if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
-        if dynamic_pe is None:
-            logger.debug(f"股票 {stock_code} 动态市盈率数据缺失")
-            return False
-        threshold = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["threshold"]
-        if dynamic_pe < threshold:
-            logger.info(f"股票 {stock_code} 动态市盈率不满足条件: {dynamic_pe:.2f} < {threshold}")
-            return False
+        if dynamic_pe is not None:
+            threshold = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["threshold"]
+            if dynamic_pe < threshold:
+                logger.info(f"股票 {stock_code} 动态市盈率不满足条件: {dynamic_pe:.2f} < {threshold}")
+                return False
+        else:
+            logger.debug(f"股票 {stock_code} 动态市盈率数据缺失，保留股票")
     
     # 检查净利润
     if FINANCIAL_FILTER_PARAMS["net_profit"]["enabled"]:
-        if net_profit is None:
-            logger.debug(f"股票 {stock_code} 净利润数据缺失")
-            return False
-        threshold = FINANCIAL_FILTER_PARAMS["net_profit"]["threshold"]
-        if net_profit <= threshold:
-            logger.info(f"股票 {stock_code} 净利润不满足条件: {net_profit:.2f} <= {threshold}")
-            return False
+        if net_profit is not None:
+            threshold = FINANCIAL_FILTER_PARAMS["net_profit"]["threshold"]
+            if net_profit <= threshold:
+                logger.info(f"股票 {stock_code} 净利润不满足条件: {net_profit:.2f} <= {threshold}")
+                return False
+        else:
+            logger.debug(f"股票 {stock_code} 净利润数据缺失，保留股票")
     
     return True
 
@@ -325,11 +325,43 @@ def filter_and_update_stocks():
         # 创建临时dataframe用于财务处理
         temp_df = process_batch.copy()
         
-        # 登录Baostock
-        login_result = bs.login()
-        if login_result.error_code != '0':
-            logger.error(f"Baostock登录失败: {login_result.error_msg}")
-            return
+        def login_baostock_with_retry(max_retries=3, delay=2):
+    """
+    带重试的 baostock 登录
+    返回: (success: bool, error_msg: str)
+    """
+    for i in range(max_retries):
+        try:
+            login_result = bs.login()
+            if login_result.error_code == '0':
+                logger.info(f"✅ Baostock登录成功 (第 {i+1} 次尝试)")
+                return (True, "")
+            else:
+                error_msg = login_result.error_msg
+                logger.warning(f"⚠️ Baostock登录失败 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning(f"⚠️ Baostock登录异常 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
+        
+        if i < max_retries - 1:
+            logger.info(f"等待 {delay} 秒后重试...")
+            time.sleep(delay)
+    
+    return (False, error_msg)
+
+        # 判断是否需要使用 baostock（只有动态市盈率启用时才需要）
+        need_baostock = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]
+        
+        # 如果需要 baostock，尝试登录
+        baostock_logged_in = False
+        if need_baostock:
+            logger.info("📡 准备登录Baostock（动态市盈率功能已启用）")
+            baostock_logged_in, error_msg = login_baostock_with_retry()
+            if not baostock_logged_in:
+                logger.error(f"❌ Baostock登录失败: {error_msg}")
+                logger.warning("⚠️ 动态市盈率功能已启用但无法登录，相关功能将被跳过")
+        else:
+            logger.info("ℹ️ 动态市盈率功能已禁用，跳过Baostock登录")
         
         try:
             # 逐个处理股票（操作临时dataframe）
@@ -343,8 +375,8 @@ def filter_and_update_stocks():
                 dynamic_pe = None
                 net_profit = None
                 
-                # 获取动态市盈率（如果启用）
-                if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]:
+                # 获取动态市盈率（如果启用且已登录）
+                if FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"] and baostock_logged_in:
                     dynamic_pe = get_dynamic_pe(stock_code)
                     # 保存到临时DataFrame
                     if dynamic_pe is not None:
@@ -394,8 +426,10 @@ def filter_and_update_stocks():
                 time.sleep(random.uniform(2.0, 5.0))
         
         finally:
-            # 确保登出
-            bs.logout()
+            # 确保登出（如果已登录）
+            if baostock_logged_in:
+                bs.logout()
+                logger.info("✅ 已登出Baostock")
         
         # 从临时dataframe中筛选出通过过滤的股票
         passed_stocks = temp_df[temp_df['filter'] == True]

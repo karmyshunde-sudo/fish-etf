@@ -13,7 +13,7 @@ from typing import Dict, Any
 
 from config import Config
 from utils.date_utils import get_beijing_time
-from .futures_data_source import FuturesDataSource, get_futures_report, FUTURES_CODES, EXTERNAL_INDICES
+from data_crawler.futures_data_source import FuturesDataSource, get_futures_report, FUTURES_CODES, EXTERNAL_INDICES
 
 logger = logging.getLogger(__name__)
 

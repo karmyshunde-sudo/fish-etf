@@ -1427,13 +1427,18 @@ jobs:
 
       - name: 发送飞书通知
         env:
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
         run: |
-          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
           if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
-            curl -s -X POST "$FEISHU_WEBHOOK" -H "Content-Type: application/json" \
-              -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"✅ 【期货数据获取（手动）】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
+            python -c "
+from wechat_push.feishu_push import send_feishu_message
+send_feishu_message('✅ 【期货数据获取（手动）】执行成功')
+"
           else
-            curl -s -X POST "$FEISHU_WEBHOOK" -H "Content-Type: application/json" \
-              -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"⚠️ 【期货数据获取（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+            python -c "
+from wechat_push.feishu_push import send_feishu_message
+send_feishu_message('⚠️ 【期货数据获取（手动）】执行失败')
+"
           fi

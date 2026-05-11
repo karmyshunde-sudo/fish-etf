@@ -389,57 +389,84 @@ class FuturesDataSource:
     def _fetch_from_yfinance_futures(self, contract_codes: List[str]) -> pd.DataFrame:
         """从Yahoo Finance获取中国股指期货数据（海外可访问）"""
         try:
-            import yfinance as yf
+            from yahooquery import Ticker
             
             all_data = []
             
-            # Yahoo Finance 合约映射
+            # Yahoo Finance 合约映射 - 使用正确的代码
             yf_mapping = {
-                "IC01": "CN03.NYB",  # 中证500股指期货
-                "IC03": "CN03.NYB",
-                "IC06": "CN06.NYB",
-                "IC09": "CN09.NYB",
-                "IF01": "CN03.NYB",  # 沪深300股指期货
-                "IF03": "CN03.NYB",
-                "IF06": "CN06.NYB",
-                "IF09": "CN09.NYB",
-                "IH01": "CN03.NYB",  # 上证50股指期货
-                "IH03": "CN03.NYB",
-                "IH06": "CN06.NYB",
-                "IH09": "CN09.NYB"
+                "IC01": "CSI500=CF",   # 中证500股指期货主力合约
+                "IC03": "CSI500=CF",
+                "IC06": "CSI500=CF",
+                "IC09": "CSI500=CF",
+                "IF01": "CSI300=CF",   # 沪深300股指期货主力合约
+                "IF03": "CSI300=CF",
+                "IF06": "CSI300=CF",
+                "IF09": "CSI300=CF",
+                "IH01": "SH50=CF",     # 上证50股指期货主力合约
+                "IH03": "SH50=CF",
+                "IH06": "SH50=CF",
+                "IH09": "SH50=CF"
             }
             
-            for contract in contract_codes:
-                try:
+            unique_codes = list(set(yf_mapping.values()))
+            tickers = Ticker(unique_codes, asynchronous=True)
+            
+            quotes = tickers.quotes
+            if quotes:
+                for contract in contract_codes:
                     yf_code = yf_mapping.get(contract)
                     if not yf_code:
                         continue
                     
-                    ticker = yf.Ticker(yf_code)
-                    data = ticker.history(period='1d')
-                    
-                    if not data.empty:
-                        latest = data.iloc[-1]
+                    quote = quotes.get(yf_code)
+                    if quote:
                         all_data.append({
                             "合约代码": contract,
-                            "最新价": float(latest['Close']),
-                            "开盘价": float(latest['Open']),
-                            "最高价": float(latest['High']),
-                            "最低价": float(latest['Low']),
-                            "成交量": float(latest['Volume']),
-                            "日期": latest.name.strftime("%Y-%m-%d"),
+                            "最新价": float(quote.get('regularMarketPrice', 0) or quote.get('currentPrice', 0)),
+                            "开盘价": float(quote.get('regularMarketOpen', 0)),
+                            "最高价": float(quote.get('regularMarketDayHigh', 0)),
+                            "最低价": float(quote.get('regularMarketDayLow', 0)),
+                            "成交量": float(quote.get('regularMarketVolume', 0) or 0),
+                            "日期": get_beijing_time().strftime("%Y-%m-%d"),
                             "数据源": "Yahoo Finance",
                             "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
                         })
-                    time.sleep(random.uniform(1.0, 2.0))
-                except Exception as e:
-                    logger.debug(f"Yahoo Finance获取 {contract} 失败: {str(e)}")
-                    continue
+            
+            if not all_data:
+                logger.debug("尝试获取历史数据...")
+                history = tickers.history(period='1d')
+                if isinstance(history, pd.DataFrame) and not history.empty:
+                    for contract in contract_codes:
+                        yf_code = yf_mapping.get(contract)
+                        if not yf_code:
+                            continue
+                        
+                        try:
+                            ticker_data = history.xs(yf_code, level='symbol')
+                            if not ticker_data.empty:
+                                latest = ticker_data.iloc[-1]
+                                all_data.append({
+                                    "合约代码": contract,
+                                    "最新价": float(latest['close']),
+                                    "开盘价": float(latest['open']),
+                                    "最高价": float(latest['high']),
+                                    "最低价": float(latest['low']),
+                                    "成交量": float(latest['volume']),
+                                    "日期": latest.name.strftime("%Y-%m-%d"),
+                                    "数据源": "Yahoo Finance",
+                                    "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                        except Exception:
+                            continue
             
             df = pd.DataFrame(all_data)
             if not df.empty:
                 self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
             return df
+        except ImportError:
+            logger.warning("yahooquery库未安装，跳过此数据源")
+            return pd.DataFrame()
         except Exception as e:
             logger.error(f"Yahoo Finance数据源失败: {str(e)}")
             return pd.DataFrame()
@@ -566,14 +593,14 @@ class FuturesDataSource:
             pd.DataFrame: 包含所有合约行情数据
         """
         sources = [
+            ("Yahoo Finance", self._fetch_from_yfinance_futures),
+            ("Investing.com", self._fetch_from_investing),
+            ("TradingView", self._fetch_from_tradingview),
             ("efinance", self._fetch_from_efinance),
             ("AkShare", self._fetch_from_akshare),
             ("东方财富", self._fetch_from_eastmoney),
             ("新浪财经", self._fetch_from_sina),
-            ("腾讯财经", self._fetch_from_tencent),
-            ("Investing.com", self._fetch_from_investing),
-            ("Yahoo Finance", self._fetch_from_yfinance_futures),
-            ("TradingView", self._fetch_from_tradingview)
+            ("腾讯财经", self._fetch_from_tencent)
         ]
         
         all_contracts = []

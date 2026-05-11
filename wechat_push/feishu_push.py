@@ -72,19 +72,18 @@ def _get_access_token(app_id: str, app_secret: str) -> Optional[str]:
 def _send_single_message(access_token: str, receive_id: str, receive_id_type: str, message: str, retry_count: int = 0) -> bool:
     """使用飞书OpenAPI发送消息"""
     try:
-        url = f"{_FEISHU_API_BASE_URL}/im/v1/messages"
+        url = f"{_FEISHU_API_BASE_URL}/im/v1/messages?receive_id_type={receive_id_type}"
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json; charset=utf-8"
         }
         
         payload = {
             "receive_id": receive_id,
-            "receive_id_type": receive_id_type,
             "msg_type": "text",
-            "content": json.dumps({
+            "content": {
                 "text": message
-            })
+            }
         }
         
         logger.debug(f"发送消息 (重试 {retry_count}): {message[:100]}...")

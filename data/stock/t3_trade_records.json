@@ -672,5 +672,18 @@
     "position_pct": 0.25,
     "pnl_pct": 6.633020908435472,
     "pnl_amount": 1655.9999999999998
+  },
+  {
+    "type": "sell",
+    "code": "301016",
+    "name": "雷尔伟",
+    "date": "2026-05-11",
+    "buy_date": "2026-05-01",
+    "buy_price": 16.29,
+    "sell_price": 18.04,
+    "reason": "触发止盈",
+    "position_pct": 0.25,
+    "pnl_pct": 10.742786985880915,
+    "pnl_amount": 2625.0
   }
 ]

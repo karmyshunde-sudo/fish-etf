@@ -389,11 +389,11 @@ class FuturesDataSource:
     def _fetch_from_yfinance_futures(self, contract_codes: List[str]) -> pd.DataFrame:
         """从Yahoo Finance获取中国股指期货数据（海外可访问）"""
         try:
-            from yahooquery import Ticker
+            import yfinance as yf
             
             all_data = []
             
-            # Yahoo Finance 合约映射 - 使用正确的代码
+            # Yahoo Finance 合约映射
             yf_mapping = {
                 "IC01": "CSI500=CF",   # 中证500股指期货主力合约
                 "IC03": "CSI500=CF",
@@ -409,63 +409,62 @@ class FuturesDataSource:
                 "IH09": "SH50=CF"
             }
             
+            # 获取所有唯一代码的数据
             unique_codes = list(set(yf_mapping.values()))
-            tickers = Ticker(unique_codes, asynchronous=True)
             
-            quotes = tickers.quotes
-            if quotes:
-                for contract in contract_codes:
-                    yf_code = yf_mapping.get(contract)
-                    if not yf_code:
-                        continue
+            for symbol in unique_codes:
+                try:
+                    ticker = yf.Ticker(symbol)
                     
-                    quote = quotes.get(yf_code)
-                    if quote:
-                        all_data.append({
-                            "合约代码": contract,
-                            "最新价": float(quote.get('regularMarketPrice', 0) or quote.get('currentPrice', 0)),
-                            "开盘价": float(quote.get('regularMarketOpen', 0)),
-                            "最高价": float(quote.get('regularMarketDayHigh', 0)),
-                            "最低价": float(quote.get('regularMarketDayLow', 0)),
-                            "成交量": float(quote.get('regularMarketVolume', 0) or 0),
-                            "日期": get_beijing_time().strftime("%Y-%m-%d"),
-                            "数据源": "Yahoo Finance",
-                            "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-            
-            if not all_data:
-                logger.debug("尝试获取历史数据...")
-                history = tickers.history(period='1d')
-                if isinstance(history, pd.DataFrame) and not history.empty:
-                    for contract in contract_codes:
-                        yf_code = yf_mapping.get(contract)
-                        if not yf_code:
-                            continue
-                        
-                        try:
-                            ticker_data = history.xs(yf_code, level='symbol')
-                            if not ticker_data.empty:
-                                latest = ticker_data.iloc[-1]
-                                all_data.append({
-                                    "合约代码": contract,
-                                    "最新价": float(latest['close']),
-                                    "开盘价": float(latest['open']),
-                                    "最高价": float(latest['high']),
-                                    "最低价": float(latest['low']),
-                                    "成交量": float(latest['volume']),
-                                    "日期": latest.name.strftime("%Y-%m-%d"),
-                                    "数据源": "Yahoo Finance",
-                                    "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-                                })
-                        except Exception:
-                            continue
+                    # 尝试获取实时数据
+                    info = ticker.info
+                    if info and isinstance(info, dict) and 'currentPrice' in info:
+                        current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+                        if current_price:
+                            for contract, code in yf_mapping.items():
+                                if code == symbol:
+                                    all_data.append({
+                                        "合约代码": contract,
+                                        "最新价": float(current_price),
+                                        "开盘价": float(info.get('open', 0) or info.get('regularMarketOpen', 0)),
+                                        "最高价": float(info.get('dayHigh', 0) or info.get('regularMarketDayHigh', 0)),
+                                        "最低价": float(info.get('dayLow', 0) or info.get('regularMarketDayLow', 0)),
+                                        "成交量": float(info.get('volume', 0) or info.get('regularMarketVolume', 0)),
+                                        "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                        "数据源": "Yahoo Finance",
+                                        "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                                    })
+                    
+                    # 如果实时数据为空，尝试获取历史数据
+                    if not all_data:
+                        history = ticker.history(period='1d')
+                        if not history.empty:
+                            latest = history.iloc[-1]
+                            for contract, code in yf_mapping.items():
+                                if code == symbol:
+                                    all_data.append({
+                                        "合约代码": contract,
+                                        "最新价": float(latest['Close']),
+                                        "开盘价": float(latest['Open']),
+                                        "最高价": float(latest['High']),
+                                        "最低价": float(latest['Low']),
+                                        "成交量": float(latest['Volume']),
+                                        "日期": latest.name.strftime("%Y-%m-%d"),
+                                        "数据源": "Yahoo Finance",
+                                        "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                                    })
+                    
+                    time.sleep(random.uniform(1.0, 2.0))
+                except Exception as e:
+                    logger.debug(f"Yahoo Finance获取 {symbol} 失败: {str(e)}")
+                    continue
             
             df = pd.DataFrame(all_data)
             if not df.empty:
                 self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
             return df
         except ImportError:
-            logger.warning("yahooquery库未安装，跳过此数据源")
+            logger.warning("yfinance库未安装，跳过此数据源")
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Yahoo Finance数据源失败: {str(e)}")

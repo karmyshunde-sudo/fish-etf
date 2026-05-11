@@ -659,5 +659,18 @@
     "position_pct": 0.25,
     "target_shares": 1200,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "300994",
+    "name": "久祺股份",
+    "date": "2026-05-11",
+    "buy_date": "2026-05-01",
+    "buy_price": 13.87,
+    "sell_price": 14.79,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 6.633020908435472,
+    "pnl_amount": 1655.9999999999998
   }
 ]

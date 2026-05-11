@@ -237,6 +237,68 @@ class FuturesDataSource:
             logger.error(f"腾讯财经数据源失败: {str(e)}")
             return pd.DataFrame()
     
+    def _fetch_from_investing(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从Investing.com获取期货数据（海外可访问）"""
+        try:
+            all_data = []
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+            })
+            
+            # Investing.com 合约映射
+            contract_mapping = {
+                "IC01": "cn-futures-csi-500-03",
+                "IC03": "cn-futures-csi-500-03",
+                "IC06": "cn-futures-csi-500-06",
+                "IC09": "cn-futures-csi-500-09",
+                "IF01": "cn-futures-shanghai-se-300-03",
+                "IF03": "cn-futures-shanghai-se-300-03",
+                "IF06": "cn-futures-shanghai-se-300-06",
+                "IF09": "cn-futures-shanghai-se-300-09",
+                "IH01": "cn-futures-shanghai-se-50-03",
+                "IH03": "cn-futures-shanghai-se-50-03",
+                "IH06": "cn-futures-shanghai-se-50-06",
+                "IH09": "cn-futures-shanghai-se-50-09"
+            }
+            
+            for contract in contract_codes:
+                try:
+                    investing_code = contract_mapping.get(contract)
+                    if not investing_code:
+                        continue
+                    
+                    url = f"https://api.investing.com/api/financialdata/{investing_code}"
+                    response = session.get(url, timeout=15)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data and isinstance(data, dict):
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(data.get("last", 0) or data.get("price", 0)),
+                                "开盘价": float(data.get("open", 0)),
+                                "最高价": float(data.get("high", 0)),
+                                "最低价": float(data.get("low", 0)),
+                                "成交量": float(data.get("volume", 0) or 0),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "Investing.com",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    time.sleep(random.uniform(1.0, 2.0))
+                except Exception as e:
+                    logger.debug(f"Investing.com获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"Investing.com数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
     def _fetch_from_yfinance(self, indices: List[str]) -> pd.DataFrame:
         """从Yahoo Finance获取外盘指数数据"""
         try:
@@ -291,7 +353,8 @@ class FuturesDataSource:
             ("AkShare", self._fetch_from_akshare),
             ("东方财富", self._fetch_from_eastmoney),
             ("新浪财经", self._fetch_from_sina),
-            ("腾讯财经", self._fetch_from_tencent)
+            ("腾讯财经", self._fetch_from_tencent),
+            ("Investing.com", self._fetch_from_investing)
         ]
         
         all_contracts = []

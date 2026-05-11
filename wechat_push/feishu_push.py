@@ -81,9 +81,9 @@ def _send_single_message(access_token: str, receive_id: str, receive_id_type: st
         payload = {
             "receive_id": receive_id,
             "msg_type": "text",
-            "content": {
+            "content": json.dumps({
                 "text": message
-            }
+            })
         }
         
         logger.debug(f"发送消息 (重试 {retry_count}): {message[:100]}...")

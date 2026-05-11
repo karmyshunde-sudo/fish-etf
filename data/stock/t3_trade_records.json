@@ -695,5 +695,15 @@
     "position_pct": 0.25,
     "target_shares": 2300,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "300932",
+    "name": "三友联众",
+    "date": "2026-05-11",
+    "price": 10.81,
+    "position_pct": 0.25,
+    "target_shares": 2300,
+    "amount": 25000.0
   }
 ]

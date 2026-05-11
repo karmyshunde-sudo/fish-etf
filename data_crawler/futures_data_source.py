@@ -81,6 +81,93 @@ class FuturesDataSource:
             logger.error(f"保存JSON数据失败: {str(e)}")
             return ""
     
+    def _fetch_from_efinance(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从efinance获取期货数据（推荐）"""
+        try:
+            import efinance as ef
+            
+            all_data = []
+            
+            # efinance 合约代码映射
+            efinance_mapping = {
+                "IC01": "IC",
+                "IC03": "IC",
+                "IC06": "IC",
+                "IC09": "IC",
+                "IF01": "IF",
+                "IF03": "IF",
+                "IF06": "IF",
+                "IF09": "IF",
+                "IH01": "IH",
+                "IH03": "IH",
+                "IH06": "IH",
+                "IH09": "IH"
+            }
+            
+            # 获取所有股指期货实时行情
+            try:
+                futures_data = ef.futures.get_realtime_quotes()
+                
+                if not futures_data.empty:
+                    for contract in contract_codes:
+                        efinance_code = efinance_mapping.get(contract)
+                        if not efinance_code:
+                            continue
+                        
+                        # 筛选对应合约类型的数据
+                        filtered = futures_data[futures_data['代码'].str.contains(efinance_code)]
+                        if not filtered.empty:
+                            row = filtered.iloc[0]
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(row.get('最新价', 0)),
+                                "开盘价": float(row.get('开盘', 0)),
+                                "最高价": float(row.get('最高', 0)),
+                                "最低价": float(row.get('最低', 0)),
+                                "成交量": float(row.get('成交量', 0) or 0),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "efinance",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+            except Exception as e:
+                logger.debug(f"efinance实时行情获取失败，尝试获取历史数据: {str(e)}")
+                
+                # 备用方案：获取历史数据
+                for contract in contract_codes:
+                    try:
+                        efinance_code = efinance_mapping.get(contract)
+                        if not efinance_code:
+                            continue
+                        
+                        df = ef.futures.get_quote_history(efinance_code)
+                        if not df.empty:
+                            latest = df.iloc[-1]
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(latest.get('收盘价', 0) or latest.get('close', 0)),
+                                "开盘价": float(latest.get('开盘价', 0) or latest.get('open', 0)),
+                                "最高价": float(latest.get('最高价', 0) or latest.get('high', 0)),
+                                "最低价": float(latest.get('最低价', 0) or latest.get('low', 0)),
+                                "成交量": float(latest.get('成交量', 0) or 0),
+                                "日期": latest.name.strftime("%Y-%m-%d") if hasattr(latest, 'name') else get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "efinance",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    except Exception as ex:
+                        logger.debug(f"efinance获取 {contract} 失败: {str(ex)}")
+                        continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except ImportError:
+            logger.warning("efinance库未安装，跳过此数据源")
+            return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"efinance数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
     def _fetch_from_akshare(self, contract_codes: List[str]) -> pd.DataFrame:
         """从AkShare获取期货数据"""
         try:
@@ -479,6 +566,7 @@ class FuturesDataSource:
             pd.DataFrame: 包含所有合约行情数据
         """
         sources = [
+            ("efinance", self._fetch_from_efinance),
             ("AkShare", self._fetch_from_akshare),
             ("东方财富", self._fetch_from_eastmoney),
             ("新浪财经", self._fetch_from_sina),

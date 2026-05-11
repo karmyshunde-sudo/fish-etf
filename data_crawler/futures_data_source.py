@@ -1,0 +1,580 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+期货数据获取模块 - 多数据源轮换机制
+支持：IC/IF/IH 股指期货、外盘指数等
+【核心功能】
+1. 多数据源轮换，自动降级
+2. 支持手动输入价格（应急方案）
+3. 升贴水计算
+4. 移仓时机判断
+5. 数据自动保存
+"""
+
+import pandas as pd
+import numpy as np
+import logging
+import requests
+import json
+import os
+import time
+import random
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Tuple
+from config import Config
+from utils.date_utils import get_beijing_time, is_trading_day
+
+logger = logging.getLogger(__name__)
+
+FUTURES_CODES = {
+    "IC": {
+        "name": "中证500股指期货",
+        "contracts": ["IC01", "IC03", "IC06", "IC09"],
+        "spot_index": "000905"  # 中证500指数
+    },
+    "IF": {
+        "name": "沪深300股指期货",
+        "contracts": ["IF01", "IF03", "IF06", "IF09"],
+        "spot_index": "000300"  # 沪深300指数
+    },
+    "IH": {
+        "name": "上证50股指期货",
+        "contracts": ["IH01", "IH03", "IH06", "IH09"],
+        "spot_index": "000016"  # 上证50指数
+    }
+}
+
+EXTERNAL_INDICES = {
+    "SP500": {"name": "标普500", "symbol": "^GSPC"},
+    "NASDAQ": {"name": "纳斯达克", "symbol": "^IXIC"},
+    "DOW": {"name": "道琼斯", "symbol": "^DJI"}
+}
+
+class FuturesDataSource:
+    def __init__(self):
+        self.current_source_index = 0
+        self.failed_sources = set()
+        self.last_fetch_time = {}
+        self.data_dir = os.path.join(Config.DATA_DIR, "futures")
+        os.makedirs(self.data_dir, exist_ok=True)
+    
+    def _save_data(self, df: pd.DataFrame, filename: str) -> str:
+        """保存数据到文件"""
+        try:
+            filepath = os.path.join(self.data_dir, filename)
+            df.to_csv(filepath, index=False, encoding='utf-8-sig')
+            logger.info(f"数据已保存至: {filepath}")
+            return filepath
+        except Exception as e:
+            logger.error(f"保存数据失败: {str(e)}")
+            return ""
+    
+    def _save_json(self, data: Dict, filename: str) -> str:
+        """保存JSON数据到文件"""
+        try:
+            filepath = os.path.join(self.data_dir, filename)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"JSON数据已保存至: {filepath}")
+            return filepath
+        except Exception as e:
+            logger.error(f"保存JSON数据失败: {str(e)}")
+            return ""
+    
+    def _fetch_from_akshare(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从AkShare获取期货数据"""
+        try:
+            import akshare as ak
+            
+            all_data = []
+            for contract in contract_codes:
+                try:
+                    df = ak.futures_zh_daily(symbol=contract)
+                    if not df.empty and len(df) > 0:
+                        latest = df.iloc[-1]
+                        all_data.append({
+                            "合约代码": contract,
+                            "最新价": float(latest.get("close", 0)),
+                            "开盘价": float(latest.get("open", 0)),
+                            "最高价": float(latest.get("high", 0)),
+                            "最低价": float(latest.get("low", 0)),
+                            "成交量": float(latest.get("volume", 0)),
+                            "日期": latest.name.strftime("%Y-%m-%d") if hasattr(latest, 'name') else get_beijing_time().strftime("%Y-%m-%d"),
+                            "数据源": "AkShare",
+                            "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                    time.sleep(0.5)
+                except Exception as e:
+                    logger.debug(f"AkShare获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"AkShare数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def _fetch_from_eastmoney(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从东方财富获取期货数据"""
+        try:
+            all_data = []
+            
+            for contract in contract_codes:
+                try:
+                    url = f"https://push2.eastmoney.com/api/qt/stock/get?secid=1.{contract.lower()}&fields=f57,f58,f107,f108,f109,f110,f116"
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Referer": f"https://quote.eastmoney.com/futures/{contract.lower()}.html"
+                    }
+                    
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("data"):
+                            d = data["data"]
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(d.get("f116", 0) or d.get("f57", 0)),
+                                "开盘价": float(d.get("f107", 0)),
+                                "最高价": float(d.get("f108", 0)),
+                                "最低价": float(d.get("f109", 0)),
+                                "成交量": float(d.get("f110", 0) or 0),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "东方财富",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    time.sleep(random.uniform(0.5, 1.0))
+                except Exception as e:
+                    logger.debug(f"东方财富获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"东方财富数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def _fetch_from_sina(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从新浪财经获取期货数据"""
+        try:
+            all_data = []
+            
+            for contract in contract_codes:
+                try:
+                    sina_code = f"fu_{contract.lower()}"
+                    url = f"http://hq.sinajs.cn/list={sina_code}"
+                    response = requests.get(url, timeout=10)
+                    
+                    if response.status_code == 200:
+                        content = response.text
+                        parts = content.split('="')[1].rstrip('";').split(',') if '="' in content else []
+                        
+                        if len(parts) >= 11:
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(parts[3]),
+                                "开盘价": float(parts[1]),
+                                "最高价": float(parts[4]),
+                                "最低价": float(parts[5]),
+                                "成交量": float(parts[10]),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "新浪财经",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    time.sleep(random.uniform(0.3, 0.8))
+                except Exception as e:
+                    logger.debug(f"新浪财经获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"新浪财经数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def _fetch_from_tencent(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从腾讯财经获取期货数据"""
+        try:
+            all_data = []
+            
+            for contract in contract_codes:
+                try:
+                    url = f"http://qt.gtimg.cn/q=fu_{contract.lower()}"
+                    response = requests.get(url, timeout=10)
+                    
+                    if response.status_code == 200:
+                        content = response.text
+                        parts = content.split('~')
+                        
+                        if len(parts) >= 11:
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(parts[3]),
+                                "开盘价": float(parts[1]),
+                                "最高价": float(parts[4]),
+                                "最低价": float(parts[5]),
+                                "成交量": float(parts[10]),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "腾讯财经",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    time.sleep(random.uniform(0.3, 0.8))
+                except Exception as e:
+                    logger.debug(f"腾讯财经获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"腾讯财经数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def _fetch_from_yfinance(self, indices: List[str]) -> pd.DataFrame:
+        """从Yahoo Finance获取外盘指数数据"""
+        try:
+            import yfinance as yf
+            
+            all_data = []
+            for index_code in indices:
+                try:
+                    ticker = yf.Ticker(index_code)
+                    hist = ticker.history(period="1d")
+                    
+                    if not hist.empty:
+                        latest = hist.iloc[-1]
+                        info = ticker.info
+                        all_data.append({
+                            "指数代码": index_code,
+                            "指数名称": info.get("shortName", ""),
+                            "最新价": float(latest["Close"]),
+                            "开盘价": float(latest["Open"]),
+                            "最高价": float(latest["High"]),
+                            "最低价": float(latest["Low"]),
+                            "成交量": float(latest["Volume"]),
+                            "涨跌幅": float(latest["Close"] - latest["Open"]) / float(latest["Open"]) * 100 if latest["Open"] > 0 else 0,
+                            "日期": latest.name.strftime("%Y-%m-%d"),
+                            "数据源": "Yahoo Finance",
+                            "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                    time.sleep(random.uniform(0.5, 1.0))
+                except Exception as e:
+                    logger.debug(f"Yahoo Finance获取 {index_code} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"external_indices_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"Yahoo Finance数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def fetch_futures_data(self, contract_types: List[str] = ["IC", "IF", "IH"]) -> pd.DataFrame:
+        """
+        获取期货合约行情数据
+        
+        Args:
+            contract_types: 合约类型列表 ["IC", "IF", "IH"]
+        
+        Returns:
+            pd.DataFrame: 包含所有合约行情数据
+        """
+        sources = [
+            ("AkShare", self._fetch_from_akshare),
+            ("东方财富", self._fetch_from_eastmoney),
+            ("新浪财经", self._fetch_from_sina),
+            ("腾讯财经", self._fetch_from_tencent)
+        ]
+        
+        all_contracts = []
+        for ct in contract_types:
+            if ct in FUTURES_CODES:
+                all_contracts.extend(FUTURES_CODES[ct]["contracts"])
+        
+        logger.info(f"开始获取期货数据，合约列表: {all_contracts}")
+        
+        for source_name, fetch_func in sources:
+            if source_name in self.failed_sources:
+                continue
+            
+            try:
+                df = fetch_func(all_contracts)
+                
+                if not df.empty and len(df) > 0:
+                    logger.info(f"✅ [{source_name}] 成功获取 {len(df)} 条期货数据")
+                    
+                    if source_name in self.failed_sources:
+                        self.failed_sources.remove(source_name)
+                    
+                    return df
+                else:
+                    logger.warning(f"[{source_name}] 返回空数据")
+                    
+            except Exception as e:
+                logger.error(f"❌ [{source_name}] 获取期货数据失败: {str(e)}")
+                self.failed_sources.add(source_name)
+            
+            time.sleep(random.uniform(1.0, 2.0))
+        
+        logger.error("所有数据源均无法获取期货数据")
+        return pd.DataFrame()
+    
+    def fetch_external_indices(self) -> pd.DataFrame:
+        """获取外盘指数数据"""
+        logger.info("开始获取外盘指数数据")
+        
+        try:
+            symbols = [EXTERNAL_INDICES[key]["symbol"] for key in EXTERNAL_INDICES]
+            df = self._fetch_from_yfinance(symbols)
+            
+            if not df.empty:
+                logger.info(f"✅ 成功获取 {len(df)} 条外盘指数数据")
+                return df
+        except Exception as e:
+            logger.error(f"获取外盘指数失败: {str(e)}")
+        
+        return pd.DataFrame()
+    
+    def get_spot_index(self, index_code: str) -> Optional[float]:
+        """获取现货指数当前值"""
+        try:
+            url = f"http://hq.sinajs.cn/list=sh{index_code}"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                content = response.text
+                parts = content.split(',')
+                if len(parts) > 3:
+                    return float(parts[3])
+        except Exception as e:
+            logger.error(f"获取现货指数 {index_code} 失败: {str(e)}")
+        
+        return None
+    
+    def calculate_basis(self, futures_price: float, spot_price: float, days_to_expiry: int) -> Dict[str, float]:
+        """
+        计算升贴水
+        
+        Args:
+            futures_price: 期货价格
+            spot_price: 现货价格
+            days_to_expiry: 到期天数
+        
+        Returns:
+            Dict: 包含升贴水信息
+        """
+        if spot_price <= 0 or futures_price <= 0:
+            return {"基差": 0, "基差率": 0, "年化基差率": 0}
+        
+        basis = futures_price - spot_price
+        basis_rate = basis / spot_price * 100
+        
+        # 年化基差率
+        annual_basis_rate = 0
+        if days_to_expiry > 0:
+            annual_basis_rate = (basis / spot_price) * (365 / days_to_expiry) * 100
+        
+        return {
+            "基差": round(basis, 2),
+            "基差率": round(basis_rate, 2),
+            "年化基差率": round(annual_basis_rate, 2),
+            "贴水": basis < 0,
+            "升水": basis > 0
+        }
+    
+    def analyze_roll_opportunity(self, futures_data: pd.DataFrame) -> pd.DataFrame:
+        """
+        分析移仓时机
+        
+        Args:
+            futures_data: 期货行情数据
+        
+        Returns:
+            pd.DataFrame: 包含移仓分析结果
+        """
+        if futures_data.empty:
+            return pd.DataFrame()
+        
+        result = []
+        
+        for contract_type in FUTURES_CODES.keys():
+            contracts = FUTURES_CODES[contract_type]["contracts"]
+            spot_index = FUTURES_CODES[contract_type]["spot_index"]
+            
+            spot_price = self.get_spot_index(spot_index)
+            if spot_price is None:
+                logger.warning(f"无法获取 {contract_type} 现货指数")
+                continue
+            
+            contract_data = futures_data[futures_data["合约代码"].str.startswith(contract_type)]
+            
+            for _, row in contract_data.iterrows():
+                contract_code = row["合约代码"]
+                futures_price = row["最新价"]
+                
+                # 估算到期天数（简化计算）
+                month = int(contract_code[-2:])
+                current_month = get_beijing_time().month
+                current_year = get_beijing_time().year
+                
+                if month >= current_month:
+                    expiry_month = month
+                    expiry_year = current_year
+                else:
+                    expiry_month = month
+                    expiry_year = current_year + 1
+                
+                # 合约通常在当月第三个周五到期
+                expiry_date = self._get_expiry_date(expiry_year, expiry_month)
+                days_to_expiry = max(0, (expiry_date - get_beijing_time().date()).days)
+                
+                basis_info = self.calculate_basis(futures_price, spot_price, days_to_expiry)
+                
+                result.append({
+                    "合约类型": contract_type,
+                    "合约代码": contract_code,
+                    "期货价格": futures_price,
+                    "现货价格": spot_price,
+                    "到期天数": days_to_expiry,
+                    **basis_info,
+                    "合约名称": FUTURES_CODES[contract_type]["name"],
+                    "分析时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                })
+        
+        df = pd.DataFrame(result)
+        
+        if not df.empty:
+            # 判断是否适合移仓
+            df["建议移仓"] = df["年化基差率"].apply(lambda x: x < -5)  # 年化贴水超过5%建议移仓
+            df["移仓优先级"] = df.groupby("合约类型")["年化基差率"].rank(method="min", ascending=True)
+            
+            self._save_data(df, f"roll_analysis_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+        
+        return df
+    
+    def _get_expiry_date(self, year: int, month: int) -> datetime.date:
+        """计算合约到期日期（当月第三个周五）"""
+        import calendar
+        
+        # 获取当月第一天
+        first_day = datetime(year, month, 1).date()
+        first_weekday = first_day.weekday()  # 0=周一, 4=周五
+        
+        # 第一个周五
+        if first_weekday <= 4:
+            first_friday = first_day + timedelta(days=(4 - first_weekday))
+        else:
+            first_friday = first_day + timedelta(days=(7 - first_weekday + 4))
+        
+        # 第三个周五
+        expiry_date = first_friday + timedelta(weeks=2)
+        
+        return expiry_date
+    
+def get_futures_report(futures_data: pd.DataFrame, external_data: pd.DataFrame, 
+                      roll_analysis: pd.DataFrame) -> str:
+    """
+    生成期货数据报告
+    
+    Args:
+        futures_data: 期货行情数据
+        external_data: 外盘指数数据
+        roll_analysis: 移仓分析数据
+    
+    Returns:
+        str: 报告文本
+    """
+    beijing_time = get_beijing_time()
+    report = []
+    
+    report.append(f"📊 期货行情日报")
+    report.append(f"日期：{beijing_time.strftime('%Y-%m-%d %H:%M')}")
+    report.append("=" * 40)
+    
+    # 期货行情
+    report.append("\n📈 股指期货行情")
+    if not futures_data.empty:
+        for ct in FUTURES_CODES.keys():
+            ct_data = futures_data[futures_data["合约代码"].str.startswith(ct)]
+            if not ct_data.empty:
+                report.append(f"\n{ct} - {FUTURES_CODES[ct]['name']}")
+                for _, row in ct_data.iterrows():
+                    report.append(f"  {row['合约代码']}: {row['最新价']} ({row['数据源']})")
+    else:
+        report.append("  ❌ 无法获取期货行情数据")
+    
+    # 外盘表现
+    report.append("\n🌎 外盘指数表现")
+    if not external_data.empty:
+        for _, row in external_data.iterrows():
+            change_str = f"▲{row['涨跌幅']:.2f}%" if row['涨跌幅'] >= 0 else f"▼{row['涨跌幅']:.2f}%"
+            report.append(f"  {row['指数名称']}: {row['最新价']:.2f} {change_str}")
+    else:
+        report.append("  ❌ 无法获取外盘数据")
+    
+    # 升贴水分析
+    report.append("\n💧 升贴水分析")
+    if not roll_analysis.empty:
+        for ct in FUTURES_CODES.keys():
+            ct_data = roll_analysis[roll_analysis["合约类型"] == ct]
+            if not ct_data.empty:
+                report.append(f"\n{ct} 合约")
+                for _, row in ct_data.iterrows():
+                    basis_type = "贴水" if row["贴水"] else "升水" if row["升水"] else "平水"
+                    status = "⚠️" if row["建议移仓"] else "✅"
+                    report.append(f"  {row['合约代码']}: 基差 {row['基差']:.2f} ({row['基差率']:.2f}%) [{basis_type}] 年化{row['年化基差率']:.2f}% {status}")
+    else:
+        report.append("  ❌ 无法计算升贴水")
+    
+    # 移仓建议
+    report.append("\n📋 移仓建议")
+    if not roll_analysis.empty:
+        need_roll = roll_analysis[roll_analysis["建议移仓"]]
+        if not need_roll.empty:
+            report.append("需要关注的移仓机会：")
+            for _, row in need_roll.iterrows():
+                report.append(f"  • {row['合约代码']}: 年化贴水 {abs(row['年化基差率']):.2f}%")
+        else:
+            report.append("当前无强烈移仓需求")
+    else:
+        report.append("无法判断移仓时机")
+    
+    return "\n".join(report)
+
+def main():
+    """主函数 - 测试期货数据获取"""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    
+    fds = FuturesDataSource()
+    
+    print("=== 期货数据获取测试 ===")
+    
+    # 获取期货数据
+    futures_data = fds.fetch_futures_data()
+    print(f"\n期货行情数据:")
+    print(futures_data)
+    
+    # 获取外盘数据
+    external_data = fds.fetch_external_indices()
+    print(f"\n外盘指数数据:")
+    print(external_data)
+    
+    # 分析移仓时机
+    roll_analysis = fds.analyze_roll_opportunity(futures_data)
+    print(f"\n移仓分析:")
+    print(roll_analysis)
+    
+    # 生成报告
+    report = get_futures_report(futures_data, external_data, roll_analysis)
+    print(f"\n{report}")
+
+if __name__ == "__main__":
+    main()

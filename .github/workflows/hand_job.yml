@@ -1401,7 +1401,7 @@ jobs:
           echo "日志文件: $LOG_FILE"
           if [ -f "data_crawler/futures_data_integrator.py" ]; then
             echo "找到期货数据获取文件: data_crawler/futures_data_integrator.py"
-            python -m data_crawler.futures_data_integrator 2>&1 | tee "$LOG_FILE"
+            python data_crawler/futures_data_integrator.py 2>&1 | tee "$LOG_FILE"
             if [ ${PIPESTATUS[0]} -eq 0 ]; then
               echo "task_status=success" >> $GITHUB_OUTPUT
             else
@@ -1432,13 +1432,7 @@ jobs:
           FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
         run: |
           if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
-            python -c "
-from wechat_push.feishu_push import send_feishu_message
-send_feishu_message('✅ 【期货数据获取（手动）】执行成功')
-"
+            python -c "from wechat_push.feishu_push import send_feishu_message; send_feishu_message('✅ 【期货数据获取（手动）】执行成功')"
           else
-            python -c "
-from wechat_push.feishu_push import send_feishu_message
-send_feishu_message('⚠️ 【期货数据获取（手动）】执行失败')
-"
+            python -c "from wechat_push.feishu_push import send_feishu_message; send_feishu_message('⚠️ 【期货数据获取（手动）】执行失败')"
           fi

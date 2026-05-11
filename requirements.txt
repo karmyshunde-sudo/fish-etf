@@ -1,5 +1,6 @@
 yfinance==0.2.66
-akshare>=1.17.71  # 主数据源
+yahooquery>=2.3.0  # Yahoo Finance API（海外可访问）
+akshare>=1.17.71   # 主数据源
 efinance>=0.5.8    # efinance 数据源（东方财富，支持ETF和股票）
 pandas>=1.5.3     # 数据处理
 numpy>=1.21.0     # 数值计算

@@ -299,6 +299,135 @@ class FuturesDataSource:
             logger.error(f"Investing.com数据源失败: {str(e)}")
             return pd.DataFrame()
     
+    def _fetch_from_yfinance_futures(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从Yahoo Finance获取中国股指期货数据（海外可访问）"""
+        try:
+            import yfinance as yf
+            
+            all_data = []
+            
+            # Yahoo Finance 合约映射
+            yf_mapping = {
+                "IC01": "CN03.NYB",  # 中证500股指期货
+                "IC03": "CN03.NYB",
+                "IC06": "CN06.NYB",
+                "IC09": "CN09.NYB",
+                "IF01": "CN03.NYB",  # 沪深300股指期货
+                "IF03": "CN03.NYB",
+                "IF06": "CN06.NYB",
+                "IF09": "CN09.NYB",
+                "IH01": "CN03.NYB",  # 上证50股指期货
+                "IH03": "CN03.NYB",
+                "IH06": "CN06.NYB",
+                "IH09": "CN09.NYB"
+            }
+            
+            for contract in contract_codes:
+                try:
+                    yf_code = yf_mapping.get(contract)
+                    if not yf_code:
+                        continue
+                    
+                    ticker = yf.Ticker(yf_code)
+                    data = ticker.history(period='1d')
+                    
+                    if not data.empty:
+                        latest = data.iloc[-1]
+                        all_data.append({
+                            "合约代码": contract,
+                            "最新价": float(latest['Close']),
+                            "开盘价": float(latest['Open']),
+                            "最高价": float(latest['High']),
+                            "最低价": float(latest['Low']),
+                            "成交量": float(latest['Volume']),
+                            "日期": latest.name.strftime("%Y-%m-%d"),
+                            "数据源": "Yahoo Finance",
+                            "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                    time.sleep(random.uniform(1.0, 2.0))
+                except Exception as e:
+                    logger.debug(f"Yahoo Finance获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"Yahoo Finance数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
+    def _fetch_from_tradingview(self, contract_codes: List[str]) -> pd.DataFrame:
+        """从TradingView获取期货数据（海外可访问）"""
+        try:
+            all_data = []
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.tradingview.com/"
+            })
+            
+            # TradingView 合约映射
+            tv_mapping = {
+                "IC01": "SHFE:CN03",
+                "IC03": "SHFE:CN03",
+                "IC06": "SHFE:CN06",
+                "IC09": "SHFE:CN09",
+                "IF01": "SHFE:CN03",
+                "IF03": "SHFE:CN03",
+                "IF06": "SHFE:CN06",
+                "IF09": "SHFE:CN09",
+                "IH01": "SHFE:CN03",
+                "IH03": "SHFE:CN03",
+                "IH06": "SHFE:CN06",
+                "IH09": "SHFE:CN09"
+            }
+            
+            for contract in contract_codes:
+                try:
+                    tv_code = tv_mapping.get(contract)
+                    if not tv_code:
+                        continue
+                    
+                    url = f"https://scanner.tradingview.com/global/scan"
+                    payload = {
+                        "columns": ["name", "close", "open", "high", "low", "volume"],
+                        "filter": {"left": "name", "operation": "equal", "right": tv_code},
+                        "options": {"lang": "zh"}
+                    }
+                    
+                    response = session.post(url, json=payload, timeout=15)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data and isinstance(data, dict) and 'data' in data:
+                            result = data['data']
+                            if result:
+                                item = result[0]
+                                all_data.append({
+                                    "合约代码": contract,
+                                    "最新价": float(item.get('close', 0)),
+                                    "开盘价": float(item.get('open', 0)),
+                                    "最高价": float(item.get('high', 0)),
+                                    "最低价": float(item.get('low', 0)),
+                                    "成交量": float(item.get('volume', 0)),
+                                    "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                    "数据源": "TradingView",
+                                    "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                    time.sleep(random.uniform(2.0, 3.0))
+                except Exception as e:
+                    logger.debug(f"TradingView获取 {contract} 失败: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(all_data)
+            if not df.empty:
+                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+            return df
+        except Exception as e:
+            logger.error(f"TradingView数据源失败: {str(e)}")
+            return pd.DataFrame()
+    
     def _fetch_from_yfinance(self, indices: List[str]) -> pd.DataFrame:
         """从Yahoo Finance获取外盘指数数据"""
         try:
@@ -354,7 +483,9 @@ class FuturesDataSource:
             ("东方财富", self._fetch_from_eastmoney),
             ("新浪财经", self._fetch_from_sina),
             ("腾讯财经", self._fetch_from_tencent),
-            ("Investing.com", self._fetch_from_investing)
+            ("Investing.com", self._fetch_from_investing),
+            ("Yahoo Finance", self._fetch_from_yfinance_futures),
+            ("TradingView", self._fetch_from_tradingview)
         ]
         
         all_contracts = []

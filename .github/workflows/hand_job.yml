@@ -21,6 +21,7 @@ on:
           - 'crawl_etf_daily'
           - 'calculate_arbitrage'
           - 'calculate_position'
+          - 'fetch_futures_data'                    # 期货数据获取任务
       stock_code:
         description: '股票代码（6位数字，不带前缀后缀）'
         required: false
@@ -1334,3 +1335,105 @@ jobs:
           EMOJI=${STATUS == 'success' && '✅' || '❌'}
           curl -s -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" \
             -d "{\"msgtype\": \"text\", \"text\": {\"content\": \"$EMOJI 【趋势通道策略（手动）】执行${STATUS}\\n北京时间: ${BEIJING_TIME}\"}}"
+
+  # 期货数据获取（手动）
+  fetch-futures-data-manual:
+    name: 期货数据获取（手动）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'fetch_futures_data'
+    permissions:
+      contents: write
+    steps:
+      - name: 验证时区设置
+        run: |
+          echo "时区验证: $(date -u '+%Y-%m-%d %H%M%S' UTC) | $(TZ=Asia/Shanghai date '+%Y-%m-%d %H%M%S' CST)"
+
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 验证代码版本
+        run: |
+          echo "当前工作目录: $(pwd)"
+          echo "当前分支: $(git branch --show-current)"
+          echo "当前commit: $(git rev-parse HEAD)"
+          echo "最新远程commit: $(git ls-remote origin main | awk '{print $1}')"
+          echo "当前main分支的提交历史:"
+          git log --oneline -n 5
+          echo "本地仓库状态:"
+          git status
+
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 安装依赖包
+        run: |
+          echo "当前工作目录: $(pwd)"
+          if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt 文件存在，开始安装依赖..."
+            pip install -r requirements.txt
+          else
+            echo "❌ 错误: requirements.txt 文件不存在"
+            ls -la
+            exit 1
+          fi
+
+      - name: 创建数据目录
+        run: |
+          mkdir -p data/{futures,flags,logs} && chmod -R 777 data
+
+      - name: 执行期货数据获取（手动）
+        id: execute_task
+        env:
+          WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
+          TZ: Asia/Shanghai
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
+          LOG_FILE="data/logs/fetch_futures_data_${BEIJING_TIME}.log"
+          echo "正在执行: 期货数据获取（手动）"
+          echo "日志文件: $LOG_FILE"
+          if [ -f "data_crawler/futures_data_integrator.py" ]; then
+            echo "找到期货数据获取文件: data_crawler/futures_data_integrator.py"
+            python -m data_crawler.futures_data_integrator 2>&1 | tee "$LOG_FILE"
+            if [ ${PIPESTATUS[0]} -eq 0 ]; then
+              echo "task_status=success" >> $GITHUB_OUTPUT
+            else
+              echo "task_status=failed" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "错误: 未找到期货数据获取文件 data_crawler/futures_data_integrator.py"
+            echo "task_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: 提交期货数据
+        if: steps.execute_task.outputs.task_status == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/futures/
+          if [ -n "$(git diff --cached --name-only data/futures/)" ]; then
+            git commit -m "手动更新期货数据" && git push origin main
+          else
+            echo "期货数据没有变化，无需提交"
+          fi
+
+      - name: 发送飞书通知
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
+            curl -s -X POST "$FEISHU_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"✅ 【期货数据获取（手动）】执行成功\\n北京时间: ${BEIJING_TIME}\"}}"
+          else
+            curl -s -X POST "$FEISHU_WEBHOOK" -H "Content-Type: application/json" \
+              -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"⚠️ 【期货数据获取（手动）】执行失败\\n北京时间: ${BEIJING_TIME}\"}}"
+          fi

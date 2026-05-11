@@ -36,6 +36,12 @@ _access_token_info = {
     "expire_time": 0
 }
 
+# User Access Token 缓存（用于用户身份发送）
+_user_access_token_info = {
+    "token": "",
+    "expire_time": 0
+}
+
 def _get_access_token(app_id: str, app_secret: str) -> Optional[str]:
     """获取飞书开放平台 Access Token"""
     global _access_token_info
@@ -67,6 +73,61 @@ def _get_access_token(app_id: str, app_secret: str) -> Optional[str]:
             
     except Exception as e:
         logger.error(f"获取Access Token异常: {str(e)}")
+        return None
+
+def _get_user_access_token(app_id: str, app_secret: str, refresh_token: Optional[str] = None) -> Optional[str]:
+    """获取用户身份的 Access Token（自动刷新）"""
+    global _user_access_token_info
+    
+    current_time = time.time()
+    
+    # 检查缓存是否有效
+    if _user_access_token_info["token"] and current_time < _user_access_token_info["expire_time"] - 60:
+        return _user_access_token_info["token"]
+    
+    try:
+        # 优先使用 refresh_token 刷新
+        if refresh_token:
+            url = f"{_FEISHU_API_BASE_URL}/authen/v1/refresh_access_token"
+            payload = {
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token"
+            }
+        else:
+            # 如果没有 refresh_token，尝试使用授权码（需要环境变量配置）
+            code = os.environ.get("FEISHU_AUTH_CODE", "")
+            if not code:
+                logger.warning("未配置 FEISHU_AUTH_CODE 或 FEISHU_REFRESH_TOKEN，无法获取 user_access_token")
+                return None
+            
+            url = f"{_FEISHU_API_BASE_URL}/authen/v1/access_token"
+            payload = {
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "code": code,
+                "grant_type": "authorization_code"
+            }
+        
+        response = requests.post(url, json=payload, timeout=_REQUEST_TIMEOUT)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result.get("code") == 0:
+            _user_access_token_info["token"] = result.get("access_token", "")
+            _user_access_token_info["expire_time"] = current_time + result.get("expire", 7200)
+            
+            # 保存新的 refresh_token（如果返回了）
+            if "refresh_token" in result:
+                logger.info("获取 user_access_token 成功")
+            return _user_access_token_info["token"]
+        else:
+            logger.error(f"获取 user_access_token 失败: {result.get('msg', '未知错误')}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"获取 user_access_token 异常: {str(e)}")
         return None
 
 def _send_single_message(access_token: str, receive_id: str, receive_id_type: str, message: str, retry_count: int = 0) -> bool:
@@ -106,7 +167,12 @@ def _send_single_message(access_token: str, receive_id: str, receive_id_type: st
         logger.error(f"网络连接错误 (重试 {retry_count})")
         return False
     except requests.exceptions.RequestException as e:
-        logger.error(f"请求异常: {str(e)} (重试 {retry_count})")
+        try:
+            response_text = e.response.text if hasattr(e.response, 'text') else 'N/A'
+            logger.error(f"请求异常: {str(e)} (重试 {retry_count})")
+            logger.error(f"响应内容: {response_text}")
+        except:
+            logger.error(f"请求异常: {str(e)} (重试 {retry_count})")
         return False
     except Exception as e:
         logger.error(f"发送消息时发生未预期错误: {str(e)} (重试 {retry_count})", exc_info=True)
@@ -198,10 +264,14 @@ def send_feishu_message(message: str,
             logger.error("飞书应用ID或密钥未配置")
             return False
         
-        # 优先使用私聊模式（user_id）
+        # 优先使用私聊模式（user_id/open_id）
         if user_id:
             receive_id = user_id
-            receive_id_type = "user_id"
+            # 判断是user_id还是open_id
+            if user_id.startswith("ou_"):
+                receive_id_type = "open_id"
+            else:
+                receive_id_type = "user_id"
             logger.info("使用私聊模式发送消息")
         elif chat_id:
             receive_id = chat_id
@@ -250,6 +320,87 @@ def send_feishu_message(message: str,
         
     except Exception as e:
         logger.error(f"发送飞书消息失败: {str(e)}", exc_info=True)
+        return False
+
+def send_feishu_message_as_user(message: str, 
+                               app_id: Optional[str] = None,
+                               app_secret: Optional[str] = None,
+                               refresh_token: Optional[str] = None,
+                               chat_id: Optional[str] = None) -> bool:
+    """
+    以用户身份发送消息（用于触发机器人回复）
+    
+    使用 user_access_token 发送消息，可以触发飞书机器人的自动回复
+    支持自动获取和刷新 user_access_token
+    
+    Args:
+        message: 消息内容
+        app_id: 飞书应用ID（从环境变量 FEISHU_APP_ID 获取）
+        app_secret: 飞书应用密钥（从环境变量 FEISHU_APP_SECRET 获取）
+        refresh_token: 用户刷新令牌（从环境变量 FEISHU_REFRESH_TOKEN 获取）
+        chat_id: 群组ID（从环境变量 FEISHU_CHAT_ID 获取）
+    
+    Returns:
+        bool: 是否发送成功
+    """
+    try:
+        if not message or not message.strip():
+            logger.warning("尝试发送空消息，已忽略")
+            return False
+        
+        # 从环境变量获取配置
+        if not app_id:
+            app_id = os.getenv("FEISHU_APP_ID", "")
+        if not app_secret:
+            app_secret = os.getenv("FEISHU_APP_SECRET", "")
+        if not refresh_token:
+            refresh_token = os.getenv("FEISHU_REFRESH_TOKEN", "")
+        if not chat_id:
+            chat_id = os.getenv("FEISHU_CHAT_ID", "")
+        
+        # 检查配置
+        if not app_id or not app_secret:
+            logger.error("飞书应用ID或密钥未配置")
+            return False
+        
+        if not chat_id:
+            logger.error("群组ID (FEISHU_CHAT_ID) 未配置")
+            return False
+        
+        # 自动获取/刷新 user_access_token
+        user_access_token = _get_user_access_token(app_id, app_secret, refresh_token)
+        if not user_access_token:
+            logger.error("无法获取 user_access_token")
+            return False
+        
+        url = f"{_FEISHU_API_BASE_URL}/im/v1/messages?receive_id_type=chat_id"
+        headers = {
+            "Authorization": f"Bearer {user_access_token}",
+            "Content-Type": "application/json; charset=utf-8"
+        }
+        
+        payload = {
+            "receive_id": chat_id,
+            "msg_type": "text",
+            "content": json.dumps({
+                "text": message
+            })
+        }
+        
+        logger.info("以用户身份发送消息")
+        response = requests.post(url, headers=headers, json=payload, timeout=_REQUEST_TIMEOUT)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result.get("code") == 0:
+            logger.info("用户身份消息发送成功")
+            return True
+        else:
+            logger.error(f"用户身份消息发送失败: {result.get('msg', '未知错误')}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"发送用户身份消息失败: {str(e)}", exc_info=True)
         return False
 
 def send_futures_report(futures_data: Dict[str, Any], 

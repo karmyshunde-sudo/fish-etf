@@ -1427,6 +1427,7 @@ jobs:
           fi
 
       - name: 发送飞书通知
+        if: always()
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}

@@ -1394,6 +1394,7 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.STOCK_WEBHOOK }}
           TZ: Asia/Shanghai
+          PYTHONPATH: "."
         run: |
           BEIJING_TIME=$(TZ=Asia/Shanghai date '+%Y%m%d_%H%M%S')
           LOG_FILE="data/logs/fetch_futures_data_${BEIJING_TIME}.log"
@@ -1401,7 +1402,7 @@ jobs:
           echo "日志文件: $LOG_FILE"
           if [ -f "data_crawler/futures_data_integrator.py" ]; then
             echo "找到期货数据获取文件: data_crawler/futures_data_integrator.py"
-            python data_crawler/futures_data_integrator.py 2>&1 | tee "$LOG_FILE"
+            python -c "import sys; sys.path.insert(0, '.'); from data_crawler.futures_data_integrator import main; main()" 2>&1 | tee "$LOG_FILE"
             if [ ${PIPESTATUS[0]} -eq 0 ]; then
               echo "task_status=success" >> $GITHUB_OUTPUT
             else

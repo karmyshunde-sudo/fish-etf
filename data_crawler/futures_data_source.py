@@ -169,39 +169,109 @@ class FuturesDataSource:
             return pd.DataFrame()
     
     def _fetch_from_akshare(self, contract_codes: List[str]) -> pd.DataFrame:
-        """从AkShare获取期货数据"""
+        """从AkShare获取期货数据 - 使用多种接口"""
+        import akshare as ak
+        
+        all_data = []
+        
+        # 方法1：使用 futures_zh_realtime 获取金融期货实时行情
         try:
-            import akshare as ak
-            
-            all_data = []
-            for contract in contract_codes:
-                try:
-                    df = ak.futures_zh_daily(symbol=contract)
-                    if not df.empty and len(df) > 0:
-                        latest = df.iloc[-1]
-                        all_data.append({
-                            "合约代码": contract,
-                            "最新价": float(latest.get("close", 0)),
-                            "开盘价": float(latest.get("open", 0)),
-                            "最高价": float(latest.get("high", 0)),
-                            "最低价": float(latest.get("low", 0)),
-                            "成交量": float(latest.get("volume", 0)),
-                            "日期": latest.name.strftime("%Y-%m-%d") if hasattr(latest, 'name') else get_beijing_time().strftime("%Y-%m-%d"),
-                            "数据源": "AkShare",
-                            "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                    time.sleep(0.5)
-                except Exception as e:
-                    logger.debug(f"AkShare获取 {contract} 失败: {str(e)}")
-                    continue
-            
-            df = pd.DataFrame(all_data)
-            if not df.empty:
-                self._save_data(df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
-            return df
+            logger.info("尝试 AKShare futures_zh_realtime 接口...")
+            df = ak.futures_zh_realtime()
+            if not df.empty and 'symbol' in df.columns:
+                for _, row in df.iterrows():
+                    symbol = str(row.get('symbol', ''))
+                    for target in contract_codes:
+                        if symbol.startswith(target[:2]):
+                            all_data.append({
+                                "合约代码": symbol,
+                                "最新价": float(row.get('last_price', row.get('price', 0)) or 0),
+                                "开盘价": float(row.get('open', 0) or 0),
+                                "最高价": float(row.get('high', 0) or 0),
+                                "最低价": float(row.get('low', 0) or 0),
+                                "成交量": float(row.get('volume', 0) or 0),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "AkShare (realtime)",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                
+                if all_data:
+                    result_df = pd.DataFrame(all_data)
+                    self._save_data(result_df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+                    logger.info(f"✅ [AkShare] 成功获取 {len(result_df)} 条期货数据 (realtime)")
+                    return result_df
         except Exception as e:
-            logger.error(f"AkShare数据源失败: {str(e)}")
-            return pd.DataFrame()
+            logger.warning(f"AKShare futures_zh_realtime 失败: {str(e)}")
+        
+        # 方法2：使用 futures_zh_spot 获取实时行情
+        try:
+            logger.info("尝试 AKShare futures_zh_spot 接口...")
+            df = ak.futures_zh_spot()
+            if not df.empty:
+                for _, row in df.iterrows():
+                    symbol = str(row.get('名称', row.get('代码', '')))
+                    for target in contract_codes:
+                        if any(symbol.startswith(t) for t in ['IF', 'IH', 'IC']):
+                            all_data.append({
+                                "合约代码": symbol,
+                                "最新价": float(row.get('最新价', row.get('收盘', 0)) or 0),
+                                "开盘价": float(row.get('开盘', 0) or 0),
+                                "最高价": float(row.get('最高', 0) or 0),
+                                "最低价": float(row.get('最低', 0) or 0),
+                                "成交量": float(row.get('成交量', 0) or 0),
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "AkShare (spot)",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                
+                if all_data:
+                    result_df = pd.DataFrame(all_data)
+                    self._save_data(result_df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+                    logger.info(f"✅ [AkShare] 成功获取 {len(result_df)} 条期货数据 (spot)")
+                    return result_df
+        except Exception as e:
+            logger.warning(f"AKShare futures_zh_spot 失败: {str(e)}")
+        
+        # 方法3：逐个获取主力合约
+        try:
+            logger.info("尝试 AKShare futures_main_sina 接口...")
+            main_contracts = {
+                "IC": ["IC2506", "IC2509"],
+                "IF": ["IF2506", "IF2509"],
+                "IH": ["IH2506", "IH2509"]
+            }
+            
+            for type_code, contracts in main_contracts.items():
+                for contract in contracts:
+                    try:
+                        df = ak.futures_main_sina(symbol=contract.replace(type_code, type_code.lower()))
+                        if not df.empty and len(df) > 0:
+                            latest = df.iloc[-1]
+                            all_data.append({
+                                "合约代码": contract,
+                                "最新价": float(latest.iloc[0] if hasattr(latest.iloc[0], '__float__') else 0),
+                                "开盘价": 0,
+                                "最高价": 0,
+                                "最低价": 0,
+                                "成交量": 0,
+                                "日期": get_beijing_time().strftime("%Y-%m-%d"),
+                                "数据源": "AkShare (main)",
+                                "更新时间": get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                        time.sleep(0.5)
+                    except Exception:
+                        continue
+                
+                if all_data:
+                    result_df = pd.DataFrame(all_data)
+                    self._save_data(result_df, f"futures_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv")
+                    logger.info(f"✅ [AkShare] 成功获取 {len(result_df)} 条期货数据 (main)")
+                    return result_df
+        except Exception as e:
+            logger.warning(f"AKShare futures_main_sina 失败: {str(e)}")
+        
+        logger.warning("[AkShare] 所有接口均返回空数据")
+        return pd.DataFrame()
     
     def _fetch_from_eastmoney(self, contract_codes: List[str]) -> pd.DataFrame:
         """从东方财富获取期货数据"""
@@ -426,14 +496,24 @@ class FuturesDataSource:
                 spy_price = index_info.get('currentPrice', 500) if index_info else 500
                 spy_change = index_info.get('regularMarketChangePercent', 0) if index_info else 0
                 
+                # 月份价差映射：远月合约价格高于近月合约（升水）
+                month_spread = {
+                    "01": 0.0,      # 当月合约，基准价格
+                    "03": 0.003,     # 3月合约，升水0.3%
+                    "06": 0.008,     # 6月合约，升水0.8%
+                    "09": 0.013      # 9月合约，升水1.3%
+                }
+                
                 # 根据外盘估算中国股指期货
                 for contract in contract_codes:
                     try:
                         contract_type = contract[:2]  # IC, IF, IH
+                        contract_month = contract[2:]  # 01, 03, 06, 09
                         base_price = base_prices.get(contract_type, 5000)
+                        spread = month_spread.get(contract_month, 0)
                         
-                        # 简单估算：外盘涨1%，中国股指期货也涨1%
-                        estimated_price = base_price * (1 + (spy_change / 100))
+                        # 外盘影响 + 月份价差
+                        estimated_price = base_price * (1 + (spy_change / 100)) * (1 + spread)
                         
                         all_data.append({
                             "合约代码": contract,

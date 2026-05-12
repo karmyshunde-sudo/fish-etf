@@ -1434,7 +1434,26 @@ jobs:
           FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
         run: |
           if [ "${{ steps.execute_task.outputs.task_status }}" == "success" ]; then
-            python -c "from wechat_push.feishu_push import send_feishu_message; send_feishu_message('✅ 【期货数据获取（手动）】执行成功')"
+            python -c "
+import sys, os, json
+sys.path.insert(0, '.')
+
+from wechat_push.feishu_push import send_feishu_message
+
+# 读取最新的期货报告文件
+report_file = None
+import glob
+files = sorted(glob.glob('data/futures/futures_report_*.txt'), reverse=True)
+if files:
+    report_file = files[0]
+
+if report_file:
+    with open(report_file, 'r', encoding='utf-8') as f:
+        report_content = f.read()
+    send_feishu_message(report_content)
+else:
+    send_feishu_message('⚠️ 期货数据获取成功，但未找到报告文件')
+"
           else
             python -c "from wechat_push.feishu_push import send_feishu_message; send_feishu_message('⚠️ 【期货数据获取（手动）】执行失败')"
           fi

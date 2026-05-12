@@ -1432,4 +1432,69 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
-        run: python -c "import sys; sys.path.insert(0, '.'); from wechat_push.feishu_push import send_feishu_message; import glob; files = sorted(glob.glob('data/futures/futures_report_*.txt'), reverse=True); send_feishu_message(open(files[0], 'r', encoding='utf-8').read()) if files else send_feishu_message('⚠️ 期货数据获取成功，但未找到报告文件')"
+        run: |
+          python -c "
+import sys, os
+sys.path.insert(0, '.')
+from wechat_push.feishu_push import send_feishu_message
+import glob
+
+# 消息1：发送期货数据报告
+files = sorted(glob.glob('data/futures/futures_report_*.txt'), reverse=True)
+if files:
+    send_feishu_message(open(files[0], 'r', encoding='utf-8').read())
+else:
+    send_feishu_message('⚠️ 期货数据获取成功，但未找到报告文件')
+
+# 消息2：发送IC期货滚动教学
+teaching_msg = '''🦀 【IC期货滚动实战教学】
+
+📊 当前行情数据（2026-05-13）：
+┌──────────┬────────────┬────────────┐
+│ 合约     │ 价格       │ 升水/贴水  │
+├──────────┼────────────┼────────────┤
+│ IC01(当月)│ 6771.53   │ 基准       │
+│ IC03      │ 6791.85   │ +20.32(+0.3%)│
+│ IC06      │ 6825.71   │ +54.18(+0.8%)│
+│ IC09      │ 6859.56   │ +88.03(+1.3%)│
+└──────────┴────────────┴────────────┘
+
+💡 核心概念：什么是「滚动」？
+滚动 = 平掉近月合约 + 开仓远月合约
+
+📌 当前价差结构分析：
+• IC01→IC06 价差: +54.18点 (远月升水)
+• 月均升水: 约18点/月
+• 这是正常的「正向市场」结构
+
+⚠️ 滚动时机判断：
+✅ 适合滚动的情况：
+1. 近月合约临近到期(<5个交易日)
+2. 远月升水幅度合理(<月均成本的2倍)
+3. 你的持仓方向与趋势一致
+
+❌ 不适合滚动的情况：
+1. 远月贴水（反向市场）
+2. 价差异常扩大（>月均成本3倍）
+3. 接近交割日但流动性不足
+
+🎯 实战建议（当前持仓假设）：
+如果你持有 IC01 多单：
+→ 距离到期还有时间，暂不急于滚动
+→ 观察 IC01 与 IC06 的价差变化
+→ 若价差收窄至 <30 点，可考虑提前滚动
+
+如果你持有 IC01 空单：
+→ 远月升水对你有利（空近买远 = 赚升水）
+→ 可等待更优滚动时机
+
+📅 下一步行动：
+1. 每日监控价差变化
+2. 关注中证500指数走势
+3. 到期前5个交易日必须完成滚动
+
+==================
+📅 教学时间: 2026-05-13
+📊 数据来源: Git-fish-etf 工作流自动推送'''
+send_feishu_message(teaching_msg)
+"

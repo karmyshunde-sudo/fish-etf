@@ -22,5 +22,15 @@
     "target_shares": 2300,
     "current_price": 10.81,
     "hold_days": 4
+  },
+  {
+    "code": "600506",
+    "name": "统一股份",
+    "buy_date": "2026-05-15",
+    "buy_price": 18.25,
+    "stop_loss": 17.3375,
+    "take_profit": 20.075000000000003,
+    "position_pct": 0.25,
+    "target_shares": 1300
   }
 ]

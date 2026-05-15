@@ -741,5 +741,15 @@
     "position_pct": 0.25,
     "target_shares": 1300,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "600668",
+    "name": "尖峰集团",
+    "date": "2026-05-15",
+    "price": 9.93,
+    "position_pct": 0.25,
+    "target_shares": 2500,
+    "amount": 25000.0
   }
 ]

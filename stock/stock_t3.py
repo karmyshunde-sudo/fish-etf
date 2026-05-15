@@ -252,11 +252,9 @@ class TradeRecorder:
         total_sell_amount = sum(t.get("sell_price", 0) * t.get("target_shares", 0) for t in sell_trades)
         total_profit = sum(t.get("pnl_amount", 0) for t in sell_trades)
         
-        # 计算胜率
         winning_trades = [t for t in sell_trades if t.get("pnl_pct", 0) > 0]
         win_rate = len(winning_trades) / total_sell_times * 100 if total_sell_times > 0 else 0
         
-        # 计算平均持仓天数
         avg_hold_days = 0
         if sell_trades:
             total_hold_days = 0
@@ -270,7 +268,6 @@ class TradeRecorder:
                         pass
             avg_hold_days = total_hold_days / len(sell_trades) if sell_trades else 0
         
-        # 计算平均盈亏
         avg_pnl = total_profit / total_sell_times if total_sell_times > 0 else 0
         
         return {
@@ -743,7 +740,6 @@ def format_trade_summary(summary, positions=None):
 • 平均持仓天数: {summary['avg_hold_days']:.1f}天
 • 平均单笔盈亏: {summary['avg_pnl']:+.0f}元"""
     
-    # 添加当前持仓统计
     if positions and len(positions) > 0:
         position_value = 0
         position_cost = 0

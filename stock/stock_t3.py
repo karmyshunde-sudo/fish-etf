@@ -249,14 +249,42 @@ class TradeRecorder:
         total_buy_times = len(buy_trades)
         total_sell_times = len(sell_trades)
         total_cost = sum(t.get("amount", 0) for t in buy_trades)
+        total_sell_amount = sum(t.get("sell_price", 0) * t.get("target_shares", 0) for t in sell_trades)
         total_profit = sum(t.get("pnl_amount", 0) for t in sell_trades)
+        
+        # 计算胜率
+        winning_trades = [t for t in sell_trades if t.get("pnl_pct", 0) > 0]
+        win_rate = len(winning_trades) / total_sell_times * 100 if total_sell_times > 0 else 0
+        
+        # 计算平均持仓天数
+        avg_hold_days = 0
+        if sell_trades:
+            total_hold_days = 0
+            for t in sell_trades:
+                if "buy_date" in t and "date" in t:
+                    try:
+                        buy_dt = datetime.strptime(t["buy_date"], "%Y-%m-%d")
+                        sell_dt = datetime.strptime(t["date"], "%Y-%m-%d")
+                        total_hold_days += (sell_dt - buy_dt).days
+                    except:
+                        pass
+            avg_hold_days = total_hold_days / len(sell_trades) if sell_trades else 0
+        
+        # 计算平均盈亏
+        avg_pnl = total_profit / total_sell_times if total_sell_times > 0 else 0
+        
         return {
             "start_date": start_date,
             "total_buy_times": total_buy_times,
             "total_sell_times": total_sell_times,
             "total_cost": total_cost,
+            "total_sell_amount": total_sell_amount,
             "total_profit": total_profit,
-            "profit_rate": (total_profit / total_cost * 100) if total_cost > 0 else 0
+            "profit_rate": (total_profit / total_cost * 100) if total_cost > 0 else 0,
+            "win_rate": win_rate,
+            "avg_hold_days": avg_hold_days,
+            "avg_pnl": avg_pnl,
+            "winning_trades": len(winning_trades)
         }
 
 class PositionManager:
@@ -681,7 +709,7 @@ def format_no_stock_message():
 🔄 建议: 保持耐心，等待更好的入场时机"""
     return message
 
-def format_trade_summary(summary):
+def format_trade_summary(summary, positions=None):
     if not summary:
         return """【小市值布林带 - 策略交易汇总】
 
@@ -689,20 +717,87 @@ def format_trade_summary(summary):
 • 暂无交易记录
 • 策略处于初始化阶段
 • 等待符合条件的股票出现"""
+    
     profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
+    win_rate_symbol = "🟢" if summary["win_rate"] >= 50 else "🔴"
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    run_days = (datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days
+    
     message = f"""【小市值布林带 - 策略交易汇总】
 
 📅 策略统计周期:
 • 开始日期: {summary['start_date']}
-• 结束日期: {datetime.now().strftime('%Y-%m-%d')}
-• 运行天数: {(datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days}天
+• 结束日期: {current_date}
+• 运行天数: {run_days}天
 
 📊 交易统计:
 • 累计买入次数: {summary['total_buy_times']}次
 • 累计卖出次数: {summary['total_sell_times']}次
 • 总买入成本: {summary['total_cost']:,.0f}元
+• 总卖出金额: {summary['total_sell_amount']:,.0f}元
 • 总实现利润: {profit_symbol} {summary['total_profit']:+,.0f}元
-• 整体盈利率: {profit_symbol} {summary['profit_rate']:+.2f}%"""
+• 整体盈利率: {profit_symbol} {summary['profit_rate']:+.2f}%
+
+📈 绩效指标:
+• 胜率: {win_rate_symbol} {summary['win_rate']:.1f}% ({summary['winning_trades']}/{summary['total_sell_times']}次盈利)
+• 平均持仓天数: {summary['avg_hold_days']:.1f}天
+• 平均单笔盈亏: {summary['avg_pnl']:+.0f}元"""
+    
+    # 添加当前持仓统计
+    if positions and len(positions) > 0:
+        position_value = 0
+        position_cost = 0
+        position_pnl = 0
+        position_details = []
+        
+        for pos in positions:
+            buy_price = pos["buy_price"]
+            current_price = pos.get("current_price", buy_price)
+            shares = pos.get("target_shares", 0)
+            cost = buy_price * shares
+            value = current_price * shares
+            pnl = value - cost
+            pnl_pct = (current_price / buy_price - 1) * 100
+            pnl_symbol = "🟢" if pnl >= 0 else "🔴"
+            
+            position_cost += cost
+            position_value += value
+            position_pnl += pnl
+            
+            position_details.append({
+                "code": pos["code"],
+                "name": pos["name"],
+                "shares": shares,
+                "buy_price": buy_price,
+                "current_price": current_price,
+                "cost": cost,
+                "value": value,
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+                "pnl_symbol": pnl_symbol
+            })
+        
+        position_pnl_pct = (position_pnl / position_cost * 100) if position_cost > 0 else 0
+        position_pnl_symbol = "🟢" if position_pnl >= 0 else "🔴"
+        
+        message += f"""
+
+💼 当前持仓统计 ({len(positions)}只):
+• 持仓总成本: {position_cost:,.0f}元
+• 持仓总市值: {position_value:,.0f}元
+• 持仓浮动盈亏: {position_pnl_symbol} {position_pnl:+.0f}元 ({position_pnl_pct:+.2f}%)
+
+📋 持仓明细:"""
+        
+        for pos in position_details:
+            message += f"""
+• {pos['code']} {pos['name']}
+  ├─ 持仓数量: {pos['shares']:,}股
+  ├─ 买入成本: {pos['buy_price']:.2f}元
+  ├─ 当前价格: {pos['current_price']:.2f}元
+  ├─ 持仓市值: {pos['value']:,.0f}元
+  └─ 浮动盈亏: {pos['pnl_symbol']} {pos['pnl']:+.0f}元 ({pos['pnl_pct']:+.2f}%)"""
+    
     return message
 
 def format_status_message(history_positions_count, new_stocks_count, start_date,
@@ -834,8 +929,8 @@ def main():
             no_stock_msg = format_no_stock_message()
             send_and_save_wechat_message(no_stock_msg, "position")
         
-        # 14. 发送交易汇总消息
-        summary_msg = format_trade_summary(trade_summary)
+        # 14. 发送交易汇总消息（包含当前持仓统计）
+        summary_msg = format_trade_summary(trade_summary, all_positions)
         send_and_save_wechat_message(summary_msg, "position")
         
         logger.info("===== 策略执行完成 =====")

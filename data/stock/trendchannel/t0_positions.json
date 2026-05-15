@@ -13,7 +13,7 @@
     "upper": 19.49025,
     "lower": 16.85475,
     "current_price": 21.2,
-    "hold_days": 17
+    "hold_days": 20
   },
   {
     "code": "300590",
@@ -29,7 +29,7 @@
     "upper": 14.046999999999999,
     "lower": 12.316,
     "current_price": 15.29,
-    "hold_days": 17
+    "hold_days": 20
   },
   {
     "code": "301510",
@@ -45,7 +45,7 @@
     "upper": 36.636250000000004,
     "lower": 31.693750000000005,
     "current_price": 40.65,
-    "hold_days": 17
+    "hold_days": 20
   },
   {
     "code": "601177",
@@ -61,7 +61,7 @@
     "upper": 15.938500000000001,
     "lower": 14.4235,
     "current_price": 16.79,
-    "hold_days": 13
+    "hold_days": 16
   },
   {
     "code": "688236",
@@ -77,6 +77,6 @@
     "upper": 20.695749999999997,
     "lower": 18.780250000000002,
     "current_price": 17.82,
-    "hold_days": 11
+    "hold_days": 14
   }
 ]

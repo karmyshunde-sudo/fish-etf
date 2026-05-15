@@ -552,7 +552,7 @@ def test_connection(app_id: Optional[str] = None,
         return False
 
 def send_futures_report_and_teaching(report_file_path: Optional[str] = None) -> bool:
-    """发送期货报告 + IC滚动教学（工作流调用入口）"""
+    """发送期货报告 + 原始数据（工作流调用入口）"""
     import glob
     if not report_file_path:
         files = sorted(glob.glob('data/futures/futures_report_*.txt'), reverse=True)
@@ -564,65 +564,39 @@ def send_futures_report_and_teaching(report_file_path: Optional[str] = None) -> 
     with open(report_file_path, 'r', encoding='utf-8') as f:
         report = f.read()
     
+    # 消息1：发送完整期货报告
     send_feishu_message(report)
     print("✅ 消息1: 期货报告已发送")
     
-    ic_prices = {}
+    # 消息2：提取IC/IF/IH原始数据
+    ic_lines = []
+    if_lines = []
+    ih_lines = []
+    
     for line in report.split('\n'):
         line = line.strip()
-        for code in ['IC01', 'IC03', 'IC06', 'IC09']:
-            if f'{code}:' in line and 'IC' in line:
-                parts = line.split(f'{code}:')
-                if len(parts) > 1:
-                    price_str = parts[1].strip().split()[0]
-                    try:
-                        ic_prices[code] = float(price_str)
-                    except:
-                        pass
+        if line.startswith('IC') and ':' in line:
+            ic_lines.append(line)
+        elif line.startswith('IF') and ':' in line:
+            if_lines.append(line)
+        elif line.startswith('IH') and ':' in line:
+            ih_lines.append(line)
     
-    p = ic_prices
-    if len(p) >= 4:
-        ic01, ic03, ic06, ic09 = p.get('IC01', 0), p.get('IC03', 0), p.get('IC06', 0), p.get('IC09', 0)
-        spread_06 = round(ic06 - ic01, 2) if ic01 else 0
-        pct_06 = round(spread_06 / ic01 * 100, 2) if ic01 else 0
-        teaching = (
-            f"🦀 【IC期货滚动实战教学】\n\n"
-            f"📊 当前行情数据：\n"
-            f"┌──────────┬────────────┬────────────┐\n"
-            f"│ 合约     │ 价格       │ 升水/贴水  │\n"
-            f"├──────────┼────────────┼────────────┤\n"
-            f"│ IC01(当月)│ {ic01:.2f}   │ 基准       │\n"
-            f"│ IC03      │ {ic03:.2f}   │ +{round(ic03-ic01,2):.2f}       │\n"
-            f"│ IC06      │ {ic06:.2f}   │ +{spread_06:.2f}({pct_06:+.1f}%)│\n"
-            f"│ IC09      │ {ic09:.2f}   │ +{round(ic09-ic01,2):.2f}       │\n"
-            f"└──────────┴────────────┴────────────┘\n\n"
-            f"💡 核心概念：「滚动」= 平掉近月合约 + 开仓远月合约\n\n"
-            f"📌 当前价差结构分析：\n"
-            f"• IC01→IC06 价差: {spread_06:+.2f}点 ({'远月升水' if spread_06 > 0 else '远月贴水'})\n\n"
-            f"⚠️ 滚动时机判断：\n"
-            f"✅ 适合滚动: 近月到期<5日 | 升水合理 | 持仓方向与趋势一致\n"
-            f"❌ 不适合: 远月贴水 | 价差异常扩大 | 流动性不足\n\n"
-            f"🎯 实战建议：\n"
-            f"• 持有多单: 距离到期还有时间，暂不急于滚动\n"
-            f"• 持有空单: 远月升水有利(空近买远=赚升水)，可等待更优时机\n\n"
-            f"📅 下一步: 每日监控价差 | 关注中证500指数 | 到期前5日必须完成滚动\n\n"
-            f"==================\n"
-            f"📊 数据来源: Git-fish-etf 工作流自动推送"
-        )
-    else:
-        teaching = (
-            "🦀 【IC期货滚动实战教学】\n\n"
-            "⚠️ 无法从报告中解析IC价格数据\n\n"
-            "💡 核心概念：「滚动」= 平掉近月合约 + 开仓远月合约\n\n"
-            "⚠️ 滚动时机判断：\n"
-            "✅ 适合滚动: 近月到期<5日 | 升水合理 | 持仓方向与趋势一致\n"
-            "❌ 不适合: 远月贴水 | 价差异常扩大 | 流动性不足\n\n"
-            "==================\n"
-            "📊 数据来源: Git-fish-etf 工作流自动推送"
-        )
+    data_msg = "🦀 期货行情原始数据\n\n"
+    if ic_lines:
+        data_msg += "【IC 中证500股指期货】\n"
+        data_msg += "\n".join(ic_lines) + "\n\n"
+    if if_lines:
+        data_msg += "【IF 沪深300股指期货】\n"
+        data_msg += "\n".join(if_lines) + "\n\n"
+    if ih_lines:
+        data_msg += "【IH 上证50股指期货】\n"
+        data_msg += "\n".join(ih_lines) + "\n\n"
     
-    send_feishu_message(teaching)
-    print("✅ 消息2: IC滚动教学已发送")
+    data_msg += "==================\n📊 数据来源: Git-fish-etf 工作流自动推送"
+    
+    send_feishu_message(data_msg)
+    print("✅ 消息2: 原始数据已发送")
     return True
 
 try:

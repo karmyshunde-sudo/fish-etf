@@ -731,5 +731,15 @@
     "position_pct": 0.25,
     "pnl_pct": 1.5688259109311709,
     "pnl_amount": 371.99999999999847
+  },
+  {
+    "type": "buy",
+    "code": "600506",
+    "name": "统一股份",
+    "date": "2026-05-15",
+    "price": 18.25,
+    "position_pct": 0.25,
+    "target_shares": 1300,
+    "amount": 25000.0
   }
 ]

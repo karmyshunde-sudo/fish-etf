@@ -705,5 +705,18 @@
     "position_pct": 0.25,
     "target_shares": 2300,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "301257",
+    "name": "普蕊斯",
+    "date": "2026-05-15",
+    "buy_date": "2026-05-04",
+    "buy_price": 52.4,
+    "sell_price": 53.18,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 1.4885496183206115,
+    "pnl_amount": 312.00000000000045
   }
 ]

@@ -439,11 +439,25 @@ class PositionManager:
         return sold_positions
     
     def add_position(self, stock_data, buy_price, position_pct):
+        code = stock_data["code"]
+        current_price = buy_price
+        
+        file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_csv(file_path)
+                if len(df) > 0:
+                    df = df.sort_values("日期").reset_index(drop=True)
+                    current_price = df.iloc[-1]["收盘"]
+            except Exception as e:
+                logger.error(f"读取 {code} 日线数据失败: {str(e)}")
+        
         new_position = {
-            "code": stock_data["code"],
+            "code": code,
             "name": stock_data["name"],
             "buy_date": datetime.now().strftime("%Y-%m-%d"),
             "buy_price": buy_price,
+            "current_price": current_price,
             "stop_loss": buy_price * (1 - STOP_LOSS_PCT),
             "take_profit": buy_price * (1 + TAKE_PROFIT_PCT),
             "position_pct": position_pct,

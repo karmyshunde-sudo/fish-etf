@@ -1,0 +1,7 @@
+【趋势通道 - 策略状态】
+• 历史持仓加载: 5 只
+• 持仓文件: ✅ 存在 (1837 字节, 含 5 条记录) - /home/runner/work/fish-etf/fish-etf/data/stock/trendchannel/t0_positions.json
+• 今日新信号: 0 只
+• 📅 累计交易起始: 2026-04-25
+• 交易记录文件: ✅ 存在 (含 9 条记录) - /home/runner/work/fish-etf/fish-etf/data/stock/trendchannel/t0_trade_records.json
+• 运行环境: unknown

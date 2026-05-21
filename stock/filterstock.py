@@ -53,6 +53,32 @@ FINANCIAL_FILTER_PARAMS = {
     }
 }
 
+
+def login_baostock_with_retry(max_retries=3, delay=2):
+    """
+    带重试的 baostock 登录
+    返回: (success: bool, error_msg: str)
+    """
+    for i in range(max_retries):
+        try:
+            login_result = bs.login()
+            if login_result.error_code == '0':
+                logger.info(f"✅ Baostock登录成功 (第 {i+1} 次尝试)")
+                return (True, "")
+            else:
+                error_msg = login_result.error_msg
+                logger.warning(f"⚠️ Baostock登录失败 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning(f"⚠️ Baostock登录异常 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
+        
+        if i < max_retries - 1:
+            logger.info(f"等待 {delay} 秒后重试...")
+            time.sleep(delay)
+    
+    return (False, error_msg)
+
+
 def get_dynamic_pe(code):
     """
     使用Baostock获取单只股票动态市盈率
@@ -117,6 +143,7 @@ def get_dynamic_pe(code):
     except Exception as e:
         logger.exception(f"获取股票 {code} 动态市盈率失败")
         return None
+
 
 def get_net_profit(code):
     """
@@ -183,7 +210,8 @@ def get_net_profit(code):
     except Exception as e:
         logger.exception(f"获取股票 {code} 净利润数据失败: {str(e)}")
         return None
-        
+
+
 def apply_financial_filters(stock_code, dynamic_pe, net_profit):
     """
     应用财务过滤条件
@@ -215,6 +243,7 @@ def apply_financial_filters(stock_code, dynamic_pe, net_profit):
             logger.debug(f"股票 {stock_code} 净利润数据缺失，保留股票")
     
     return True
+
 
 def get_market_value(code):
     """
@@ -263,6 +292,7 @@ def get_market_value(code):
     except Exception as e:
         logger.exception(f"获取股票 {code} 流通市值失败")
         return None
+
 
 def filter_and_update_stocks():
     """
@@ -325,30 +355,6 @@ def filter_and_update_stocks():
         # 创建临时dataframe用于财务处理
         temp_df = process_batch.copy()
         
-        def login_baostock_with_retry(max_retries=3, delay=2):
-    """
-    带重试的 baostock 登录
-    返回: (success: bool, error_msg: str)
-    """
-    for i in range(max_retries):
-        try:
-            login_result = bs.login()
-            if login_result.error_code == '0':
-                logger.info(f"✅ Baostock登录成功 (第 {i+1} 次尝试)")
-                return (True, "")
-            else:
-                error_msg = login_result.error_msg
-                logger.warning(f"⚠️ Baostock登录失败 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
-        except Exception as e:
-            error_msg = str(e)
-            logger.warning(f"⚠️ Baostock登录异常 (第 {i+1}/{max_retries} 次尝试): {error_msg}")
-        
-        if i < max_retries - 1:
-            logger.info(f"等待 {delay} 秒后重试...")
-            time.sleep(delay)
-    
-    return (False, error_msg)
-
         # 判断是否需要使用 baostock（只有动态市盈率启用时才需要）
         need_baostock = FINANCIAL_FILTER_PARAMS["dynamic_pe"]["enabled"]
         
@@ -465,6 +471,7 @@ def filter_and_update_stocks():
     except Exception as e:
         logger.exception(f"处理股票列表时发生错误")
         return False
+
 
 if __name__ == "__main__":
     start_time = datetime.now()

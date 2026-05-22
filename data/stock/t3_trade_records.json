@@ -751,5 +751,18 @@
     "position_pct": 0.25,
     "target_shares": 2500,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "688022",
+    "name": "瀚川智能",
+    "date": "2026-05-22",
+    "buy_date": "2026-05-11",
+    "buy_price": 10.62,
+    "sell_price": 10.62,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 0.0,
+    "pnl_amount": 0.0
   }
 ]

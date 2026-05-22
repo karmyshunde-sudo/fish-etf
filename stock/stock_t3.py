@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 stock_t3.py - 小市值布林带策略（终极版：持仓写入验证 + Git提交 + 详细诊断）
+修复：开始日期取最早交易日期（修复字符串比较问题）
 """
 
 import os
@@ -241,9 +242,18 @@ class TradeRecorder:
         logger.info(f"记录卖出交易: {position['code']} {position['name']}")
     
     def get_trade_summary(self):
+        """获取交易汇总统计"""
         if not self.trades:
             return None
-        start_date = self.trades[0]["date"]
+        
+        # 修复：使用 datetime 对象比较，确保取到真正的最早日期
+        try:
+            dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in self.trades]
+            start_date = min(dates).strftime("%Y-%m-%d")
+        except (ValueError, KeyError) as e:
+            logger.error(f"解析交易日期失败: {e}")
+            start_date = self.trades[0].get("date", "未知")
+        
         buy_trades = [t for t in self.trades if t["type"] == "buy"]
         sell_trades = [t for t in self.trades if t["type"] == "sell"]
         total_buy_times = len(buy_trades)
@@ -732,7 +742,12 @@ def format_trade_summary(summary, positions=None):
     profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
     win_rate_symbol = "🟢" if summary["win_rate"] >= 50 else "🔴"
     current_date = datetime.now().strftime('%Y-%m-%d')
-    run_days = (datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days
+    
+    # 安全计算运行天数
+    try:
+        run_days = (datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days
+    except (ValueError, KeyError):
+        run_days = 0
     
     message = f"""【小市值布林带 - 策略交易汇总】
 
@@ -900,9 +915,9 @@ def main():
         # 9. 重新获取持仓
         all_positions = position_manager.get_current_positions()
         
-        # 10. 获取交易汇总
+        # 10. 获取交易汇总（修复：安全获取start_date）
         trade_summary = trade_recorder.get_trade_summary()
-        start_date = trade_summary['start_date'] if trade_summary else None
+        start_date = trade_summary.get('start_date') if trade_summary else None
         
         # 11. 检查文件状态（此时文件应该已创建）
         positions_file_exists = os.path.exists(POSITION_FILE)

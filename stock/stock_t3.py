@@ -4,8 +4,9 @@
 stock_t3.py - 小市值布林带策略
 修复：
 1. 所有消息标题加 T3- 前缀
-2. 日线数据路径改用 Config.STOCK_DAILY_DIR
+2. 日线数据路径改用动态计算的路径
 3. 开始日期取最早交易日期（datetime比较）
+4. 投资收益计算修正：已实现盈亏 + 未实现盈亏
 """
 
 import os
@@ -51,6 +52,9 @@ MAX_HOLD_DAYS = 10
 STOCK_DATA_DIR = os.path.join(Config.DATA_DIR, "stock")
 POSITION_FILE = os.path.join(STOCK_DATA_DIR, "t3_positions.json")
 TRADE_RECORDS_FILE = os.path.join(STOCK_DATA_DIR, "t3_trade_records.json")
+
+# 日线数据目录（动态计算）
+STOCK_DAILY_DIR = os.path.join(Config.DATA_DIR, "daily")
 
 MIN_DATA_DAYS = 60
 # ================================
@@ -168,7 +172,7 @@ class TradeRecorder:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                 if loaded == data:
-                    logger.debug(f"数据已保存并验证通过: {filepath} (大小: {os.path.getsize(filepath)} 字节)")
+                    logger.debug(f"数据已保存并验证通过: {filepath}")
                     return True
                 else:
                     logger.error(f"文件内容验证失败: {filepath}")
@@ -243,10 +247,11 @@ class TradeRecorder:
         logger.info(f"记录卖出交易: {position['code']} {position['name']}")
     
     def get_trade_summary(self):
+        """获取交易汇总统计（修正投资收益计算）"""
         if not self.trades:
             return None
         
-        # 修复：使用 datetime 对象比较，确保取到真正的最早日期
+        # 使用 datetime 对象比较，确保取到真正的最早日期
         try:
             dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in self.trades]
             start_date = min(dates).strftime("%Y-%m-%d")
@@ -256,11 +261,22 @@ class TradeRecorder:
         
         buy_trades = [t for t in self.trades if t["type"] == "buy"]
         sell_trades = [t for t in self.trades if t["type"] == "sell"]
+        
         total_buy_times = len(buy_trades)
         total_sell_times = len(sell_trades)
-        total_cost = sum(t.get("amount", 0) for t in buy_trades)
+        
+        # ===== 修正：投资收益计算 =====
+        # 已实现盈亏 = 所有已卖出股票的实际盈亏之和
+        realized_pnl = sum(t.get("pnl_amount", 0) for t in sell_trades)
+        
+        # 已卖出总金额（用于计算已实现收益率）
         total_sell_amount = sum(t.get("sell_price", 0) * t.get("target_shares", 0) for t in sell_trades)
-        total_profit = sum(t.get("pnl_amount", 0) for t in sell_trades)
+        
+        # 已买入总成本（仅已卖出的股票）
+        total_cost_sold = sum(t.get("buy_price", 0) * t.get("target_shares", 0) for t in sell_trades)
+        
+        # 已实现收益率 = 已实现盈亏 / 已卖出股票的总成本
+        realized_return_rate = (realized_pnl / total_cost_sold * 100) if total_cost_sold > 0 else 0
         
         winning_trades = [t for t in sell_trades if t.get("pnl_pct", 0) > 0]
         win_rate = len(winning_trades) / total_sell_times * 100 if total_sell_times > 0 else 0
@@ -278,16 +294,16 @@ class TradeRecorder:
                         pass
             avg_hold_days = total_hold_days / len(sell_trades) if sell_trades else 0
         
-        avg_pnl = total_profit / total_sell_times if total_sell_times > 0 else 0
+        avg_pnl = realized_pnl / total_sell_times if total_sell_times > 0 else 0
         
         return {
             "start_date": start_date,
             "total_buy_times": total_buy_times,
             "total_sell_times": total_sell_times,
-            "total_cost": total_cost,
-            "total_sell_amount": total_sell_amount,
-            "total_profit": total_profit,
-            "profit_rate": (total_profit / total_cost * 100) if total_cost > 0 else 0,
+            "total_cost_sold": total_cost_sold,  # 已卖出股票的总成本
+            "total_sell_amount": total_sell_amount,  # 已卖出总金额
+            "realized_pnl": realized_pnl,  # 已实现盈亏
+            "realized_return_rate": realized_return_rate,  # 已实现收益率
             "win_rate": win_rate,
             "avg_hold_days": avg_hold_days,
             "avg_pnl": avg_pnl,
@@ -303,6 +319,7 @@ class PositionManager:
         self.trade_recorder = trade_recorder
         self.positions = self.load_positions_with_backup()
         logger.info(f"初始化持仓管理器，加载到 {len(self.positions)} 个持仓")
+        logger.info(f"日线数据目录: {STOCK_DAILY_DIR}")
     
     def _load_from_file(self, filepath):
         if not os.path.exists(filepath):
@@ -333,7 +350,7 @@ class PositionManager:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                 if loaded == data:
-                    logger.debug(f"持仓数据已保存并验证通过: {filepath} (大小: {os.path.getsize(filepath)} 字节, 含 {len(data)} 条记录)")
+                    logger.debug(f"持仓数据已保存并验证通过: {filepath}")
                     return True
                 else:
                     logger.error(f"持仓文件内容验证失败: {filepath}")
@@ -379,9 +396,6 @@ class PositionManager:
         updated_positions = []
         sold_positions = []
         
-        # 修复：使用 Config.STOCK_DAILY_DIR 读取日线数据
-        daily_dir = Config.STOCK_DAILY_DIR
-        
         for position in self.positions:
             try:
                 code = position["code"]
@@ -391,8 +405,8 @@ class PositionManager:
                 hold_days = (datetime.strptime(current_date, "%Y-%m-%d") - 
                             datetime.strptime(buy_date, "%Y-%m-%d")).days
                 
-                # 使用正确的日线数据目录
-                file_path = os.path.join(daily_dir, f"{code}.csv")
+                # 使用动态计算的日线数据目录
+                file_path = os.path.join(STOCK_DAILY_DIR, f"{code}.csv")
                 current_price = buy_price
                 
                 if os.path.exists(file_path):
@@ -401,11 +415,11 @@ class PositionManager:
                         if len(df) > 0:
                             df = df.sort_values("日期").reset_index(drop=True)
                             current_price = float(df.iloc[-1]["收盘"])
-                            logger.info(f"读取 {code} 最新价格: {current_price}")
+                            logger.info(f"✅ 读取 {code} 最新价格: {current_price}")
                     except Exception as e:
-                        logger.error(f"读取 {code} 日线数据失败: {str(e)}")
+                        logger.error(f"❌ 读取 {code} 日线数据失败: {str(e)}")
                 else:
-                    logger.warning(f"日线数据文件不存在: {file_path}")
+                    logger.warning(f"⚠️ 日线数据文件不存在: {file_path}")
                 
                 position["current_price"] = current_price
                 position["hold_days"] = hold_days
@@ -446,9 +460,7 @@ class PositionManager:
         code = stock_data["code"]
         current_price = buy_price
         
-        # 使用正确的日线数据目录
-        daily_dir = Config.STOCK_DAILY_DIR
-        file_path = os.path.join(daily_dir, f"{code}.csv")
+        file_path = os.path.join(STOCK_DAILY_DIR, f"{code}.csv")
         
         if os.path.exists(file_path):
             try:
@@ -456,11 +468,11 @@ class PositionManager:
                 if len(df) > 0:
                     df = df.sort_values("日期").reset_index(drop=True)
                     current_price = float(df.iloc[-1]["收盘"])
-                    logger.info(f"读取 {code} 最新价格: {current_price}")
+                    logger.info(f"✅ 读取 {code} 最新价格: {current_price}")
             except Exception as e:
-                logger.error(f"读取 {code} 日线数据失败: {str(e)}")
+                logger.error(f"❌ 读取 {code} 日线数据失败: {str(e)}")
         else:
-            logger.warning(f"日线数据文件不存在: {file_path}")
+            logger.warning(f"⚠️ 日线数据文件不存在: {file_path}")
         
         new_position = {
             "code": code,
@@ -585,9 +597,6 @@ def filter_stocks(exclude_codes=None):
         logger.error(f"读取股票列表失败: {str(e)}")
         return []
     
-    # 使用正确的日线数据目录
-    daily_dir = Config.STOCK_DAILY_DIR
-    
     qualified_stocks = []
     for _, row in basic_info_df.iterrows():
         code = str(row["代码"])
@@ -599,8 +608,7 @@ def filter_stocks(exclude_codes=None):
         if market_cap < MIN_MARKET_CAP * 1e8 or market_cap > MAX_MARKET_CAP * 1e8:
             continue
         
-        # 使用正确的日线数据目录
-        file_path = os.path.join(daily_dir, f"{code}.csv")
+        file_path = os.path.join(STOCK_DAILY_DIR, f"{code}.csv")
         if not os.path.exists(file_path):
             continue
         try:
@@ -649,7 +657,7 @@ def filter_stocks(exclude_codes=None):
     logger.info(f"筛选完成，找到 {len(qualified_stocks)} 只符合条件的股票")
     return qualified_stocks
 
-# ========== 消息格式化函数（标题加 T3- 前缀）==========
+# ========== 消息格式化函数 ==========
 def format_position_message(position):
     buy_price = position["buy_price"]
     current_price = position.get("current_price", buy_price)
@@ -734,6 +742,7 @@ def format_no_stock_message():
     return message
 
 def format_trade_summary(summary, positions=None):
+    """格式化交易汇总（修正投资收益显示）"""
     if not summary:
         return """【T3-小市值布林带 - 策略交易汇总】
 
@@ -742,14 +751,21 @@ def format_trade_summary(summary, positions=None):
 • 策略处于初始化阶段
 • 等待符合条件的股票出现"""
     
-    profit_symbol = "🔴" if summary["total_profit"] < 0 else "🟢"
-    win_rate_symbol = "🟢" if summary["win_rate"] >= 50 else "🔴"
     current_date = datetime.now().strftime('%Y-%m-%d')
     
     try:
         run_days = (datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days
     except (ValueError, KeyError):
         run_days = 0
+    
+    # 已实现盈亏
+    realized_pnl = summary.get("realized_pnl", 0)
+    realized_return_rate = summary.get("realized_return_rate", 0)
+    realized_symbol = "🔴" if realized_pnl < 0 else "🟢"
+    
+    # 胜率
+    win_rate = summary.get("win_rate", 0)
+    win_rate_symbol = "🟢" if win_rate >= 50 else "🔴"
     
     message = f"""【T3-小市值布林带 - 策略交易汇总】
 
@@ -761,16 +777,19 @@ def format_trade_summary(summary, positions=None):
 📊 交易统计:
 • 累计买入次数: {summary['total_buy_times']}次
 • 累计卖出次数: {summary['total_sell_times']}次
-• 总买入成本: {summary['total_cost']:,.0f}元
-• 总卖出金额: {summary['total_sell_amount']:,.0f}元
-• 总实现利润: {profit_symbol} {summary['total_profit']:+,.0f}元
-• 整体盈利率: {profit_symbol} {summary['profit_rate']:+.2f}%
+• 已卖出总成本: {summary.get('total_cost_sold', 0):,.0f}元
+• 已卖出总金额: {summary.get('total_sell_amount', 0):,.0f}元
+
+💰 投资收益:
+• 已实现盈亏: {realized_symbol} {realized_pnl:+,.0f}元
+• 已实现收益率: {realized_symbol} {realized_return_rate:+.2f}%
 
 📈 绩效指标:
-• 胜率: {win_rate_symbol} {summary['win_rate']:.1f}% ({summary['winning_trades']}/{summary['total_sell_times']}次盈利)
-• 平均持仓天数: {summary['avg_hold_days']:.1f}天
-• 平均单笔盈亏: {summary['avg_pnl']:+.0f}元"""
+• 胜率: {win_rate_symbol} {win_rate:.1f}% ({summary.get('winning_trades', 0)}/{summary['total_sell_times']}次盈利)
+• 平均持仓天数: {summary.get('avg_hold_days', 0):.1f}天
+• 平均单笔盈亏: {summary.get('avg_pnl', 0):+.0f}元"""
     
+    # 未实现盈亏（当前持仓浮动盈亏）
     if positions and len(positions) > 0:
         position_value = 0
         position_cost = 0
@@ -812,7 +831,7 @@ def format_trade_summary(summary, positions=None):
 💼 当前持仓统计 ({len(positions)}只):
 • 持仓总成本: {position_cost:,.0f}元
 • 持仓总市值: {position_value:,.0f}元
-• 持仓浮动盈亏: {position_pnl_symbol} {position_pnl:+.0f}元 ({position_pnl_pct:+.2f}%)
+• 未实现盈亏: {position_pnl_symbol} {position_pnl:+.0f}元 ({position_pnl_pct:+.2f}%)
 
 📋 持仓明细:"""
         
@@ -824,22 +843,31 @@ def format_trade_summary(summary, positions=None):
   ├─ 当前价格: {pos['current_price']:.2f}元
   ├─ 持仓市值: {pos['value']:,.0f}元
   └─ 浮动盈亏: {pos['pnl_symbol']} {pos['pnl']:+.0f}元 ({pos['pnl_pct']:+.2f}%)"""
+        
+        # 总投资收益 = 已实现 + 未实现
+        total_pnl = realized_pnl + position_pnl
+        total_pnl_symbol = "🟢" if total_pnl >= 0 else "🔴"
+        message += f"""
+
+📊 总投资收益:
+• 已实现盈亏: {realized_symbol} {realized_pnl:+,.0f}元
+• 未实现盈亏: {position_pnl_symbol} {position_pnl:+,.0f}元
+• 总盈亏: {total_pnl_symbol} {total_pnl:+,.0f}元"""
     
     return message
 
 def format_status_message(history_positions_count, new_stocks_count, start_date,
                           positions_file_exists, positions_file_empty, positions_file_size,
-                          trades_file_exists, trades_count,
-                          positions_file_path, trades_file_path):
+                          trades_file_exists, trades_count):
     if not positions_file_exists:
-        positions_status = f"❌ 不存在 (期望路径: {positions_file_path})"
+        positions_status = f"❌ 不存在"
     elif positions_file_empty:
-        positions_status = f"⚠️ 存在但为空 - {positions_file_path}"
+        positions_status = f"⚠️ 存在但为空"
     else:
         positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录)"
     
     if not trades_file_exists:
-        trades_status = f"❌ 不存在 (期望路径: {trades_file_path})"
+        trades_status = f"❌ 不存在"
     else:
         trades_status = f"✅ 存在 (含 {trades_count} 条记录)"
     
@@ -851,7 +879,7 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
 • 今日新买入: {new_stocks_count} 只
 • 📅 累计交易起始: {start_date_str}
 • 交易记录文件: {trades_status}
-• 日线数据目录: {Config.STOCK_DAILY_DIR}
+• 日线数据目录: {STOCK_DAILY_DIR}
 • 运行环境: {os.getenv('RUN_ENV', 'unknown')}
 """
     return message
@@ -879,6 +907,8 @@ def send_stock_messages(positions, new_stocks):
 
 def main():
     logger.info("===== 开始执行T3-小市值布林带策略 =====")
+    logger.info(f"日线数据目录: {STOCK_DAILY_DIR}")
+    
     try:
         current_date = datetime.now().strftime("%Y-%m-%d")
         
@@ -942,9 +972,7 @@ def main():
             positions_file_empty=positions_file_empty,
             positions_file_size=positions_file_size,
             trades_file_exists=trades_file_exists,
-            trades_count=trades_count,
-            positions_file_path=POSITION_FILE,
-            trades_file_path=TRADE_RECORDS_FILE
+            trades_count=trades_count
         )
         send_and_save_wechat_message(status_msg, "position")
         time.sleep(2)

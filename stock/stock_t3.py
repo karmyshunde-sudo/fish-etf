@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_t3.py - 小市值布林带策略（终极版：持仓写入验证 + Git提交 + 详细诊断）
-修复：开始日期取最早交易日期（修复字符串比较问题）
+stock_t3.py - 小市值布林带策略
+修复：
+1. 所有消息标题加 T3- 前缀
+2. 日线数据路径改用 Config.STOCK_DAILY_DIR
+3. 开始日期取最早交易日期（datetime比较）
 """
 
 import os
@@ -44,7 +47,7 @@ MIN_POSITION_PCT = 0.20
 TARGET_HOLDINGS = 4
 MAX_HOLD_DAYS = 10
 
-# ===== 统一使用 stock 子目录存储所有策略相关文件 =====
+# ===== 持仓和交易记录文件路径 =====
 STOCK_DATA_DIR = os.path.join(Config.DATA_DIR, "stock")
 POSITION_FILE = os.path.join(STOCK_DATA_DIR, "t3_positions.json")
 TRADE_RECORDS_FILE = os.path.join(STOCK_DATA_DIR, "t3_trade_records.json")
@@ -81,7 +84,7 @@ def log_git_status(file_path, action_desc):
     return tracked
 # ========================================
 
-# ========== 消息保存函数（与 tickten.py 风格一致）==========
+# ========== 消息保存函数 ==========
 def extract_title_from_message(message):
     lines = message.strip().split('\n')
     if lines:
@@ -129,7 +132,7 @@ def send_and_save_wechat_message(message, message_type):
 # ============================================================
 
 class TradeRecorder:
-    """交易记录器（增强版：支持备份和恢复 + 写入验证 + Git提交）"""
+    """交易记录器"""
     
     def __init__(self):
         self.trade_file = TRADE_RECORDS_FILE
@@ -162,17 +165,16 @@ class TradeRecorder:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                # 验证写入的内容是否与原始数据一致
                 with open(filepath, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                 if loaded == data:
                     logger.debug(f"数据已保存并验证通过: {filepath} (大小: {os.path.getsize(filepath)} 字节)")
                     return True
                 else:
-                    logger.error(f"文件内容验证失败: {filepath} 内容与原始数据不符")
+                    logger.error(f"文件内容验证失败: {filepath}")
                     return False
             else:
-                logger.error(f"文件保存后验证失败: {filepath} 不存在或大小为0")
+                logger.error(f"文件保存后验证失败: {filepath}")
                 return False
         except Exception as e:
             logger.error(f"保存文件 {filepath} 失败: {str(e)}")
@@ -198,7 +200,6 @@ class TradeRecorder:
         if success:
             self._save_to_file(self.trades, self.backup_file)
             logger.info(f"交易记录已保存，当前共 {len(self.trades)} 条记录")
-            # 模仿 tickten.py：提交到Git仓库
             commit_success = commit_files_in_batches(self.trade_file, "LAST_FILE")
             if commit_success:
                 logger.info(f"✅ 成功提交交易记录文件到Git仓库: {self.trade_file}")
@@ -242,7 +243,6 @@ class TradeRecorder:
         logger.info(f"记录卖出交易: {position['code']} {position['name']}")
     
     def get_trade_summary(self):
-        """获取交易汇总统计"""
         if not self.trades:
             return None
         
@@ -295,7 +295,7 @@ class TradeRecorder:
         }
 
 class PositionManager:
-    """持仓管理器（增强版：支持备份和恢复 + 写入验证 + Git提交 + 内容诊断）"""
+    """持仓管理器"""
     
     def __init__(self, trade_recorder):
         self.positions_file = POSITION_FILE
@@ -330,7 +330,6 @@ class PositionManager:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                # 验证内容一致性
                 with open(filepath, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                 if loaded == data:
@@ -338,15 +337,9 @@ class PositionManager:
                     return True
                 else:
                     logger.error(f"持仓文件内容验证失败: {filepath}")
-                    # 记录错误详情
-                    logger.error(f"内存数据长度: {len(data)}, 文件数据长度: {len(loaded)}")
-                    if data and len(data) > 0:
-                        logger.error(f"内存第一条: {data[0]}")
-                    if loaded and len(loaded) > 0:
-                        logger.error(f"文件第一条: {loaded[0]}")
                     return False
             else:
-                logger.error(f"持仓文件保存后验证失败: {filepath} 不存在或大小为0")
+                logger.error(f"持仓文件保存后验证失败: {filepath}")
                 return False
         except Exception as e:
             logger.error(f"保存持仓文件 {filepath} 失败: {str(e)}")
@@ -368,24 +361,16 @@ class PositionManager:
         return []
     
     def save_positions(self):
-        """保存持仓到主文件和备份，并提交到Git"""
         logger.info(f"准备保存持仓，当前内存中持仓数量: {len(self.positions)}")
-        if self.positions:
-            sample = self.positions[0] if self.positions else {}
-            logger.info(f"持仓示例: {sample.get('code', 'N/A')} {sample.get('name', 'N/A')}")
         success = self._save_to_file(self.positions, self.positions_file)
         if success:
-            # 保存备份
             self._save_to_file(self.positions, self.backup_file)
             logger.info(f"持仓已保存，当前共 {len(self.positions)} 个持仓")
-            
-            # 模仿 tickten.py：提交到Git仓库
             commit_success = commit_files_in_batches(self.positions_file, "LAST_FILE")
             if commit_success:
                 logger.info(f"✅ 成功提交持仓文件到Git仓库: {self.positions_file}")
             else:
                 logger.error(f"❌ 提交持仓文件到Git仓库失败: {self.positions_file}")
-            
             log_git_status(self.positions_file, "保存持仓")
         else:
             logger.error("持仓保存失败！")
@@ -393,6 +378,10 @@ class PositionManager:
     def update_positions(self, current_date):
         updated_positions = []
         sold_positions = []
+        
+        # 修复：使用 Config.STOCK_DAILY_DIR 读取日线数据
+        daily_dir = Config.STOCK_DAILY_DIR
+        
         for position in self.positions:
             try:
                 code = position["code"]
@@ -402,16 +391,21 @@ class PositionManager:
                 hold_days = (datetime.strptime(current_date, "%Y-%m-%d") - 
                             datetime.strptime(buy_date, "%Y-%m-%d")).days
                 
-                file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
+                # 使用正确的日线数据目录
+                file_path = os.path.join(daily_dir, f"{code}.csv")
                 current_price = buy_price
+                
                 if os.path.exists(file_path):
                     try:
                         df = pd.read_csv(file_path)
                         if len(df) > 0:
                             df = df.sort_values("日期").reset_index(drop=True)
-                            current_price = df.iloc[-1]["收盘"]
+                            current_price = float(df.iloc[-1]["收盘"])
+                            logger.info(f"读取 {code} 最新价格: {current_price}")
                     except Exception as e:
                         logger.error(f"读取 {code} 日线数据失败: {str(e)}")
+                else:
+                    logger.warning(f"日线数据文件不存在: {file_path}")
                 
                 position["current_price"] = current_price
                 position["hold_days"] = hold_days
@@ -452,15 +446,21 @@ class PositionManager:
         code = stock_data["code"]
         current_price = buy_price
         
-        file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
+        # 使用正确的日线数据目录
+        daily_dir = Config.STOCK_DAILY_DIR
+        file_path = os.path.join(daily_dir, f"{code}.csv")
+        
         if os.path.exists(file_path):
             try:
                 df = pd.read_csv(file_path)
                 if len(df) > 0:
                     df = df.sort_values("日期").reset_index(drop=True)
-                    current_price = df.iloc[-1]["收盘"]
+                    current_price = float(df.iloc[-1]["收盘"])
+                    logger.info(f"读取 {code} 最新价格: {current_price}")
             except Exception as e:
                 logger.error(f"读取 {code} 日线数据失败: {str(e)}")
+        else:
+            logger.warning(f"日线数据文件不存在: {file_path}")
         
         new_position = {
             "code": code,
@@ -476,9 +476,6 @@ class PositionManager:
         self.trade_recorder.record_buy(stock_data, buy_price, position_pct)
         self.positions.append(new_position)
         logger.info(f"添加新持仓后，内存持仓数: {len(self.positions)}")
-        # 输出前几个持仓的代码，便于调试
-        codes = [p['code'] for p in self.positions[-5:]]
-        logger.info(f"最近持仓代码: {codes}")
         self.save_positions()
     
     def get_current_positions(self):
@@ -487,7 +484,7 @@ class PositionManager:
     def get_holding_codes(self):
         return [pos["code"] for pos in self.positions]
 
-# ========== 技术指标函数（与原代码相同）==========
+# ========== 技术指标函数 ==========
 def calculate_bollinger_bands(df):
     try:
         middle_band = df["收盘"].rolling(window=BOLLINGER_PERIOD).mean()
@@ -577,7 +574,7 @@ def calculate_stock_score(stock_data):
 def filter_stocks(exclude_codes=None):
     if exclude_codes is None:
         exclude_codes = []
-    basic_info_file = os.path.join(Config.DATA_DIR, "all_stocks.csv")
+    basic_info_file = Config.ALL_STOCK_PATH
     if not os.path.exists(basic_info_file):
         logger.error("股票列表文件不存在")
         return []
@@ -587,6 +584,9 @@ def filter_stocks(exclude_codes=None):
     except Exception as e:
         logger.error(f"读取股票列表失败: {str(e)}")
         return []
+    
+    # 使用正确的日线数据目录
+    daily_dir = Config.STOCK_DAILY_DIR
     
     qualified_stocks = []
     for _, row in basic_info_df.iterrows():
@@ -598,7 +598,9 @@ def filter_stocks(exclude_codes=None):
             market_cap = row.get("流通市值", 0)
         if market_cap < MIN_MARKET_CAP * 1e8 or market_cap > MAX_MARKET_CAP * 1e8:
             continue
-        file_path = os.path.join(Config.DATA_DIR, "daily", f"{code}.csv")
+        
+        # 使用正确的日线数据目录
+        file_path = os.path.join(daily_dir, f"{code}.csv")
         if not os.path.exists(file_path):
             continue
         try:
@@ -647,6 +649,7 @@ def filter_stocks(exclude_codes=None):
     logger.info(f"筛选完成，找到 {len(qualified_stocks)} 只符合条件的股票")
     return qualified_stocks
 
+# ========== 消息格式化函数（标题加 T3- 前缀）==========
 def format_position_message(position):
     buy_price = position["buy_price"]
     current_price = position.get("current_price", buy_price)
@@ -664,7 +667,7 @@ def format_position_message(position):
         suggestion = "继续持有（已有盈利）"
     else:
         suggestion = "继续持有"
-    message = f"""【T3小市值布林带 - 当前持仓明细】
+    message = f"""【T3-小市值布林带 - 当前持仓明细】
 💰{position['code']} {position['name']}
 📊 持有 {position.get('target_shares', 0):,}股
 
@@ -683,7 +686,7 @@ def format_new_stock_message(stock_data):
     buy_price = close_price
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
-    message = f"""【T3小市值布林带 - 新推荐股票】
+    message = f"""【T3-小市值布林带 - 新推荐股票】
 💰{stock_data['code']} {stock_data['name']}
 
 🎯 交易计划：
@@ -709,7 +712,7 @@ def format_new_stock_message(stock_data):
 
 def format_no_stock_message():
     current_date = datetime.now().strftime("%Y-%m-%d")
-    message = f"""【T3小市值布林带 - 暂无符合条件的股票】
+    message = f"""【T3-小市值布林带 - 暂无符合条件的股票】
         
 📅 日期: {current_date}
         
@@ -732,7 +735,7 @@ def format_no_stock_message():
 
 def format_trade_summary(summary, positions=None):
     if not summary:
-        return """【T3小市值布林带 - 策略交易汇总】
+        return """【T3-小市值布林带 - 策略交易汇总】
 
 📊 交易统计:
 • 暂无交易记录
@@ -743,13 +746,12 @@ def format_trade_summary(summary, positions=None):
     win_rate_symbol = "🟢" if summary["win_rate"] >= 50 else "🔴"
     current_date = datetime.now().strftime('%Y-%m-%d')
     
-    # 安全计算运行天数
     try:
         run_days = (datetime.now() - datetime.strptime(summary['start_date'], '%Y-%m-%d')).days
     except (ValueError, KeyError):
         run_days = 0
     
-    message = f"""【T3小市值布林带 - 策略交易汇总】
+    message = f"""【T3-小市值布林带 - 策略交易汇总】
 
 📅 策略统计周期:
 • 开始日期: {summary['start_date']}
@@ -832,23 +834,24 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
     if not positions_file_exists:
         positions_status = f"❌ 不存在 (期望路径: {positions_file_path})"
     elif positions_file_empty:
-        positions_status = f"⚠️ 存在但为空 (0字节) - {positions_file_path}"
+        positions_status = f"⚠️ 存在但为空 - {positions_file_path}"
     else:
-        positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录) - {positions_file_path}"
+        positions_status = f"✅ 存在 ({positions_file_size} 字节, 含 {history_positions_count} 条记录)"
     
     if not trades_file_exists:
         trades_status = f"❌ 不存在 (期望路径: {trades_file_path})"
     else:
-        trades_status = f"✅ 存在 (含 {trades_count} 条记录) - {trades_file_path}"
+        trades_status = f"✅ 存在 (含 {trades_count} 条记录)"
     
     start_date_str = start_date if start_date else "无历史记录"
     
-    message = f"""【T3小市值布林带 - 策略状态】
+    message = f"""【T3-小市值布林带 - 策略状态】
 • 历史持仓加载: {history_positions_count} 只
 • 持仓文件: {positions_status}
 • 今日新买入: {new_stocks_count} 只
 • 📅 累计交易起始: {start_date_str}
 • 交易记录文件: {trades_status}
+• 日线数据目录: {Config.STOCK_DAILY_DIR}
 • 运行环境: {os.getenv('RUN_ENV', 'unknown')}
 """
     return message
@@ -875,7 +878,7 @@ def send_stock_messages(positions, new_stocks):
     return True
 
 def main():
-    logger.info("===== 开始执行小市值布林带策略 =====")
+    logger.info("===== 开始执行T3-小市值布林带策略 =====")
     try:
         current_date = datetime.now().strftime("%Y-%m-%d")
         
@@ -891,7 +894,7 @@ def main():
         
         # 4. 发送卖出提示
         if sold_positions:
-            sell_msg = "【T3小市值布林带 - 卖出提示】\n\n"
+            sell_msg = "【T3-小市值布林带 - 卖出提示】\n\n"
             for pos in sold_positions:
                 sell_msg += f"• {pos['code']} {pos['name']} - {pos['reason']}\n"
             send_and_save_wechat_message(sell_msg, "position")
@@ -915,11 +918,11 @@ def main():
         # 9. 重新获取持仓
         all_positions = position_manager.get_current_positions()
         
-        # 10. 获取交易汇总（修复：安全获取start_date）
+        # 10. 获取交易汇总
         trade_summary = trade_recorder.get_trade_summary()
         start_date = trade_summary.get('start_date') if trade_summary else None
         
-        # 11. 检查文件状态（此时文件应该已创建）
+        # 11. 检查文件状态
         positions_file_exists = os.path.exists(POSITION_FILE)
         positions_file_empty = False
         positions_file_size = 0
@@ -954,13 +957,13 @@ def main():
             no_stock_msg = format_no_stock_message()
             send_and_save_wechat_message(no_stock_msg, "position")
         
-        # 14. 发送交易汇总消息（包含当前持仓统计）
+        # 14. 发送交易汇总消息
         summary_msg = format_trade_summary(trade_summary, all_positions)
         send_and_save_wechat_message(summary_msg, "position")
         
-        logger.info("===== 策略执行完成 =====")
+        logger.info("===== T3-小市值布林带策略执行完成 =====")
     except Exception as e:
-        error_msg = f"【T3小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
+        error_msg = f"【T3-小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
         send_and_save_wechat_message(error_msg, "error")
 

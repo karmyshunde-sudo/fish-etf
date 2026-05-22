@@ -1,29 +1,5 @@
 [
   {
-    "code": "688022",
-    "name": "瀚川智能",
-    "buy_date": "2026-05-11",
-    "buy_price": 10.62,
-    "stop_loss": 10.088999999999999,
-    "take_profit": 11.682,
-    "position_pct": 0.25,
-    "target_shares": 2300,
-    "current_price": 10.62,
-    "hold_days": 8
-  },
-  {
-    "code": "300932",
-    "name": "三友联众",
-    "buy_date": "2026-05-11",
-    "buy_price": 10.81,
-    "stop_loss": 10.2695,
-    "take_profit": 11.891000000000002,
-    "position_pct": 0.25,
-    "target_shares": 2300,
-    "current_price": 10.81,
-    "hold_days": 8
-  },
-  {
     "code": "600506",
     "name": "统一股份",
     "buy_date": "2026-05-15",
@@ -33,7 +9,7 @@
     "position_pct": 0.25,
     "target_shares": 1300,
     "current_price": 18.25,
-    "hold_days": 4
+    "hold_days": 7
   },
   {
     "code": "600668",
@@ -45,6 +21,6 @@
     "position_pct": 0.25,
     "target_shares": 2500,
     "current_price": 9.93,
-    "hold_days": 4
+    "hold_days": 7
   }
 ]

@@ -764,5 +764,18 @@
     "position_pct": 0.25,
     "pnl_pct": 0.0,
     "pnl_amount": 0.0
+  },
+  {
+    "type": "sell",
+    "code": "300932",
+    "name": "三友联众",
+    "date": "2026-05-22",
+    "buy_date": "2026-05-11",
+    "buy_price": 10.81,
+    "sell_price": 10.81,
+    "reason": "持有超过10天",
+    "position_pct": 0.25,
+    "pnl_pct": 0.0,
+    "pnl_amount": 0.0
   }
 ]

@@ -664,7 +664,7 @@ def format_position_message(position):
         suggestion = "继续持有（已有盈利）"
     else:
         suggestion = "继续持有"
-    message = f"""【小市值布林带 - 当前持仓明细】
+    message = f"""【T3小市值布林带 - 当前持仓明细】
 💰{position['code']} {position['name']}
 📊 持有 {position.get('target_shares', 0):,}股
 
@@ -683,7 +683,7 @@ def format_new_stock_message(stock_data):
     buy_price = close_price
     stop_loss = buy_price * (1 - STOP_LOSS_PCT)
     take_profit = buy_price * (1 + TAKE_PROFIT_PCT)
-    message = f"""【小市值布林带 - 新推荐股票】
+    message = f"""【T3小市值布林带 - 新推荐股票】
 💰{stock_data['code']} {stock_data['name']}
 
 🎯 交易计划：
@@ -709,7 +709,7 @@ def format_new_stock_message(stock_data):
 
 def format_no_stock_message():
     current_date = datetime.now().strftime("%Y-%m-%d")
-    message = f"""【小市值布林带 - 暂无符合条件的股票】
+    message = f"""【T3小市值布林带 - 暂无符合条件的股票】
         
 📅 日期: {current_date}
         
@@ -732,7 +732,7 @@ def format_no_stock_message():
 
 def format_trade_summary(summary, positions=None):
     if not summary:
-        return """【小市值布林带 - 策略交易汇总】
+        return """【T3小市值布林带 - 策略交易汇总】
 
 📊 交易统计:
 • 暂无交易记录
@@ -749,7 +749,7 @@ def format_trade_summary(summary, positions=None):
     except (ValueError, KeyError):
         run_days = 0
     
-    message = f"""【小市值布林带 - 策略交易汇总】
+    message = f"""【T3小市值布林带 - 策略交易汇总】
 
 📅 策略统计周期:
 • 开始日期: {summary['start_date']}
@@ -843,7 +843,7 @@ def format_status_message(history_positions_count, new_stocks_count, start_date,
     
     start_date_str = start_date if start_date else "无历史记录"
     
-    message = f"""【小市值布林带 - 策略状态】
+    message = f"""【T3小市值布林带 - 策略状态】
 • 历史持仓加载: {history_positions_count} 只
 • 持仓文件: {positions_status}
 • 今日新买入: {new_stocks_count} 只
@@ -891,7 +891,7 @@ def main():
         
         # 4. 发送卖出提示
         if sold_positions:
-            sell_msg = "【小市值布林带 - 卖出提示】\n\n"
+            sell_msg = "【T3小市值布林带 - 卖出提示】\n\n"
             for pos in sold_positions:
                 sell_msg += f"• {pos['code']} {pos['name']} - {pos['reason']}\n"
             send_and_save_wechat_message(sell_msg, "position")
@@ -960,7 +960,7 @@ def main():
         
         logger.info("===== 策略执行完成 =====")
     except Exception as e:
-        error_msg = f"【小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
+        error_msg = f"【T3小市值布林带 - 策略执行错误】\n错误详情：{str(e)}"
         logger.error(error_msg, exc_info=True)
         send_and_save_wechat_message(error_msg, "error")
 

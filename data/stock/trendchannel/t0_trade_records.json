@@ -118,5 +118,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价18.26 < 中轨19.56）",
     "pnl_pct": 1.8404907975460225
+  },
+  {
+    "type": "buy",
+    "code": "688139",
+    "name": "海尔生物",
+    "date": "2026-05-25",
+    "price": 36.79,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 33.1985,
+    "target": 39.105,
+    "score": 97
   }
 ]

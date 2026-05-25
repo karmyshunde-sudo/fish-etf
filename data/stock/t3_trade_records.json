@@ -823,5 +823,18 @@
     "position_pct": 0.25,
     "pnl_pct": -14.904330312185298,
     "pnl_amount": -3700.000000000001
+  },
+  {
+    "type": "sell",
+    "code": "688022",
+    "name": "瀚川智能",
+    "date": "2026-05-25",
+    "buy_date": "2026-05-22",
+    "buy_price": 10.62,
+    "sell_price": 9.81,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -7.627118644067787,
+    "pnl_amount": -1862.999999999997
   }
 ]

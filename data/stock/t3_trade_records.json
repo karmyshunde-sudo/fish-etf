@@ -856,5 +856,15 @@
     "position_pct": 0.25,
     "target_shares": 5400,
     "amount": 25000.0
+  },
+  {
+    "type": "buy",
+    "code": "300452",
+    "name": "山河药辅",
+    "date": "2026-05-25",
+    "price": 12.87,
+    "position_pct": 0.25,
+    "target_shares": 1900,
+    "amount": 25000.0
   }
 ]

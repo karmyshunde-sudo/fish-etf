@@ -1,50 +1,14 @@
 [
   {
-    "code": "600506",
-    "name": "统一股份",
-    "buy_date": "2026-05-15",
-    "buy_price": 18.25,
-    "stop_loss": 17.3375,
-    "take_profit": 20.075000000000003,
-    "position_pct": 0.25,
-    "target_shares": 1300,
-    "current_price": 18.25,
-    "hold_days": 7
-  },
-  {
-    "code": "600668",
-    "name": "尖峰集团",
-    "buy_date": "2026-05-15",
-    "buy_price": 9.93,
-    "stop_loss": 9.433499999999999,
-    "take_profit": 10.923,
-    "position_pct": 0.25,
-    "target_shares": 2500,
-    "current_price": 9.93,
-    "hold_days": 7
-  },
-  {
-    "code": "688022",
-    "name": "瀚川智能",
-    "buy_date": "2026-05-22",
-    "buy_price": 10.62,
-    "current_price": 10.62,
-    "stop_loss": 10.088999999999999,
-    "take_profit": 11.682,
-    "position_pct": 0.25,
-    "target_shares": 2300,
-    "hold_days": 0
-  },
-  {
     "code": "300932",
     "name": "三友联众",
     "buy_date": "2026-05-22",
     "buy_price": 10.81,
-    "current_price": 10.81,
+    "current_price": 10.33,
     "stop_loss": 10.2695,
     "take_profit": 11.891000000000002,
     "position_pct": 0.25,
     "target_shares": 2300,
-    "hold_days": 0
+    "hold_days": 3
   }
 ]

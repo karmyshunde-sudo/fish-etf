@@ -810,5 +810,18 @@
     "position_pct": 0.25,
     "pnl_pct": 0.273972602739736,
     "pnl_amount": 65.00000000000092
+  },
+  {
+    "type": "sell",
+    "code": "600668",
+    "name": "尖峰集团",
+    "date": "2026-05-25",
+    "buy_date": "2026-05-15",
+    "buy_price": 9.93,
+    "sell_price": 8.45,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -14.904330312185298,
+    "pnl_amount": -3700.000000000001
   }
 ]

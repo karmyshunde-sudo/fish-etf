@@ -62,5 +62,21 @@
     "lower": 17.08175,
     "current_price": 16.69,
     "hold_days": 24
+  },
+  {
+    "code": "688139",
+    "name": "海尔生物",
+    "direction": "long",
+    "buy_date": "2026-05-25",
+    "buy_price": 36.79,
+    "stop_loss": 33.1985,
+    "target": 39.105,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 33.1985,
+    "upper": 34.93475,
+    "lower": 31.462250000000004,
+    "current_price": 36.79,
+    "hold_days": 0
   }
 ]

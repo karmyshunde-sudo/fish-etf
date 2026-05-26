@@ -1,47 +1,38 @@
 [
   {
-    "code": "300932",
-    "name": "三友联众",
-    "buy_date": "2026-05-22",
-    "buy_price": 10.81,
-    "current_price": 10.33,
-    "stop_loss": 10.2695,
-    "take_profit": 11.891000000000002,
-    "position_pct": 0.25,
-    "target_shares": 2300,
-    "hold_days": 3
-  },
-  {
     "code": "603086",
     "name": "先达股份",
     "buy_date": "2026-05-25",
     "buy_price": 6.74,
-    "current_price": 6.74,
+    "current_price": 6.6,
     "stop_loss": 6.403,
     "take_profit": 7.414000000000001,
     "position_pct": 0.25,
-    "target_shares": 3700
+    "target_shares": 3700,
+    "hold_days": 1
   },
   {
     "code": "300425",
     "name": "中建环能",
     "buy_date": "2026-05-25",
     "buy_price": 4.57,
-    "current_price": 4.57,
+    "current_price": 4.52,
     "stop_loss": 4.3415,
     "take_profit": 5.027000000000001,
     "position_pct": 0.25,
-    "target_shares": 5400
+    "target_shares": 5400,
+    "hold_days": 1
   },
   {
     "code": "300452",
     "name": "山河药辅",
     "buy_date": "2026-05-25",
     "buy_price": 12.87,
-    "current_price": 12.87,
+    "current_price": 12.73,
     "stop_loss": 12.226499999999998,
     "take_profit": 14.157,
     "position_pct": 0.25,
-    "target_shares": 1900
+    "target_shares": 1900,
+    "hold_days": 1
   }
 ]

@@ -866,5 +866,18 @@
     "position_pct": 0.25,
     "target_shares": 1900,
     "amount": 25000.0
+  },
+  {
+    "type": "sell",
+    "code": "300932",
+    "name": "三友联众",
+    "date": "2026-05-26",
+    "buy_date": "2026-05-22",
+    "buy_price": 10.81,
+    "sell_price": 10.15,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -6.105457909343204,
+    "pnl_amount": -1518.0000000000002
   }
 ]

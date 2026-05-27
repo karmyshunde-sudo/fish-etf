@@ -142,5 +142,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价38.43 < 中轨39.77）",
     "pnl_pct": 7.526580861779513
+  },
+  {
+    "type": "buy",
+    "code": "605580",
+    "name": "恒盛能源",
+    "date": "2026-05-27",
+    "price": 25.9,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 22.0885,
+    "target": 28.083,
+    "score": 97
   }
 ]

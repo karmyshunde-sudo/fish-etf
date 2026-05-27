@@ -4,35 +4,35 @@
     "name": "先达股份",
     "buy_date": "2026-05-25",
     "buy_price": 6.74,
-    "current_price": 6.6,
+    "current_price": 6.47,
     "stop_loss": 6.403,
     "take_profit": 7.414000000000001,
     "position_pct": 0.25,
     "target_shares": 3700,
-    "hold_days": 1
+    "hold_days": 2
   },
   {
     "code": "300425",
     "name": "中建环能",
     "buy_date": "2026-05-25",
     "buy_price": 4.57,
-    "current_price": 4.52,
+    "current_price": 4.41,
     "stop_loss": 4.3415,
     "take_profit": 5.027000000000001,
     "position_pct": 0.25,
     "target_shares": 5400,
-    "hold_days": 1
+    "hold_days": 2
   },
   {
     "code": "300452",
     "name": "山河药辅",
     "buy_date": "2026-05-25",
     "buy_price": 12.87,
-    "current_price": 12.73,
+    "current_price": 12.55,
     "stop_loss": 12.226499999999998,
     "take_profit": 14.157,
     "position_pct": 0.25,
     "target_shares": 1900,
-    "hold_days": 1
+    "hold_days": 2
   }
 ]

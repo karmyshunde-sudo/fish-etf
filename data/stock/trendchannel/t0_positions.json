@@ -9,27 +9,11 @@
     "target": 14.949,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 15.067000000000002,
-    "upper": 16.2115,
-    "lower": 13.922500000000001,
-    "current_price": 16.1,
-    "hold_days": 31
-  },
-  {
-    "code": "301510",
-    "name": "固高科技",
-    "direction": "long",
-    "buy_date": "2026-04-25",
-    "buy_price": 35.74,
-    "stop_loss": 31.009500000000003,
-    "target": 37.898,
-    "position_pct": 0.1,
-    "score": 97,
-    "middle": 39.4685,
-    "upper": 42.863749999999996,
-    "lower": 36.07325,
-    "current_price": 40.63,
-    "hold_days": 31
+    "middle": 15.102,
+    "upper": 16.14825,
+    "lower": 14.05575,
+    "current_price": 15.26,
+    "hold_days": 32
   },
   {
     "code": "601177",
@@ -41,11 +25,11 @@
     "target": 16.972,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.3305,
-    "upper": 17.47875,
-    "lower": 15.182250000000002,
-    "current_price": 16.84,
-    "hold_days": 27
+    "middle": 16.466,
+    "upper": 17.65175,
+    "lower": 15.28025,
+    "current_price": 17.3,
+    "hold_days": 28
   },
   {
     "code": "688236",
@@ -57,11 +41,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 17.9315,
-    "upper": 19.022,
-    "lower": 16.841,
-    "current_price": 17.3,
-    "hold_days": 25
+    "middle": 17.78,
+    "upper": 18.887,
+    "lower": 16.673000000000002,
+    "current_price": 17.05,
+    "hold_days": 26
   },
   {
     "code": "688139",
@@ -73,10 +57,10 @@
     "target": 39.105,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 33.400999999999996,
-    "upper": 35.20175,
-    "lower": 31.600249999999996,
-    "current_price": 37.36,
-    "hold_days": 1
+    "middle": 33.5005,
+    "upper": 35.455,
+    "lower": 31.546000000000003,
+    "current_price": 35.59,
+    "hold_days": 2
   }
 ]

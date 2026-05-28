@@ -154,5 +154,17 @@
     "stop_loss": 22.0885,
     "target": 28.083,
     "score": 97
+  },
+  {
+    "type": "sell",
+    "code": "688139",
+    "name": "海尔生物",
+    "date": "2026-05-28",
+    "buy_date": "2026-05-25",
+    "buy_price": 36.79,
+    "sell_price": 34.02,
+    "direction": "long",
+    "reason": "触发移动止损（34.95）",
+    "pnl_pct": -7.529219896711052
   }
 ]

@@ -879,5 +879,18 @@
     "position_pct": 0.25,
     "pnl_pct": -6.105457909343204,
     "pnl_amount": -1518.0000000000002
+  },
+  {
+    "type": "sell",
+    "code": "603086",
+    "name": "先达股份",
+    "date": "2026-05-28",
+    "buy_date": "2026-05-25",
+    "buy_price": 6.74,
+    "sell_price": 6.24,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -7.41839762611276,
+    "pnl_amount": -1850.0
   }
 ]

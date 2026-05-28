@@ -62,5 +62,21 @@
     "lower": 20.517,
     "current_price": 25.62,
     "hold_days": 1
+  },
+  {
+    "code": "605179",
+    "name": "一鸣食品",
+    "direction": "short",
+    "buy_date": "2026-05-28",
+    "buy_price": 15.18,
+    "stop_loss": 16.282,
+    "target": 14.358999999999998,
+    "position_pct": 0.1,
+    "score": 95,
+    "middle": 16.282,
+    "upper": 16.897750000000002,
+    "lower": 15.66625,
+    "current_price": 15.18,
+    "hold_days": 0
   }
 ]

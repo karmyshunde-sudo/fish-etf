@@ -9,11 +9,11 @@
     "target": 14.949,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 15.102,
-    "upper": 16.14825,
-    "lower": 14.05575,
+    "middle": 15.1625,
+    "upper": 16.16375,
+    "lower": 14.161249999999999,
     "current_price": 15.26,
-    "hold_days": 32
+    "hold_days": 33
   },
   {
     "code": "601177",
@@ -25,11 +25,11 @@
     "target": 16.972,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.466,
-    "upper": 17.65175,
-    "lower": 15.28025,
-    "current_price": 17.3,
-    "hold_days": 28
+    "middle": 16.621499999999997,
+    "upper": 17.845499999999998,
+    "lower": 15.397499999999997,
+    "current_price": 17.6,
+    "hold_days": 29
   },
   {
     "code": "688236",
@@ -41,27 +41,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 17.78,
-    "upper": 18.887,
-    "lower": 16.673000000000002,
-    "current_price": 17.05,
-    "hold_days": 26
-  },
-  {
-    "code": "688139",
-    "name": "海尔生物",
-    "direction": "long",
-    "buy_date": "2026-05-25",
-    "buy_price": 36.79,
-    "stop_loss": 33.1985,
-    "target": 39.105,
-    "position_pct": 0.1,
-    "score": 97,
-    "middle": 33.5005,
-    "upper": 35.455,
-    "lower": 31.546000000000003,
-    "current_price": 35.59,
-    "hold_days": 2
+    "middle": 17.6215,
+    "upper": 18.75775,
+    "lower": 16.48525,
+    "current_price": 16.58,
+    "hold_days": 27
   },
   {
     "code": "605580",
@@ -73,10 +57,26 @@
     "target": 28.083,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 22.0885,
-    "upper": 23.725749999999998,
-    "lower": 20.45125,
-    "current_price": 25.9,
+    "middle": 22.272,
+    "upper": 24.026999999999997,
+    "lower": 20.517,
+    "current_price": 25.62,
+    "hold_days": 1
+  },
+  {
+    "code": "605179",
+    "name": "一鸣食品",
+    "direction": "short",
+    "buy_date": "2026-05-28",
+    "buy_price": 15.18,
+    "stop_loss": 16.282,
+    "target": 14.358999999999998,
+    "position_pct": 0.1,
+    "score": 95,
+    "middle": 16.282,
+    "upper": 16.897750000000002,
+    "lower": 15.66625,
+    "current_price": 15.18,
     "hold_days": 0
   }
 ]

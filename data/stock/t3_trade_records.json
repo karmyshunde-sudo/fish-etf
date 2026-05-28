@@ -892,5 +892,18 @@
     "position_pct": 0.25,
     "pnl_pct": -7.41839762611276,
     "pnl_amount": -1850.0
+  },
+  {
+    "type": "sell",
+    "code": "300425",
+    "name": "中建环能",
+    "date": "2026-05-28",
+    "buy_date": "2026-05-25",
+    "buy_price": 4.57,
+    "sell_price": 4.31,
+    "reason": "触发止损",
+    "position_pct": 0.25,
+    "pnl_pct": -5.689277899343558,
+    "pnl_amount": -1404.0000000000036
   }
 ]

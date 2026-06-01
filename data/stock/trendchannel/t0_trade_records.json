@@ -190,5 +190,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价14.58 < 中轨15.19）",
     "pnl_pct": 3.7722419928825572
+  },
+  {
+    "type": "buy",
+    "code": "301565",
+    "name": "中仑新材",
+    "date": "2026-06-01",
+    "price": 29.02,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 23.1715,
+    "target": 31.241,
+    "score": 97
   }
 ]

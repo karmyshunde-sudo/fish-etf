@@ -62,5 +62,21 @@
     "lower": 15.426749999999998,
     "current_price": 15.41,
     "hold_days": 4
+  },
+  {
+    "code": "301565",
+    "name": "中仑新材",
+    "direction": "long",
+    "buy_date": "2026-06-01",
+    "buy_price": 29.02,
+    "stop_loss": 23.1715,
+    "target": 31.241,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 23.1715,
+    "upper": 24.83725,
+    "lower": 21.505750000000003,
+    "current_price": 29.02,
+    "hold_days": 0
   }
 ]

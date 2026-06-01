@@ -178,5 +178,29 @@
     "stop_loss": 16.282,
     "target": 14.358999999999998,
     "score": 95
+  },
+  {
+    "type": "sell",
+    "code": "300590",
+    "name": "移为通信",
+    "date": "2026-06-01",
+    "buy_date": "2026-04-25",
+    "buy_price": 14.05,
+    "sell_price": 14.58,
+    "direction": "long",
+    "reason": "收盘价跌破中轨（收盘价14.58 < 中轨15.19）",
+    "pnl_pct": 3.7722419928825572
+  },
+  {
+    "type": "buy",
+    "code": "301565",
+    "name": "中仑新材",
+    "date": "2026-06-01",
+    "price": 29.02,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 23.1715,
+    "target": 31.241,
+    "score": 97
   }
 ]

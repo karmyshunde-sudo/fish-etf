@@ -4,11 +4,11 @@
     "name": "山河药辅",
     "buy_date": "2026-05-25",
     "buy_price": 12.87,
-    "current_price": 12.7,
+    "current_price": 12.89,
     "stop_loss": 12.226499999999998,
     "take_profit": 14.157,
     "position_pct": 0.25,
     "target_shares": 1900,
-    "hold_days": 7
+    "hold_days": 8
   }
 ]

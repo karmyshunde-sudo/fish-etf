@@ -9,11 +9,11 @@
     "target": 16.972,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.8895,
-    "upper": 18.139750000000003,
-    "lower": 15.63925,
-    "current_price": 17.81,
-    "hold_days": 33
+    "middle": 16.9805,
+    "upper": 18.25025,
+    "lower": 15.710749999999999,
+    "current_price": 17.76,
+    "hold_days": 34
   },
   {
     "code": "688236",
@@ -25,11 +25,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 17.3055,
-    "upper": 18.463499999999996,
-    "lower": 16.1475,
-    "current_price": 16.28,
-    "hold_days": 31
+    "middle": 17.139499999999998,
+    "upper": 18.292249999999996,
+    "lower": 15.986749999999999,
+    "current_price": 16.11,
+    "hold_days": 32
   },
   {
     "code": "605580",
@@ -41,11 +41,11 @@
     "target": 28.083,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 23.0135,
-    "upper": 25.24325,
-    "lower": 20.78375,
-    "current_price": 30.29,
-    "hold_days": 5
+    "middle": 23.311500000000002,
+    "upper": 25.6935,
+    "lower": 20.929500000000004,
+    "current_price": 27.26,
+    "hold_days": 6
   },
   {
     "code": "605179",
@@ -57,26 +57,10 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 16.083,
-    "upper": 16.73925,
-    "lower": 15.426749999999998,
-    "current_price": 15.41,
-    "hold_days": 4
-  },
-  {
-    "code": "301565",
-    "name": "中仑新材",
-    "direction": "long",
-    "buy_date": "2026-06-01",
-    "buy_price": 29.02,
-    "stop_loss": 23.1715,
-    "target": 31.241,
-    "position_pct": 0.1,
-    "score": 97,
-    "middle": 23.1715,
-    "upper": 24.83725,
-    "lower": 21.505750000000003,
-    "current_price": 29.02,
-    "hold_days": 0
+    "middle": 16.0005,
+    "upper": 16.662,
+    "lower": 15.338999999999999,
+    "current_price": 15.55,
+    "hold_days": 5
   }
 ]

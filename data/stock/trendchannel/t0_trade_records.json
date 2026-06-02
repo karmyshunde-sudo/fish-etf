@@ -214,5 +214,17 @@
     "direction": "long",
     "reason": "触发移动止损（27.57）",
     "pnl_pct": -6.06478290833907
+  },
+  {
+    "type": "buy",
+    "code": "605277",
+    "name": "新亚电子",
+    "date": "2026-06-02",
+    "price": 25.74,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 23.496,
+    "target": 27.698999999999998,
+    "score": 97
   }
 ]

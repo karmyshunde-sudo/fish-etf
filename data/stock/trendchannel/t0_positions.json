@@ -62,5 +62,21 @@
     "lower": 12.718999999999998,
     "current_price": 15.81,
     "hold_days": 0
+  },
+  {
+    "code": "600279",
+    "name": "重庆港",
+    "direction": "long",
+    "buy_date": "2026-06-04",
+    "buy_price": 5.44,
+    "stop_loss": 4.9575,
+    "target": 5.8020000000000005,
+    "position_pct": 0.1,
+    "score": 92,
+    "middle": 4.9575,
+    "upper": 5.228999999999999,
+    "lower": 4.686,
+    "current_price": 5.44,
+    "hold_days": 0
   }
 ]

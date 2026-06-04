@@ -1,21 +1,5 @@
 [
   {
-    "code": "601177",
-    "name": "杭齿前进",
-    "direction": "long",
-    "buy_date": "2026-04-29",
-    "buy_price": 16.25,
-    "stop_loss": 14.635,
-    "target": 16.972,
-    "position_pct": 0.1,
-    "score": 100,
-    "middle": 17.065,
-    "upper": 18.358,
-    "lower": 15.772000000000002,
-    "current_price": 17.62,
-    "hold_days": 35
-  },
-  {
     "code": "688236",
     "name": "春立医疗",
     "direction": "short",
@@ -25,11 +9,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 17.072,
-    "upper": 18.065749999999998,
-    "lower": 16.07825,
-    "current_price": 15.95,
-    "hold_days": 33
+    "middle": 16.9615,
+    "upper": 17.92675,
+    "lower": 15.996250000000002,
+    "current_price": 15.74,
+    "hold_days": 34
   },
   {
     "code": "605580",
@@ -41,11 +25,11 @@
     "target": 28.083,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 23.5235,
-    "upper": 26.07575,
-    "lower": 20.971249999999998,
-    "current_price": 25.71,
-    "hold_days": 7
+    "middle": 23.8525,
+    "upper": 26.616999999999997,
+    "lower": 21.088,
+    "current_price": 28.28,
+    "hold_days": 8
   },
   {
     "code": "605179",
@@ -57,26 +41,42 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 15.889500000000002,
-    "upper": 16.580250000000003,
-    "lower": 15.198750000000002,
-    "current_price": 15.03,
-    "hold_days": 6
+    "middle": 15.772,
+    "upper": 16.47175,
+    "lower": 15.07225,
+    "current_price": 14.7,
+    "hold_days": 7
   },
   {
-    "code": "605277",
-    "name": "新亚电子",
+    "code": "605018",
+    "name": "长华集团",
     "direction": "long",
-    "buy_date": "2026-06-02",
-    "buy_price": 25.74,
-    "stop_loss": 23.496,
-    "target": 27.698999999999998,
+    "buy_date": "2026-06-04",
+    "buy_price": 15.81,
+    "stop_loss": 13.729999999999999,
+    "target": 17.158,
     "position_pct": 0.1,
-    "score": 97,
-    "middle": 23.582,
-    "upper": 25.13525,
-    "lower": 22.028750000000002,
-    "current_price": 24.55,
-    "hold_days": 1
+    "score": 92,
+    "middle": 13.729999999999999,
+    "upper": 14.741,
+    "lower": 12.718999999999998,
+    "current_price": 15.81,
+    "hold_days": 0
+  },
+  {
+    "code": "600279",
+    "name": "重庆港",
+    "direction": "long",
+    "buy_date": "2026-06-04",
+    "buy_price": 5.44,
+    "stop_loss": 4.9575,
+    "target": 5.8020000000000005,
+    "position_pct": 0.1,
+    "score": 92,
+    "middle": 4.9575,
+    "upper": 5.228999999999999,
+    "lower": 4.686,
+    "current_price": 5.44,
+    "hold_days": 0
   }
 ]

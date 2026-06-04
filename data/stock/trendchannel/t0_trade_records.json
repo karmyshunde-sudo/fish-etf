@@ -250,5 +250,17 @@
     "direction": "long",
     "reason": "触发移动止损（24.45）",
     "pnl_pct": -5.982905982905979
+  },
+  {
+    "type": "buy",
+    "code": "605018",
+    "name": "长华集团",
+    "date": "2026-06-04",
+    "price": 15.81,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 13.729999999999999,
+    "target": 17.158,
+    "score": 92
   }
 ]

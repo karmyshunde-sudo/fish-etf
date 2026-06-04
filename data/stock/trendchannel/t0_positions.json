@@ -46,5 +46,21 @@
     "lower": 15.07225,
     "current_price": 14.7,
     "hold_days": 7
+  },
+  {
+    "code": "605018",
+    "name": "长华集团",
+    "direction": "long",
+    "buy_date": "2026-06-04",
+    "buy_price": 15.81,
+    "stop_loss": 13.729999999999999,
+    "target": 17.158,
+    "position_pct": 0.1,
+    "score": 92,
+    "middle": 13.729999999999999,
+    "upper": 14.741,
+    "lower": 12.718999999999998,
+    "current_price": 15.81,
+    "hold_days": 0
   }
 ]

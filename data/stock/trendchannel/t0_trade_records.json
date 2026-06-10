@@ -286,5 +286,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价5.01 < 中轨5.06）",
     "pnl_pct": -7.904411764705893
+  },
+  {
+    "type": "buy",
+    "code": "603859",
+    "name": "能科科技",
+    "date": "2026-06-10",
+    "price": 52.95,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 44.703,
+    "target": 58.642,
+    "score": 94
   }
 ]

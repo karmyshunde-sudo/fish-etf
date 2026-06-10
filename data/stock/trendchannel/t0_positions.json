@@ -9,11 +9,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 16.5575,
-    "upper": 17.51525,
-    "lower": 15.599750000000002,
-    "current_price": 15.01,
-    "hold_days": 39
+    "middle": 16.444,
+    "upper": 17.38075,
+    "lower": 15.507249999999999,
+    "current_price": 15.24,
+    "hold_days": 40
   },
   {
     "code": "605580",
@@ -25,11 +25,11 @@
     "target": 28.083,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 24.583499999999997,
-    "upper": 27.854249999999997,
-    "lower": 21.312749999999998,
-    "current_price": 26.31,
-    "hold_days": 13
+    "middle": 24.787,
+    "upper": 28.027749999999997,
+    "lower": 21.54625,
+    "current_price": 26.15,
+    "hold_days": 14
   },
   {
     "code": "605179",
@@ -41,11 +41,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 15.384,
-    "upper": 16.1265,
-    "lower": 14.6415,
-    "current_price": 14.11,
-    "hold_days": 12
+    "middle": 15.263,
+    "upper": 15.99725,
+    "lower": 14.52875,
+    "current_price": 14.03,
+    "hold_days": 13
   },
   {
     "code": "605018",
@@ -57,26 +57,10 @@
     "target": 17.158,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 14.386500000000002,
-    "upper": 15.617250000000002,
-    "lower": 13.155750000000001,
-    "current_price": 17.97,
-    "hold_days": 5
-  },
-  {
-    "code": "600279",
-    "name": "重庆港",
-    "direction": "long",
-    "buy_date": "2026-06-04",
-    "buy_price": 5.44,
-    "stop_loss": 4.9575,
-    "target": 5.8020000000000005,
-    "position_pct": 0.1,
-    "score": 92,
-    "middle": 5.059,
-    "upper": 5.39725,
-    "lower": 4.720750000000001,
-    "current_price": 5.57,
-    "hold_days": 5
+    "middle": 14.7225,
+    "upper": 16.0965,
+    "lower": 13.3485,
+    "current_price": 19.77,
+    "hold_days": 6
   }
 ]

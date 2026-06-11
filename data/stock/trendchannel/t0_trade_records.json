@@ -310,5 +310,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价24.84 < 中轨24.89）",
     "pnl_pct": -4.092664092664088
+  },
+  {
+    "type": "buy",
+    "code": "300039",
+    "name": "上海凯宝",
+    "date": "2026-06-11",
+    "price": 4.46,
+    "direction": "short",
+    "position_pct": 0.1,
+    "stop_loss": 5.340999999999999,
+    "target": 4.1659999999999995,
+    "score": 100
   }
 ]

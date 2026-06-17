@@ -334,5 +334,17 @@
     "direction": "long",
     "reason": "收盘价跌破中轨（收盘价15.04 < 中轨15.42）",
     "pnl_pct": -4.870335230866549
+  },
+  {
+    "type": "buy",
+    "code": "601696",
+    "name": "中银证券",
+    "date": "2026-06-17",
+    "price": 13.3,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 11.468,
+    "target": 14.163,
+    "score": 97
   }
 ]

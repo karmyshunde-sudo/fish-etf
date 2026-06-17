@@ -62,5 +62,21 @@
     "lower": 4.8695,
     "current_price": 4.49,
     "hold_days": 6
+  },
+  {
+    "code": "601696",
+    "name": "中银证券",
+    "direction": "long",
+    "buy_date": "2026-06-17",
+    "buy_price": 13.3,
+    "stop_loss": 11.468,
+    "target": 14.163,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 11.468,
+    "upper": 12.11525,
+    "lower": 10.82075,
+    "current_price": 13.3,
+    "hold_days": 0
   }
 ]

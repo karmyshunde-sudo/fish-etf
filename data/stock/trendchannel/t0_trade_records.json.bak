@@ -346,5 +346,29 @@
     "stop_loss": 11.468,
     "target": 14.163,
     "score": 97
+  },
+  {
+    "type": "sell",
+    "code": "603859",
+    "name": "能科科技",
+    "date": "2026-06-24",
+    "buy_date": "2026-06-10",
+    "buy_price": 52.95,
+    "sell_price": 49.65,
+    "direction": "long",
+    "reason": "触发移动止损（50.30）",
+    "pnl_pct": -6.232294617563747
+  },
+  {
+    "type": "buy",
+    "code": "605011",
+    "name": "杭州热电",
+    "date": "2026-06-24",
+    "price": 17.83,
+    "direction": "short",
+    "position_pct": 0.1,
+    "stop_loss": 19.909,
+    "target": 15.925999999999998,
+    "score": 92
   }
 ]

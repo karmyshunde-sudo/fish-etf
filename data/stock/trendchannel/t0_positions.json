@@ -62,5 +62,21 @@
     "lower": 11.02125,
     "current_price": 13.14,
     "hold_days": 7
+  },
+  {
+    "code": "605011",
+    "name": "杭州热电",
+    "direction": "short",
+    "buy_date": "2026-06-24",
+    "buy_price": 17.83,
+    "stop_loss": 19.909,
+    "target": 15.925999999999998,
+    "position_pct": 0.1,
+    "score": 92,
+    "middle": 19.909,
+    "upper": 21.337,
+    "lower": 18.480999999999998,
+    "current_price": 17.83,
+    "hold_days": 0
   }
 ]

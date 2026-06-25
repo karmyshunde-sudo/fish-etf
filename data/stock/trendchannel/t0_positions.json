@@ -9,11 +9,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 15.519,
-    "upper": 16.40025,
-    "lower": 14.63775,
-    "current_price": 15.32,
-    "hold_days": 54
+    "middle": 15.414499999999999,
+    "upper": 16.282249999999998,
+    "lower": 14.54675,
+    "current_price": 14.96,
+    "hold_days": 55
   },
   {
     "code": "605179",
@@ -25,11 +25,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 14.363999999999999,
-    "upper": 15.136499999999998,
-    "lower": 13.5915,
-    "current_price": 13.73,
-    "hold_days": 27
+    "middle": 14.278,
+    "upper": 15.055,
+    "lower": 13.501000000000001,
+    "current_price": 13.35,
+    "hold_days": 28
   },
   {
     "code": "300039",
@@ -41,11 +41,11 @@
     "target": 4.1659999999999995,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 4.8475,
-    "upper": 5.095,
-    "lower": 4.6000000000000005,
-    "current_price": 4.39,
-    "hold_days": 13
+    "middle": 4.794,
+    "upper": 5.045249999999999,
+    "lower": 4.54275,
+    "current_price": 4.34,
+    "hold_days": 14
   },
   {
     "code": "601696",
@@ -57,11 +57,11 @@
     "target": 14.163,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 11.715,
-    "upper": 12.40875,
-    "lower": 11.02125,
-    "current_price": 13.14,
-    "hold_days": 7
+    "middle": 11.7665,
+    "upper": 12.478250000000001,
+    "lower": 11.05475,
+    "current_price": 12.9,
+    "hold_days": 8
   },
   {
     "code": "605011",
@@ -73,10 +73,10 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 19.909,
-    "upper": 21.337,
-    "lower": 18.480999999999998,
-    "current_price": 17.83,
-    "hold_days": 0
+    "middle": 19.6475,
+    "upper": 21.12275,
+    "lower": 18.172250000000002,
+    "current_price": 16.75,
+    "hold_days": 1
   }
 ]

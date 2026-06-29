@@ -9,11 +9,11 @@
     "target": 15.999000000000002,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 15.414499999999999,
-    "upper": 16.282249999999998,
-    "lower": 14.54675,
-    "current_price": 14.96,
-    "hold_days": 56
+    "middle": 15.181999999999999,
+    "upper": 16.04675,
+    "lower": 14.31725,
+    "current_price": 13.9,
+    "hold_days": 59
   },
   {
     "code": "605179",
@@ -25,11 +25,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 14.1805,
-    "upper": 14.926,
-    "lower": 13.435,
-    "current_price": 13.23,
-    "hold_days": 29
+    "middle": 14.067999999999998,
+    "upper": 14.826249999999998,
+    "lower": 13.309749999999998,
+    "current_price": 12.8,
+    "hold_days": 32
   },
   {
     "code": "300039",
@@ -41,27 +41,11 @@
     "target": 4.1659999999999995,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 4.737,
-    "upper": 4.9935,
-    "lower": 4.4805,
-    "current_price": 4.2,
-    "hold_days": 15
-  },
-  {
-    "code": "601696",
-    "name": "中银证券",
-    "direction": "long",
-    "buy_date": "2026-06-17",
-    "buy_price": 13.3,
-    "stop_loss": 11.468,
-    "target": 14.163,
-    "position_pct": 0.1,
-    "score": 97,
-    "middle": 11.844000000000001,
-    "upper": 12.57975,
-    "lower": 11.108250000000002,
-    "current_price": 13.18,
-    "hold_days": 9
+    "middle": 4.6775,
+    "upper": 4.937,
+    "lower": 4.418,
+    "current_price": 4.18,
+    "hold_days": 18
   },
   {
     "code": "605011",
@@ -73,10 +57,26 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 19.3405,
-    "upper": 20.823249999999998,
-    "lower": 17.85775,
-    "current_price": 15.99,
-    "hold_days": 2
+    "middle": 18.994999999999997,
+    "upper": 20.4305,
+    "lower": 17.559499999999996,
+    "current_price": 15.48,
+    "hold_days": 5
+  },
+  {
+    "code": "601799",
+    "name": "星宇股份",
+    "direction": "short",
+    "buy_date": "2026-06-29",
+    "buy_price": 97.91,
+    "stop_loss": 118.71149999999997,
+    "target": 87.17899999999999,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 118.71149999999997,
+    "upper": 126.75974999999997,
+    "lower": 110.66324999999998,
+    "current_price": 97.91,
+    "hold_days": 0
   }
 ]

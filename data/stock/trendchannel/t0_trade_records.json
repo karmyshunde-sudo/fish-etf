@@ -370,5 +370,17 @@
     "stop_loss": 19.909,
     "target": 15.925999999999998,
     "score": 92
+  },
+  {
+    "type": "sell",
+    "code": "601696",
+    "name": "中银证券",
+    "date": "2026-06-29",
+    "buy_date": "2026-06-17",
+    "buy_price": 13.3,
+    "sell_price": 12.38,
+    "direction": "long",
+    "reason": "触发移动止损（12.63）",
+    "pnl_pct": -6.917293233082705
   }
 ]

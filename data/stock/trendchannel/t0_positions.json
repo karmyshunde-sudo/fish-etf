@@ -62,5 +62,21 @@
     "lower": 17.559499999999996,
     "current_price": 15.48,
     "hold_days": 5
+  },
+  {
+    "code": "601799",
+    "name": "星宇股份",
+    "direction": "short",
+    "buy_date": "2026-06-29",
+    "buy_price": 97.91,
+    "stop_loss": 118.71149999999997,
+    "target": 87.17899999999999,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 118.71149999999997,
+    "upper": 126.75974999999997,
+    "lower": 110.66324999999998,
+    "current_price": 97.91,
+    "hold_days": 0
   }
 ]

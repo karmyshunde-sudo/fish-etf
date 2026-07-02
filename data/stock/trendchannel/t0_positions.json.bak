@@ -1,21 +1,5 @@
 [
   {
-    "code": "688236",
-    "name": "春立医疗",
-    "direction": "short",
-    "buy_date": "2026-05-01",
-    "buy_price": 17.3,
-    "stop_loss": 20.023,
-    "target": 15.999000000000002,
-    "position_pct": 0.1,
-    "score": 100,
-    "middle": 15.020500000000002,
-    "upper": 15.983500000000003,
-    "lower": 14.057500000000001,
-    "current_price": 14.46,
-    "hold_days": 61
-  },
-  {
     "code": "605179",
     "name": "一鸣食品",
     "direction": "short",
@@ -25,11 +9,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 13.7925,
-    "upper": 14.52075,
-    "lower": 13.064250000000001,
-    "current_price": 12.57,
-    "hold_days": 34
+    "middle": 13.6875,
+    "upper": 14.4135,
+    "lower": 12.9615,
+    "current_price": 12.93,
+    "hold_days": 35
   },
   {
     "code": "300039",
@@ -41,11 +25,11 @@
     "target": 4.1659999999999995,
     "position_pct": 0.1,
     "score": 100,
-    "middle": 4.5735,
-    "upper": 4.8629999999999995,
-    "lower": 4.284000000000001,
-    "current_price": 4.26,
-    "hold_days": 20
+    "middle": 4.532500000000001,
+    "upper": 4.8332500000000005,
+    "lower": 4.231750000000001,
+    "current_price": 4.46,
+    "hold_days": 21
   },
   {
     "code": "605011",
@@ -57,11 +41,11 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 18.274,
-    "upper": 19.609,
-    "lower": 16.939,
-    "current_price": 15.46,
-    "hold_days": 7
+    "middle": 17.9435,
+    "upper": 19.262,
+    "lower": 16.625,
+    "current_price": 16.07,
+    "hold_days": 8
   },
   {
     "code": "601799",
@@ -73,10 +57,26 @@
     "target": 87.17899999999999,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 115.10499999999999,
-    "upper": 123.13674999999999,
-    "lower": 107.07324999999999,
-    "current_price": 90.62,
-    "hold_days": 2
+    "middle": 113.60350000000001,
+    "upper": 121.84675000000001,
+    "lower": 105.36025000000001,
+    "current_price": 97.0,
+    "hold_days": 3
+  },
+  {
+    "code": "600373",
+    "name": "中文传媒",
+    "direction": "short",
+    "buy_date": "2026-07-02",
+    "buy_price": 6.74,
+    "stop_loss": 7.301,
+    "target": 6.279,
+    "position_pct": 0.1,
+    "score": 90,
+    "middle": 7.301,
+    "upper": 7.64675,
+    "lower": 6.95525,
+    "current_price": 6.74,
+    "hold_days": 0
   }
 ]

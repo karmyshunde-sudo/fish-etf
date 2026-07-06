@@ -9,27 +9,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 13.6875,
-    "upper": 14.4135,
-    "lower": 12.9615,
-    "current_price": 12.93,
-    "hold_days": 36
-  },
-  {
-    "code": "300039",
-    "name": "上海凯宝",
-    "direction": "short",
-    "buy_date": "2026-06-11",
-    "buy_price": 4.46,
-    "stop_loss": 5.340999999999999,
-    "target": 4.1659999999999995,
-    "position_pct": 0.1,
-    "score": 100,
-    "middle": 4.532500000000001,
-    "upper": 4.8332500000000005,
-    "lower": 4.231750000000001,
-    "current_price": 4.46,
-    "hold_days": 22
+    "middle": 13.561999999999998,
+    "upper": 14.272249999999998,
+    "lower": 12.851749999999997,
+    "current_price": 13.37,
+    "hold_days": 39
   },
   {
     "code": "605011",
@@ -41,11 +25,11 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 17.9435,
-    "upper": 19.262,
-    "lower": 16.625,
-    "current_price": 16.07,
-    "hold_days": 9
+    "middle": 17.4405,
+    "upper": 18.79425,
+    "lower": 16.08675,
+    "current_price": 17.39,
+    "hold_days": 12
   },
   {
     "code": "601799",
@@ -57,11 +41,11 @@
     "target": 87.17899999999999,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 113.60350000000001,
-    "upper": 121.84675000000001,
-    "lower": 105.36025000000001,
-    "current_price": 97.0,
-    "hold_days": 4
+    "middle": 110.9775,
+    "upper": 119.037,
+    "lower": 102.918,
+    "current_price": 100.31,
+    "hold_days": 7
   },
   {
     "code": "600373",
@@ -73,10 +57,10 @@
     "target": 6.279,
     "position_pct": 0.1,
     "score": 90,
-    "middle": 7.301,
-    "upper": 7.64675,
-    "lower": 6.95525,
-    "current_price": 6.74,
-    "hold_days": 1
+    "middle": 7.234999999999999,
+    "upper": 7.5725,
+    "lower": 6.897499999999999,
+    "current_price": 6.73,
+    "hold_days": 4
   }
 ]

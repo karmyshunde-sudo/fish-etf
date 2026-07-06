@@ -430,5 +430,17 @@
     "direction": "short",
     "reason": "收盘价突破中轨（收盘价4.52 > 中轨4.47）",
     "pnl_pct": -1.345291479820619
+  },
+  {
+    "type": "buy",
+    "code": "300018",
+    "name": "中元股份",
+    "date": "2026-07-06",
+    "price": 14.65,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 12.553,
+    "target": 16.269,
+    "score": 94
   }
 ]

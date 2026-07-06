@@ -418,5 +418,17 @@
     "stop_loss": 7.301,
     "target": 6.279,
     "score": 90
+  },
+  {
+    "type": "sell",
+    "code": "300039",
+    "name": "上海凯宝",
+    "date": "2026-07-06",
+    "buy_date": "2026-06-11",
+    "buy_price": 4.46,
+    "sell_price": 4.52,
+    "direction": "short",
+    "reason": "收盘价突破中轨（收盘价4.52 > 中轨4.47）",
+    "pnl_pct": -1.345291479820619
   }
 ]

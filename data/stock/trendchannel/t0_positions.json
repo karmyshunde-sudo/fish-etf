@@ -62,5 +62,21 @@
     "lower": 6.897499999999999,
     "current_price": 6.73,
     "hold_days": 4
+  },
+  {
+    "code": "300018",
+    "name": "中元股份",
+    "direction": "long",
+    "buy_date": "2026-07-06",
+    "buy_price": 14.65,
+    "stop_loss": 12.553,
+    "target": 16.269,
+    "position_pct": 0.1,
+    "score": 94,
+    "middle": 12.553,
+    "upper": 13.76725,
+    "lower": 11.338750000000001,
+    "current_price": 14.65,
+    "hold_days": 0
   }
 ]

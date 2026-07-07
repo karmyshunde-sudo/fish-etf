@@ -62,5 +62,21 @@
     "lower": 6.86725,
     "current_price": 6.78,
     "hold_days": 5
+  },
+  {
+    "code": "605305",
+    "name": "中际联合",
+    "direction": "long",
+    "buy_date": "2026-07-07",
+    "buy_price": 47.39,
+    "stop_loss": 40.308499999999995,
+    "target": 51.787,
+    "position_pct": 0.1,
+    "score": 89,
+    "middle": 40.308499999999995,
+    "upper": 43.606249999999996,
+    "lower": 37.010749999999994,
+    "current_price": 47.39,
+    "hold_days": 0
   }
 ]

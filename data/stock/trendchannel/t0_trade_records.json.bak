@@ -442,5 +442,29 @@
     "stop_loss": 12.553,
     "target": 16.269,
     "score": 94
+  },
+  {
+    "type": "sell",
+    "code": "300018",
+    "name": "中元股份",
+    "date": "2026-07-07",
+    "buy_date": "2026-07-06",
+    "buy_price": 14.65,
+    "sell_price": 13.9,
+    "direction": "long",
+    "reason": "触发移动止损（13.92）",
+    "pnl_pct": -5.1194539249146755
+  },
+  {
+    "type": "buy",
+    "code": "605305",
+    "name": "中际联合",
+    "date": "2026-07-07",
+    "price": 47.39,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 40.308499999999995,
+    "target": 51.787,
+    "score": 89
   }
 ]

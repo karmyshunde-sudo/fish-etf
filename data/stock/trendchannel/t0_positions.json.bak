@@ -9,11 +9,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 13.561999999999998,
-    "upper": 14.272249999999998,
-    "lower": 12.851749999999997,
-    "current_price": 13.37,
-    "hold_days": 39
+    "middle": 13.507499999999999,
+    "upper": 14.212499999999999,
+    "lower": 12.802499999999998,
+    "current_price": 13.41,
+    "hold_days": 40
   },
   {
     "code": "605011",
@@ -25,11 +25,11 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 17.4405,
-    "upper": 18.79425,
-    "lower": 16.08675,
-    "current_price": 17.39,
-    "hold_days": 12
+    "middle": 17.235,
+    "upper": 18.54525,
+    "lower": 15.92475,
+    "current_price": 16.65,
+    "hold_days": 13
   },
   {
     "code": "601799",
@@ -45,7 +45,7 @@
     "upper": 119.037,
     "lower": 102.918,
     "current_price": 100.31,
-    "hold_days": 7
+    "hold_days": 8
   },
   {
     "code": "600373",
@@ -57,26 +57,26 @@
     "target": 6.279,
     "position_pct": 0.1,
     "score": 90,
-    "middle": 7.234999999999999,
-    "upper": 7.5725,
-    "lower": 6.897499999999999,
-    "current_price": 6.73,
-    "hold_days": 4
+    "middle": 7.198,
+    "upper": 7.5287500000000005,
+    "lower": 6.86725,
+    "current_price": 6.78,
+    "hold_days": 5
   },
   {
-    "code": "300018",
-    "name": "中元股份",
+    "code": "605305",
+    "name": "中际联合",
     "direction": "long",
-    "buy_date": "2026-07-06",
-    "buy_price": 14.65,
-    "stop_loss": 12.553,
-    "target": 16.269,
+    "buy_date": "2026-07-07",
+    "buy_price": 47.39,
+    "stop_loss": 40.308499999999995,
+    "target": 51.787,
     "position_pct": 0.1,
-    "score": 94,
-    "middle": 12.553,
-    "upper": 13.76725,
-    "lower": 11.338750000000001,
-    "current_price": 14.65,
+    "score": 89,
+    "middle": 40.308499999999995,
+    "upper": 43.606249999999996,
+    "lower": 37.010749999999994,
+    "current_price": 47.39,
     "hold_days": 0
   }
 ]

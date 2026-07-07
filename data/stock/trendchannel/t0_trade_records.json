@@ -442,5 +442,17 @@
     "stop_loss": 12.553,
     "target": 16.269,
     "score": 94
+  },
+  {
+    "type": "sell",
+    "code": "300018",
+    "name": "中元股份",
+    "date": "2026-07-07",
+    "buy_date": "2026-07-06",
+    "buy_price": 14.65,
+    "sell_price": 13.9,
+    "direction": "long",
+    "reason": "触发移动止损（13.92）",
+    "pnl_pct": -5.1194539249146755
   }
 ]

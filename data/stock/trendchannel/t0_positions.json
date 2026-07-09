@@ -9,11 +9,11 @@
     "target": 14.358999999999998,
     "position_pct": 0.1,
     "score": 95,
-    "middle": 13.449000000000002,
-    "upper": 14.139750000000001,
-    "lower": 12.758250000000002,
-    "current_price": 12.94,
-    "hold_days": 41
+    "middle": 13.398499999999999,
+    "upper": 14.089249999999998,
+    "lower": 12.707749999999999,
+    "current_price": 13.02,
+    "hold_days": 42
   },
   {
     "code": "605011",
@@ -25,11 +25,11 @@
     "target": 15.925999999999998,
     "position_pct": 0.1,
     "score": 92,
-    "middle": 17.048,
-    "upper": 18.335749999999997,
-    "lower": 15.76025,
-    "current_price": 16.06,
-    "hold_days": 14
+    "middle": 16.864,
+    "upper": 18.124750000000002,
+    "lower": 15.603250000000001,
+    "current_price": 15.77,
+    "hold_days": 15
   },
   {
     "code": "601799",
@@ -41,11 +41,11 @@
     "target": 87.17899999999999,
     "position_pct": 0.1,
     "score": 97,
-    "middle": 108.78799999999998,
-    "upper": 116.70949999999999,
-    "lower": 100.86649999999997,
-    "current_price": 102.0,
-    "hold_days": 9
+    "middle": 107.40650000000001,
+    "upper": 115.28675000000001,
+    "lower": 99.52625,
+    "current_price": 97.67,
+    "hold_days": 10
   },
   {
     "code": "600373",
@@ -57,26 +57,10 @@
     "target": 6.279,
     "position_pct": 0.1,
     "score": 90,
-    "middle": 7.152500000000001,
-    "upper": 7.482500000000001,
-    "lower": 6.822500000000001,
-    "current_price": 6.69,
-    "hold_days": 6
-  },
-  {
-    "code": "605305",
-    "name": "中际联合",
-    "direction": "long",
-    "buy_date": "2026-07-07",
-    "buy_price": 47.39,
-    "stop_loss": 40.308499999999995,
-    "target": 51.787,
-    "position_pct": 0.1,
-    "score": 89,
-    "middle": 40.728500000000004,
-    "upper": 44.130500000000005,
-    "lower": 37.3265,
-    "current_price": 46.13,
-    "hold_days": 1
+    "middle": 7.097999999999999,
+    "upper": 7.4137499999999985,
+    "lower": 6.7822499999999994,
+    "current_price": 6.73,
+    "hold_days": 7
   }
 ]

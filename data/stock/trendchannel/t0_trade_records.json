@@ -466,5 +466,17 @@
     "stop_loss": 40.308499999999995,
     "target": 51.787,
     "score": 89
+  },
+  {
+    "type": "sell",
+    "code": "605305",
+    "name": "中际联合",
+    "date": "2026-07-09",
+    "buy_date": "2026-07-07",
+    "buy_price": 47.39,
+    "sell_price": 44.41,
+    "direction": "long",
+    "reason": "触发移动止损（45.02）",
+    "pnl_pct": -6.288246465499059
   }
 ]

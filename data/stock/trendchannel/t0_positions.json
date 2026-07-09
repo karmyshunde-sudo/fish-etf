@@ -62,5 +62,21 @@
     "lower": 6.7822499999999994,
     "current_price": 6.73,
     "hold_days": 7
+  },
+  {
+    "code": "600120",
+    "name": "浙江东方",
+    "direction": "long",
+    "buy_date": "2026-07-09",
+    "buy_price": 5.06,
+    "stop_loss": 4.531499999999999,
+    "target": 5.420999999999999,
+    "position_pct": 0.1,
+    "score": 97,
+    "middle": 4.531499999999999,
+    "upper": 4.802249999999999,
+    "lower": 4.26075,
+    "current_price": 5.06,
+    "hold_days": 0
   }
 ]

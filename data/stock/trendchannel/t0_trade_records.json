@@ -478,5 +478,17 @@
     "direction": "long",
     "reason": "触发移动止损（45.02）",
     "pnl_pct": -6.288246465499059
+  },
+  {
+    "type": "buy",
+    "code": "600120",
+    "name": "浙江东方",
+    "date": "2026-07-09",
+    "price": 5.06,
+    "direction": "long",
+    "position_pct": 0.1,
+    "stop_loss": 4.531499999999999,
+    "target": 5.420999999999999,
+    "score": 97
   }
 ]
